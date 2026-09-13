@@ -63,7 +63,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   showFps: true,
   masterVolume: 85,
   voices: true,
-  crosshairColor: '#F2A93B',
+  crosshairColor: '#FF5C1A',
   crosshairSize: 9,
   crosshairGap: 8,
   crosshairThickness: 2,

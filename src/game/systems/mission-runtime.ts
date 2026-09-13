@@ -19,6 +19,7 @@ export interface MissionHost {
   radio(text: string, at?: THREE.Vector3): void;
   detonate(at: THREE.Vector3): void;
   resupply(): void;
+  scoreBonus?(points: number): void;
   finish(win: boolean): void;
 }
 
@@ -104,6 +105,7 @@ export class MissionRuntime {
         break;
       }
       case 'phase-completed':
+        h.scoreBonus?.(250);
         if (event.consequences.alert) h.ai.alertZone(event.consequences.alert, h.player);
         if (event.consequences.reinforce) this.pressure.request(event.consequences.reinforce, event.consequences.from);
         if (event.consequences.resupply) h.resupply();

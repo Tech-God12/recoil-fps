@@ -6,7 +6,7 @@ import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 
 export interface Results {
-  win: boolean; kills: number; shots: number; hits: number; headshots: number; timeSec: number;
+  win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
   mission: MissionReport; pressure: PressureStats;
 }
 
@@ -109,6 +109,7 @@ export function ResultsScreen({ r, onRedeploy, onMenu }: { r: Results; onRedeplo
           <div><span>MISSION TIME</span><strong>{missionClock(r.timeSec)}</strong></div>
           <div><span>ACCURACY</span><strong>{accuracy}<small>%</small></strong></div>
           <div><span>ELIMINATIONS</span><strong>{r.kills}</strong></div>
+          <div><span>SCORE</span><strong>{r.score.toLocaleString('en-US')}</strong></div>
         </div>
         <section className="debrief-timeline" aria-label="Mission phase timings">
           <div className="mission-section-label"><span>AFTER-ACTION TIMELINE</span><span>ELAPSED</span></div>
@@ -116,7 +117,7 @@ export function ResultsScreen({ r, onRedeploy, onMenu }: { r: Results; onRedeplo
             <span>0{i + 1}</span><strong>{phase.title}</strong><span className="debrief-phase-status">{phase.complete ? 'COMPLETE' : phase.seconds > 0 ? 'INTERRUPTED' : 'NOT REACHED'}</span><time>{missionClock(phase.seconds)}</time>
           </div>)}
         </section>
-        <p className="debrief-footnote">{r.pressure.totalSpawned} hostiles entered the operation. Peak simultaneous pressure: {r.pressure.peakLive}. {r.headshots} headshots.</p>
+        <p className="debrief-footnote">{r.pressure.totalSpawned} hostiles entered the operation. Peak simultaneous pressure: {r.pressure.peakLive}. {r.headshots} headshots. Score: +100 per elimination, +150 per headshot, +250 per objective{r.win ? ', +1000 extracted' : ''}.</p>
         <div className="debrief-actions"><button className="mission-primary" onClick={onRedeploy}>Replay mission <Arrow /></button><button className="mission-secondary" onClick={onMenu}>Return to menu</button></div>
       </div>
     </main>

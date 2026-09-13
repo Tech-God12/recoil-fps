@@ -56,7 +56,7 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
               <span className="w-1.5 h-1.5 rotate-45" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
               <span className="tabnum text-[11px] font-black" style={{ color }}>{n.dist < 10 ? n.dist.toFixed(1) : Math.round(n.dist)}m</span>
               {Math.abs(n.above) > 1.8 && <span className="text-[9px] text-white/60">{n.above > 0 ? '▲' : '▼'}</span>}
-              <span className="text-[8px] tracking-[0.2em] text-white/40 ml-1">{hud.enemiesLeft} LEFT</span>
+              <span className="text-[8px] tracking-[0.2em] text-white/40 ml-1">{hud.enemiesLeft} ACTIVE</span>
             </div>
           </div>
         );
@@ -97,8 +97,8 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         </div>
       </div>
 
-      {/* ============ KILL FEED ============ */}
-      <div className="absolute top-5 right-6 space-y-1.5 text-right">
+      {/* ============ KILL FEED — starts below the utility button column so nothing overlaps ============ */}
+      <div className="absolute top-[58px] right-6 space-y-1.5 text-right">
         {fx.feed.map(f => (
           <div key={f.id} className="feed-row chamfer-xs">
             <span className="text-[var(--acc)] font-black">YOU</span>
@@ -115,25 +115,29 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>
       )}
+      {/* Sniper scope tube mask — only ever rendered for the AWM; everything outside the circle is dark. */}
+      {hud.ads >= 0.3 && hud.weapon.includes('SNIPER') && (
+        <div className="absolute inset-0" style={{ background: 'radial-gradient(circle 160px at 50% 50%, rgba(0,0,0,0) 96%, rgba(4,6,9,0.97) 99%)', opacity: Math.min(1, (hud.ads - 0.3) / 0.4) }} />
+      )}
       {hud.ads >= 0.3 && (
         <div
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center"
           style={{ opacity: Math.min(1, (hud.ads - 0.3) / 0.4) }}
         >
           {hud.weapon.includes('SNIPER') ? (
-            /* Single clean sniper scope: thin reticle + mil-dots on a soft vignette */
-            <div className="relative w-[320px] h-[320px] rounded-full shadow-[0_0_60px_rgba(0,0,0,0.85)] flex items-center justify-center">
-              <div className="absolute rounded-full ring-1 ring-black/50" style={{ inset: 6 }} />
-              <div className="absolute w-full h-px bg-black/70" />
-              <div className="absolute h-full w-px bg-black/70" />
-              {[-16, -8, 8, 16].map(offset => (
-                <div key={offset} className="absolute h-px bg-black/60" style={{ width: 12, transform: `translateY(${offset}px)` }} />
-              ))}
-              {[-16, -8, 8, 16].map(offset => (
-                <div key={`v-${offset}`} className="absolute w-px bg-black/60" style={{ height: 12, transform: `translateX(${offset}px)` }} />
-              ))}
-              <div className="absolute w-1.5 h-1.5 rounded-full bg-[#FF2020]/90 shadow-[0_0_8px_#FF2020]" />
-            </div>
+            /* Scope optics: tube mask is drawn at the HUD root; mil-dot reticle here. */
+              <div className="relative w-[320px] h-[320px] rounded-full shadow-[0_0_60px_rgba(0,0,0,0.85)] flex items-center justify-center">
+                <div className="absolute rounded-full ring-1 ring-black/50" style={{ inset: 6 }} />
+                <div className="absolute w-full h-px bg-black/70" />
+                <div className="absolute h-full w-px bg-black/70" />
+                {[-16, -8, 8, 16].map(offset => (
+                  <div key={offset} className="absolute h-px bg-black/60" style={{ width: 12, transform: `translateY(${offset}px)` }} />
+                ))}
+                {[-16, -8, 8, 16].map(offset => (
+                  <div key={`v-${offset}`} className="absolute w-px bg-black/60" style={{ height: 12, transform: `translateX(${offset}px)` }} />
+                ))}
+                <div className="absolute w-1.5 h-1.5 rounded-full bg-[#FF2020]/90 shadow-[0_0_8px_#FF2020]" />
+              </div>
           ) : (
             /* Clean red-dot reflex sight for all other weapons */
             <div className="relative w-9 h-9 flex items-center justify-center">
@@ -257,16 +261,45 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         </div>
         <div className="text-[9px] tracking-[0.24em] text-white/45 space-y-0.5">
           <div>ELIMINATIONS <span className="text-white font-black ml-1">{hud.kills}</span></div>
-          <div>HOSTILES <span className="text-[#FF5544] font-black ml-1">{hud.enemiesLeft}</span></div>
+          {/* Pressure refills by design — this is the live roster, not a countdown. */}
+          <div>ACTIVE HOSTILES <span className="text-[#FF5544] font-black ml-1">{hud.enemiesLeft}</span></div>
+          <div>SCORE <span className="text-[var(--acc)] font-black tabnum ml-1">{hud.score.toLocaleString('en-US')}</span></div>
         </div>
       </div>
 
-      {/* ============ FPS ============ */}
+      {/* ============ LIVE TACTICAL MINIMAP (rendered from real collision geometry) ============ */}
+      <MiniMap hud={hud} />
+
+      {/* ============ FPS — bottom-center, out of the kill-feed column ============ */}
       {s.showFps && (
-        <div className="absolute top-5 right-6 mt-[76px] text-right">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
           <span className="chamfer-xs hud-chip px-2 py-1 text-[10px] font-black tabnum" style={{ color: fpsColor }}>{hud.fps} FPS</span>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------- Corner tactical map: reuses the pre-baked mapImage + live entity dots ---------- */
+function MiniMap({ hud }: { hud: HudState }) {
+  if (!hud.mapImage) return null;
+  const mm = hud.missionMap;
+  const objColor = mm?.extract ? '#8CDBC2' : 'var(--acc)';
+  return (
+    <div className="minimap absolute left-8 bottom-[172px]" aria-label="Tactical map" role="img">
+      <div className="absolute inset-0 minimap-img" style={{ backgroundImage: `url(${hud.mapImage})` }} />
+      {mm && (
+        <>
+          <span className="minimap-ring" style={{ left: `${mm.nx * 100}%`, top: `${mm.nz * 100}%`, width: `${mm.ringPct * 2}%`, height: `${mm.ringPct * 2}%`, borderColor: objColor }} />
+          <span className="minimap-dot" style={{ left: `${mm.nx * 100}%`, top: `${mm.nz * 100}%`, width: 6, height: 6, background: objColor, boxShadow: `0 0 6px ${objColor}` }} />
+        </>
+      )}
+      {hud.enemiesMap.map((e, i) => (
+        <span key={i} className="minimap-dot minimap-enemy" style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%` }} />
+      ))}
+      <span className="minimap-player" style={{ left: `${hud.playerMap.nx * 100}%`, top: `${hud.playerMap.nz * 100}%`, transform: `translate(-50%,-50%) rotate(${hud.bearing}deg)` }} />
+      <span className="absolute top-1 left-2 text-[8px] font-black text-white/75" style={{ textShadow: '0 0 4px #000' }}>N</span>
+      <span className="absolute bottom-1 right-2 text-[7px] tracking-[0.24em] font-bold text-white/50" style={{ textShadow: '0 0 4px #000' }}>TAC MAP</span>
     </div>
   );
 }

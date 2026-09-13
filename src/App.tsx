@@ -7,9 +7,9 @@ import { MainMenu, PauseMenu, ResultsScreen, type Results } from './ui/Screens';
 type Phase = 'menu' | 'playing' | 'paused' | 'results';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const DEFAULT_HUD: HudState = {
-  hp: 100, mag: 30, magSize: 30, reserve: Infinity, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
-  frags: 5, flashes: 2, bearing: 0, kills: 0, enemiesLeft: 0, cooking: false, sprinting: false,
-  interacting: false, canVault: false, ads: 0, spread: 0, pings: [], radarEnemies: [],
+  hp: 100, mag: 30, magSize: 30, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
+  frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
+  canVault: false, ads: 0, spread: 0, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });

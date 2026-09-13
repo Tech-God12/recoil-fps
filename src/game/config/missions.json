@@ -67,7 +67,7 @@
     "id": "ridgeline",
     "name": "RIDGELINE",
     "map": "kasbah",
-    "deployment": [0, 0, 30],
+    "deployment": [0, 0, 66],
     "brief": "Open a route through the western market, sabotage the citadel supply cache, and withdraw to the west gate.",
     "extractionCallsign": "Nomad",
     "phases": [
@@ -79,7 +79,7 @@
       },
       {
         "id": "ridge-clear", "type": "clear", "title": "Clear the western market",
-        "location": "West market", "at": [-42, 0, 25], "radius": 20, "zone": "west-market", "count": 6,
+        "location": "West market", "at": [-42, 0, 27.5], "radius": 20, "zone": "west-market", "count": 6,
         "brief": "Neutralise six defenders. Clear a route between the stalls and the inner ring road.",
         "pressure": { "target": 6, "interval": 8 }, "onComplete": { "reinforce": 3, "from": "north", "resupply": true }
       },
@@ -117,7 +117,7 @@
       { "id": "ridge-outer-east", "from": "east", "at": [64, 0, 0] },
       { "id": "ridge-outer-west", "from": "west", "at": [-64, 0, 0] },
       { "id": "ridge-outer-north", "from": "north", "at": [0, 0, -64] },
-      { "id": "ridge-outer-south", "from": "south", "at": [0, 0, 64] }
+      { "id": "ridge-outer-south", "from": "south", "at": [0, 0, 66] }
     ]
   }
 }

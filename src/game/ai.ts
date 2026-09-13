@@ -287,7 +287,14 @@ export class Enemy {
 
   private die() {
     this.state = 'DEAD'; this.deathT = 0;
-    this.ctx.effects.bloodDecal(this.pos);
+    // Sit the pool on whatever the soldier actually died on (crate, floor slab, roof),
+    // instead of pinning every kill to the ground plane under the map.
+    let surfaceY = 0;
+    for (const b of this.ctx.solids) {
+      if (b.maxY > this.pos.y + 0.4 || b.maxY <= surfaceY) continue;
+      if (this.pos.x > b.minX - 0.3 && this.pos.x < b.maxX + 0.3 && this.pos.z > b.minZ - 0.3 && this.pos.z < b.maxZ + 0.3) surfaceY = b.maxY;
+    }
+    this.ctx.effects.bloodDecal(this.pos, surfaceY);
     if (this.role === 'leader') { this.ctx.onCallout('mandown', this.pos); this.squad.leaderDown(); }
     this.ctx.onEliminated?.(this);
   }

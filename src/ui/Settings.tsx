@@ -69,6 +69,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                 <Slider label="ADS SENSITIVITY MULTIPLIER" value={s.adsSensitivity} min={0.2} max={1.5} step={0.05} onChange={v => set({ adsSensitivity: v })} hint="Relative look speed while aiming down sights" />
                 <Slider label="FIELD OF VIEW" value={s.fov} min={70} max={120} unit="°" onChange={v => set({ fov: v })} hint="Higher = wider peripheral vision" />
                 <Toggle label="INVERT VERTICAL LOOK" value={s.invertY} onChange={v => set({ invertY: v })} />
+                <Toggle label="ADS TOGGLE" value={s.adsToggle} onChange={v => set({ adsToggle: v })} hint="Off: hold Mouse 2 to aim. On: click Mouse 2 to keep the scope in, click again to lower it." />
                 <div className="mt-6">
                   <SectionTitle sub="Enemy reaction time, accuracy and squad tactics">COMBAT DIFFICULTY</SectionTitle>
                   <Segmented label="THREAT LEVEL" value={s.difficulty}

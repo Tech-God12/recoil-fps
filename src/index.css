@@ -66,22 +66,6 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 }
 .util-btn:hover { color: #fff; border-color: var(--acc); background: var(--acc-dim); }
 
-/* ============ MENU NAV ============ */
-.menu-link {
-  position: relative; display: flex; align-items: center; gap: .6rem; width: 100%;
-  padding: .55rem 0; font-size: 12px; font-weight: 700; letter-spacing: 0.26em;
-  color: rgba(255,255,255,0.5); cursor: pointer; background: none; border: 0;
-  transition: color .18s, padding-left .18s;
-}
-.menu-link .chev { color: var(--acc); opacity: 0; transform: translateX(-6px); transition: all .18s; }
-.menu-link:hover { color: #fff; padding-left: .5rem; }
-.menu-link:hover .chev { opacity: 1; transform: translateX(0); }
-.menu-link-on { color: #fff; padding-left: .5rem; }
-.menu-link-on .chev { opacity: 1; transform: translateX(0); animation: chevPulse 1.4s ease-in-out infinite; }
-.underline-fx { position: absolute; left: 0; bottom: 2px; height: 1px; width: 0; background: var(--acc); transition: width .28s cubic-bezier(.22,1,.36,1); }
-.menu-link:hover .underline-fx, .menu-link-on .underline-fx { width: 100%; }
-@keyframes chevPulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-
 .nav-item {
   display: flex; align-items: center; gap: .7rem; width: 100%;
   padding: .65rem 1.25rem; font-size: 10px; font-weight: 700; letter-spacing: 0.24em;
@@ -116,22 +100,11 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 .seg:hover { color: #fff; border-color: rgba(255,255,255,0.4); }
 .seg-on { color: #fff; background: var(--acc-dim); border-color: var(--acc); box-shadow: 0 0 10px rgba(242,169,59,0.2); }
 
-.mapcard { position: relative; overflow: hidden; cursor: pointer; border: 1px solid rgba(255,255,255,0.12); background: rgba(9,11,14,0.8); color: #fff; transition: all .22s cubic-bezier(.22,1,.36,1); min-height: 130px; }
-.mapcard:hover { transform: translateY(-3px); border-color: rgba(255,255,255,0.4); }
-.mapcard-on { border-color: var(--acc); box-shadow: 0 0 22px rgba(242,169,59,0.25); }
-.mapcard-art { position: absolute; inset: 0; opacity: .32; background-size: cover; background-position: center; transition: opacity .3s, transform .6s; }
-.mapcard:hover .mapcard-art { opacity: .5; transform: scale(1.06); }
-.mapcard-art[data-map="alrasul"] { background-image: linear-gradient(135deg, #c9a46a 0%, #6e5a3a 60%, #1a1712 100%); }
-.mapcard-art[data-map="kasbah"] { background-image: radial-gradient(circle at 50% 50%, #b98a5c 0%, #5a4530 45%, #14110d 100%); }
-.mapcard-art::after { content: ''; position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px); background-size: 14px 14px; }
 
 .preset { padding: .55rem .5rem; text-align: center; cursor: pointer; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.75); transition: all .18s; }
 .preset:hover { border-color: rgba(255,255,255,0.4); color: #fff; transform: translateY(-2px); }
 .preset-on { border-color: var(--acc); background: var(--acc-dim); color: #fff; box-shadow: 0 0 14px rgba(242,169,59,0.22); }
 
-.wcard { flex: 1; padding: .6rem .7rem; text-align: left; cursor: pointer; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.7); transition: all .18s; }
-.wcard:hover { border-color: rgba(255,255,255,0.35); color: #fff; transform: translateY(-2px); }
-.wcard-on { border-color: var(--acc); background: var(--acc-dim); color: #fff; box-shadow: 0 0 16px rgba(242,169,59,0.2); }
 
 .keycap {
   display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
@@ -146,15 +119,6 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 
 /* ============ HUD ============ */
 .hud-chip { background: rgba(6,8,11,0.72); border: 1px solid rgba(255,255,255,0.12); backdrop-filter: blur(8px); }
-.hud-frame { background: #0b0d10; border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 6px 26px rgba(0,0,0,0.75); }
-.live-dot { width: 6px; height: 6px; border-radius: 50%; background: #00FF88; box-shadow: 0 0 8px #00FF88; animation: livePulse 1.6s ease-in-out infinite; }
-@keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
-
-.radar-sweep { background: conic-gradient(from 0deg, rgba(242,169,59,0.22) 0deg, transparent 60deg, transparent 360deg); animation: sweep 2.6s linear infinite; }
-@keyframes sweep { to { transform: rotate(360deg); } }
-
-.blip { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; background: var(--danger); box-shadow: 0 0 9px var(--danger); transform: rotate(45deg); transition: left .14s linear, top .14s linear; animation: blipPulse 1s ease-in-out infinite; }
-@keyframes blipPulse { 0%,100%{opacity:1} 50%{opacity:.45} }
 
 .ping-diamond { position: absolute; top: 2px; width: 7px; height: 7px; margin-left: -3.5px; background: var(--danger); box-shadow: 0 0 8px var(--danger); transform: rotate(45deg); }
 
@@ -191,9 +155,6 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 .streak-line { animation: lineSweep 1.6s ease-out forwards; }
 @keyframes lineSweep { 0%{transform:scaleX(0)} 30%{transform:scaleX(1)} 100%{transform:scaleX(1);opacity:0} }
 
-.callout { animation: calloutIn 2.4s ease-out forwards; }
-@keyframes calloutIn { 0%{opacity:0;transform:translate(-50%,6px)} 12%{opacity:1;transform:translate(-50%,0)} 85%{opacity:1} 100%{opacity:0} }
-
 .score-pop { animation: scoreFloat 1.3s ease-out forwards; }
 @keyframes scoreFloat { 0%{opacity:0;transform:translateY(10px) scale(.8)} 18%{opacity:1;transform:translateY(0) scale(1.1)} 35%{transform:translateY(-4px) scale(1)} 100%{opacity:0;transform:translateY(-30px) scale(.95)} }
 
@@ -206,7 +167,26 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
 
 .minimap-grid { background-image: linear-gradient(rgba(242,169,59,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(242,169,59,0.10) 1px, transparent 1px); background-size: 16px 16px; }
-.scanlines { background: repeating-linear-gradient(0deg, rgba(0,0,0,0.5) 0 1px, transparent 1px 3px); }
+/* ============ TAC MINIMAP ============ */
+.minimap {
+  width: clamp(120px,13vw,168px); aspect-ratio: 1; overflow: hidden; pointer-events: none;
+  background: #0b0d10; border: 1px solid rgba(255,255,255,0.22); border-radius: 10px;
+  box-shadow: 0 6px 26px rgba(0,0,0,0.75), inset 0 0 0 1px rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+}
+.minimap-img { background-size: cover; background-position: center; opacity: .92; filter: saturate(.8) brightness(.85); }
+.minimap-ring {
+  position: absolute; transform: translate(-50%,-50%); aspect-ratio: 1; border-radius: 50%;
+  border: 1.5px dashed currentColor; opacity: .8; min-width: 6px; min-height: 6px;
+}
+.minimap-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; transform: translate(-50%,-50%); }
+.minimap-enemy { width: 7px; height: 7px; margin: 0; background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: blipPulse 1.2s ease-in-out infinite; }
+@keyframes blipPulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+.minimap-player {
+  position: absolute; width: 0; height: 0; transform-origin: center;
+  border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 9px solid #fff;
+  margin-left: -4.5px; margin-top: -5px; filter: drop-shadow(0 1px 2px #000);
+}
 
 /* ============ SCREEN ANIMATIONS ============ */
 .anim-fade { animation: fadeIn .28s ease-out both; }
@@ -217,29 +197,6 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 .anim-slide-l { animation: slideL .42s cubic-bezier(.22,1,.36,1) both; }
 @keyframes slideL { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: translateX(0); } }
 
-@keyframes kenburns { from { transform: scale(1.05) translate(0,0); } to { transform: scale(1.16) translate(-1.5%, 1.5%); } }
-
-.glitch { position: relative; animation: glitchIn 1.1s steps(14) 1; }
-@keyframes glitchIn {
-  0% { opacity: 0; clip-path: inset(0 0 92% 0); transform: translateX(-8px); }
-  15% { opacity: 1; clip-path: inset(40% 0 38% 0); transform: translateX(6px); }
-  30% { clip-path: inset(78% 0 8% 0); transform: translateX(-5px); }
-  45% { clip-path: inset(12% 0 66% 0); transform: translateX(4px); }
-  60% { clip-path: inset(55% 0 22% 0); transform: translateX(-3px); }
-  80% { clip-path: inset(0 0 0 0); transform: translateX(1px); }
-  100% { clip-path: inset(0 0 0 0); transform: translateX(0); }
-}
-
-.rank-slam { animation: rankSlam .5s cubic-bezier(.22,1.4,.36,1) both; }
-@keyframes rankSlam { 0%{opacity:0;transform:scale(2.6) rotate(-12deg)} 60%{opacity:1;transform:scale(.9) rotate(2deg)} 100%{opacity:1;transform:scale(1) rotate(0)} }
-
-.shutter { position: absolute; left: 0; right: 0; height: 50%; background: linear-gradient(#05070a, #0a0e14); }
-.shutter-top { top: 0; animation: shutTop .62s cubic-bezier(.65,0,.35,1) both; }
-.shutter-bot { bottom: 0; animation: shutBot .62s cubic-bezier(.65,0,.35,1) both; }
-@keyframes shutTop { from { transform: translateY(-100%); } to { transform: translateY(0); } }
-@keyframes shutBot { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.load-bar { animation: loadBar 1s ease-in-out infinite; }
-@keyframes loadBar { 0%{width:0} 70%{width:100%} 100%{width:100%} }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
@@ -346,7 +303,7 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 .debrief-heading > p { margin: 0; color: #adbfb0; font-size: 15px; }
 .mission-eyebrow.extracted { color: #9dd7be; }
 .mission-eyebrow.interrupted { color: #eda88c; }
-.debrief-summary { margin: 37px 0; padding: 24px 0; border-top: 1px solid #adbda63b; border-bottom: 1px solid #adbda63b; display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; }
+.debrief-summary { margin: 37px 0; padding: 24px 0; border-top: 1px solid #adbda63b; border-bottom: 1px solid #adbda63b; display: grid; grid-template-columns: repeat(5,1fr); gap: 16px; }
 .debrief-summary > div { display: flex; flex-direction: column; gap: 10px; }
 .debrief-summary span { color: #9dad9c; font-size: 9px; letter-spacing: .13em; }
 .debrief-summary strong { font: 700 clamp(17px,2.3vw,28px) 'Orbitron',sans-serif; color: #e8ddc7; }
@@ -365,6 +322,7 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 .mission-error button { color: #e0c89e; background: none; border: 0; margin-left: auto; cursor: pointer; }
 .mission-loading { position: absolute; inset: 0; z-index: 80; display: grid; place-items: center; background: #101916dd; color: #e4ceab; font-size: 16px; }
 
+@media (max-height: 660px) { .minimap { display: none; } }
 @media (max-width: 900px) {
   .operations-layout { grid-template-columns: minmax(245px,1fr) minmax(275px,1fr); gap: 32px; }
   .operation-intro h1 { font-size: 64px; }

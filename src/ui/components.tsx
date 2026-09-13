@@ -1,5 +1,5 @@
 // Recoil FPS — shared tactical UI primitives
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 
 /* ---------- Chamfered panel with corner brackets ---------- */
 export function Panel({ children, className = '', bracket = true, pad = 'p-5' }: { children: ReactNode; className?: string; bracket?: boolean; pad?: string }) {
@@ -125,41 +125,4 @@ export function ColorPick({ label, value, onChange }: { label: string; value: st
   );
 }
 
-/* ---------- Stat bar (weapon cards) ---------- */
-export function StatBar({ label, value, max = 100, delay = 0 }: { label: string; value: number; max?: number; delay?: number }) {
-  const [w, setW] = useState(0);
-  useEffect(() => { const t = setTimeout(() => setW((value / max) * 100), delay); return () => clearTimeout(t); }, [value, max, delay]);
-  return (
-    <div className="mb-1.5">
-      <div className="flex justify-between text-[9px] tracking-[0.16em] text-white/45 mb-1"><span>{label}</span><span className="text-white/70">{value}</span></div>
-      <div className="h-[3px] bg-white/10 rounded-full overflow-hidden">
-        <div className="h-full bg-[var(--acc)] rounded-full transition-all duration-700 ease-out shadow-[0_0_8px_var(--acc)]" style={{ width: `${w}%` }} />
-      </div>
-    </div>
-  );
-}
 
-/* ---------- Count-up number ---------- */
-export function CountUp({ to, dur = 900, suffix = '', delay = 0 }: { to: number; dur?: number; suffix?: string; delay?: number }) {
-  const [n, setN] = useState(0);
-  const raf = useRef(0);
-  useEffect(() => {
-    let start = 0;
-    const timer = setTimeout(() => {
-      const tick = (t: number) => {
-        if (!start) start = t;
-        const p = Math.min(1, (t - start) / dur);
-        setN(Math.round(to * (1 - Math.pow(1 - p, 3))));
-        if (p < 1) raf.current = requestAnimationFrame(tick);
-      };
-      raf.current = requestAnimationFrame(tick);
-    }, delay);
-    return () => { clearTimeout(timer); cancelAnimationFrame(raf.current); };
-  }, [to, dur, delay]);
-  return <>{n}{suffix}</>;
-}
-
-/* ---------- Keycap glyph ---------- */
-export function Key({ children }: { children: ReactNode }) {
-  return <span className="keycap">{children}</span>;
-}

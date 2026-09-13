@@ -113,7 +113,7 @@ export function Segmented<T extends string>({ label, value, options, onChange, h
 
 /* ---------- Color swatch picker ---------- */
 export function ColorPick({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  const cols = ['#FF5C1A', '#38FF9B', '#FF2E4D', '#00E0FF', '#FFFFFF', '#FFC400'];
+  const cols = ['#F06A2E', '#3FD68E', '#E5484D', '#58BFE4', '#FFFFFF', '#E8B93C'];
   return (
     <div className="setting-row">
       <div className="flex-1 flex items-center justify-between gap-4">

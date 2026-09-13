@@ -213,7 +213,7 @@ function gradeFor(r: Results): { grade: string; tint: string } {
   const accuracy = r.shots ? Math.round(r.hits / r.shots * 100) : 0;
   const score = (r.win ? 60 : 0) + Math.min(20, r.kills * 2) + Math.min(20, accuracy / 5);
   const grade = score >= 95 ? 'S' : score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'D';
-  return { grade, tint: grade === 'S' || grade === 'A' ? '#38FF9B' : grade === 'B' ? '#FFC400' : '#FF2E4D' };
+  return { grade, tint: grade === 'S' || grade === 'A' ? '#3FD68E' : grade === 'B' ? '#E8B93C' : '#E5484D' };
 }
 
 export function ResultsScreen({ r, onRedeploy, onMenu }: { r: Results; onRedeploy: () => void; onMenu: () => void }) {

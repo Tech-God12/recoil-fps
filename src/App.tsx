@@ -10,7 +10,7 @@ const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, reserve: Infinity, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   interacting: false, canVault: false, ads: 0, spread: 0, pings: [], radarEnemies: [],
-  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60,
+  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
 

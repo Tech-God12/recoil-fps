@@ -27,40 +27,30 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
 
   return (
     <div className="hud-root pointer-events-none select-none">
-      {/* HUD frame corners + ambient scanlines */}
+      {/* HUD frame corners */}
       <span className="hud-corner tl" /><span className="hud-corner tr" />
       <span className="hud-corner bl" /><span className="hud-corner br" />
-      <div className="hud-scan scanlines" aria-hidden="true" />
 
       {/* damage vignette */}
       {vig > 0 && (
         <div className={`absolute inset-0 ${lowHp ? 'hp-pulse' : ''}`}
-          style={{ boxShadow: `inset 0 0 ${120 + vig * 200}px rgba(255,46,77,${0.25 + vig * 0.6})` }} />
+          style={{ boxShadow: `inset 0 0 ${120 + vig * 200}px rgba(229,72,77,${0.22 + vig * 0.5})` }} />
       )}
       {/* flashbang */}
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
       {hud.mission && <MissionObjective mission={hud.mission} />}
 
-      {/* ============ THREAT PROXIMITY INDICATOR ============ */}
-      {hud.nearest && (() => {
+      {/* ============ THREAT READOUT (slim — no centre ring clutter) ============ */}
+      {hud.nearest && hud.nearest.dist < 30 && (() => {
         const n = hud.nearest;
-        const hot = n.dist < 12, warm = n.dist < 30;
-        const color = hot ? '#FF2E4D' : warm ? '#FFC400' : 'rgba(255,255,255,0.55)';
-        const R = 92;
-        const a = (n.angle - 90) * Math.PI / 180;
-        const ax = Math.cos(a) * R, ay = Math.sin(a) * R;
+        const hot = n.dist < 12;
+        const color = hot ? 'var(--danger)' : 'var(--warn)';
         return (
-          <div className="absolute left-1/2 top-1/2" style={{ opacity: hud.ads > 0.6 ? 0.35 : 1, transition: 'opacity .2s' }}>
-            <div className="absolute rounded-full border" style={{ width: R * 2, height: R * 2, left: -R, top: -R, borderColor: 'rgba(255,255,255,0.07)' }} />
-            <div className={`absolute ${hot ? 'prox-hot' : ''}`} style={{ left: ax, top: ay, transform: `translate(-50%,-50%) rotate(${n.angle}deg)` }}>
-              <svg width="26" height="26" viewBox="0 0 26 26"><path d="M13 2 L22 20 L13 15 L4 20 Z" fill={color} style={{ filter: `drop-shadow(0 0 6px ${color})` }} /></svg>
-            </div>
-            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 cut-xs hud-chip px-2 py-0.5" style={{ top: 34 }}>
-              <span className="w-1.5 h-1.5 rotate-45" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
-              <span className="tabnum text-[11px] font-black" style={{ color }}>{n.dist < 10 ? n.dist.toFixed(1) : Math.round(n.dist)}m</span>
-              {Math.abs(n.above) > 1.8 && <span className="text-[9px] text-white/60">{n.above > 0 ? '▲' : '▼'}</span>}
-              <span className="mono text-[8px] text-white/40 ml-1">{hud.enemiesLeft} LEFT</span>
-            </div>
+          <div className="absolute left-1/2 top-1/2 flex flex-col items-center" style={{ opacity: hud.ads > 0.6 ? 0.35 : 1, transition: 'opacity .2s' }}>
+            <span className="threat-dot" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+            <span className="threat-range" style={{ color }}>
+              {n.dist < 10 ? n.dist.toFixed(1) : Math.round(n.dist)}m{n.above > 1.8 ? ' ▲' : n.above < -1.8 ? ' ▼' : ''}
+            </span>
           </div>
         );
       })()}
@@ -170,14 +160,14 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         </div>
       )}
 
-      {/* ============ DAMAGE ARCS ============ */}
+      {/* ============ DAMAGE ARCS (directional, subtle) ============ */}
       {fx.dmgArcs.map(a => (
         <div key={a.id} className="absolute inset-0 grid place-items-center dmg-arc" style={{ transform: `rotate(${a.dir}deg)` }}>
           <div style={{
-            width: '74vmin', height: '74vmin', borderRadius: '50%',
-            border: '3px solid transparent', borderTopColor: '#FF2E4D',
-            filter: `drop-shadow(0 -4px 16px rgba(255,46,77,${a.opacity}))`, opacity: a.opacity,
-            clipPath: 'polygon(18% 0%, 82% 0%, 50% 50%)',
+            width: '56vmin', height: '56vmin', borderRadius: '50%',
+            border: '2px solid transparent', borderTopColor: '#E5484D',
+            filter: `drop-shadow(0 -3px 10px rgba(229,72,77,${a.opacity * 0.8}))`, opacity: a.opacity * 0.85,
+            clipPath: 'polygon(20% 0%, 80% 0%, 50% 50%)',
           }} />
         </div>
       ))}
@@ -219,36 +209,38 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         </div>
       )}
 
-      {/* ============ TACTICAL RADAR ============ */}
-      {hud.mapImage && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2">
-          <div className="radar" style={{ opacity: hud.ads > 0.6 ? 0.3 : 1, transition: 'opacity .2s' }}>
-            <div className="radar-world" style={{ transform: `rotate(${-hud.bearing}deg)` }}>
-              <img
-                src={hud.mapImage}
-                alt=""
-                draggable={false}
-                className="radar-map"
-                style={{ transform: `translate(${(0.5 - hud.playerMap.nx) * 100}%, ${(0.5 - hud.playerMap.nz) * 100}%)` }}
-              />
-              {hud.enemiesMap.map((e, i) => (
-                <span key={i} className="radar-enemy" style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%` }} />
-              ))}
+      {/* ============ TACTICAL RADAR (bottom-left, 60m zoom) ============ */}
+      {hud.mapImage && (() => {
+        // 60m radius fills the dish; scale the full-map image so 120m spans the 168px diameter.
+        const zoom = (hud.worldHalf * 2) / 170;
+        const ox = (0.5 - hud.playerMap.nx) * 100 * zoom;
+        const oz = (0.5 - hud.playerMap.nz) * 100 * zoom;
+        return (
+          <div className="radar-pos">
+            <div className="radar" style={{ opacity: hud.ads > 0.6 ? 0.35 : 1, transition: 'opacity .2s' }}>
+              <div className="radar-world" style={{ transform: `rotate(${-hud.bearing}deg)` }}>
+                <div className="radar-zoom" style={{ transform: `translate(${ox}%, ${oz}%) scale(${zoom})` }}>
+                  <img src={hud.mapImage} alt="" draggable={false} className="radar-map" />
+                  {hud.enemiesMap.map((e, i) => (
+                    <span key={i} className="radar-enemy" style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%` }} />
+                  ))}
+                </div>
+              </div>
+              <div className="radar-spin" style={{ transform: `rotate(${-hud.bearing}deg)` }} aria-hidden="true">
+                <span className="radar-card" style={{ top: 2, left: '50%', marginLeft: -3 }}>N</span>
+                <span className="radar-card" style={{ bottom: 2, left: '50%', marginLeft: -3 }}>S</span>
+                <span className="radar-card" style={{ left: 4, top: '50%', marginTop: -4 }}>W</span>
+                <span className="radar-card" style={{ right: 4, top: '50%', marginTop: -4 }}>E</span>
+              </div>
+              <span className="radar-rings" /><span className="radar-rings r2" /><span className="radar-rings r3" />
+              <span className="radar-sweep" />
+              <span className="radar-player" />
+              <span className="radar-label">60M</span>
+              <span className="radar-frame" />
             </div>
-            <div className="radar-spin" style={{ transform: `rotate(${-hud.bearing}deg)` }} aria-hidden="true">
-              <span className="radar-card" style={{ top: 3, left: '50%', marginLeft: -3 }}>N</span>
-              <span className="radar-card" style={{ bottom: 3, left: '50%', marginLeft: -3 }}>S</span>
-              <span className="radar-card" style={{ left: 5, top: '50%', marginTop: -4 }}>W</span>
-              <span className="radar-card" style={{ right: 5, top: '50%', marginTop: -4 }}>E</span>
-            </div>
-            <span className="radar-rings" /><span className="radar-rings r2" /><span className="radar-rings r3" />
-            <span className="radar-sweep" />
-            <span className="radar-player" />
-            <span className="radar-label">60M RANGE</span>
-            <span className="radar-frame" />
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ============ AMMO ============ */}
       <div className="absolute bottom-7 right-8 text-right">
@@ -275,6 +267,20 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         {hud.cooking && <div className="mt-1.5 cook-warn">◉ COOKING — RELEASE G</div>}
         {!hud.reloading && hud.mag <= 5 && <div className="mt-1.5 text-[10px] tracking-[0.3em] font-black text-[var(--warn)] blink">RELOAD</div>}
       </div>
+
+      {/* ============ ONBOARDING STRIP (first seconds of a mission) ============ */}
+      {hud.mission && hud.mission.elapsed < 12 && (
+        <div className="onboard-strip cut-xs hud-chip" role="status">
+          <span className="onboard-fade" style={{ animationDelay: '7.5s' }}>
+            <span className="keycap">WASD</span> MOVE
+            <i /><span className="keycap">RMB</span> SCOPE
+            <i /><span className="keycap">G</span> HOLD FRAG
+            <i /><span className="keycap">Q/E</span> LEAN
+            <i /><span className="keycap">SPACE</span> VAULT
+            <i /><span className="keycap">X</span> HOLD PLANT
+          </span>
+        </div>
+      )}
 
       {/* ============ VITALS ============ */}
       <div className="absolute bottom-7 left-8">

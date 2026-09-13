@@ -56,9 +56,9 @@ export const DEFAULT_SETTINGS: GameSettings = {
   shadowQuality: 'low',
   bloom: false,
   bloomStrength: 22,
-  vignette: 18,
+  vignette: 12,
   filmGrain: 0,
-  brightness: 125,
+  brightness: 110,
   cameraShake: 100,
   showFps: true,
   masterVolume: 85,
@@ -98,6 +98,7 @@ export interface HudState {
   enemiesMap: { nx: number; nz: number }[];
   fps: number;
   magSize: number;
+  worldHalf: number;
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
 }
@@ -285,9 +286,10 @@ export class Engine {
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 5);
 
-    // Clear bright desert daylight — high visibility, light fog only at distance
+    // Clear bright desert daylight — high visibility, light fog only at distance.
+    // Slightly desaturated so enemy silhouettes stay readable instead of washing out.
     this.scene.background = new THREE.Color(0xB8CCDA);
-    this.scene.fog = new THREE.Fog(0xD9CDB0, 110, 420); // starts far out, never muddies gameplay range
+    this.scene.fog = new THREE.Fog(0xC6BEA8, 130, 430);
     // strong sky fill so shadowed faces stay readable
     const hemi = new THREE.HemisphereLight(0xCFE0EE, 0xB89A66, 1.15);
     this.scene.add(hemi);
@@ -776,42 +778,87 @@ void main(){
    * World X maps to canvas X, world Z maps to canvas Y.
    */
   private generateMapImage(): string {
-    const S = 256;
+    const S = 512;
     const span = this.world.half * 2;
     const scale = S / span;
     const px = (wx: number) => (wx + span / 2) * scale;
     const pz = (wz: number) => (wz + span / 2) * scale;
     const [c, ctx] = this.makeCanvas(S, S);
-    // Terrain base
-    ctx.fillStyle = '#96A084';
+
+    // --- terrain base: packed desert sand ---
+    ctx.fillStyle = '#7D735A';
     ctx.fillRect(0, 0, S, S);
-    // grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    // subtle large-scale mottling
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    for (let i = 0; i < 26; i++) {
+      const r = 28 + Math.random() * 70;
+      ctx.beginPath();
+      ctx.arc(Math.random() * S, Math.random() * S, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // --- walkability shading (real solids: dark where you cannot walk) ---
+    const blockers = this.world.solids.filter(b => b.maxY > 1.35 && b.minY < 1.75);
+    const STEP = 4; // 512px / 4 = 128 samples per axis ≈ 1.7m per cell
+    ctx.fillStyle = 'rgba(24,21,16,0.5)';
+    for (let gy = 0; gy < S; gy += STEP) {
+      for (let gx = 0; gx < S; gx += STEP) {
+        const wx = (gx + STEP / 2) / scale - span / 2;
+        const wz = (gy + STEP / 2) / scale - span / 2;
+        let blocked = false;
+        for (const b of blockers) {
+          if (wx > b.minX && wx < b.maxX && wz > b.minZ && wz < b.maxZ) { blocked = true; break; }
+        }
+        if (blocked) ctx.fillRect(gx, gy, STEP, STEP);
+      }
+    }
+
+    // --- roads / paved zones ---
+    ctx.fillStyle = '#8C8877';
+    for (const b of this.world.concrete) {
+      ctx.fillRect(px(b.minX), pz(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (const b of this.world.concrete) {
+      ctx.fillRect(px(b.minX), pz(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
+    }
+
+    // --- faint survey grid ---
+    ctx.strokeStyle = 'rgba(0,0,0,0.07)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= S; i += 32) {
       ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, S); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(S, i); ctx.stroke();
     }
-    // Roads (concrete/asphalt zones)
-    ctx.fillStyle = '#5A564C';
-    for (const b of this.world.concrete) {
-      ctx.fillRect(px(b.minX), pz(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
-    }
-    // Buildings & cover footprints (accurate from real solids)
-    for (const b of this.world.solids) {
+
+    // --- building & cover footprints, low → tall so heights stack correctly ---
+    const sorted = [...this.world.solids].sort((a, b) => a.maxY - b.maxY);
+    for (const b of sorted) {
       const x = px(b.minX), y = pz(b.minZ);
-      const w = Math.max(1.5, (b.maxX - b.minX) * scale);
-      const h = Math.max(1.5, (b.maxZ - b.minZ) * scale);
+      const w = Math.max(2.5, (b.maxX - b.minX) * scale);
+      const h = Math.max(2.5, (b.maxZ - b.minZ) * scale);
       const tall = b.maxY > 3.4;
-      ctx.fillStyle = tall ? '#B8956A' : '#6E6750';
+      const mid = !tall && b.maxY > 1.9;
+      // drop shadow for depth
+      ctx.fillStyle = 'rgba(20,16,10,0.35)';
+      ctx.fillRect(x + 3, y + 3, w, h);
+      // body colour by height class
+      ctx.fillStyle = tall ? '#A98D68' : mid ? '#7C7558' : '#5E5A4B';
       ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-      ctx.lineWidth = 1;
+      // sunlit top edge + shaded bottom edge for readable 3D-ish footprint
+      ctx.fillStyle = 'rgba(255,244,214,0.28)';
+      ctx.fillRect(x, y, w, Math.max(2, Math.min(4, h * 0.16)));
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(x, y + h - Math.max(2, Math.min(4, h * 0.16)), w, Math.max(2, Math.min(4, h * 0.16)));
+      // crisp outline
+      ctx.strokeStyle = 'rgba(12,9,5,0.55)';
+      ctx.lineWidth = 1.5;
       ctx.strokeRect(x, y, w, h);
     }
-    // border
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth = 3;
+
+    // --- border ---
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 4;
     ctx.strokeRect(0, 0, S, S);
     return c.toDataURL();
   }
@@ -1980,6 +2027,7 @@ void main(){
       nearest,
       fps: Math.round(this.fps),
       magSize: this.def().magSize,
+      worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
       mission: this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
     };

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine, DEFAULT_SETTINGS, type GameEvent, type GameSettings, type HudState } from './game/engine';
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
-import { MainMenu, PauseMenu, ResultsScreen, type Results } from './ui/Screens';
+import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
 
 type Phase = 'menu' | 'playing' | 'paused' | 'results';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
@@ -10,7 +10,7 @@ const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, pings: [],
-  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60,
+  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
 
@@ -208,8 +208,8 @@ export default function App() {
       <div className="absolute top-3 right-4 z-50 flex gap-2">
         <button onClick={fullscreen} className="util-btn">FULLSCREEN</button>
       </div>
-      {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">Close</button></div>}
-      {launching && <div className="mission-loading" role="status">Preparing mission...</div>}
+      {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
+      {launching && <BootScreen />}
     </div>
   );
 }

@@ -17,19 +17,23 @@ export class SpatialAudioEngine {
       this.master.gain.value = 0.85;
       this.master.connect(this.ctx.destination);
 
-      // Reverb/Echo bus
+      // Reverb/Echo bus — tuned to be less muddy, shorter, darker
       this.echoBus = this.ctx.createDelay(1.0);
-      this.echoBus.delayTime.value = 0.16;
+      this.echoBus.delayTime.value = 0.11;
       this.echoFb = this.ctx.createGain();
-      this.echoFb.gain.value = 0.24;
+      this.echoFb.gain.value = 0.18;
       this.echoGain = this.ctx.createGain();
-      this.echoGain.gain.value = 0.32;
+      this.echoGain.gain.value = 0.20;
       const lp = this.ctx.createBiquadFilter();
       lp.type = 'lowpass';
-      lp.frequency.value = 2200;
+      lp.frequency.value = 1600;
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 250;
       this.echoBus.connect(this.echoFb);
       this.echoFb.connect(this.echoBus);
-      this.echoBus.connect(lp);
+      this.echoBus.connect(hp);
+      hp.connect(lp);
       lp.connect(this.echoGain);
       this.echoGain.connect(this.master);
     }
@@ -103,12 +107,13 @@ export class SpatialAudioEngine {
   }
 
   setIndoor(indoor: boolean) {
-    if (!this.ctx || !this.echoBus || !this.echoFb) return;
+    if (!this.ctx || !this.echoBus || !this.echoFb || !this.echoGain) return;
     if (indoor === this.indoor) return;
     this.indoor = indoor;
     const t = this.ctx.currentTime;
-    this.echoBus.delayTime.linearRampToValueAtTime(indoor ? 0.06 : 0.16, t + 0.15);
-    this.echoFb.gain.linearRampToValueAtTime(indoor ? 0.42 : 0.22, t + 0.15);
+    this.echoBus.delayTime.linearRampToValueAtTime(indoor ? 0.055 : 0.11, t + 0.18);
+    this.echoFb.gain.linearRampToValueAtTime(indoor ? 0.36 : 0.18, t + 0.18);
+    this.echoGain.gain.linearRampToValueAtTime(indoor ? 0.32 : 0.20, t + 0.18);
   }
 
   private noise(): AudioBuffer {
@@ -121,7 +126,7 @@ export class SpatialAudioEngine {
     return this.noiseBuf;
   }
 
-  // 2D Ambient Desert Wind Layer (non-spatial)
+  // 2D Ambient Desert Wind Layer — softer, less annoying after 60s, with two LFOs for variation
   private startAmbientWind() {
     if (!this.ctx || !this.master) return;
     const ctx = this.ctx;
@@ -130,106 +135,139 @@ export class SpatialAudioEngine {
     src.loop = true;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 280;
+    lp.frequency.value = 240;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 180;
+    bp.Q.value = 0.6;
     const g = ctx.createGain();
-    g.gain.value = 0.055;
+    g.gain.value = 0.028; // much softer than before
+    // Slow gust LFO
     const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.11;
+    lfo.frequency.value = 0.07;
     const lfoG = ctx.createGain();
-    lfoG.gain.value = 0.025;
+    lfoG.gain.value = 0.018;
     lfo.connect(lfoG);
     lfoG.connect(g.gain);
-    src.connect(lp);
+    // Faster shimmer LFO
+    const lfo2 = ctx.createOscillator();
+    lfo2.frequency.value = 0.31;
+    const lfo2G = ctx.createGain();
+    lfo2G.gain.value = 0.006;
+    lfo2.connect(lfo2G);
+    lfo2G.connect(lp.frequency);
+    src.connect(bp);
+    bp.connect(lp);
     lp.connect(g);
     g.connect(this.master);
     src.start();
     lfo.start();
+    lfo2.start();
   }
 
-  // ==================== WEAPON SOUNDS ====================
+  // ==================== WEAPON SOUNDS — distinct personality per gun ====================
   fireM4() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    // Layer 1: Sharp transient punch
-    this.burstDirect({ dur: 0.035, gain: 0.95, freq: 3400, q: 0.7, hp: 800 });
-    // Layer 2: Mid body crack
-    this.burstDirect({ dur: 0.11, gain: 0.75, freq: 950, q: 0.8, toEcho: 0.45 });
-    // Layer 3: Bass thump / pressure wave
-    this.burstDirect({ dur: 0.18, gain: 0.55, freq: 160, q: 0.6, type: 'lowpass' });
-    // Layer 4: Sub harmonic punch
+    // M4: crisp 5.56 NATO — sharp transient + mid crack + tight bass
+    this.burstDirect({ dur: 0.028, gain: 1.0, freq: 3600, q: 0.75, hp: 900 });
+    this.burstDirect({ dur: 0.10, gain: 0.78, freq: 980, q: 0.85, toEcho: 0.32 });
+    this.burstDirect({ dur: 0.16, gain: 0.52, freq: 165, q: 0.65, type: 'lowpass' });
     const o = ctx.createOscillator();
     o.type = 'triangle';
-    o.frequency.setValueAtTime(155, t);
-    o.frequency.exponentialRampToValueAtTime(45, t + 0.09);
+    o.frequency.setValueAtTime(165, t);
+    o.frequency.exponentialRampToValueAtTime(48, t + 0.085);
     const og = ctx.createGain();
-    og.gain.setValueAtTime(0.55, t);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    og.gain.setValueAtTime(0.50, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.095);
     o.connect(og); og.connect(this.master!);
-    o.start(t); o.stop(t + 0.11);
-    // Bolt mechanical slap
-    this.burstDirect({ dur: 0.045, gain: 0.18, freq: 4800, q: 2.2, when: 0.045 });
+    o.start(t); o.stop(t + 0.10);
+    // Bolt slap + brass ping
+    this.burstDirect({ dur: 0.038, gain: 0.20, freq: 5200, q: 2.4, when: 0.042 });
+    this.burstDirect({ dur: 0.06, gain: 0.10, freq: 6800, q: 3.2, when: 0.075 });
   }
 
   firePistol() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    this.burstDirect({ dur: 0.03, gain: 0.85, freq: 2800, q: 0.8, hp: 700 });
-    this.burstDirect({ dur: 0.09, gain: 0.55, freq: 720, q: 0.9, toEcho: 0.35 });
+    // M1911 .45: thumpy, lower, more body
+    this.burstDirect({ dur: 0.032, gain: 0.90, freq: 2600, q: 0.85, hp: 600 });
+    this.burstDirect({ dur: 0.11, gain: 0.62, freq: 580, q: 0.95, toEcho: 0.28 });
+    this.burstDirect({ dur: 0.18, gain: 0.48, freq: 110, q: 0.5, type: 'lowpass' });
     const o = ctx.createOscillator();
     o.type = 'triangle';
-    o.frequency.setValueAtTime(130, t);
-    o.frequency.exponentialRampToValueAtTime(50, t + 0.08);
+    o.frequency.setValueAtTime(125, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.09);
     const og = ctx.createGain();
-    og.gain.setValueAtTime(0.45, t);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    og.gain.setValueAtTime(0.48, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
     o.connect(og); og.connect(this.master!);
-    o.start(t); o.stop(t + 0.095);
+    o.start(t); o.stop(t + 0.105);
+    // slide clack
+    this.burstDirect({ dur: 0.045, gain: 0.22, freq: 3400, q: 2.0, when: 0.05 });
   }
 
   dryFire() {
     this.ensure();
-    this.burstDirect({ dur: 0.025, gain: 0.4, freq: 2400, q: 3.5 });
+    this.burstDirect({ dur: 0.022, gain: 0.42, freq: 2600, q: 3.8 });
+    this.burstDirect({ dur: 0.04, gain: 0.18, freq: 800, q: 1.5, when: 0.01 });
   }
 
-  // AK-47: deep, grittier 7.62x39 grind with a duller crack and more mid-body weight
+  // AK-47: deep, grittier 7.62x39 grind with duller crack and heavy mid-body
   fireAK() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    this.burstDirect({ dur: 0.05, gain: 0.95, freq: 2300, q: 0.7, hp: 500 });
-    this.burstDirect({ dur: 0.14, gain: 0.7, freq: 620, q: 0.8, toEcho: 0.4 });
-    this.burstDirect({ dur: 0.22, gain: 0.6, freq: 120, q: 0.5, type: 'lowpass' });
+    this.burstDirect({ dur: 0.048, gain: 1.05, freq: 2100, q: 0.68, hp: 420 });
+    this.burstDirect({ dur: 0.16, gain: 0.82, freq: 540, q: 0.75, toEcho: 0.38 });
+    this.burstDirect({ dur: 0.26, gain: 0.68, freq: 95, q: 0.45, type: 'lowpass' });
     const o = ctx.createOscillator();
     o.type = 'sawtooth';
-    o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.11);
+    o.frequency.setValueAtTime(105, t); o.frequency.exponentialRampToValueAtTime(36, t + 0.13);
     const og = ctx.createGain();
-    og.gain.setValueAtTime(0.5, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-    o.connect(og); og.connect(this.master!); o.start(t); o.stop(t + 0.13);
-    this.burstDirect({ dur: 0.05, gain: 0.16, freq: 4400, q: 1.8, when: 0.06 });
+    og.gain.setValueAtTime(0.58, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    o.connect(og); og.connect(this.master!); o.start(t); o.stop(t + 0.15);
+    // distinctive AK bolt clatter + wood resonance
+    this.burstDirect({ dur: 0.055, gain: 0.20, freq: 3800, q: 1.6, when: 0.06 });
+    this.burstDirect({ dur: 0.09, gain: 0.14, freq: 680, q: 0.9, when: 0.07 });
   }
 
-  // AWM .338 Lapua: huge, distant boom + sharp supersonic crack
+  // AWM .338 Lapua: huge boom + supersonic crack with delay
   fireSniper() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    this.burstDirect({ dur: 0.09, gain: 1.0, freq: 1800, q: 0.6, hp: 400 });
-    this.burstDirect({ dur: 0.28, gain: 0.85, freq: 480, q: 0.7, toEcho: 0.5 });
-    this.burstDirect({ dur: 0.5, gain: 0.7, freq: 80, q: 0.4, type: 'lowpass' });
+    // Massive low-end pressure wave
+    this.burstDirect({ dur: 0.12, gain: 1.15, freq: 1600, q: 0.55, hp: 320 });
+    this.burstDirect({ dur: 0.32, gain: 0.92, freq: 420, q: 0.65, toEcho: 0.48 });
+    this.burstDirect({ dur: 0.58, gain: 0.85, freq: 62, q: 0.35, type: 'lowpass' });
     const o = ctx.createOscillator();
     o.type = 'triangle';
-    o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(28, t + 0.4);
+    o.frequency.setValueAtTime(82, t); o.frequency.exponentialRampToValueAtTime(22, t + 0.48);
     const og = ctx.createGain();
-    og.gain.setValueAtTime(0.8, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
-    o.connect(og); og.connect(this.master!); o.start(t); o.stop(t + 0.46);
-    // delayed supersonic crack
-    this.burstDirect({ dur: 0.04, gain: 0.4, freq: 5200, q: 2, when: 0.07 });
+    og.gain.setValueAtTime(0.95, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.52);
+    o.connect(og); og.connect(this.master!); o.start(t); o.stop(t + 0.54);
+    // supersonic crack delayed
+    this.burstDirect({ dur: 0.045, gain: 0.55, freq: 5800, q: 2.2, when: 0.09, hp: 1200 });
+    // bolt action clack
+    this.burstDirect({ dur: 0.08, gain: 0.28, freq: 2200, q: 1.8, when: 0.28 });
   }
 
-  // MP7A1 4.6mm: tight, fast, sharp PDW crack
+  // MP7A1 4.6mm: tight, fast, sharp PDW crack — high-pitched and snappy
   fireSMG() {
-    this.ensure();
-    this.burstDirect({ dur: 0.03, gain: 0.85, freq: 3800, q: 0.9, hp: 900 });
-    this.burstDirect({ dur: 0.08, gain: 0.55, freq: 1050, q: 0.8, toEcho: 0.3 });
-    this.burstDirect({ dur: 0.12, gain: 0.4, freq: 200, q: 0.5, type: 'lowpass' });
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    this.burstDirect({ dur: 0.022, gain: 0.92, freq: 4200, q: 0.95, hp: 1100 });
+    this.burstDirect({ dur: 0.065, gain: 0.58, freq: 1180, q: 0.85, toEcho: 0.22 });
+    this.burstDirect({ dur: 0.10, gain: 0.38, freq: 220, q: 0.55, type: 'lowpass' });
+    // very quick sub punch
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.setValueAtTime(210, t);
+    o.frequency.exponentialRampToValueAtTime(90, t + 0.05);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.28, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    o.connect(og); og.connect(this.master!);
+    o.start(t); o.stop(t + 0.065);
   }
 
   // SPATIAL: Enemy Gunfire with exact 3D HRTF Panning
@@ -453,13 +491,19 @@ export class SpatialAudioEngine {
   }
 
   footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085);
+    const base = (sprint ? 0.16 : crouch ? 0.038 : 0.082);
     if (surface === 'sand') {
-      this.burstDirect({ dur: 0.07, gain: g, freq: 850, q: 0.6 });
+      // soft, low, longer — shuffling sand
+      this.burstDirect({ dur: 0.095, gain: base * 0.9, freq: 420, q: 0.55, type: 'lowpass' });
+      this.burstDirect({ dur: 0.06, gain: base * 0.45, freq: 1200, q: 0.7 });
     } else if (surface === 'concrete') {
-      this.burstDirect({ dur: 0.05, gain: g, freq: 1750, q: 1.4 });
+      // sharp, bright, short — boot on concrete
+      this.burstDirect({ dur: 0.035, gain: base * 1.15, freq: 2200, q: 1.6, hp: 800 });
+      this.burstDirect({ dur: 0.05, gain: base * 0.55, freq: 850, q: 0.9 });
     } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
+      // woody thud + creak — hollow
+      this.burstDirect({ dur: 0.07, gain: base, freq: 480, q: 0.85 });
+      this.burstDirect({ dur: 0.09, gain: base * 0.5, freq: 1800, q: 1.2, hp: 1000 });
     }
   }
 

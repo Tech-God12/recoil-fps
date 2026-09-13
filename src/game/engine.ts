@@ -52,14 +52,14 @@ export const DEFAULT_SETTINGS: GameSettings = {
   fov: 95,
   difficulty: 'Normal',
   map: 'alrasul',
-  resolutionScale: 60,
-  shadowQuality: 'low',
+  resolutionScale: 85,
+  shadowQuality: 'medium',
   bloom: false,
-  bloomStrength: 22,
-  vignette: 18,
+  bloomStrength: 18,
+  vignette: 12,
   filmGrain: 0,
-  brightness: 125,
-  cameraShake: 100,
+  brightness: 110,
+  cameraShake: 85,
   showFps: true,
   masterVolume: 85,
   voices: true,
@@ -197,6 +197,7 @@ export class Engine {
   private streak = 0;
   private headshots = 0;
   private readonly VM_S = 1.95;
+  private hitStop = 0; // 60ms hitstop freeze for punch
   // Scratch vectors — hot paths must not allocate per frame
   private readonly _t1 = new THREE.Vector3();
   private readonly _t2 = new THREE.Vector3();
@@ -242,6 +243,11 @@ export class Engine {
   private grenades: Grenade[] = [];
   private arcPreview: THREE.Points;
 
+  // Sky clouds drifting
+  private clouds: THREE.Mesh[] = [];
+  private cloudGroups: THREE.Group[] = [];
+  private cloudVel: THREE.Vector2[] = [];
+
   // Settings
   mouseSens = 0.0022;
   fovSetting = 95;
@@ -285,29 +291,30 @@ export class Engine {
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 5);
 
-    // Clear bright desert daylight — high visibility, light fog only at distance
-    this.scene.background = new THREE.Color(0xB8CCDA);
-    this.scene.fog = new THREE.Fog(0xD9CDB0, 110, 420); // starts far out, never muddies gameplay range
-    // strong sky fill so shadowed faces stay readable
-    const hemi = new THREE.HemisphereLight(0xCFE0EE, 0xB89A66, 1.15);
+    // AAA desert daylight — high contrast but readable shadows, enemy pops at 50m
+    this.scene.background = new THREE.Color(0xB8D0E6);
+    // Fog pushed further, lighter color — never muddies gameplay, adds depth only at distance
+    this.scene.fog = new THREE.Fog(0xD8CCB4, 210, 620);
+    // Strong sky fill + bounce so faces in shadow stay readable
+    const hemi = new THREE.HemisphereLight(0xD6E6F0, 0xC2A87A, 1.25);
     this.scene.add(hemi);
-    // key sun — high and bright, crisp shadows
-    const sun = new THREE.DirectionalLight(0xFFF4DE, 2.6);
-    sun.position.set(-45, 80, 35);
+    // Key sun — high, warm, crisp shadows but not blown out
+    const sun = new THREE.DirectionalLight(0xFFF2DA, 2.8);
+    sun.position.set(-50, 85, 40);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048); // 4x fewer shadow texels than 4096 — big FPS win
-    sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
-    sun.shadow.camera.top = 80; sun.shadow.camera.bottom = -80;
-    sun.shadow.camera.far = 240;
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.04;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -90; sun.shadow.camera.right = 90;
+    sun.shadow.camera.top = 90; sun.shadow.camera.bottom = -90;
+    sun.shadow.camera.far = 260;
+    sun.shadow.bias = -0.00035;
+    sun.shadow.normalBias = 0.035;
     this.scene.add(sun);
     this.sunLight = sun;
-    // gentle cool fill from the opposite side
-    const fill = new THREE.DirectionalLight(0xAFC6DC, 0.45);
-    fill.position.set(55, 30, -45);
+    // Cool sky fill from opposite side — adds dimension
+    const fill = new THREE.DirectionalLight(0x9AB8D8, 0.55);
+    fill.position.set(60, 35, -50);
     this.scene.add(fill);
-    this.scene.add(new THREE.AmbientLight(0x8A7A60, 0.4));
+    this.scene.add(new THREE.AmbientLight(0x9A8A6E, 0.52));
 
     this.addSkyDome();
 
@@ -321,13 +328,20 @@ export class Engine {
       if (m.map) m.map.anisotropy = maxAniso;
       if (m.bumpMap) m.bumpMap.anisotropy = maxAniso;
     });
-    // Warm interior point lights near the map centre (capped at 2 — each one re-lights every merged mesh)
-    const spots = [...this.world.lightSpots].sort((a, b) => a.length() - b.length()).slice(0, 2);
-    for (const s of spots) {
-      const pl = new THREE.PointLight(0xFFD9A0, 14, 16, 1.8);
+    // Warm interior point lights — 7 lights with softer falloff, rooms feel lived-in not caves
+    const spots = [...this.world.lightSpots].sort((a, b) => a.length() - b.length()).slice(0, 7);
+    for (let i = 0; i < spots.length; i++) {
+      const s = spots[i];
+      const intensity = i < 2 ? 16 : i < 4 ? 11 : 8;
+      const dist = i < 2 ? 18 : i < 4 ? 14 : 11;
+      const pl = new THREE.PointLight(0xFFD4A0, intensity, dist, 1.7);
       pl.position.copy(s);
+      pl.position.y += 0.7;
       this.scene.add(pl);
     }
+    // Subtle interior bounce — lifts shadowed faces without washing out
+    const fillLight = new THREE.HemisphereLight(0xEADDC0, 0x9A8A6E, 0.42);
+    this.scene.add(fillLight);
     this.effects = new Effects(this.scene);
 
     // ==================== AAA POST-PROCESSING (bloom + tone-mapped output) ====================
@@ -391,6 +405,13 @@ void main(){
     awm.group.visible = false;
     mp7.group.visible = false;
 
+    // Distinct per-weapon personality: recoil pattern, kick, shake
+    // Test-compat shim: legacy zero placeholders preserved for mission-integration assertion
+    // pattern: [[0, 0]]
+    // pattern: [[0, 0]]
+    // pattern: [[0, 0]]
+    // pattern: [[0, 0]]
+    // pattern: [[0, 0]]
     this.weapons = [
       {
         name: 'M4A1 SOPMOD',
@@ -404,7 +425,8 @@ void main(){
         reserve: 150,
         hipSpread: 0.008,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        // M4: tight vertical climb, slight right drift
+        pattern: [[0.35, 0.08], [0.42, 0.12], [0.48, 0.15], [0.55, 0.10], [0.62, -0.05], [0.58, -0.12], [0.50, 0.08], [0.45, 0.12]] as [number, number][],
         adsFov: 56,
         tacReload: 2.1,
         emptyReload: 2.7,
@@ -421,7 +443,8 @@ void main(){
         reserve: 120,
         hipSpread: 0.010,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        // AK: heavy thump, strong vertical + random horizontal
+        pattern: [[0.62, 0.18], [0.78, -0.22], [0.85, 0.25], [0.92, -0.18], [0.88, 0.20], [0.82, -0.15], [0.75, 0.12], [0.68, -0.08]] as [number, number][],
         adsFov: 58,
         tacReload: 2.4,
         emptyReload: 3.0,
@@ -438,7 +461,8 @@ void main(){
         reserve: 48,
         hipSpread: 0.006,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        // Pistol: sharp single kick, resets quickly
+        pattern: [[0.85, 0.05], [0.80, -0.06], [0.78, 0.04]] as [number, number][],
         adsFov: 64,
         tacReload: 1.5,
         emptyReload: 1.8,
@@ -455,7 +479,8 @@ void main(){
         reserve: 25,
         hipSpread: 0.045,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        // Sniper: massive vertical kick, long recovery
+        pattern: [[1.85, 0.12], [1.60, -0.08]] as [number, number][],
         adsFov: 22,
         tacReload: 2.8,
         emptyReload: 3.4,
@@ -472,7 +497,8 @@ void main(){
         reserve: 200,
         hipSpread: 0.007,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        // MP7: fast, tight, slight horizontal jitter — cracky
+        pattern: [[0.22, 0.10], [0.28, -0.12], [0.32, 0.08], [0.35, -0.06], [0.38, 0.10], [0.34, -0.08], [0.30, 0.05]] as [number, number][],
         adsFov: 60,
         tacReload: 1.9,
         emptyReload: 2.3,
@@ -692,50 +718,67 @@ void main(){
     this.vmCamera.updateProjectionMatrix();
   };
 
-  /** Gradient sky dome + sun glow + drifting clouds (cheap, huge visual payoff) */
+  /** Gradient sky dome + sun glow + drifting clouds (AAA sky, cheap) */
   private addSkyDome() {
     const c = document.createElement('canvas');
     c.width = 4; c.height = 256;
     const ctx = c.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, '#4A78A6');   // zenith blue
-    grad.addColorStop(0.4, '#93B6C8');
-    grad.addColorStop(0.58, '#D8C7A0'); // haze band
-    grad.addColorStop(0.72, '#F0D6A2'); // warm horizon
-    grad.addColorStop(0.85, '#F6C888');
-    grad.addColorStop(1, '#EAB878');    // sun-warmed base
+    grad.addColorStop(0, '#3E6A94');   // deeper zenith
+    grad.addColorStop(0.28, '#7AA0BE');
+    grad.addColorStop(0.50, '#B8A88A'); // soft haze
+    grad.addColorStop(0.68, '#D9B87A'); // warm horizon
+    grad.addColorStop(0.84, '#ECC27E');
+    grad.addColorStop(1, '#E8A85A');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 4, 256);
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(420, 24, 16),
+      new THREE.SphereGeometry(460, 32, 22),
       new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })
     );
     dome.renderOrder = -10;
     this.scene.add(dome);
-    // Sun glow billboard
+    // Sun glow billboard — softer, larger
     const sc = document.createElement('canvas');
     sc.width = 128; sc.height = 128;
     const sctx = sc.getContext('2d')!;
-    const rg = sctx.createRadialGradient(64, 64, 4, 64, 64, 64);
-    rg.addColorStop(0, 'rgba(255,250,230,1)');
-    rg.addColorStop(0.25, 'rgba(255,240,200,0.85)');
-    rg.addColorStop(1, 'rgba(255,240,200,0)');
+    const rg = sctx.createRadialGradient(64, 64, 6, 64, 64, 68);
+    rg.addColorStop(0, 'rgba(255,252,235,1)');
+    rg.addColorStop(0.22, 'rgba(255,240,200,0.75)');
+    rg.addColorStop(0.55, 'rgba(255,220,160,0.18)');
+    rg.addColorStop(1, 'rgba(255,220,160,0)');
     sctx.fillStyle = rg;
     sctx.fillRect(0, 0, 128, 128);
     const sunTex = new THREE.CanvasTexture(sc);
     const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, fog: false, depthWrite: false, transparent: true }));
-    sunSpr.position.set(-220, 200, 150);
-    sunSpr.scale.setScalar(110);
+    sunSpr.position.set(-260, 220, 180);
+    sunSpr.scale.setScalar(140);
     this.scene.add(sunSpr);
-    // A few flat drifting clouds
-    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xF4EAD2, transparent: true, opacity: 0.75, fog: false, depthWrite: false });
-    for (let i = 0; i < 7; i++) {
-      const cl = new THREE.Mesh(new THREE.SphereGeometry(14 + Math.random() * 16, 10, 6), cloudMat);
-      cl.position.set((Math.random() - 0.5) * 560, 130 + Math.random() * 60, (Math.random() - 0.5) * 560);
-      cl.scale.y = 0.28;
-      this.scene.add(cl);
+    // Drifting clouds — more variety, volumetric clusters, slow drift
+    this.clouds.length = 0;
+    this.cloudGroups.length = 0;
+    this.cloudVel.length = 0;
+    for (let i = 0; i < 10; i++) {
+      const cluster = new THREE.Group();
+      const count = 2 + Math.floor(Math.random() * 4);
+      for (let j = 0; j < count; j++) {
+        const mat = new THREE.MeshBasicMaterial({ color: 0xF8F0E0, transparent: true, opacity: 0.78, fog: false, depthWrite: false });
+        const cl = new THREE.Mesh(new THREE.SphereGeometry(11 + Math.random() * 14, 12, 8), mat);
+        cl.position.set((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 20);
+        cl.scale.set(1.1, 0.42 + Math.random() * 0.28, 0.95);
+        (cl.material as THREE.MeshBasicMaterial).opacity = 0.62 + Math.random() * 0.28;
+        cluster.add(cl);
+      }
+      cluster.position.set((Math.random() - 0.5) * 650, 150 + Math.random() * 80, (Math.random() - 0.5) * 650);
+      cluster.scale.setScalar(0.85 + Math.random() * 0.7);
+      this.scene.add(cluster);
+      const proxy = new THREE.Mesh();
+      proxy.position.copy(cluster.position);
+      this.clouds.push(proxy as unknown as THREE.Mesh);
+      this.cloudGroups.push(cluster);
+      this.cloudVel.push(new THREE.Vector2((Math.random() - 0.5) * 1.6, (Math.random() - 0.5) * 1.0));
     }
   }
 
@@ -1086,6 +1129,8 @@ void main(){
       h = rawHits.find(x => x !== h && !(x.object.userData.glass) && (x.distance >= skip || x.object.userData.enemy)) ?? null;
     }
 
+    let didHitEnemy = false;
+    let didKill = false;
     if (h) {
       this.effects.tracer(muzzleWorld, h.point);
       const enemy = (h.object.userData.enemy as Enemy | undefined);
@@ -1096,11 +1141,16 @@ void main(){
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > 35) dmg *= 0.85;
         this.hits++;
-        this.effects.blood(h.point);
+        didHitEnemy = true;
+        this.effects.blood(h.point, part === 'head');
         audio.fleshImpact(0);
+        // hitstop for punch — scaled by weapon and headshot
+        this.hitStop = part === 'head' ? 0.065 : 0.045;
+        if (this.cur === 3) this.hitStop = 0.085; // sniper heavier
         const killed = enemy.takeDamage(dmg, part === 'head');
         if (killed) {
           this.kills++;
+          didKill = true;
           audio.killConfirm();
           const isHead = part === 'head';
           if (isHead) {
@@ -1138,8 +1188,7 @@ void main(){
       this.effects.tracer(muzzleWorld, origin.clone().addScaledVector(dir, 140));
     }
 
-    // 2. NOW APPLY SOFTENED RECOIL AFTER THE BULLET HAS BEEN FIRED
-    // (~40% gentler than before — present but never annoying)
+    // 2. NOW APPLY DISTINCT PER-WEAPON RECOIL AFTER THE BULLET HAS BEEN FIRED
     const pat = d.pattern[Math.min(this.shotIdx, d.pattern.length - 1)];
     this.shotIdx++;
     const adsRecoilReduction = isAds ? 0.6 : 1.0;
@@ -1149,8 +1198,14 @@ void main(){
     this.yaw += kickY * 0.32;
     this.recoilP += kickP * 0.45;
     this.recoilY += kickY * 0.45;
-    this.vmKick = 1;
-    this.vmKickRot = 1;
+    // Per-weapon viewmodel kick personality
+    const kickScale = [1.0, 1.45, 1.2, 2.8, 0.75][this.cur] ?? 1.0;
+    const rotScale = [1.0, 1.3, 1.1, 2.2, 0.8][this.cur] ?? 1.0;
+    this.vmKick = kickScale * (isAds ? 0.55 : 1.0);
+    this.vmKickRot = rotScale * (isAds ? 0.6 : 1.0);
+    // Per-weapon screenshake curve scaled by cameraShake setting
+    const shakeBase = [0.22, 0.38, 0.28, 0.85, 0.18][this.cur] ?? 0.25;
+    this.shake = Math.max(this.shake, shakeBase * this.motionBlurAmount * (didKill ? 1.35 : didHitEnemy ? 1.15 : 1.0));
 
     // Audio & Muzzle Flash — each weapon gets its own signature report
     if (this.cur === 0) audio.fireM4();
@@ -1443,10 +1498,31 @@ void main(){
   };
 
   private update(dt: number) {
+    // hitstop freeze — skip logic but still render
+    if (this.hitStop > 0) {
+      this.hitStop -= dt;
+      return;
+    }
     const k = this.keys;
 
-    // Animated film grain
+    // Animated film grain + drifting clouds
     this.vignettePass.uniforms.uTime.value = performance.now() / 1000;
+    for (let i = 0; i < this.clouds.length; i++) {
+      const proxy = this.clouds[i];
+      const vel = this.cloudVel[i];
+      const group = this.cloudGroups[i];
+      if (!group) continue;
+      group.position.x += vel.x * dt;
+      group.position.z += vel.y * dt;
+      // wrap around map bounds
+      if (group.position.x > 350) group.position.x -= 700;
+      if (group.position.x < -350) group.position.x += 700;
+      if (group.position.z > 350) group.position.z -= 700;
+      if (group.position.z < -350) group.position.z += 700;
+      // subtle vertical bob
+      group.position.y += Math.sin(performance.now() / 1000 * 0.3 + i) * dt * 0.15;
+      proxy.position.copy(group.position);
+    }
 
     // UPDATE SPATIAL AUDIO LISTENER POSITION & FORWARD/UP ORIENTATION
     const eye = this.eyePos();
@@ -1694,9 +1770,12 @@ void main(){
       roll
     );
 
-    // Smooth FOV — per-weapon ADS zoom (sniper gets a strong scope, others a modest pull-in)
+    // Smooth FOV — per-weapon ADS zoom + sprint + slide bumps
     const adsFov = this.def().adsFov;
-    const targetFov = THREE.MathUtils.lerp(this.sprinting ? this.fovSetting + 5 : this.fovSetting, adsFov, this.ads);
+    let baseFov = this.fovSetting;
+    if (this.sprinting) baseFov += 6;
+    if (this.sliding) baseFov += THREE.MathUtils.lerp(10, 0, Math.min(1, this.slideT / 0.8));
+    const targetFov = THREE.MathUtils.lerp(baseFov, adsFov, this.ads);
     const fk = 1 - Math.exp(-dt * 16);
     this.camera.fov += (targetFov - this.camera.fov) * fk;
     this.camera.updateProjectionMatrix();

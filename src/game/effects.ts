@@ -20,8 +20,8 @@ interface BurstSlot {
 const decalGeo = new THREE.CircleGeometry(0.035, 8);
 const bulletHoleMat = new THREE.MeshBasicMaterial({ color: 0x141210, transparent: true, opacity: 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
 const bloodDecalMat = new THREE.MeshBasicMaterial({ color: 0x7A0A0A, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
-const tracerMat = new THREE.MeshBasicMaterial({ color: 0xFFC46B, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
-const tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 1);
+const tracerMat = new THREE.MeshBasicMaterial({ color: 0xFFD080, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
+const tracerGeo = new THREE.BoxGeometry(0.035, 0.035, 1);
 
 export class Effects {
   private bursts: BurstSlot[] = [];
@@ -37,6 +37,7 @@ export class Effects {
   private flashLight: THREE.PointLight;
   flashTimer = 0;
   // scratch (no alloc in hot paths)
+  private dustFrame = 0;
   private readonly _v1 = new THREE.Vector3();
   private readonly _v2 = new THREE.Vector3();
 
@@ -72,21 +73,21 @@ export class Effects {
       scene.add(mesh);
       this.tracers.push({ mesh, life: 0, active: false });
     }
-    // ambient ground-level sand drift
-    const N = 320;
+    // ambient ground-level sand drift — reduced count + throttled update
+    const N = 180;
     const pos = new Float32Array(N * 3);
     this.dustVel = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
       pos[i * 3] = (Math.random() - 0.5) * 90;
       pos[i * 3 + 1] = Math.random() * 2.2;
       pos[i * 3 + 2] = (Math.random() - 0.5) * 90;
-      this.dustVel[i * 3] = 1.5 + Math.random() * 2.5;
-      this.dustVel[i * 3 + 1] = (Math.random() - 0.5) * 0.3;
-      this.dustVel[i * 3 + 2] = (Math.random() - 0.5) * 0.8;
+      this.dustVel[i * 3] = 1.2 + Math.random() * 2.0;
+      this.dustVel[i * 3 + 1] = (Math.random() - 0.5) * 0.25;
+      this.dustVel[i * 3 + 2] = (Math.random() - 0.5) * 0.6;
     }
     const dg = new THREE.BufferGeometry();
     dg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0xD8C090, size: 0.06, transparent: true, opacity: 0.45, sizeAttenuation: true }));
+    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0xD8C090, size: 0.055, transparent: true, opacity: 0.38, sizeAttenuation: true }));
     this.dust.frustumCulled = false;
     scene.add(this.dust);
 
@@ -113,8 +114,9 @@ export class Effects {
 
   impact(pos: THREE.Vector3, normal: THREE.Vector3) {
     this._v1.copy(pos).addScaledVector(normal, 0.03);
-    this.burst(this._v1, 8, 0xC8B080, 2.2, 0.4, 4);
-    this.burst(this._v1, 5, 0xFFE9B0, 3.4, 0.12, 2, 0.08); // white-hot strike flash
+    this.burst(this._v1, 10, 0xC8B080, 2.6, 0.45, 4, 0.06);
+    this.burst(this._v1, 7, 0xFFE9B0, 4.0, 0.15, 2, 0.10); // white-hot strike flash — punchier
+    this.burst(this._v1, 4, 0xFF8A30, 2.0, 0.22, 3, 0.07); // extra spark
     const m = this.holes[this.holeIdx];
     this.holeIdx = (this.holeIdx + 1) % this.holes.length;
     m.visible = true;
@@ -124,12 +126,18 @@ export class Effects {
   }
 
   glassShatter(pos: THREE.Vector3) {
-    this.burst(pos, 26, 0xBFE4F7, 3.2, 0.9, 9, 0.07, 1.4);
-    this.burst(pos, 10, 0xFFFFFF, 1.6, 0.4, 6, 0.05);
+    this.burst(pos, 32, 0xBFE4F7, 3.8, 1.0, 9, 0.08, 1.5);
+    this.burst(pos, 14, 0xFFFFFF, 2.0, 0.5, 6, 0.06);
   }
 
-  blood(pos: THREE.Vector3) {
-    this.burst(pos, 12, 0x8C1010, 2.6, 0.45, 6, 0.06);
+  blood(pos: THREE.Vector3, headshot = false) {
+    if (headshot) {
+      this.burst(pos, 22, 0x9A0A0A, 4.2, 0.65, 7, 0.085);
+      this.burst(pos, 10, 0xFF3030, 3.0, 0.35, 5, 0.07);
+    } else {
+      this.burst(pos, 16, 0x8C1010, 3.2, 0.55, 6, 0.075);
+      this.burst(pos, 6, 0xFF2020, 2.0, 0.28, 4, 0.05);
+    }
   }
 
   bloodDecal(pos: THREE.Vector3) {
@@ -156,26 +164,27 @@ export class Effects {
     if (len < 1) return;
     const t = this.tracers[this.tracerIdx];
     this.tracerIdx = (this.tracerIdx + 1) % this.tracers.length;
-    const l = Math.min(len, 4);
+    const l = Math.min(len, 6.5); // longer, more visible tracer
     t.mesh.position.copy(from).addScaledVector(this._v1.normalize(), l / 2);
-    t.mesh.scale.set(1, 1, l);
+    t.mesh.scale.set(1.2, 1.2, l);
     t.mesh.lookAt(to);
     t.mesh.visible = true;
-    t.life = 0.09;
+    t.life = 0.13;
     t.active = true;
   }
 
   explosion(pos: THREE.Vector3) {
-    this.burst(pos, 40, 0xFFA030, 9, 0.5, 9, 0.14);
-    this.burst(pos, 30, 0x555048, 5, 1.4, 1.5, 0.22, 1.4);
-    this.burst(pos, 20, 0x2A2620, 7, 0.8, 7, 0.1);
+    this.burst(pos, 48, 0xFFA030, 10, 0.6, 9, 0.16);
+    this.burst(pos, 36, 0x555048, 5.5, 1.5, 1.5, 0.26, 1.5);
+    this.burst(pos, 24, 0x2A2620, 7.5, 0.9, 7, 0.12);
+    this.burst(pos, 16, 0xFFE8A0, 6, 0.25, 3, 0.09); // bright core flash
     this.flashLight.position.copy(pos).y += 0.5;
-    this.flashLight.intensity = 30;
-    this.flashTimer = 0.12;
+    this.flashLight.intensity = 36;
+    this.flashTimer = 0.15;
   }
 
   footDust(pos: THREE.Vector3) {
-    this.burst(pos, 3, 0xC8B080, 0.7, 0.35, 1.2, 0.05);
+    this.burst(pos, 5, 0xC8B080, 0.9, 0.45, 1.2, 0.06);
   }
 
   update(dt: number, playerPos: THREE.Vector3) {
@@ -204,18 +213,23 @@ export class Effects {
       this.flashTimer -= dt;
       if (this.flashTimer <= 0) this.flashLight.intensity = 0;
     }
-    const arr = this.dust.geometry.attributes.position.array as Float32Array;
-    for (let i = 0; i < arr.length; i += 3) {
-      arr[i] += this.dustVel[i] * dt;
-      arr[i + 1] += this.dustVel[i + 1] * dt;
-      arr[i + 2] += this.dustVel[i + 2] * dt;
-      if (arr[i] - playerPos.x > 45) arr[i] -= 90;
-      if (arr[i] - playerPos.x < -45) arr[i] += 90;
-      if (arr[i + 2] - playerPos.z > 45) arr[i + 2] -= 90;
-      if (arr[i + 2] - playerPos.z < -45) arr[i + 2] += 90;
-      if (arr[i + 1] > 2.4) arr[i + 1] = 0.05;
-      if (arr[i + 1] < 0) arr[i + 1] = 2.2;
+    // Throttle dust to every 2nd frame — big CPU win, still looks like drift
+    this.dustFrame++;
+    if (this.dustFrame % 2 === 0) {
+      const arr = this.dust.geometry.attributes.position.array as Float32Array;
+      const ddt = dt * 2; // compensate for skipped frame
+      for (let i = 0; i < arr.length; i += 3) {
+        arr[i] += this.dustVel[i] * ddt;
+        arr[i + 1] += this.dustVel[i + 1] * ddt;
+        arr[i + 2] += this.dustVel[i + 2] * ddt;
+        if (arr[i] - playerPos.x > 45) arr[i] -= 90;
+        if (arr[i] - playerPos.x < -45) arr[i] += 90;
+        if (arr[i + 2] - playerPos.z > 45) arr[i + 2] -= 90;
+        if (arr[i + 2] - playerPos.z < -45) arr[i + 2] += 90;
+        if (arr[i + 1] > 2.4) arr[i + 1] = 0.05;
+        if (arr[i + 1] < 0) arr[i + 1] = 2.2;
+      }
+      this.dust.geometry.attributes.position.needsUpdate = true;
     }
-    this.dust.geometry.attributes.position.needsUpdate = true;
   }
 }

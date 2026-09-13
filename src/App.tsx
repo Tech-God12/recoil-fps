@@ -205,9 +205,11 @@ export default function App() {
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && <ResultsScreen r={results} onRedeploy={deploy} onMenu={quit} />}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
-      <div className="absolute top-3 right-4 z-50 flex gap-2">
-        <button onClick={fullscreen} className="util-btn">FULLSCREEN</button>
-      </div>
+      {phase !== 'playing' && (
+        <div className="absolute bottom-3 right-4 z-50 flex gap-2 opacity-60 hover:opacity-100 transition-opacity">
+          <button onClick={fullscreen} className="util-btn text-[10px] px-2 py-1 tracking-widest">⛶ FULLSCREEN [F11]</button>
+        </div>
+      )}
       {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">Close</button></div>}
       {launching && <div className="mission-loading" role="status">Preparing mission...</div>}
     </div>

@@ -556,10 +556,11 @@ export interface SoldierModel {
   hitMeshes: THREE.Mesh[];
 }
 
-export function buildSoldier(): SoldierModel {
+export function buildSoldier(variant?: number): SoldierModel {
   const m = getSoldierMat();
   const g = new THREE.Group();
   const hitMeshes: THREE.Mesh[] = [];
+  const varIdx = variant ?? Math.floor(Math.random() * 3);
   // Enemies don't cast shadows (21 hostiles × 6 meshes was a shadow-pass disaster).
   // They still receive, so they sit grounded in the scene.
   const tag = (mesh: THREE.Mesh, part: string) => { mesh.userData.part = part; mesh.castShadow = false; hitMeshes.push(mesh); return mesh; };
@@ -568,8 +569,10 @@ export function buildSoldier(): SoldierModel {
   const torso = new THREE.Group(); torso.position.y = 0.95;
   const t = new Part();
   t.box(0.40, 0.56, 0.24, SR.camo, 0, 0.30, 0);                 // shirt body
-  t.box(0.44, 0.42, 0.29, SR.vest, 0, 0.30, 0);                 // plate carrier
-  t.box(0.46, 0.08, 0.31, SR.vest, 0, 0.52, 0);                 // shoulder straps top
+  // vest variety
+  const vestRegion = varIdx === 1 ? SR.olive : varIdx === 2 ? SR.black : SR.vest;
+  t.box(0.44, 0.42, 0.29, vestRegion, 0, 0.30, 0);                 // plate carrier
+  t.box(0.46, 0.08, 0.31, vestRegion, 0, 0.52, 0);                 // shoulder straps top
   for (const px of [-0.13, 0, 0.13]) t.box(0.10, 0.15, 0.07, SR.webbing, px, 0.22, -0.17);  // mag pouches
   t.box(0.12, 0.10, 0.06, SR.webbing, 0.16, 0.42, -0.16);       // radio pouch
   t.box(0.32, 0.30, 0.14, SR.olive, 0, 0.32, 0.20);             // backpack
@@ -577,22 +580,37 @@ export function buildSoldier(): SoldierModel {
   t.box(0.16, 0.14, 0.08, SR.olive, -0.2, 0.02, 0.06);          // hip pouch
   t.box(0.14, 0.12, 0.08, SR.black, 0.22, 0.0, 0.0);            // holster
   t.box(0.16, 0.1, 0.16, SR.camo, 0, 0.62, 0);                  // neck / collar
+  // extra variety: shemagh for variant 2
+  if (varIdx === 2) t.box(0.20, 0.14, 0.18, SR.camo, 0, 0.58, 0.02);
   const torsoMesh = tag(t.mesh(m), 'torso'); torso.add(torsoMesh);
   g.add(torso);
   // pelvis
   const pv = new Part(); pv.box(0.40, 0.22, 0.25, SR.camo, 0, 0.86, 0);
   g.add(tag(pv.mesh(m), 'torso'));
 
-  // ---- head ----
+  // ---- head ---- variety
   const head = new THREE.Group(); head.position.y = 0.70;
   const h = new Part();
   h.sph(0.115, SR.skin, 0, 0.13, 0, 1, 1.12, 1);                 // head
   h.box(0.06, 0.05, 0.04, SR.skin, 0, 0.1, -0.11);               // nose/chin mass
-  h.sph(0.15, SR.helmet, 0, 0.19, 0, 1.0, 0.85, 1.1, Math.PI * 0.6); // helmet shell
-  h.box(0.28, 0.03, 0.06, SR.helmet, 0, 0.16, -0.14);            // brim
-  h.box(0.05, 0.05, 0.05, SR.black, 0, 0.26, -0.14);             // NVG mount
-  h.box(0.22, 0.07, 0.06, SR.visor, 0, 0.15, -0.1);              // goggles
-  h.box(0.24, 0.03, 0.03, SR.black, 0, 0.17, 0.05);              // goggle strap
+  if (varIdx === 0) {
+    h.sph(0.15, SR.helmet, 0, 0.19, 0, 1.0, 0.85, 1.1, Math.PI * 0.6); // helmet shell
+    h.box(0.28, 0.03, 0.06, SR.helmet, 0, 0.16, -0.14);            // brim
+    h.box(0.05, 0.05, 0.05, SR.black, 0, 0.26, -0.14);             // NVG mount
+    h.box(0.22, 0.07, 0.06, SR.visor, 0, 0.15, -0.1);              // goggles
+  } else if (varIdx === 1) {
+    // boonie hat
+    h.cyl(0.18, 0.18, 0.06, 8, SR.helmet, 0, 0.20, 0);
+    h.cyl(0.26, 0.26, 0.02, 8, SR.helmet, 0, 0.17, 0);
+    h.box(0.22, 0.07, 0.06, SR.visor, 0, 0.14, -0.08);
+  } else {
+    // tactical helmet with NVG + visor
+    h.sph(0.155, SR.black, 0, 0.20, 0, 1.0, 0.90, 1.05, Math.PI * 0.62);
+    h.box(0.05, 0.05, 0.05, SR.black, 0, 0.28, -0.14);
+    h.box(0.10, 0.04, 0.12, SR.black, 0, 0.26, -0.10);
+    h.box(0.24, 0.03, 0.03, SR.black, 0, 0.18, 0.04);
+  }
+  h.box(0.24, 0.03, 0.03, SR.black, 0, 0.17, 0.05);              // goggle strap generic
   h.box(0.05, 0.14, 0.02, SR.black, 0.11, 0.06, -0.02);          // chin strap
   h.box(0.06, 0.06, 0.04, SR.black, -0.13, 0.13, -0.02);         // comms earpiece
   h.box(0.02, 0.12, 0.02, SR.black, -0.13, 0.06, -0.08);         // boom mic

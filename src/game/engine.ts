@@ -147,31 +147,72 @@ interface Grenade {
 
 const V = () => new THREE.Vector3();
 
+/**
+ * Two animation frames, not one: the first runs before the browser has painted, so a
+ * single rAF does not guarantee the boot screen is actually on screen. Used to break
+ * the staged mission build into chunks the main thread can breathe between.
+ */
+function nextFrame(): Promise<void> {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+/**
+ * Hostiles cannot acquire the player during the opening seconds of a mission, so a
+ * deployment is never met by squads that are already firing. Broken immediately if the
+ * player shoots first — you do not get to fire into a crowd and still be "unseen".
+ */
+const OPENING_GRACE = 8;
+/** Capsule heights used for AI movement. The crouch height is what lets a squad duck
+ *  under a bridge deck instead of jamming on its underside. */
+const AI_STAND_HEIGHT = 1.7;
+const AI_CROUCH_HEIGHT = 1.15;
+
+/**
+ * Adaptive resolution. The scale is a discrete fraction of the user's cap so the
+ * controller settles on a value instead of hunting: every change reallocates the
+ * drawing buffer *and* every post-FX render target, which is a hard stall on the main
+ * thread. The previous continuous 0.88/1.12 multipliers produced a fresh stall every
+ * few seconds, and because the FPS reading that triggered the next change still
+ * contained the cost of the last one, it could only ever ratchet downwards.
+ */
+const ADAPT_STEPS = [1, 0.85, 0.72, 0.6];
+const ADAPT_DOWN_FPS = 45;
+const ADAPT_UP_FPS = 57;
+const ADAPT_EVAL_MS = 5000;
+const ADAPT_LOCK_MS = 8000;
+const ADAPT_DOWN_WINDOWS = 2;
+const ADAPT_UP_WINDOWS = 3;
+/** A frame longer than this is a hitch, not sustained throughput; it must not drive scaling. */
+const ADAPT_STALL_SECONDS = 0.25;
+
 export class Engine {
-  private renderer: THREE.WebGLRenderer;
+  // Assigned in init(), which Engine.create() awaits before handing the instance out.
+  private renderer!: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera: THREE.PerspectiveCamera;
+  private camera!: THREE.PerspectiveCamera;
   private vmScene = new THREE.Scene();
   private reflectionMap?: THREE.WebGLRenderTarget;
-  private vmCamera: THREE.PerspectiveCamera;
-  private world: World;
-  private effects: Effects;
-  private ai: AIManager;
+  private vmCamera!: THREE.PerspectiveCamera;
+  private world!: World;
+  private effects!: Effects;
+  private ai!: AIManager;
   private missionRuntime!: MissionRuntime;
   private rosterVersion = -1;
   private started = false;
   private finishDelay = -1;
   private pendingResult: Extract<GameEvent, { type: 'end' }> | null = null;
-  private onEvent: (e: GameEvent) => void;
-  private composer: EffectComposer;
-  private bloom: UnrealBloomPass;
-  private vignettePass: ShaderPass;
+  private onEvent!: (e: GameEvent) => void;
+  private composer!: EffectComposer;
+  private bloom!: UnrealBloomPass;
+  private vignettePass!: ShaderPass;
   private sunLight!: THREE.DirectionalLight;
   private mapImage = '';
   private clouds = new THREE.Group();
 
   // Player state
-  private pos: THREE.Vector3;
+  private pos!: THREE.Vector3;
   private vel = V();
   private yaw = Math.PI / 2 + 0.6;
   private pitch = 0;
@@ -197,6 +238,8 @@ export class Engine {
   private staticTime = 0;
   private lastPos = V();
   private dead = false;
+  /** Set the moment the player fires: ends the opening grace window immediately. */
+  private graceBroken = false;
   private vx = 0;
   private vz = 0;
   private stepAcc = 0;
@@ -224,10 +267,10 @@ export class Engine {
   private eyeH = 1.62;
 
   // Weapons
-  private weapons: WeaponDef[];
+  private weapons!: WeaponDef[];
   private cur = 0;
-  private mags: number[];
-  private reserves: number[];
+  private mags!: number[];
+  private reserves!: number[];
   private fireCD = 0;
   private shotIdx = 0;
   private shotResetT = 0;
@@ -239,8 +282,8 @@ export class Engine {
   private switchT = -1;
   private vmKick = 0;
   private vmKickRot = 0;
-  private muzzleFlash: THREE.Mesh;
-  private vmLight: THREE.PointLight;
+  private muzzleFlash!: THREE.Mesh;
+  private vmLight!: THREE.PointLight;
 
   // Grenades
   private frags = 5;
@@ -248,7 +291,7 @@ export class Engine {
   private cooking = false;
   private cookT = 0;
   private grenades: Grenade[] = [];
-  private arcPreview: THREE.Points;
+  private arcPreview!: THREE.Points;
 
   // Settings
   mouseSens = 0.0022;
@@ -282,10 +325,27 @@ export class Engine {
   private appliedPR = -1;
   private graphicsLost = false;
 
-  constructor(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul') {
+  private constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
+  }
+
+  /**
+   * Building a mission is several hundred milliseconds of unavoidable work: procedural
+   * textures, world geometry, the tactical map image, PMREM reflections, ten soldier
+   * models and the first shader compile. It used to run in one synchronous block inside
+   * the Deploy click, so the tab froze on a dead-looking menu before the boot screen
+   * could even paint. create() stages it across frames and pre-compiles shaders off the
+   * blocking path instead.
+   */
+  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul'): Promise<Engine> {
+    const engine = new Engine(canvas);
+    await engine.init(difficulty, onEvent, mapId);
+    return engine;
+  }
+
+  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul') {
     this.onEvent = onEvent;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     // Cap pixel ratio at 1.25 — the single biggest FPS win on high-DPI screens
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     this.renderer.shadowMap.enabled = true;
@@ -326,6 +386,8 @@ export class Engine {
 
     this.addSkyDome(mapId);
 
+    // Heaviest single stage: procedural texture set plus all world geometry.
+    await nextFrame();
     this.world = buildWorld(this.scene, mapId);
     this.buildSolidGrid();
     const maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
@@ -344,6 +406,7 @@ export class Engine {
       this.scene.add(pl);
     }
     this.effects = new Effects(this.scene);
+    await nextFrame();
 
     // ==================== AAA POST-PROCESSING (bloom + tone-mapped output) ====================
     this.composer = new EffectComposer(this.renderer);
@@ -381,11 +444,14 @@ void main(){
     this.composer.addPass(new OutputPass());
 
     // Accurate tactical map rendered from the real world collision geometry
+    await nextFrame();
     this.mapImage = this.generateMapImage();
     this.pos = this.world.playerSpawn.clone();
     this.lastPos.copy(this.pos);
 
-    // Viewmodel lighting
+    // Viewmodel lighting — PMREM renders a whole environment scene, so give the
+    // browser a frame either side of it.
+    await nextFrame();
     this.createReflections();
     this.canvas.addEventListener('webglcontextlost',this.onGraphicsLost);
     this.canvas.addEventListener('webglcontextrestored',this.onGraphicsRestored);
@@ -398,6 +464,7 @@ void main(){
     this.vmScene.add(this.vmLight);
 
     // Weapons: 1. M4A1 SOPMOD, 2. AK-47, 3. M1911, 4. AWM Sniper, 5. MP7A1 PDW
+    await nextFrame();
     const m4 = buildM4();
     const ak = buildAK47();
     const m1911 = buildM1911();
@@ -537,7 +604,16 @@ void main(){
       damagePlayer: (a, f) => this.damagePlayer(a, f),
       groundHeight: this.world.navigationHeight ?? this.world.groundHeight,
       moveCollide: (p, dx, dz, r) => {
-        this.moveAxis(p, dx, dz, r, 1.7);
+        const ox = p.x, oz = p.z;
+        this.moveAxis(p, dx, dz, r, AI_STAND_HEIGHT);
+        // The bridge decks hang barely 1.6m over the dry riverbed, so a squad walking
+        // the sand underneath used to jam on the deck's underside and shuffle in place.
+        // If a crouched actor genuinely fits, duck and carry on.
+        const want = Math.hypot(dx, dz);
+        if (want > 0 && Math.hypot(p.x - ox, p.z - oz) < want * 0.5 && this.headroomAt(p, r) >= AI_CROUCH_HEIGHT) {
+          p.x = ox; p.z = oz;
+          this.moveAxis(p, dx, dz, r, AI_CROUCH_HEIGHT);
+        }
         // Ground-based squads follow the same continuous wadi bed as the player.
         p.y = this.supportHeight(p, r);
       },
@@ -560,8 +636,11 @@ void main(){
         this.addPing(p);
       },
       onEliminated: enemy => this.missionRuntime?.recordElimination(enemy),
+      canAcquire: () => this.graceBroken || this.missionRuntime.mission.elapsed >= OPENING_GRACE,
     };
 
+    // Ten pooled soldier models plus the nav grid over the whole sector.
+    await nextFrame();
     this.ai = new AIManager(ctx, []);
     this.missionRuntime = new MissionRuntime({
       scene: this.scene, world: this.world, camera: this.camera, ai: this.ai, player: this.pos,
@@ -600,6 +679,12 @@ void main(){
     this.composeCamera(1 / 60);
     this.animateViewmodel(1 / 60);
     this.camera.updateMatrixWorld(true);
+    // Pre-compile every shader variant off the blocking path. The single synchronous
+    // render() this replaces linked dozens of programs inside the deploy click, and
+    // program linking was the largest slice of the spawn freeze.
+    await this.renderer.compileAsync(this.scene, this.camera);
+    await this.renderer.compileAsync(this.vmScene, this.vmCamera);
+    await nextFrame();
     this.render();
     window.addEventListener('resize', this.resize);
     this.lastT = performance.now();
@@ -742,7 +827,12 @@ void main(){
   };
   private onGraphicsRestored = () => {
     if (this.disposed) return;
-    this.graphicsLost=false; this.appliedPR=-1; this.dynPR=Math.min(this.dynPR,0.85);
+    this.graphicsLost=false; this.appliedPR=-1;
+    // Re-uploaded GPU state is expensive for a while: resume one ladder step down,
+    // staying on the ladder so the scaler can climb back without hunting.
+    this.adaptStep = Math.max(this.adaptStep, 1);
+    this.dynPR = this.userPR * ADAPT_STEPS[this.adaptStep];
+    this.adaptLow = 0; this.adaptHigh = 0; this.adaptLockUntil = 0; this.adaptSamples.length = 0;
     this.syncPixelRatio(); this.createReflections(); this.renderer.shadowMap.needsUpdate=true;
     this.onEvent({type:'graphics',text:'Graphics restored. Your mission is preserved; select Resume to continue.'});
   };
@@ -1071,6 +1161,25 @@ void main(){
     return s;
   }
 
+  /**
+   * Vertical clearance between the actor's feet and the first obstruction overhead,
+   * capped at a standing capsule. Used to decide whether an AI can duck under a low
+   * bridge deck rather than grinding into it.
+   */
+  private headroomAt(p: THREE.Vector3, radius: number): number {
+    const near = this.nearSolids(p.x, p.z, radius + 0.1);
+    let top = AI_STAND_HEIGHT;
+    for (let i = 0; i < near.length; i++) {
+      const b = near[i];
+      if (b.maxY <= p.y + 0.55) continue;                       // underfoot / steppable
+      if (p.x + radius <= b.minX || p.x - radius >= b.maxX) continue;
+      if (p.z + radius <= b.minZ || p.z - radius >= b.maxZ) continue;
+      const gap = b.minY - p.y;
+      if (gap < top) top = gap;
+    }
+    return top;
+  }
+
   private surfaceAt(): 'sand' | 'concrete' | 'wood' {
     for (const b of this.world.wood) if (pointInAABB(this.pos.x, this.pos.y + 0.5, this.pos.z, b)) return 'wood';
     for (const b of this.world.interiors) if (pointInAABB(this.pos.x, this.pos.y + 0.5, this.pos.z, b)) return 'concrete';
@@ -1171,6 +1280,8 @@ void main(){
     if (this.fireCD > 0 || this.reloadT >= 0 || this.switchT >= 0 || this.cooking) return;
     if (this.sprinting || this.sprintToFireDelay > 0) return; // Cannot fire during sprint
     if (this.sliding) return; // Cannot fire during slide
+    // Firing ends the opening grace window — hostiles are allowed to see you now.
+    this.graceBroken = true;
 
     const d = this.def();
     if (this.mags[this.cur] <= 0) {
@@ -1602,9 +1713,11 @@ void main(){
     const frameSeconds = Math.max(0, (t - this.lastT) / 1000);
     const dt = Math.min(0.05, frameSeconds);
     this.lastT = t;
-    // rolling FPS meter
+    // rolling FPS meter (true reading, including hitches — this is what the HUD shows)
     this.fpsAcc += frameSeconds; this.fpsFrames++;
     if (this.fpsAcc >= 0.25) { this.fps = this.fpsFrames / this.fpsAcc; this.fpsAcc = 0; this.fpsFrames = 0; }
+    // A separate, hitch-immune sample drives resolution scaling only.
+    this.recordFrameForScaling(frameSeconds);
     this.adaptResolution(t);
     if (this.paused) return;
     if (this.ended) {
@@ -2056,8 +2169,9 @@ void main(){
     const cap = s.resolutionScale / 100;
     this.adaptiveEnabled = s.adaptiveResolution ?? true;
     this.userPR = cap * Math.min(window.devicePixelRatio || 1,1.25);
-    this.dynPR = this.userPR;
-    this.goodStreak = 0;
+    this.adaptStep = 0;
+    this.dynPR = this.userPR * ADAPT_STEPS[0];
+    this.adaptLow = 0; this.adaptHigh = 0; this.adaptLockUntil = 0; this.adaptSamples.length = 0;
     this.syncPixelRatio();
 
     // Shadows
@@ -2091,24 +2205,62 @@ void main(){
   private userPR = 1;
   private dynPR = 1;
   private lastAdaptT = 0;
-  private goodStreak = 0;
+  private adaptStep = 0;
+  private adaptLow = 0;
+  private adaptHigh = 0;
+  private adaptLockUntil = 0;
+  private adaptSamples: number[] = [];
 
   private adaptResolution(t: number) {
-    if (!this.adaptiveEnabled || this.paused || document.hidden || t - this.lastAdaptT < 5000) return;
+    if (!this.adaptiveEnabled || this.paused || document.hidden) return;
+    if (t - this.lastAdaptT < ADAPT_EVAL_MS) return;
+    // Do not re-judge on a window that still contains the cost of the last change.
+    if (t < this.adaptLockUntil) { this.lastAdaptT = t; this.adaptSamples.length = 0; return; }
     this.lastAdaptT = t;
-    if (this.fps < 45 && this.dynPR > 0.6) {
-      this.dynPR = Math.max(0.6, this.dynPR * 0.88);
-      this.syncPixelRatio();
-      this.goodStreak = 0;
-    } else if (this.fps > 57 && this.dynPR < this.userPR) {
-      if (++this.goodStreak >= 2) {
-        this.goodStreak = 0;
-        this.dynPR = Math.min(this.userPR, this.dynPR * 1.12);
-        this.syncPixelRatio();
-      }
+    const fps = this.stableFps();
+    this.adaptSamples.length = 0;
+    if (fps < 0) return;
+    const maxStep = ADAPT_STEPS.length - 1;
+    if (fps < ADAPT_DOWN_FPS && this.adaptStep < maxStep) {
+      this.adaptHigh = 0;
+      if (++this.adaptLow < ADAPT_DOWN_WINDOWS) return;
+      this.adaptLow = 0;
+      this.applyAdaptStep(this.adaptStep + 1, t);
+    } else if (fps > ADAPT_UP_FPS && this.adaptStep > 0) {
+      this.adaptLow = 0;
+      if (++this.adaptHigh < ADAPT_UP_WINDOWS) return;
+      this.adaptHigh = 0;
+      this.applyAdaptStep(this.adaptStep - 1, t);
     } else {
-      this.goodStreak = 0;
+      this.adaptLow = 0; this.adaptHigh = 0;
     }
+  }
+
+  private applyAdaptStep(step: number, t: number) {
+    this.adaptStep = step;
+    this.dynPR = this.userPR * ADAPT_STEPS[step];
+    this.syncPixelRatio();
+    this.adaptLockUntil = t + ADAPT_LOCK_MS;
+    this.adaptSamples.length = 0;
+  }
+
+  /**
+   * Median frame rate over the clean frames since the last evaluation. A median is
+   * immune to the odd multi-second hitch, which a mean is not — and a mean is exactly
+   * what used to make one stall look like a permanently slow GPU.
+   * Returns -1 when there is not enough clean data to judge.
+   */
+  private stableFps(): number {
+    const n = this.adaptSamples.length;
+    if (n < 30) return -1;
+    const sorted = this.adaptSamples.slice().sort((a, b) => a - b);
+    const median = sorted[n >> 1];
+    return median > 0 ? 1 / median : -1;
+  }
+
+  private recordFrameForScaling(frameSeconds: number) {
+    if (frameSeconds <= 0 || frameSeconds > ADAPT_STALL_SECONDS) return;
+    if (this.adaptSamples.length < 480) this.adaptSamples.push(frameSeconds);
   }
 
   setPaused(p: boolean) {

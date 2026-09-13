@@ -6,6 +6,15 @@ import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './
 
 type Phase = 'menu' | 'playing' | 'paused' | 'results';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
+
+/**
+ * Resolves once the browser has painted. Two animation frames, because the first one
+ * fires before paint — a single rAF is not enough to guarantee the loading screen is
+ * actually visible before we start blocking the main thread.
+ */
+const afterPaint = () => new Promise<void>(resolve => {
+  requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+});
 const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
@@ -156,8 +165,13 @@ export default function App() {
     clearTimers();
     setLaunching(true); setError(''); setShowSettings(false); setResults(null); setFx(emptyFx());
     engineRef.current?.dispose(); engineRef.current = null;
+    // Let React commit and the browser actually paint the boot screen before any of the
+    // heavy mission build starts. Without this the deploy click blocked the main thread
+    // first, so the player stared at a frozen menu with no loading state at all.
+    await afterPaint();
+    if (session.current !== epoch) return;
     try {
-      const engine = new Engine(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, settings.map);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, settings.map);
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');

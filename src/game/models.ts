@@ -1,6 +1,7 @@
 // Recoil FPS — Weapon + character models v3
 // Every model uses ONE atlas material and merged geometry → 1-8 draw calls per model.
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 type Region = [number, number, number, number]; // u0 v0 u1 v1
@@ -103,6 +104,20 @@ const WM = {
   tritium: new THREE.MeshBasicMaterial({ color: 0x7CFF5A }),
 };
 
+// Deterministic lacquer grain: no external assets or runtime canvas allocation.
+const grainData = new Uint8Array(128*256*4);
+for (let y=0;y<256;y++) for (let x=0;x<128;x++) {
+  const grain = Math.sin(x*0.7 + Math.sin(y*0.034)*2 + Math.sin(y*0.011+x*0.08))*0.5+0.5;
+  const fleck = ((x*37+y*71)%31)/31;
+  const i=(y*128+x)*4;
+  grainData[i]=170+grain*30+fleck*8; grainData[i+1]=105+grain*22; grainData[i+2]=60+grain*14; grainData[i+3]=255;
+}
+const woodGrain = new THREE.DataTexture(grainData,128,256);
+woodGrain.colorSpace=THREE.SRGBColorSpace; woodGrain.wrapS=woodGrain.wrapT=THREE.RepeatWrapping;
+woodGrain.magFilter=THREE.LinearFilter; woodGrain.needsUpdate=true;
+WM.wood.map=woodGrain; WM.wood.color.setHex(0x886445); WM.wood.roughness=0.34;
+WM.woodDark.map=woodGrain; WM.woodDark.color.setHex(0x8B5C30);
+
 /** Collects parts per-material and merges → 1 draw call per material. */
 class GunBuilder {
   private buckets = new Map<THREE.Material, THREE.BufferGeometry[]>();
@@ -112,6 +127,7 @@ class GunBuilder {
   private static V = new THREE.Vector3();
   private static S = new THREE.Vector3(1, 1, 1);
   private put(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) {
+    if (geo.index) { const indexed=geo; geo=geo.toNonIndexed(); indexed.dispose(); }
     GunBuilder.Q.setFromEuler(GunBuilder.E.set(rx, ry, rz));
     GunBuilder.M.compose(GunBuilder.V.set(x, y, z), GunBuilder.Q, GunBuilder.S);
     geo.applyMatrix4(GunBuilder.M);
@@ -119,8 +135,8 @@ class GunBuilder {
     if (!a) { a = []; this.buckets.set(mat, a); }
     a.push(geo);
   }
-  box(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.put(new THREE.BoxGeometry(w, h, d), mat, x, y, z, rx, ry, rz); return this; }
-  cyl(rt: number, rb: number, h: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, seg = 10) { this.put(new THREE.CylinderGeometry(rt, rb, h, seg), mat, x, y, z, rx, ry, rz); return this; }
+  box(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.put(new RoundedBoxGeometry(w, h, d, 1, Math.min(w,h,d)*0.13), mat, x, y, z, rx, ry, rz); return this; }
+  cyl(rt: number, rb: number, h: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, seg = 16, open = false) { this.put(new THREE.CylinderGeometry(rt, rb, h, seg, 1, open), mat, x, y, z, rx, ry, rz); return this; }
   sph(r: number, mat: THREE.Material, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1) {
     const g = new THREE.SphereGeometry(r, 10, 8); g.scale(sx, sy, sz); this.put(g, mat, x, y, z); return this;
   }
@@ -319,7 +335,7 @@ export function buildAK47(): WeaponModel {
   // ---- receiver ----
   b.box(0.038, 0.042, 0.23, S, 0, 0.012, -0.12);
   b.box(0.040, 0.012, 0.23, S, 0, 0.037, -0.12);                    // ribbed dust cover
-  for (let i = 0; i < 5; i++) b.box(0.041, 0.003, 0.20, D, 0, 0.043, -0.12 + (i - 2) * 0.008);
+  for (let i = 0; i < 5; i++) b.box(0.041, 0.003, 0.004, D, 0, 0.043, -0.12 + (i - 2) * 0.028);
   b.box(0.004, 0.020, 0.060, D, 0.021, 0.016, -0.13);               // ejection port
   b.box(0.008, 0.028, 0.006, S, 0.024, 0.014, -0.07);               // charging knob
   b.box(0.006, 0.030, 0.020, S, 0.021, -0.002, -0.06);              // selector
@@ -349,6 +365,10 @@ export function buildAK47(): WeaponModel {
   // ---- rear tangent sight ----
   b.box(0.024, 0.010, 0.040, S, 0, 0.046, -0.20);
   b.box(0.024, 0.014, 0.008, D, 0, 0.052, -0.205);                  // slider
+  for (const side of [-1,1]) {
+    for (const z of [-0.045,-0.08,-0.19,-0.215]) b.cyl(0.0025,0.0025,0.002,S,side*0.0205,0.005,z,0,0,Math.PI/2);
+    for (let i=0;i<5;i++) b.box(0.002,0.006,0.010,WD,side*0.0225,0.015,-0.25-i*0.023);
+  }
   // ---- Kobra (open frame) ----
   b.box(0.034, 0.010, 0.046, D, 0, 0.044, -0.12);
   b.box(0.005, 0.026, 0.038, D, -0.016, 0.062, -0.12);
@@ -360,11 +380,12 @@ export function buildAK47(): WeaponModel {
   // ---- curved mag ----
   const mag = new THREE.Group();
   const mb = new GunBuilder();
-  mb.box(0.028, 0.090, 0.064, S, 0, -0.05, 0, 0.28);
-  mb.box(0.027, 0.040, 0.060, S, 0, -0.105, 0.016, 0.42);
-  mb.box(0.030, 0.050, 0.060, S, 0, -0.145, 0.040, 0.52);
-  mb.box(0.030, 0.012, 0.062, D, 0, -0.172, 0.06, 0.52);
-  for (let i = 0; i < 5; i++) mb.box(0.030, 0.003, 0.058, D, 0, -0.025 - i * 0.017, 0.006 + i * 0.006, 0.3);
+  for (let i=0;i<12;i++) {
+    const t=i/11, angle=0.12+t*0.65;
+    mb.box(0.028,0.019,0.061,S,0,-0.012-t*0.157,t*t*0.065,angle);
+    for (const side of [-1,1]) mb.box(0.0018,0.019,0.003,D,side*0.0145,-0.012-t*0.157,t*t*0.065-0.018,angle);
+  }
+  mb.box(0.031,0.008,0.066,D,0,-0.177,0.068,0.77);
   mb.build(mag);
   mag.position.set(0, -0.03, -0.17); g.add(mag);
   const optic = new THREE.Group(); g.add(optic);
@@ -436,13 +457,27 @@ export function buildAWM(): WeaponModel {
 
   // Steel bolt-action receiver + bolt handle
   b.cyl(0.018, 0.018, 0.18, DS, 0, 0.022, -0.12, Math.PI / 2);
-  b.cyl(0.005, 0.005, 0.04, S, 0.026, 0.032, -0.05, 0, 0, 0.9);   // bolt lever
-  b.sph(0.009, D, 0.045, 0.048, -0.05);                            // bolt pear handle
+  const bolt = new THREE.Group(); g.add(bolt);
+  const bb = new GunBuilder();
+  bb.cyl(0.005, 0.005, 0.04, S, 0.026, 0.032, -0.05, 0, 0, 0.9);   // bolt lever
+  bb.sph(0.009, D, 0.045, 0.048, -0.05); bb.build(bolt);                            // bolt pear handle
 
   // Folded tactical bipod on forend
   b.box(0.022, 0.018, 0.04, D, 0, -0.018, -0.42);
   b.cyl(0.005, 0.005, 0.12, D, -0.018, -0.07, -0.42, 0.15, 0, 0.1);
   b.cyl(0.005, 0.005, 0.12, D,  0.018, -0.07, -0.42, 0.15, 0, -0.1);
+
+  for (const z of [-0.045,-0.19]) {
+    b.box(0.032,0.017,0.024,DS,0,0.046,z);
+    b.cyl(0.021,0.021,0.016,DS,0,SIGHT_Y,z,Math.PI/2);
+  }
+  for (let i=0;i<7;i++) {
+    b.box(0.002,0.017,0.014,D,-0.022,-0.01,-0.19-i*0.022);
+    b.box(0.002,0.017,0.014,D,0.022,-0.01,-0.19-i*0.022);
+  }
+  b.box(0.036,0.018,0.18,chassisMat,0,-0.07,0.09); // lower thumbhole stock rail
+  b.box(0.036,0.07,0.023,chassisMat,0,-0.038,0.18);
+  b.build(g);
 
   // Scope is its own group so it disappears in ADS — the HUD renders the clean high-zoom scope
   const optic = new THREE.Group(); g.add(optic);
@@ -450,13 +485,14 @@ export function buildAWM(): WeaponModel {
   sb.box(0.024, 0.014, 0.08, D, 0, 0.045, -0.12);                         // Picatinny base
   sb.cyl(0.007, 0.007, 0.03, DS, -0.014, 0.045, -0.11, 0, 0, Math.PI / 2); // clamping screws
   sb.cyl(0.007, 0.007, 0.03, DS,  0.014, 0.045, -0.11, 0, 0, Math.PI / 2);
-  sb.cyl(0.017, 0.017, 0.23, D, 0, SIGHT_Y, -0.13, Math.PI / 2, 0, 0, 20);  // 34mm scope tube
-  sb.cyl(0.026, 0.019, 0.06, D, 0, SIGHT_Y, -0.255, Math.PI / 2);          // objective bell 50mm
-  sb.cyl(0.020, 0.017, 0.05, D, 0, SIGHT_Y, -0.005, Math.PI / 2);          // ocular bell
+  sb.cyl(0.017, 0.017, 0.23, D, 0, SIGHT_Y, -0.13, Math.PI / 2, 0, 0, 24, true);  // 34mm scope tube
+  sb.cyl(0.026, 0.019, 0.06, D, 0, SIGHT_Y, -0.255, Math.PI / 2, 0, 0, 24, true);          // objective bell 50mm
+  sb.cyl(0.020, 0.017, 0.05, D, 0, SIGHT_Y, -0.005, Math.PI / 2, 0, 0, 24, true);          // ocular bell
   sb.cyl(0.014, 0.014, 0.03, D, 0, SIGHT_Y - 0.024, -0.13);                // elevation turret
   sb.cyl(0.014, 0.014, 0.03, D, 0.024, SIGHT_Y, -0.13, 0, 0, Math.PI / 2); // windage turret
   sb.cyl(0.010, 0.010, 0.02, D, 0, SIGHT_Y + 0.024, -0.13);                // parallax knob
   sb.box(0.022, 0.018, 0.014, D, 0, SIGHT_Y, -0.05);                       // throw lever
+  for (let i=0;i<8;i++) sb.cyl(0.021,0.021,0.0018,DS,0,SIGHT_Y,-0.025+i*0.004,Math.PI/2,0,0,24,true);
   sb.build(optic);
 
   // Scope lenses (glass tint + mil-dot reticle) kept with the scope, hidden in ADS
@@ -485,7 +521,7 @@ export function buildAWM(): WeaponModel {
 
   const { lArm, keys } = attachArms(g, { fore: [0, -0.035, -0.36], mag: [0, -0.08, -0.14], fa: [0.045, 0.048, -0.05] });
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.022, -0.72); g.add(muzzle);
-  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden };
+  return { group: g, mag, chargingHandle: bolt, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden };
 }
 
 // ================= NEW GUN 2: MP7A1 SUBMACHINE GUN (PDW) =================
@@ -496,10 +532,18 @@ export function buildMP7(): WeaponModel {
   const b = new GunBuilder();
 
   // Compact reinforced polymer receiver
-  b.box(0.034, 0.052, 0.22, P, 0, 0.01, -0.10);
+  b.box(0.041, 0.059, 0.22, P, 0, 0.01, -0.10);
   b.box(0.036, 0.012, 0.24, D, 0, 0.04, -0.11);                     // top Picatinny rail
   for (let i = 0; i < 9; i++) b.box(0.030, 0.006, 0.013, D, 0, 0.048, -0.04 - i * 0.02);
 
+  // Ventilated heat shield, ambidextrous controls and receiver pins.
+  for(const side of [-1,1]) {
+    for(let i=0;i<5;i++) b.box(0.002,0.008,0.012,DS,side*0.022,0.019,-0.15-i*0.017);
+    b.cyl(0.003,0.003,0.002,S,side*0.022,-0.003,-0.025,0,0,Math.PI/2);
+    b.box(0.004,0.007,0.026,DS,side*0.024,0.005,-0.062);
+  }
+  b.box(0.002,0.016,0.058,DS,0.022,0.023,-0.064); // ejection port
+  b.box(0.004,0.008,0.051,S,0.024,0.014,-0.064);
   // Folding foregrip (extended forward)
   b.box(0.022, 0.065, 0.025, G, 0, -0.04, -0.21, 0.12);
   b.box(0.024, 0.012, 0.028, P, 0, -0.005, -0.21);                  // hinge block
@@ -523,7 +567,7 @@ export function buildMP7(): WeaponModel {
 
   // Micro Red Dot Sight (Aimpoint T1 style on high riser)
   b.box(0.028, 0.016, 0.040, D, 0, 0.052, -0.12);                   // riser mount
-  b.cyl(0.013, 0.013, 0.065, D, 0, SIGHT_Y, -0.12, Math.PI / 2);    // micro tube body
+  b.cyl(0.016, 0.016, 0.052, D, 0, SIGHT_Y+0.004, -0.12, Math.PI / 2,0,0,20,true);    // micro tube body
   b.cyl(0.006, 0.006, 0.008, D, 0.014, SIGHT_Y, -0.12, 0, 0, Math.PI / 2); // battery cap
   b.build(g);
 
@@ -540,6 +584,7 @@ export function buildMP7(): WeaponModel {
   const mb = new GunBuilder();
   mb.box(0.025, 0.11, 0.032, DS, 0, -0.09, -0.07, -0.32);
   mb.box(0.028, 0.012, 0.036, D, 0, -0.15, -0.09, -0.32);
+  for(const side of [-1,1]) for(let i=0;i<4;i++) mb.box(0.002,0.004,0.023,D,side*0.013,-0.10-i*0.009,-0.073-i*0.003,-0.32);
   mb.build(mag);
   g.add(mag);
 
@@ -552,7 +597,7 @@ export function buildMP7(): WeaponModel {
 /* ================= ENEMY SOLDIER ================= */
 export interface SoldierModel {
   group: THREE.Group;
-  parts: { torso: THREE.Object3D; head: THREE.Object3D; lLeg: THREE.Object3D; rLeg: THREE.Object3D; lArm: THREE.Object3D; rArm: THREE.Object3D; rifle: THREE.Object3D };
+  parts: { torso: THREE.Object3D; head: THREE.Object3D; lLeg: THREE.Object3D; rLeg: THREE.Object3D; lShin: THREE.Object3D; rShin: THREE.Object3D; muzzle: THREE.Object3D; lArm: THREE.Object3D; rArm: THREE.Object3D; rifle: THREE.Object3D };
   hitMeshes: THREE.Mesh[];
 }
 
@@ -613,31 +658,40 @@ export function buildSoldier(): SoldierModel {
   };
   const lArm = mkArm(-1), rArm = mkArm(1);
 
-  // ---- legs (pivot at hip) ----
+  // Separate thigh and shin pivots preserve a planted sole at rest.
   const mkLeg = (side: number) => {
-    const l = new THREE.Group(); l.position.set(side * 0.115, 0.85, 0);
-    const p = new Part();
-    p.box(0.17, 0.42, 0.18, SR.camo, 0, -0.22, 0);                 // thigh
-    p.box(0.12, 0.10, 0.06, SR.olive, side * 0.02, -0.2, -0.1);    // thigh pouch
-    p.box(0.15, 0.12, 0.09, SR.black, 0, -0.42, -0.08);            // knee pad
-    p.box(0.14, 0.40, 0.15, SR.camo, 0, -0.62, 0);                 // shin
-    p.box(0.15, 0.12, 0.26, SR.boot, 0, -0.85, -0.04);             // boot
-    p.box(0.16, 0.04, 0.28, SR.black, 0, -0.9, -0.04);             // sole
-    l.add(tag(p.mesh(m), 'limb'));
-    g.add(l); return l;
+    const leg = new THREE.Group(); leg.position.set(side*0.115,0.92,0);
+    const thigh = new Part();
+    thigh.box(0.17,0.41,0.18,SR.camo,0,-0.205,0);
+    thigh.box(0.12,0.14,0.06,SR.olive,side*0.035,-0.21,-0.10);
+    leg.add(tag(thigh.mesh(m),'limb'));
+    const shin = new THREE.Group(); shin.position.y=-0.43;
+    const lower = new Part();
+    lower.box(0.15,0.12,0.09,SR.black,0,0,-0.085);
+    lower.box(0.14,0.35,0.15,SR.camo,0,-0.20,0);
+    lower.box(0.15,0.12,0.26,SR.boot,0,-0.41,-0.045);
+    lower.box(0.16,0.04,0.28,SR.black,0,-0.47,-0.045);
+    shin.add(tag(lower.mesh(m),'limb')); leg.add(shin); g.add(leg);
+    return {leg,shin};
   };
-  const lLeg = mkLeg(-1), rLeg = mkLeg(1);
+  const left=mkLeg(-1), right=mkLeg(1);
+  const lLeg=left.leg, rLeg=right.leg, lShin=left.shin, rShin=right.shin;
 
   // ---- rifle (child of torso) ----
   const rifle = new THREE.Group();
-  const r = new Part();
-  r.box(0.05, 0.08, 0.5, SR.black, 0, 0, 0);
-  r.box(0.05, 0.11, 0.2, SR.black, 0, -0.01, 0.38);              // stock
-  r.box(0.04, 0.16, 0.07, SR.black, 0, -0.11, 0.02);             // mag
-  r.box(0.04, 0.11, 0.05, SR.black, 0, -0.1, -0.18);             // foregrip
-  r.cyl(0.012, 0.012, 0.3, 8, SR.black, 0, 0.02, -0.42, Math.PI / 2); // barrel
-  r.box(0.03, 0.05, 0.05, SR.black, 0, 0.07, -0.05);             // optic
-  const rifleMesh = r.mesh(m); rifleMesh.castShadow = false; rifle.add(rifleMesh);
+  const rb = new GunBuilder();
+  rb.box(0.065,0.085,0.30,WM.darkSteel,0,0,0);
+  rb.box(0.055,0.09,0.18,WM.wood,0,-0.015,0.24);
+  rb.box(0.06,0.10,0.014,WM.rubber,0,-0.02,0.34);
+  rb.box(0.06,0.07,0.18,WM.wood,0,0,-0.23);
+  rb.cyl(0.013,0.013,0.24,WM.steel,0,0.02,-0.43,Math.PI/2);
+  rb.cyl(0.009,0.009,0.20,WM.darkSteel,0,0.05,-0.30,Math.PI/2);
+  rb.box(0.03,0.075,0.023,WM.darkSteel,0,0.05,-0.50);
+  rb.box(0.038,0.13,0.06,WM.wood,0,-0.085,0.065,-0.25);
+  for (let i=0;i<8;i++) rb.box(0.038,0.027,0.08,WM.darkSteel,0,-0.04-i*0.022,-0.065+i*i*0.001,0.15+i*0.075);
+  rb.box(0.045,0.028,0.055,WM.dark,0,0.065,-0.03);
+  rb.build(rifle);
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0,0.02,-0.56); rifle.add(muzzle);
   rifle.position.set(0.09, 0.32, -0.42);
   torso.add(rifle);
 
@@ -647,5 +701,5 @@ export function buildSoldier(): SoldierModel {
   const headHit = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), ghost); headHit.position.y = 0.14; headHit.userData.part = 'head'; head.add(headHit); hitMeshes.push(headHit);
   const legHit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.45), ghost); legHit.position.y = 0.45; legHit.userData.part = 'limb'; g.add(legHit); hitMeshes.push(legHit);
 
-  return { group: g, parts: { torso, head, lLeg, rLeg, lArm, rArm, rifle }, hitMeshes };
+  return { group: g, parts: { torso, head, lLeg, rLeg, lShin, rShin, muzzle, lArm, rArm, rifle }, hitMeshes };
 }

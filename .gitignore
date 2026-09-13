@@ -13,3 +13,6 @@ npm-debug.log*
 .DS_Store
 .idea/
 .vscode/
+
+# Local browser / visual QA artifacts (not shipped)
+.arena/

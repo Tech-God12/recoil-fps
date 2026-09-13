@@ -60,13 +60,17 @@ class VoiceManager {
     const key = opts.key ?? `${kind}:${text}`;
     const cd = opts.cooldownMs ?? 2500;
     if (now - (this.lastSpoke[key] ?? -99999) < cd) return; // anti-spam
+    // Never accumulate stale combat chatter in the browser speech queue.
+    if (kind === 'enemy' && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) return;
+    if (kind === 'announcer' && now-(this.lastSpoke.announcer ?? -99999)<1800) return;
     this.lastSpoke[key] = now;
+    if (kind === 'announcer') this.lastSpoke.announcer=now;
     try {
       const u = new SpeechSynthesisUtterance(text);
       const v = this.pickVoice(kind);
       if (v) u.voice = v;
-      u.rate = opts.rate ?? (kind === 'announcer' ? 1.05 : 1.25);
-      u.pitch = opts.pitch ?? (kind === 'announcer' ? 0.7 : 0.9);
+      u.rate = opts.rate ?? (kind === 'announcer' ? 1.0 : 1.08);
+      u.pitch = opts.pitch ?? (kind === 'announcer' ? 0.98 : 1.02);
       u.volume = opts.volume ?? (kind === 'announcer' ? 0.9 : 0.75);
       // Don't stack enemy chatter — announcer may interrupt
       if (kind === 'announcer') window.speechSynthesis.cancel();
@@ -77,7 +81,7 @@ class VoiceManager {
   // ---------- Announcer (match + streaks) ----------
   objective(text: string) {
     // Keep announcer lines short and infrequent so they never feel like noise.
-    const short = text.length > 46 ? text.slice(0, 46) + '…' : text;
+    const short = text.length > 180 ? text.slice(0,180).replace(/\s+\S*$/, '') + '.' : text;
     this.speak(short, 'announcer', { key: `objective:${text}`, cooldownMs: 2500, rate: 1.0, volume: 0.6 });
   }
 
@@ -111,7 +115,7 @@ class VoiceManager {
     const pool = lines[kind] ?? ['Alert!'];
     const text = pool[Math.floor(Math.random() * pool.length)];
     // Rare (9s cooldown), quiet, steady pitch — voice reads as ambience, never chatter.
-    this.speak(text, 'enemy', { key: 'enemy-any', cooldownMs: 9000, rate: 1.05, pitch: 0.85, volume: 0.5 });
+    this.speak(text, 'enemy', { key: 'enemy-any', cooldownMs: 9000, rate: 1.05, pitch: 1.0, volume: 0.5 });
   }
 }
 

@@ -1,3 +1,4 @@
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 // Recoil FPS — Core Engine V2.0
 // Laser-accurate ballistics, full spatial audio listener, lean Q/E, slide, jump, sprint delays
 import * as THREE from 'three';
@@ -11,7 +12,7 @@ import { buildM4, buildAK47, buildM1911, buildAWM, buildMP7, type WeaponModel } 
 import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
-import { AIManager, DIFFICULTIES, type AIContext, type Enemy } from './ai';
+import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './ai';
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
 import type { MissionReport, MissionPhase } from './systems/mission';
 import type { PressureStats } from './systems/reinforcements';
@@ -26,6 +27,7 @@ export interface GameSettings {
   difficulty: string;
   map: MapId;
   // Graphics
+  adaptiveResolution: boolean;
   resolutionScale: number;  // 50 - 100 (%)
   shadowQuality: 'off' | 'low' | 'medium' | 'high';
   bloom: boolean;
@@ -54,7 +56,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   fov: 95,
   difficulty: 'Normal',
   map: 'alrasul',
-  resolutionScale: 60,
+  adaptiveResolution: true,
+  resolutionScale: 100,
   shadowQuality: 'low',
   bloom: false,
   bloomStrength: 22,
@@ -105,6 +108,7 @@ export interface HudState {
 }
 
 export type GameEvent =
+  | { type: 'graphics'; text: string }
   | { type: 'hit'; kill: boolean }
   | { type: 'kill'; name: string; weapon: string; headshot: boolean }
   | { type: 'damage'; dir: number; amount: number }
@@ -148,6 +152,7 @@ export class Engine {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private vmScene = new THREE.Scene();
+  private reflectionMap?: THREE.WebGLRenderTarget;
   private vmCamera: THREE.PerspectiveCamera;
   private world: World;
   private effects: Effects;
@@ -163,6 +168,7 @@ export class Engine {
   private vignettePass: ShaderPass;
   private sunLight!: THREE.DirectionalLight;
   private mapImage = '';
+  private clouds = new THREE.Group();
 
   // Player state
   private pos: THREE.Vector3;
@@ -187,6 +193,7 @@ export class Engine {
   private sprintToFireDelay = 0;
   private sprintToAdsDelay = 0;
   private footPhase = 0;
+  private walkBlend = 0;
   private staticTime = 0;
   private lastPos = V();
   private dead = false;
@@ -270,6 +277,10 @@ export class Engine {
   private hittables: THREE.Object3D[] = [];
   private raycaster = new THREE.Raycaster();
   private rmb = false;
+  private boltCycle = 0;
+  private adaptiveEnabled = true;
+  private appliedPR = -1;
+  private graphicsLost = false;
 
   constructor(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul') {
     this.canvas = canvas;
@@ -280,24 +291,24 @@ export class Engine {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap; // PCF (not Soft) — ~2x cheaper
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.25;
+    this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.autoClear = false;
 
-    this.camera = new THREE.PerspectiveCamera(this.fovSetting, 1, 0.05, 500);
+    this.camera = new THREE.PerspectiveCamera(this.fovSetting, 1, 0.12, 500);
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 5);
 
     // Clear bright desert daylight — high visibility, light fog only at distance.
     // Slightly desaturated so enemy silhouettes stay readable instead of washing out.
     this.scene.background = new THREE.Color(0xB8CCDA);
-    this.scene.fog = new THREE.Fog(0xC6BEA8, 130, 430);
+    this.scene.fog = new THREE.Fog(mapId === 'alrasul' ? 0xC6B89C : 0xB4C0C5, 130, 430);
     // strong sky fill so shadowed faces stay readable
-    const hemi = new THREE.HemisphereLight(0xCFE0EE, 0xB89A66, 1.15);
+    const hemi = new THREE.HemisphereLight(0xCFE0EE, 0x8C765A, 0.65);
     this.scene.add(hemi);
     // key sun — high and bright, crisp shadows
-    const sun = new THREE.DirectionalLight(0xFFF4DE, 2.6);
-    sun.position.set(-45, 80, 35);
+    const sun = new THREE.DirectionalLight(0xFFE4BE, 3.0);
+    sun.position.set(-65, 52, 40);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048); // 4x fewer shadow texels than 4096 — big FPS win
     sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
@@ -308,12 +319,12 @@ export class Engine {
     this.scene.add(sun);
     this.sunLight = sun;
     // gentle cool fill from the opposite side
-    const fill = new THREE.DirectionalLight(0xAFC6DC, 0.45);
+    const fill = new THREE.DirectionalLight(0xAFC6DC, 0.22);
     fill.position.set(55, 30, -45);
     this.scene.add(fill);
-    this.scene.add(new THREE.AmbientLight(0x8A7A60, 0.4));
+    this.scene.add(new THREE.AmbientLight(0x8A7A60, 0.12));
 
-    this.addSkyDome();
+    this.addSkyDome(mapId);
 
     this.world = buildWorld(this.scene, mapId);
     this.buildSolidGrid();
@@ -375,6 +386,9 @@ void main(){
     this.lastPos.copy(this.pos);
 
     // Viewmodel lighting
+    this.createReflections();
+    this.canvas.addEventListener('webglcontextlost',this.onGraphicsLost);
+    this.canvas.addEventListener('webglcontextrestored',this.onGraphicsRestored);
     const vmHemi = new THREE.HemisphereLight(0xF0F4FA, 0x8A7450, 1.2);
     this.vmScene.add(vmHemi);
     const vmSun = new THREE.DirectionalLight(0xFFF2D6, 1.7);
@@ -451,8 +465,8 @@ void main(){
         name: 'AWM .338 SNIPER',
         model: awm,
         auto: false,
-        rpm: 52,
-        damage: 135,
+        rpm: 48,
+        damage: 78,
         headMul: 3.0,
         limbMul: 1.0,
         magSize: 5,
@@ -461,22 +475,22 @@ void main(){
         adsSpread: 0.000,
         pattern: [[0, 0]],
         adsFov: 22,
-        tacReload: 2.8,
-        emptyReload: 3.4,
+        tacReload: 2.25,
+        emptyReload: 2.7,
       },
       {
         name: 'MP7A1 PDW',
         model: mp7,
         auto: true,
-        rpm: 950,
+        rpm: 900,
         damage: 24,
         headMul: 2.2,
         limbMul: 0.8,
         magSize: 40,
         reserve: 200,
-        hipSpread: 0.007,
+        hipSpread: 0.011,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        pattern: [[0.6,0.15],[0.75,-0.2],[0.85,0.25],[0.9,-0.1]],
         adsFov: 60,
         tacReload: 1.9,
         emptyReload: 2.3,
@@ -521,7 +535,12 @@ void main(){
       playerAlive: () => !this.dead,
       playerStaticTime: () => this.staticTime,
       damagePlayer: (a, f) => this.damagePlayer(a, f),
-      moveCollide: (p, dx, dz, r) => this.moveAxis(p, dx, dz, r, 1.7),
+      groundHeight: this.world.navigationHeight ?? this.world.groundHeight,
+      moveCollide: (p, dx, dz, r) => {
+        this.moveAxis(p, dx, dz, r, 1.7);
+        // Ground-based squads follow the same continuous wadi bed as the player.
+        p.y = this.supportHeight(p, r);
+      },
       onCallout: (k, p) => {
         // Enemy barks stay subtle: only audible voices + a short HUD hint, no radio click spam.
         if (p.distanceTo(this.pos) < 40) {
@@ -558,11 +577,20 @@ void main(){
       detonate: at => {
         // Use the existing blast resolution for damage, glass, particles and spatial audio.
         this.explode({ mesh: this.missionRuntime.markers.cache, pos: at, vel: new THREE.Vector3(), fuse: 0, kind: 'frag', fromAI: false });
+        // World event has toggled preallocated bounds. Refresh all derived caches
+        // once, preserving the NavGrid object referenced by pooled enemies.
+        this.buildSolidGrid();
+        this.ai.nav.blocked.set(new NavGrid(this.world.solids, this.world.half, this.world.navigationHeight ?? this.world.groundHeight).blocked);
+        this.renderer.shadowMap.needsUpdate = true;
+        this.ai.invalidatePaths();
+        this.mapImage = this.generateMapImage();
         this.rebuildHittables();
       },
       finish: win => this.endMatch(win),
     }, mapId);
     this.buildSolidGrid();
+    this.ai.nav.blocked.set(new NavGrid(this.world.solids, this.world.half, this.world.navigationHeight ?? this.world.groundHeight).blocked);
+        this.renderer.shadowMap.needsUpdate = true;
     const first = this.missionRuntime.mission.current.at;
     this.yaw = Math.atan2(this.pos.x - first[0], this.pos.z - first[2]);
     this.rebuildHittables();
@@ -695,6 +723,30 @@ void main(){
     await this.canvas.requestPointerLock();
   }
 
+  private createReflections() {
+    this.reflectionMap?.dispose();
+    const environment = new RoomEnvironment();
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.reflectionMap = pmrem.fromScene(environment,0.04);
+    this.vmScene.environment = this.reflectionMap.texture;
+    this.vmScene.environmentIntensity = 0.65;
+    this.scene.environment = this.reflectionMap.texture;
+    this.scene.environmentIntensity = 0.25;
+    environment.dispose(); pmrem.dispose();
+  }
+
+  private onGraphicsLost = (event: Event) => {
+    event.preventDefault(); this.graphicsLost=true; this.setPaused(true);
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.onEvent({type:'graphics',text:'Graphics connection interrupted. Your mission is paused while the browser restores it.'});
+  };
+  private onGraphicsRestored = () => {
+    if (this.disposed) return;
+    this.graphicsLost=false; this.appliedPR=-1; this.dynPR=Math.min(this.dynPR,0.85);
+    this.syncPixelRatio(); this.createReflections(); this.renderer.shadowMap.needsUpdate=true;
+    this.onEvent({type:'graphics',text:'Graphics restored. Your mission is preserved; select Resume to continue.'});
+  };
+
   private resize = () => {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h);
@@ -713,21 +765,23 @@ void main(){
    * full resolution, i.e. the "biggest FPS lever" was a placebo.
    */
   private syncPixelRatio() {
-    const pr = Math.min(window.devicePixelRatio, this.dynPR);
+    const pr = Math.min(window.devicePixelRatio || 1, this.dynPR);
+    if (Math.abs(pr-this.appliedPR)<0.015) return;
+    this.appliedPR=pr;
     this.renderer.setPixelRatio(pr);
     this.composer.setPixelRatio(pr);
   }
 
   /** Gradient sky dome + sun glow + drifting clouds (cheap, huge visual payoff) */
-  private addSkyDome() {
+  private addSkyDome(mapId: MapId) {
     const c = document.createElement('canvas');
     c.width = 4; c.height = 256;
     const ctx = c.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
     grad.addColorStop(0, '#4A78A6');   // zenith blue
     grad.addColorStop(0.4, '#93B6C8');
-    grad.addColorStop(0.58, '#D8C7A0'); // haze band
-    grad.addColorStop(0.72, '#F0D6A2'); // warm horizon
+    grad.addColorStop(0.58, mapId === 'kasbah' ? '#C2CDD0' : '#D8C7A0'); // haze band
+    grad.addColorStop(0.72, mapId === 'kasbah' ? '#DDD8C2' : '#F0D6A2'); // warm horizon
     grad.addColorStop(0.85, '#F6C888');
     grad.addColorStop(1, '#EAB878');    // sun-warmed base
     ctx.fillStyle = grad;
@@ -755,13 +809,26 @@ void main(){
     sunSpr.position.set(-220, 200, 150);
     sunSpr.scale.setScalar(110);
     this.scene.add(sunSpr);
+    this.scene.add(this.clouds);
     // A few flat drifting clouds
-    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xF4EAD2, transparent: true, opacity: 0.75, fog: false, depthWrite: false });
+    const [cc, cctx] = this.makeCanvas(256, 128);
+    for (let i = 0; i < 8; i++) {
+      const x = 35 + i * 25, y = 65 + Math.sin(i * 1.9) * 13, r = 24 + (i % 3) * 6;
+      const gradient = cctx.createRadialGradient(x,y,3,x,y,r);
+      gradient.addColorStop(0,'rgba(255,251,238,.5)');
+      gradient.addColorStop(.55,'rgba(245,237,216,.3)');
+      gradient.addColorStop(1,'rgba(245,237,216,0)');
+      cctx.fillStyle = gradient; cctx.fillRect(x-r,y-r,r*2,r*2);
+    }
+    const cloudTexture = new THREE.CanvasTexture(cc);
+    cloudTexture.colorSpace = THREE.SRGBColorSpace;
+    const cloudMat = new THREE.SpriteMaterial({ map:cloudTexture, color:0xffffff, transparent:true, opacity:0.7, fog:false, depthWrite:false });
     for (let i = 0; i < 7; i++) {
-      const cl = new THREE.Mesh(new THREE.SphereGeometry(14 + Math.random() * 16, 10, 6), cloudMat);
-      cl.position.set((Math.random() - 0.5) * 560, 130 + Math.random() * 60, (Math.random() - 0.5) * 560);
-      cl.scale.y = 0.28;
-      this.scene.add(cl);
+      const cl = new THREE.Sprite(cloudMat);
+      const a = i * 2.39996;
+      cl.position.set(Math.cos(a)*230,100+(i%3)*16,Math.sin(a)*230);
+      cl.scale.set(110+(i%3)*20,45,1);
+      this.clouds.add(cl);
     }
   }
 
@@ -832,16 +899,9 @@ void main(){
     const blockers = this.world.solids.filter(b => b.maxY > 1.35 && b.minY < 1.75);
     const STEP = 4; // 512px / 4 = 128 samples per axis ≈ 1.7m per cell
     ctx.fillStyle = 'rgba(24,21,16,0.5)';
-    for (let gy = 0; gy < S; gy += STEP) {
-      for (let gx = 0; gx < S; gx += STEP) {
-        const wx = (gx + STEP / 2) / scale - span / 2;
-        const wz = (gy + STEP / 2) / scale - span / 2;
-        let blocked = false;
-        for (const b of blockers) {
-          if (wx > b.minX && wx < b.maxX && wz > b.minZ && wz < b.maxZ) { blocked = true; break; }
-        }
-        if (blocked) ctx.fillRect(gx, gy, STEP, STEP);
-      }
+    for (const b of blockers) {
+      ctx.fillRect(Math.floor(px(b.minX)/STEP)*STEP,Math.floor(pz(b.minZ)/STEP)*STEP,
+        Math.ceil((b.maxX-b.minX)*scale/STEP)*STEP,Math.ceil((b.maxZ-b.minZ)*scale/STEP)*STEP);
     }
 
     // --- roads / paved zones ---
@@ -854,6 +914,16 @@ void main(){
       ctx.fillRect(px(b.minX), pz(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
     }
 
+    // Wood crossings and sunken channel use their actual support elevation.
+    for (const b of this.world.wood) {
+      if (b.minY > 9000) continue;
+      ctx.fillStyle = '#998060';
+      ctx.fillRect(px(b.minX), pz(b.minZ), (b.maxX-b.minX)*scale, (b.maxZ-b.minZ)*scale);
+    }
+    for (let z = 0; z < S; z += 3) for (let x = 0; x < S; x += 3) {
+      const height = this.world.groundHeight(x / scale - span/2, z / scale - span/2);
+      if (height < -0.5) { ctx.fillStyle = height < -2 ? '#675e4a' : '#928268'; ctx.fillRect(x,z,3,3); }
+    }
     // --- faint survey grid ---
     ctx.strokeStyle = 'rgba(0,0,0,0.07)';
     ctx.lineWidth = 1;
@@ -863,7 +933,7 @@ void main(){
     }
 
     // --- building & cover footprints, low → tall so heights stack correctly ---
-    const sorted = [...this.world.solids].sort((a, b) => a.maxY - b.maxY);
+    const sorted = this.world.solids.filter(b => b.minY < 1.75 && b.maxY > 0.34).sort((a, b) => a.maxY - b.maxY);
     for (const b of sorted) {
       const x = px(b.minX), y = pz(b.minZ);
       const w = Math.max(2.5, (b.maxX - b.minX) * scale);
@@ -974,24 +1044,27 @@ void main(){
     const tryMove = (nx: number, nz: number) => {
       for (let i = 0; i < near.length; i++) {
         const b = near[i];
-        if (b.maxY <= p.y + 0.58) continue;                 // Steppable curb/stair
+        if (b.maxY <= p.y + 0.55) continue;                 // Steppable curb/stair
         if (b.minY >= p.y + height) continue;
         if (nx + radius > b.minX && nx - radius < b.maxX && nz + radius > b.minZ && nz - radius < b.maxZ) return false;
       }
       return true;
     };
-    if (tryMove(p.x + dx, p.z)) p.x += dx;
-    if (tryMove(p.x, p.z + dz)) p.z += dz;
+    const steps = Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dz))/Math.max(0.08,radius*0.5)));
+    for (let step=0;step<steps;step++) {
+      if (tryMove(p.x + dx/steps,p.z)) p.x += dx/steps;
+      if (tryMove(p.x,p.z + dz/steps)) p.z += dz/steps;
+    }
     const lim = this.world.half - 2.5;
     p.x = Math.max(-lim, Math.min(lim, p.x));
     p.z = Math.max(-lim, Math.min(lim, p.z));
   }
 
   private supportHeight(p: THREE.Vector3, radius: number): number {
-    let s = 0;
+    let s = this.world.groundHeight(p.x, p.z);
     for (const b of this.world.solids) {
-      if (b.maxY > p.y + 0.5) continue;
-      if (p.x + radius * 0.6 > b.minX && p.x - radius * 0.6 < b.maxX && p.z + radius * 0.6 > b.minZ && p.z - radius * 0.6 < b.maxZ) {
+      if (b.maxY > p.y + 0.55) continue;
+      if (p.x + radius > b.minX && p.x - radius < b.maxX && p.z + radius > b.minZ && p.z - radius < b.maxZ) {
         if (b.maxY > s) s = b.maxY;
       }
     }
@@ -1109,6 +1182,7 @@ void main(){
     this.mags[this.cur]--;
     this.fireCD = 60 / d.rpm;
     this.shots++;
+    if (this.cur === 3) { this.boltCycle = 1.25; this.rmb = false; }
     this.shotResetT = 0.28;
 
     // 1. CALCULATE EXACT BULLET TRAJECTORY FIRST BEFORE RECOIL
@@ -1420,8 +1494,9 @@ void main(){
         }
       }
       if (!bounced) g.pos.set(nx, ny, nz);
-      if (g.pos.y < 0.08) {
-        g.pos.y = 0.08;
+      const ground = this.world.groundHeight(g.pos.x, g.pos.z) + 0.08;
+      if (g.pos.y < ground) {
+        g.pos.y = ground;
         if (Math.abs(g.vel.y) > 0.8) {
           g.vel.y = Math.abs(g.vel.y) * 0.35;
           audio.grenadeBounceSpatial(g.pos.x, g.pos.y, g.pos.z);
@@ -1470,7 +1545,7 @@ void main(){
         arr[k * 3] = p.x; arr[k * 3 + 1] = p.y; arr[k * 3 + 2] = p.z;
         v.y -= 16.5 * step;
         p.addScaledVector(v, step);
-        if (p.y < 0.05) p.y = 0.05;
+        p.y = Math.max(p.y, this.world.groundHeight(p.x, p.z) + 0.05);
       }
       this.arcPreview.geometry.attributes.position.needsUpdate = true;
       this.arcPreview.visible = true;
@@ -1524,10 +1599,11 @@ void main(){
   private frame = (t: number) => {
     if (this.disposed) return;
     requestAnimationFrame(this.frame);
-    const dt = Math.min(0.05, (t - this.lastT) / 1000);
+    const frameSeconds = Math.max(0, (t - this.lastT) / 1000);
+    const dt = Math.min(0.05, frameSeconds);
     this.lastT = t;
     // rolling FPS meter
-    this.fpsAcc += dt; this.fpsFrames++;
+    this.fpsAcc += frameSeconds; this.fpsFrames++;
     if (this.fpsAcc >= 0.25) { this.fps = this.fpsFrames / this.fpsAcc; this.fpsAcc = 0; this.fpsFrames = 0; }
     this.adaptResolution(t);
     if (this.paused) return;
@@ -1544,6 +1620,7 @@ void main(){
   };
 
   private update(dt: number) {
+    this.clouds.rotation.y += dt * 0.0012;
     const k = this.keys;
 
     // Animated film grain
@@ -1572,7 +1649,9 @@ void main(){
     this.lean = this.clampLeanByWall(this.lean);
 
     // ADS TRANSITION (160ms ease-out)
-    const wantAds = this.rmb && !this.sprinting && this.reloadT < 0 && this.switchT < 0 && !this.cooking && !this.sliding;
+    if (this.boltCycle>0.3 && this.boltCycle-dt<=0.3) audio.boltRelease();
+    this.boltCycle = Math.max(0,this.boltCycle-dt);
+    const wantAds = this.rmb && this.boltCycle <= 0 && !this.sprinting && this.reloadT < 0 && this.switchT < 0 && !this.cooking && !this.sliding;
     this.sprintToAdsDelay = Math.max(0, this.sprintToAdsDelay - dt);
     this.sprintToFireDelay = Math.max(0, this.sprintToFireDelay - dt);
 
@@ -1639,16 +1718,20 @@ void main(){
     }
 
     const dxm = this.vx * dt, dzm = this.vz * dt;
+    const previousX=this.pos.x,previousZ=this.pos.z;
     // Slim 0.33 capsule slips through doorways instead of snagging on frames
     this.moveAxis(this.pos, dxm, dzm, 0.33, this.crouched ? 1.2 : 1.75);
 
-    // Stride-based footsteps
-    if (this.grounded && (Math.abs(dxm) > 0.0005 || Math.abs(dzm) > 0.0005)) {
-      this.stepAcc += Math.hypot(dxm, dzm);
+    // Drive pose and footsteps from actual displacement, not input against a wall.
+    const travelled=Math.hypot(this.pos.x-previousX,this.pos.z-previousZ);
+    this.walkBlend += (Math.min(1,travelled/Math.max(dt,0.001)/2)-this.walkBlend)*(1-Math.exp(-dt*10));
+    if (this.grounded && travelled>0.0005) {
+      this.stepAcc += travelled;
       const stride = this.sprinting ? 0.95 : this.sliding ? 1.8 : this.crouched ? 0.55 : 0.68;
+      this.footPhase=(this.footPhase+travelled*Math.PI/stride)%(Math.PI*2);
       while (this.stepAcc >= stride) {
         this.stepAcc -= stride;
-        this.footPhase += Math.PI;
+
         const surf = this.surfaceAt();
         audio.footstep(surf, this.sprinting, this.crouched);
         if (surf === 'sand' && !this.crouched) {
@@ -1665,17 +1748,19 @@ void main(){
 
     // Gravity & Jump Landing Dip (0.08m over 80ms, spring back 150ms)
     const support = this.supportHeight(this.pos, 0.4);
-    if (this.pos.y > support + 0.001) {
+    // Follow walkable downhill slopes without repeatedly becoming airborne and
+    // replaying the landing dip on every terrain triangle.
+    if (this.grounded && this.vel.y <= 0 && this.pos.y-support >= 0 && this.pos.y-support < 0.48) {
+      this.pos.y = support; this.vel.y = 0;
+    } else if (this.pos.y > support + 0.001) {
       this.vel.y -= 18.5 * dt;
       this.pos.y += this.vel.y * dt;
       this.grounded = false;
       if (this.pos.y <= support) {
         this.pos.y = support;
+        if (this.vel.y < -3) { audio.jumpLand(this.surfaceAt()); this.landDip = Math.min(0.08,-this.vel.y*0.008); }
         this.vel.y = 0;
         this.grounded = true;
-        // Landing audio + camera dip
-        audio.jumpLand(this.surfaceAt());
-        this.landDip = 0.08;
       }
     } else {
       this.pos.y += Math.min(support - this.pos.y, dt * 8);
@@ -1778,7 +1863,7 @@ void main(){
 
     // Stride bob
     const bobAmp = this.sprinting ? 0.022 : 0.012;
-    const bob = Math.sin(this.footPhase) * bobAmp * (this.grounded ? 1 : 0);
+    const bob = Math.sin(this.footPhase) * bobAmp * this.walkBlend * (this.grounded ? 1 : 0);
     eye.y += bob;
 
     // Camera shake (scaled by user setting)
@@ -1790,7 +1875,7 @@ void main(){
 
     this.camera.position.copy(eye);
     this.camera.rotation.set(
-      this.pitch + this.recoilP + (this.sprinting ? -0.02 : 0) + (this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.05 : 0),
+      this.pitch + this.recoilP + (this.sprinting ? -0.02 : 0) + (this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.05 * this.motionBlurAmount : 0),
       this.yaw + this.recoilY,
       roll
     );
@@ -1822,6 +1907,9 @@ void main(){
     // sight (and the sniper scope tube stops blocking the view).
     const inAds = a > 0.4;
     for (const obj of d.model.adsHidden) obj.visible = !inAds;
+    // Scope overlay owns the whole view; receiver rings/arms must not intrude.
+    g.visible = !(this.cur === 3 && inAds);
+    this.muzzleFlash.visible = !(this.cur === 3 && inAds);
     const hip = { x: 0.22, y: -0.19, z: -0.38, ry: 0.035 };
     const adsY = -d.model.sightY * S;
     let px = THREE.MathUtils.lerp(hip.x, 0, a);
@@ -1837,7 +1925,7 @@ void main(){
     py += Math.sin(t * Math.PI * 2 + 1) * 0.0035 * S * swayM;
 
     // Walk bob
-    const bobM = this.inputMoving() && this.grounded ? 1 : 0;
+    const bobM = this.grounded ? this.walkBlend : 0;
     px += Math.sin(this.footPhase) * 0.01 * S * bobM * swayM;
     py -= Math.abs(Math.cos(this.footPhase)) * 0.007 * S * bobM * swayM;
     rz += Math.sin(this.footPhase) * 0.012 * S * bobM * swayM;
@@ -1847,12 +1935,19 @@ void main(){
     else this.sprintPose = Math.max(0, this.sprintPose - dt / 0.12);
     const sp = this.sprintPose;
     px += sp * 0.08 * S; py -= sp * 0.13 * S; pz -= sp * 0.04;
-    rx += sp * 0.52; ry -= sp * 0.45; rz += sp * 0.26;
+    rx += sp * 0.35; ry -= sp * 0.32; rz += sp * 0.18;
+    px += Math.sin(t*10)*sp*0.012; py += Math.cos(t*20)*sp*0.006;
 
     // Fire kick (halved in ADS so the sight picture stays on target)
     const kickM = 1 - a * 0.55;
     pz += this.vmKick * 0.05 * S * kickM;
     rx += this.vmKickRot * 0.075 * kickM;
+
+    if (this.cur === 3 && this.boltCycle > 0) {
+      const cycle=1-this.boltCycle/1.25, lift=Math.sin(cycle*Math.PI);
+      py -= lift*0.035; rz += lift*0.12;
+      d.model.chargingHandle.position.z = Math.sin(Math.max(0,Math.min(1,(cycle-0.2)/0.6))*Math.PI)*0.055;
+    }
 
     // Reload animation — gun dips/tilts, mag drops, LEFT HAND works the reload
     const magObj = d.model.mag;
@@ -1919,10 +2014,10 @@ void main(){
   }
 
   private render() {
-    // Shadow map refresh every 3rd frame (world is static; only enemies move)
+    // Static architecture shadows refresh only on construction/settings/destruction.
     this.frameNo++;
     this.renderer.shadowMap.autoUpdate = false;
-    this.renderer.shadowMap.needsUpdate = (this.frameNo % 3) === 0;
+    if (this.frameNo <= 1) this.renderer.shadowMap.needsUpdate = true;
     if (this.postFxOn) {
       this.composer.render();
     } else {
@@ -1959,7 +2054,8 @@ void main(){
     // otherwise this slider only resized the canvas buffer while the whole
     // post-processed scene kept rendering at the stale cached resolution.
     const cap = s.resolutionScale / 100;
-    this.userPR = cap * 2;
+    this.adaptiveEnabled = s.adaptiveResolution ?? true;
+    this.userPR = cap * Math.min(window.devicePixelRatio || 1,1.25);
     this.dynPR = this.userPR;
     this.goodStreak = 0;
     this.syncPixelRatio();
@@ -1998,7 +2094,7 @@ void main(){
   private goodStreak = 0;
 
   private adaptResolution(t: number) {
-    if (t - this.lastAdaptT < 2500) return;
+    if (!this.adaptiveEnabled || this.paused || document.hidden || t - this.lastAdaptT < 5000) return;
     this.lastAdaptT = t;
     if (this.fps < 45 && this.dynPR > 0.6) {
       this.dynPR = Math.max(0.6, this.dynPR * 0.88);
@@ -2016,6 +2112,7 @@ void main(){
   }
 
   setPaused(p: boolean) {
+    if (!p && this.graphicsLost) return;
     this.paused = p;
     if (p) {
       this.keys.clear();
@@ -2099,6 +2196,19 @@ void main(){
     window.removeEventListener('mouseup', this.onMouseUp2);
     window.removeEventListener('contextmenu', this.onContext);
     window.removeEventListener('resize', this.resize);
+    this.canvas.removeEventListener('webglcontextlost',this.onGraphicsLost);
+    this.canvas.removeEventListener('webglcontextrestored',this.onGraphicsRestored);
+    const materials=new Set<THREE.Material>(),textures=new Set<THREE.Texture>();
+    for (const scene of [this.scene,this.vmScene]) scene.traverse(object=>{
+      if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
+        for(const mat of Array.isArray(object.material)?object.material:[object.material]) materials.add(mat);
+      }
+    });
+    for(const material of materials) {
+      for(const value of Object.values(material)) if(value instanceof THREE.Texture) textures.add(value);
+      material.dispose();
+    }
+    for(const texture of textures) texture.dispose();
     this.missionRuntime.dispose();
     this.ai.dispose();
     this.composer.dispose();
@@ -2109,6 +2219,7 @@ void main(){
       if (object instanceof THREE.Mesh || object instanceof THREE.Points) geometries.add(object.geometry);
     });
     for (const geometry of geometries) geometry.dispose();
+    this.reflectionMap?.dispose();
     this.renderer.dispose();
   }
 }

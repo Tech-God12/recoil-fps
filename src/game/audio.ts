@@ -11,6 +11,7 @@ export class SpatialAudioEngine {
   // Volume is stored even before the AudioContext exists: a settings tweak on the main
   // menu must not spin up the context (and the wind bed!) outside a live mission.
   private volume01 = 1;
+  private spatialVoices = new Map<PannerNode,{send:GainNode; expires:number}>();
 
   ensure(): AudioContext {
     if (!this.ctx) {
@@ -72,6 +73,11 @@ export class SpatialAudioEngine {
   // panningModel: 'HRTF', distanceModel: 'inverse', refDistance: 1, maxDistance: 80, rolloffFactor: 2
   createSpatialPanner(x: number, y: number, z: number): PannerNode {
     const ctx = this.ensure();
+    for (const [node,voice] of this.spatialVoices) {
+      if (voice.expires<=ctx.currentTime || this.spatialVoices.size>=24) {
+        node.disconnect(); voice.send.disconnect(); this.spatialVoices.delete(node);
+      }
+    }
     const panner = ctx.createPanner();
     panner.panningModel = 'HRTF';
     panner.distanceModel = 'inverse';
@@ -96,6 +102,7 @@ export class SpatialAudioEngine {
       eg.gain.value = 0.25;
       panner.connect(eg);
       eg.connect(this.echoBus);
+      this.spatialVoices.set(panner,{send:eg,expires:ctx.currentTime+3});
     }
     return panner;
   }
@@ -241,8 +248,8 @@ export class SpatialAudioEngine {
   // MP7A1 4.6mm: tight, fast, sharp PDW crack
   fireSMG() {
     this.ensure();
-    this.burstDirect({ dur: 0.03, gain: 0.85, freq: 3800, q: 0.9, hp: 900 });
-    this.burstDirect({ dur: 0.08, gain: 0.55, freq: 1050, q: 0.8, toEcho: 0.3 });
+    this.burstDirect({ dur: 0.024, gain: 0.7, freq: 3200, q: 0.9, hp: 900 });
+    this.burstDirect({ dur: 0.07, gain: 0.6, freq: 850, q: 0.8, toEcho: 0.3 });
     this.burstDirect({ dur: 0.12, gain: 0.4, freq: 200, q: 0.5, type: 'lowpass' });
   }
 
@@ -279,6 +286,7 @@ export class SpatialAudioEngine {
     og.connect(panner);
     o.start(t);
     o.stop(t + 0.14);
+    o.onended=()=>{src.disconnect();bp.disconnect();g.disconnect();o.disconnect();og.disconnect();panner.disconnect();};
   }
 
   // SPATIAL: Grenade Explosion with exact position
@@ -563,6 +571,7 @@ export class SpatialAudioEngine {
     g.gain.exponentialRampToValueAtTime(0.0001, t + opts.dur);
     src.connect(f);
     let out: AudioNode = f;
+    let echoSend: GainNode | undefined;
     if (opts.hp) {
       const h = ctx.createBiquadFilter();
       h.type = 'highpass';
@@ -573,12 +582,17 @@ export class SpatialAudioEngine {
     out.connect(g);
     g.connect(this.master!);
     if (opts.toEcho && this.echoBus) {
-      const eg = ctx.createGain();
+      const eg = ctx.createGain(); echoSend=eg;
       eg.gain.value = opts.toEcho;
       g.connect(eg);
       eg.connect(this.echoBus);
     }
-    src.start(t);
+    const nodes: AudioNode[]=[src,f,out,g,...(echoSend?[echoSend]:[])];
+    src.onended=()=>nodes.forEach(node=>node.disconnect());
+    // Random offset and slight pitch variation prevent the same noise attack
+    // repeating like a machine loop, especially on the 900 RPM PDW.
+    src.playbackRate.value=0.96+Math.random()*0.08;
+    src.start(t,Math.random()*0.45);
     src.stop(t + opts.dur + 0.05);
   }
 }

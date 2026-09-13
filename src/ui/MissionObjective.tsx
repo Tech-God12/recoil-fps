@@ -9,8 +9,9 @@ export function objectiveReadout(mission: MissionHud) {
   switch (mission.type) {
     case 'clear': return { value: `${mission.completed} / ${mission.required}`, label: 'defenders neutralised' };
     case 'destroy': return mission.armed
-      ? { value: missionClock(mission.remaining), label: 'charge armed / get clear' }
-      : { value: mission.canPlant ? 'HOLD X' : `${Math.ceil(mission.distance)} M`, label: mission.canPlant ? 'plant demolition charge' : 'reach the weapons cache' };
+      ? { value: missionClock(mission.remaining), label: mission.distance > mission.radius + 3 ? 'X detonate now / or wait for fuse' : 'charge armed / move clear to detonate' }
+      : { value: mission.canPlant ? (mission.plantProgress > 0 ? 'SECURING' : 'TAP X') : `${Math.ceil(mission.distance)} M`, label: mission.canPlant ? 'attach charge / progress is saved' : 'reach the weapons cache' };
+    case 'defend': return { value: `${Math.ceil(mission.defense / mission.defenseMax * 100)}% / ${missionClock(mission.remaining)}`, label: mission.contested ? 'relay overrun / eliminate hostiles in the ring' : 'relay integrity / hold off the counterattack' };
     case 'hold': return { value: missionClock(mission.remaining), label: mission.inside ? 'until extraction is ready' : 'timer paused / return to perimeter' };
     case 'extract': return { value: `${Math.ceil(mission.distance)} M`, label: 'reach the pickup alive' };
     default: return { value: `${Math.ceil(mission.distance)} M`, label: 'to the marked approach' };
@@ -19,9 +20,10 @@ export function objectiveReadout(mission: MissionHud) {
 
 export default function MissionObjective({ mission }: { mission: MissionHud }) {
   const readout = objectiveReadout(mission);
-  const timed = mission.type === 'hold' || (mission.type === 'destroy' && mission.armed);
+  const phaseLabel = {advance:'Secure the position',clear:'Clear the area',destroy:'Sabotage',defend:'Protect the relay',hold:'Hold the perimeter',extract:'Extraction'}[mission.type];
+  const timed = mission.type === 'defend' || mission.type === 'hold' || (mission.type === 'destroy' && mission.armed);
   const progress = mission.type === 'destroy' && !mission.armed ? mission.plantProgress : mission.progress;
-  const warning = (mission.type === 'hold' && !mission.inside) || (mission.type === 'destroy' && mission.armed && mission.remaining < 8);
+  const warning = (mission.type === 'defend' && mission.contested) || (mission.type === 'hold' && !mission.inside) || (mission.type === 'destroy' && mission.armed && mission.remaining < 8);
 
   return (
     <>
@@ -30,6 +32,7 @@ export default function MissionObjective({ mission }: { mission: MissionHud }) {
         <div className="obj-pips" aria-hidden="true">
           {Array.from({ length: mission.phaseCount }, (_, i) => <span key={i} className={i < mission.index ? 'done' : i === mission.index ? 'current' : ''} />)}
         </div>
+        <div className={`objective-kind kind-${mission.type}`}>{phaseLabel}</div>
         <h2>{mission.title}</h2>
         <p className="obj-brief">{mission.brief}</p>
         <div className="obj-readout">
@@ -56,8 +59,11 @@ export default function MissionObjective({ mission }: { mission: MissionHud }) {
           <span>{Math.ceil(mission.distance)} m</span>
         </div>
       )}
+      {mission.type === 'destroy' && mission.armed && mission.distance > mission.radius+3 && (
+        <div className="mission-interact"><kbd>X</kbd><span>DETONATE • collapse the route now, or wait for the fuse</span></div>
+      )}
       {mission.canPlant && !mission.armed && (
-        <div className="mission-interact"><kbd>X</kbd><span>Hold to plant charge</span><span className="interact-progress hazard-fill" style={{ transform: `scaleX(${mission.plantProgress})` }} /></div>
+        <div className="mission-interact"><kbd>X</kbd><span>{mission.plantProgress > 0 ? 'Securing charge — keep target in sight; you can fire' : 'Tap to attach • move clear, then X to detonate'}</span><span className="interact-progress hazard-fill" style={{ transform: `scaleX(${mission.plantProgress})` }} /></div>
       )}
     </>
   );

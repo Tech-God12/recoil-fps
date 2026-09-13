@@ -68,23 +68,40 @@ test('killing market defenders during approach does not soft-lock the later clea
   assert.equal(m.current.type, 'destroy');
 });
 
-test('destroy requires an uninterrupted, visible, in-range interaction and a full fuse', () => {
+test('tap attachment saves progress through cover breaks, resumes hands-free, and keeps a backup fuse', () => {
   const m = fixture(); reachDestroy(m);
-  m.update(3, input([50, 0, 0], { interact: true }));
-  m.update(3, input([20, 0, 0], { interact: true, targetVisible: false }));
-  assert.equal(m.snapshot([20, 0, 0]).armed, false);
-  m.update(1, input([20, 0, 0], { interact: true }));
-  m.update(0.1, input([20, 0, 0]));
-  m.update(1, input([20, 0, 0], { interact: true }));
-  assert.equal(m.snapshot([20, 0, 0]).armed, false, 'releasing interaction resets planting');
-  m.update(1, input([20, 0, 0], { interact: true }));
-  assert.equal(m.snapshot([20, 0, 0]).armed, true);
-  assert.equal(m.snapshot([20, 0, 0]).remaining, 5, 'planting time is not fuse time');
-  m.update(4.99, input([50, 0, 0]));
-  assert.equal(m.current.type, 'destroy');
-  m.update(0.02, input([50, 0, 0]));
-  assert.equal(m.current.type, 'hold');
-  assert.equal(m.drainEvents().filter(e => e.type === 'cache-detonated').length, 1);
+  m.update(3, input([50,0,0],{interact:true}));
+  m.update(0.1,input([20,0,0]));
+  m.update(3,input([20,0,0],{interact:true,targetVisible:false}));
+  assert.equal(m.snapshot([20,0,0]).plantProgress,0);
+  m.update(0.1,input([20,0,0]));
+  assert.equal(m.snapshot([20,0,0]).plantProgress,0,'a rejected tap behind cover must not latch');
+  m.update(0.5,input([20,0,0],{interact:true}));
+  m.update(10,input([50,0,0]));
+  assert.equal(m.snapshot([20,0,0]).plantProgress,0.25);
+  m.update(10,input([20,0,0],{targetVisible:false}));
+  assert.equal(m.snapshot([20,0,0]).plantProgress,0.25);
+  m.update(1.5,input([20,0,0]));
+  assert.equal(m.snapshot([20,0,0]).armed,true,'no need to keep X held');
+  assert.equal(m.snapshot([20,0,0]).remaining,5);
+  m.update(4.99,input([50,0,0]));
+  assert.equal(m.current.type,'destroy');
+  m.update(0.02,input([50,0,0]));
+  assert.equal(m.current.type,'hold');
+  assert.equal(m.drainEvents().filter(e=>e.type==='cache-detonated').length,1);
+});
+
+test('remote detonation requires a fresh press and clearance, not continuing to hold X', () => {
+  const m=fixture(); reachDestroy(m);
+  m.update(2,input([20,0,0],{interact:true}));
+  m.update(1,input([50,0,0],{interact:true}));
+  assert.equal(m.current.type,'destroy');
+  m.update(0,input([20,0,0]));
+  m.update(0.1,input([20,0,0],{interact:true}));
+  assert.equal(m.current.type,'destroy','remote lockout inside blast clearance');
+  m.update(0,input([50,0,0]));
+  m.update(0.1,input([50,0,0],{interact:true}));
+  assert.equal(m.current.type,'hold');
 });
 
 test('hold only advances in-zone, preserves progress outside, and schedules each wave once', () => {
@@ -142,7 +159,8 @@ test('both shipped missions have finite objectives, reachable predicate sequence
   for (const map of ['alrasul', 'kasbah']) {
     const definition = getMission(map);
     assert.deepEqual(validateMission(definition), []);
-    assert.deepEqual(definition.phases.map(p => p.pressure.target), [3, 6, 6, 9, 6]);
+    assert.deepEqual(definition.phases.map(p => p.pressure.target), map === 'alrasul' ? [3, 6, 6, 9, 6] : [3, 6, 6, 9, 9, 6]);
+    assert.deepEqual(definition.phases.map(p => p.type), map === 'alrasul' ? ['advance','clear','destroy','hold','extract'] : ['advance','clear','destroy','defend','advance','extract']);
     const m = new Mission(definition); m.start();
     for (const phase of definition.phases) {
       assert.equal(m.current.id, phase.id);
@@ -155,7 +173,8 @@ test('both shipped missions have finite objectives, reachable predicate sequence
       } else m.update(phase.seconds ?? 0.1, input(phase.at));
     }
     assert.equal(m.status, 'complete');
-    assert.equal(m.report().phases.length, 5);
+    assert.equal(m.report().phases.length, map === 'alrasul' ? 5 : 6);
+    assert.ok(m.report().phases.every(p => p.complete));
   }
 });
 

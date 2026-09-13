@@ -22,6 +22,7 @@ export interface AIContext {
   coverNodes: THREE.Vector3[];
   solids: AABB[];
   half: number;
+  groundHeight?(x: number, z: number): number;
   effects: Effects;
   difficulty: Difficulty;
   playerPos(): THREE.Vector3;
@@ -43,14 +44,17 @@ export class NavGrid {
   n: number;
   half: number;
   blocked: Uint8Array;
-  constructor(solids: AABB[], half: number) {
+  constructor(solids: AABB[], half: number, groundHeight: (x: number, z: number) => number = () => 0) {
     this.half = half; this.n = Math.ceil((half * 2) / this.cell);
     this.blocked = new Uint8Array(this.n * this.n);
     for (const b of solids) {
-      if (b.maxY <= 0.55 || b.minY > 1.7) continue; // steppable or overhead
       const x0 = Math.max(0, Math.floor((b.minX - 0.35 + half) / this.cell)), x1 = Math.min(this.n - 1, Math.floor((b.maxX + 0.35 + half) / this.cell));
       const z0 = Math.max(0, Math.floor((b.minZ - 0.35 + half) / this.cell)), z1 = Math.min(this.n - 1, Math.floor((b.maxZ + 0.35 + half) / this.cell));
-      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) this.blocked[z * this.n + x] = 1;
+      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+        const floor = groundHeight(this.toWorld(x), this.toWorld(z));
+        if (b.maxY <= floor + 0.55 || b.minY > floor + 1.7) continue;
+        this.blocked[z * this.n + x] = 1;
+      }
     }
   }
   toCell(v: number) { return Math.max(0, Math.min(this.n - 1, Math.floor((v + this.half) / this.cell))); }
@@ -73,6 +77,7 @@ export class NavGrid {
     // Binary-heap open list — pathfinding was O(n²) with array scans + splice.
     const open: number[] = [key(sx, sz)];
     const openSet = new Set<number>(open);
+    const heapIndex = new Map<number,number>([[open[0],0]]);
     const g = new Map<number, number>([[key(sx, sz), 0]]);
     const f = new Map<number, number>([[key(sx, sz), Math.hypot(gx - sx, gz - sz)]]);
     const came = new Map<number, number>();
@@ -82,7 +87,7 @@ export class NavGrid {
       const top = open[0];
       const last = open.pop()!;
       if (open.length) {
-        open[0] = last;
+        open[0] = last; heapIndex.set(last,0);
         let i = 0;
         for (;;) {
           const l = i * 2 + 1, r = l + 1;
@@ -90,19 +95,19 @@ export class NavGrid {
           if (l < open.length && fOf(open[l]) < fOf(open[m])) m = l;
           if (r < open.length && fOf(open[r]) < fOf(open[m])) m = r;
           if (m === i) break;
-          const t = open[i]; open[i] = open[m]; open[m] = t; i = m;
+          const t = open[i]; open[i] = open[m]; open[m] = t; heapIndex.set(open[i],i); heapIndex.set(open[m],m); i = m;
         }
       }
-      openSet.delete(top);
+      openSet.delete(top); heapIndex.delete(top);
       return top;
     };
     const heapPush = (k: number) => {
-      open.push(k); openSet.add(k);
+      open.push(k); openSet.add(k); heapIndex.set(k,open.length-1);
       let i = open.length - 1;
       while (i > 0) {
         const p = (i - 1) >> 1;
         if (fOf(open[p]) <= fOf(open[i])) break;
-        const t = open[i]; open[i] = open[p]; open[p] = t; i = p;
+        const t = open[i]; open[i] = open[p]; open[p] = t; heapIndex.set(open[i],i); heapIndex.set(open[p],p); i = p;
       }
     };
     let iter = 0;
@@ -135,6 +140,17 @@ export class NavGrid {
         if (ng < (g.get(nk) ?? Infinity)) {
           came.set(nk, cur); g.set(nk, ng); f.set(nk, ng + Math.hypot(gx - nx, gz - nz));
           if (!openSet.has(nk)) heapPush(nk);
+          else {
+            // Decrease-key must restore the heap ordering. Updating f alone left
+            // better routes buried and wasted the bounded search on worse nodes.
+            let i=heapIndex.get(nk)!;
+            while(i>0) {
+              const parent=(i-1)>>1;
+              if(fOf(open[parent])<=fOf(open[i])) break;
+              [open[i],open[parent]]=[open[parent],open[i]];
+              heapIndex.set(open[i],i);heapIndex.set(open[parent],parent);i=parent;
+            }
+          }
         }
       }
     }
@@ -186,6 +202,8 @@ export class Enemy {
   private deathT = -1;
   private moveTarget: THREE.Vector3 | null = null;
   private walkPhase = 0;
+  private locomotion = 0;
+  private shotPose = 0;
   private recentDamage = 0;
   private grenadeCD = 0;
   private crouched = false;
@@ -197,6 +215,8 @@ export class Enemy {
   private stuckT = 0;
   private personality: number; // 0 cautious .. 1 aggressive
   stunTimer = 0;
+
+  invalidatePath() { this.path = null; this.repathT = 0; }
 
   constructor(ctx: AIContext, nav: NavGrid, squad: Squad, role: Enemy['role'], spawn: THREE.Vector3) {
     this.ctx = ctx; this.nav = nav; this.squad = squad; this.role = role;
@@ -219,7 +239,7 @@ export class Enemy {
     this.pos.set(...at); this.hp = 100; this.state = 'ALERT'; this.dormant = false;
     this.deadAge = 0; this.deathT = -1; this.stateTime = 0; this.lastSeenT = 999;
     this.reactTimer = -1; this.hasLOS = false; this.losTimer = (this.id % 5) * 0.04;
-    this.lastKnown.set(...focus); this.moveTarget = new THREE.Vector3(...focus);
+    this.lastKnown.set(...focus); this.moveTarget = this.approachPoint(new THREE.Vector3(...focus));
     this.coverPos = null; this.hasRealCover = false; this.coverAge = 0;
     this.peeking = false; this.peekTimer = 0; this.waitTimer = 0.6;
     this.burstLeft = 0; this.burstTimer = 0; this.burstIdx = 0;
@@ -227,13 +247,13 @@ export class Enemy {
     this.grenadeCD = 4; this.crouched = false; this.stunTimer = 0;
     this.strafeDir = 0; this.strafeT = 0; this.strafeCD = 0;
     this.path = null; this.repathT = 0; this.stuckT = 0; this.patrolIdx = 0;
-    this.walkPhase = 0; this.lastX = at[0]; this.lastZ = at[2];
+    this.walkPhase = 0; this.locomotion = 0; this.shotPose = 0; this.lastX = at[0]; this.lastZ = at[2];
     this.yaw = Math.atan2(at[0] - focus[0], at[2] - focus[2]);
     const g = this.model.group;
     g.visible = true; g.position.copy(this.pos); g.rotation.set(0, this.yaw, 0); g.scale.setScalar(1);
     const p = this.model.parts;
     p.torso.position.y = 0.95; p.torso.rotation.set(0, 0, 0);
-    for (const part of [p.head, p.lLeg, p.rLeg, p.lArm, p.rArm, p.rifle]) part.rotation.set(0, 0, 0);
+    for (const part of [p.head, p.lLeg, p.rLeg, p.lShin, p.rShin, p.lArm, p.rArm, p.rifle]) part.rotation.set(0, 0, 0);
     g.updateMatrixWorld(true);
   }
 
@@ -253,11 +273,18 @@ export class Enemy {
     if (this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') {
       const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       const flat = tmpV2.set(dir.x, 0, dir.z).normalize();
-      if (fwd.dot(flat) < Math.cos(Math.PI / 4) && dist > 4) return false;
+      if (fwd.dot(flat) < Math.cos(Math.PI / 4) && dist > 16) return false;
       if (dist > 48) return false;
     }
     ray.set(eye, dir); ray.far = dist - 0.3;
     return ray.intersectObjects(this.ctx.occluders, false).length === 0;
+  }
+
+  private approachPoint(target: THREE.Vector3) {
+    const dx = target.x - this.pos.x, dz = target.z - this.pos.z, length = Math.hypot(dx,dz) || 1;
+    const side = this.role === 'flankA' ? -5.5 : this.role === 'flankB' ? 5.5 : 0;
+    const [x,z] = this.nav.nearestFree(this.nav.toCell(target.x - dz/length*side), this.nav.toCell(target.z + dx/length*side));
+    return new THREE.Vector3(this.nav.toWorld(x),target.y,this.nav.toWorld(z));
   }
 
   hear(pos: THREE.Vector3, radius: number) {
@@ -265,7 +292,9 @@ export class Enemy {
     if (this.pos.distanceTo(pos) > radius) return;
     if (this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') {
       this.setState(this.state === 'PATROL' ? 'ALERT' : this.state);
-      this.lastKnown.copy(pos); this.moveTarget = pos.clone(); this.path = null;
+      this.lastKnown.copy(pos);
+      const next = this.approachPoint(pos);
+      if (!this.moveTarget || this.moveTarget.distanceTo(next) > 3) { this.moveTarget = next; this.path = null; }
     }
   }
 
@@ -289,7 +318,7 @@ export class Enemy {
     this.state = 'DEAD'; this.deathT = 0;
     // Sit the pool on whatever the soldier actually died on (crate, floor slab, roof),
     // instead of pinning every kill to the ground plane under the map.
-    let surfaceY = 0;
+    let surfaceY = this.ctx.groundHeight?.(this.pos.x, this.pos.z) ?? 0;
     for (const b of this.ctx.solids) {
       if (b.maxY > this.pos.y + 0.4 || b.maxY <= surfaceY) continue;
       if (this.pos.x > b.minX - 0.3 && this.pos.x < b.maxX + 0.3 && this.pos.z > b.minZ - 0.3 && this.pos.z < b.maxZ + 0.3) surfaceY = b.maxY;
@@ -329,9 +358,9 @@ export class Enemy {
     this.repathT -= dt;
     const direct = this.nav.lineFree(this.pos.x, this.pos.z, target.x, target.z);
     if (!direct) {
-      if (!this.path || this.repathT <= 0 || this.pathGoal.distanceTo(target) > 2) {
+      if (this.repathT <= 0 || this.pathGoal.distanceTo(target) > 2) {
         this.path = this.nav.path(this.pos, target);
-        this.pathGoal.copy(target); this.repathT = 1.5;
+        this.pathGoal.copy(target); this.repathT = 1.5 + (this.id%5)*0.17;
       }
     } else this.path = null;
     let wp = target;
@@ -348,12 +377,17 @@ export class Enemy {
       if (this.stuckT > 0.4) { // sidestep + force repath
         const side = Math.random() > 0.5 ? 1 : -1;
         this.ctx.moveCollide(this.pos, (-dz / d) * side * speed * dt * 2.5, (dx / d) * side * speed * dt * 2.5, 0.36);
-        this.path = null; this.repathT = 0;
+        this.path = null; this.repathT = Math.max(this.repathT,0.45);
         if (this.stuckT > 1.8) { this.stuckT = 0; return true; }
       }
     } else this.stuckT = Math.max(0, this.stuckT - dt * 2);
     this.yaw = Math.atan2(-dx, -dz);
-    this.walkPhase += dt * speed * 2.4;
+    // Local separation prevents three actors collapsing onto the same path waypoint.
+    for (const teammate of this.squad.members) {
+      if (teammate === this || teammate.dead) continue;
+      const sx = this.pos.x-teammate.pos.x, sz=this.pos.z-teammate.pos.z, gap=Math.hypot(sx,sz);
+      if (gap > 0.02 && gap < 2) this.ctx.moveCollide(this.pos,sx/gap*(2-gap)*dt,sz/gap*(2-gap)*dt,0.36);
+    }
     return false;
   }
 
@@ -361,9 +395,11 @@ export class Enemy {
 
   private fireShot() {
     const ctx = this.ctx;
-    const muzzle = this.eyePos(); muzzle.y -= 0.15;
+    this.model.group.updateMatrixWorld(true);
+    const muzzle = this.model.parts.muzzle.getWorldPosition(new THREE.Vector3());
+    this.shotPose = 1;
     const pp = ctx.playerPos();
-    ctx.effects.enemyMuzzle(muzzle.clone().addScaledVector(tmpV.copy(pp).sub(muzzle).normalize(), 0.7));
+    ctx.effects.enemyMuzzle(muzzle);
     ctx.onEnemyFire(muzzle);
     const dist = muzzle.distanceTo(pp);
     const suppressing = this.state === 'SUPPRESS' || !this.hasLOS;
@@ -373,12 +409,15 @@ export class Enemy {
     acc *= this.burstIdx === 0 ? 0.55 : this.burstIdx === 1 ? 0.8 : 1;
     if (suppressing) acc *= 0.25;
     this.burstIdx++;
+    ray.set(muzzle, tmpV.copy(pp).sub(muzzle).normalize()); ray.far = Math.max(0,dist - 0.2);
+    const obstruction = ray.intersectObjects(ctx.occluders,false)[0];
+    if (obstruction) { ctx.effects.tracer(muzzle,obstruction.point,true); return; }
     if (this.hasLOS && Math.random() < acc && ctx.playerAlive()) {
-      ctx.effects.tracer(muzzle, pp.clone());
+      ctx.effects.tracer(muzzle, pp.clone(), true);
       ctx.damagePlayer(7 + Math.floor(Math.random() * 8), this.pos);
     } else {
       const miss = (this.hasLOS ? pp : this.lastKnown).clone().add(new THREE.Vector3((Math.random() - .5) * 3, 0.8 + (Math.random() - .3) * 2, (Math.random() - .5) * 3));
-      ctx.effects.tracer(muzzle, miss);
+      ctx.effects.tracer(muzzle, miss, true);
     }
   }
 
@@ -412,7 +451,7 @@ export class Enemy {
       this.hasLOS = this.checkLOS();
       if (this.hasLOS) {
         this.lastKnown.copy(this.ctx.playerFeet()); this.lastSeenT = 0;
-        if ((this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') && this.reactTimer < 0) this.reactTimer = this.ctx.difficulty.reaction * (0.7 + Math.random() * 0.6);
+        if ((this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') && this.reactTimer <= 0) this.reactTimer = this.ctx.difficulty.reaction * (0.7 + Math.random() * 0.6);
         if (!had) this.squad.shareIntel(this.lastKnown);
       }
     }
@@ -425,6 +464,11 @@ export class Enemy {
       }
     }
 
+    const closeContact = this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) < 14;
+    if (closeContact && this.reactTimer <= 0 && this.state !== 'ENGAGE' && this.state !== 'SUPPRESS') {
+      this.coverPos = null; this.moveTarget = null; this.flankTarget = null;
+      this.setState('ENGAGE'); this.waitTimer = 0;
+    }
     switch (this.state) {
       case 'PATROL': this.doPatrol(dt); break;
       case 'ALERT': this.doAlert(dt); break;
@@ -461,6 +505,17 @@ export class Enemy {
   }
 
   private doEngage(dt: number, suppress: boolean) {
+    // A visible nearby threat takes priority over running to a distant cover node.
+    if (this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) < 18) {
+      this.crouched = false; this.faceTarget(this.ctx.playerFeet());
+      this.burstTimer -= dt;
+      if (this.burstTimer <= 0) {
+        this.fireShot(); this.burstLeft++;
+        this.burstTimer = this.burstLeft % 4 === 0 ? 0.65 : 0.16;
+      }
+      this.coverPos = null;
+      return;
+    }
     if (!this.coverPos) {
       const found = this.findCover();
       if (found) { this.coverPos = found; this.hasRealCover = true; } else { this.coverPos = this.pos.clone(); this.hasRealCover = false; }
@@ -472,7 +527,10 @@ export class Enemy {
       if (next && next.distanceTo(this.coverPos) > 3) { this.coverPos = next; this.coverAge = 0; }
     }
     const atCover = this.pos.distanceTo(this.coverPos) < 0.6;
-    if (!atCover) { this.goTo(this.coverPos, 4.4, dt); this.crouched = false; }
+    if (!atCover) {
+      this.goTo(this.coverPos, 3.5, dt); this.crouched = false;
+      if (this.hasLOS) { this.faceTarget(this.ctx.playerFeet()); this.burstTimer -= dt; if (this.burstTimer <= 0) { this.fireShot(); this.burstTimer = 0.4; } }
+    }
     else {
       this.crouched = this.hasRealCover && !this.peeking;
       this.faceTarget(this.hasLOS ? this.ctx.playerFeet() : this.lastKnown);
@@ -482,7 +540,7 @@ export class Enemy {
           this.strafeT -= dt;
           const pp = this.lastKnown; const dx = this.pos.x - pp.x, dz = this.pos.z - pp.z, d = Math.hypot(dx, dz) || 1;
           this.ctx.moveCollide(this.pos, (-dz / d) * this.strafeDir * 2.8 * dt, (dx / d) * this.strafeDir * 2.8 * dt, 0.36);
-          this.walkPhase += dt * 6;
+
         } else if (this.strafeCD <= 0) { this.strafeDir = Math.random() > 0.5 ? 1 : -1; this.strafeT = 0.4 + Math.random() * 0.5; this.strafeCD = 1 + Math.random() * 1.4; }
       }
       if (this.peeking) {
@@ -521,7 +579,7 @@ export class Enemy {
     if (!this.flankTarget) {
       const pp = this.ctx.playerFeet();
       const away = tmpV.copy(this.pos).sub(pp).normalize();
-      const perp = new THREE.Vector3(-away.z, 0, away.x); if (Math.random() > 0.5) perp.negate();
+      const perp = new THREE.Vector3(-away.z, 0, away.x); if (this.role === 'flankA') perp.negate();
       this.flankTarget = pp.clone().addScaledVector(perp, 16).addScaledVector(away, 4);
       const h = this.ctx.half - 4;
       this.flankTarget.x = Math.max(-h, Math.min(h, this.flankTarget.x)); this.flankTarget.z = Math.max(-h, Math.min(h, this.flankTarget.z));
@@ -569,17 +627,28 @@ export class Enemy {
     const movedLen = Math.hypot(this.pos.x - this.lastX, this.pos.z - this.lastZ); this.lastX = this.pos.x; this.lastZ = this.pos.z;
     const targetTorsoY = this.crouched ? 0.55 : 0.95;
     p.torso.position.y += (targetTorsoY - p.torso.position.y) * Math.min(1, dt * 9);
-    const swing = movedLen > 0.02 ? Math.sin(this.walkPhase) * 0.55 : 0;
+    // Brains move only every third frame. Smooth measured speed rather than switching
+    // the walk pose off on the two intervening frames (the original skating bug).
+    const measured = Math.min(18,movedLen / Math.max(dt,0.001));
+    this.locomotion += (measured-this.locomotion) * (1-Math.exp(-dt*6));
+    this.walkPhase += this.locomotion * dt * 3.5;
+    const stride = Math.min(1,this.locomotion/2.5);
+    const swing = Math.sin(this.walkPhase) * 0.62 * stride;
+    p.lShin.rotation.x = Math.max(0,-Math.sin(this.walkPhase))*0.95*stride + (this.crouched ? 0.85 : 0);
+    p.rShin.rotation.x = Math.max(0,Math.sin(this.walkPhase))*0.95*stride + (this.crouched ? 0.85 : 0);
+    p.torso.position.y += Math.abs(Math.sin(this.walkPhase*2))*0.014*stride;
+    this.shotPose = Math.max(0,this.shotPose-dt*8);
+    p.rifle.position.z = -0.42 + this.shotPose*0.065;
     const lT = this.crouched ? 0.6 : swing, rT = this.crouched ? -0.12 : -swing;
     p.lLeg.rotation.x += (lT - p.lLeg.rotation.x) * Math.min(1, dt * 8);
     p.rLeg.rotation.x += (rT - p.rLeg.rotation.x) * Math.min(1, dt * 8);
     const aiming = this.state !== 'PATROL' && this.state !== 'RETREAT';
-    p.rifle.rotation.x += ((aiming ? -0.1 : 0.38) - p.rifle.rotation.x) * Math.min(1, dt * 6);
-    p.rArm.rotation.x += ((aiming ? -1.35 : -0.15) - p.rArm.rotation.x) * Math.min(1, dt * 6);
-    p.lArm.rotation.x += ((aiming ? -1.25 : 0.1) - p.lArm.rotation.x) * Math.min(1, dt * 6);
+    p.rifle.rotation.x += ((aiming ? -0.025-this.shotPose*0.12 : 0.38) - p.rifle.rotation.x) * Math.min(1, dt * 6);
+    p.rArm.rotation.x += ((aiming ? 1.35 : -0.15) - p.rArm.rotation.x) * Math.min(1, dt * 6);
+    p.lArm.rotation.x += ((aiming ? 1.25 : 0.1) - p.lArm.rotation.x) * Math.min(1, dt * 6);
     p.rArm.rotation.z += ((aiming ? -0.25 : 0) - p.rArm.rotation.z) * Math.min(1, dt * 6);
     p.lArm.rotation.z += ((aiming ? 0.3 : 0) - p.lArm.rotation.z) * Math.min(1, dt * 6);
-    p.torso.rotation.x = -this.flinch * 0.8; p.head.rotation.x = -this.flinch * 1.2;
+    p.torso.rotation.x = -this.flinch * 0.8 + stride*0.045 - this.shotPose*0.035; p.head.rotation.x = -this.flinch * 1.2;
     const shouldLean = this.peeking && this.crouched && this.hasRealCover;
     const leanTarget = shouldLean ? (this.id % 2 === 0 ? 0.42 : -0.42) : 0;
     p.torso.rotation.z += (leanTarget - p.torso.rotation.z) * Math.min(1, dt * 5);
@@ -633,7 +702,7 @@ export class AIManager {
   private pool: Enemy[] = [];
   constructor(ctx: AIContext, spawns: { leader: THREE.Vector3; a: THREE.Vector3; b: THREE.Vector3; patrol: THREE.Vector3[] }[]) {
     this.ctx = ctx;
-    this.nav = new NavGrid(ctx.solids, ctx.half);
+    this.nav = new NavGrid(ctx.solids, ctx.half, ctx.groundHeight);
     const reserve = new Squad([new THREE.Vector3()]);
     // Allocate once. Reinforcements reuse these models instead of growing the scene graph.
     for (let i = 0; i < PRESSURE_BUDGET.liveCap; i++) {
@@ -650,6 +719,8 @@ export class AIManager {
       });
     }
   }
+
+  invalidatePaths() { for (const enemy of this.pool) enemy.invalidatePath(); }
 
   insertSquad(batch: ReinforcementBatch): boolean {
     if (batch.members.length !== 3 || this.aliveCount() + 3 > PRESSURE_BUDGET.liveCap) return false;

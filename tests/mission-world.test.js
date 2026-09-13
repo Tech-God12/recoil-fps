@@ -68,6 +68,11 @@ for (const id of ['alrasul', 'kasbah']) {
       assert.ok(flood.reaches(phase.at, Math.min(phase.radius, 3)), `${phase.id} is not reachable at ground level`);
     }
     assert.ok(mission.insertions.filter(site => flood.reaches(site.at, 2)).length >= 6, 'need several connected insertion approaches');
+    markers.destroyCache(world);
+    world.detonate();
+    const after = reachability(world, spawn);
+    for (const phase of mission.phases) assert.ok(after.reaches(phase.at, Math.min(phase.radius, 3)), `${phase.id} disconnected by demolition`);
+    for (const site of mission.insertions) assert.ok(after.reaches(site.at, 2), `${site.id} disconnected by demolition`);
     markers.dispose();
     world.group.traverse(object => { if (object.isMesh) object.geometry.dispose(); });
   });

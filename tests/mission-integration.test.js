@@ -28,7 +28,7 @@ function aiContext() {
   };
 }
 
-test('soldier draw/triangle budget is unchanged; the reinforcement pool cannot grow beyond ten', () => {
+test('articulated soldier stays within its draw/triangle budget; the reinforcement pool cannot grow beyond ten', () => {
   const restore = installCanvasStub();
   try {
     const model = buildSoldier();
@@ -89,7 +89,7 @@ test('the engine rejects victory before extraction, irrespective of enemy count'
   const source = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /aliveCount\(\)\s*===\s*0\)\s*this\.endMatch/);
   assert.match(source, /new AIManager\(ctx, \[\]\)/, 'the engine must not reintroduce its legacy fixed roster');
-  assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 5, 'do not restore recoil during a mission update');
+  assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 4, 'only the explicitly reworked MP7 changes its recoil pattern');
 });
 
 test('a full scripted operation escalates above eighteen total spawns with a ten-live ceiling', () => {
@@ -136,9 +136,10 @@ test('SSR output exposes the mission verbs, actual objective progress, and a nor
   const at = mission.current.at;
   const snapshot = { ...mission.snapshot(at), waypoint: { x: 50, y: 50, visible: false }, live: 3, targetPressure: 3, totalSpawned: 3 };
   const html = renderToStaticMarkup(React.createElement(MissionObjective, { mission: snapshot }));
-  assert.match(html, /Reach the market/);
+  assert.ok(html.includes(mission.current.title));
+  assert.ok(html.includes(mission.current.brief));
   assert.match(html, /Current mission objective/);
-  assert.match(html, /SANDGLASS/);
+  assert.match(html, /Sandblast/);
   assert.equal(missionClock(59.9), '01:00');
   assert.equal(missionClock(0), '00:00');
   const menu = renderToStaticMarkup(React.createElement(MainMenu, { s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {} }));

@@ -65,6 +65,9 @@ export default function App() {
   const onEvent = useCallback((event: GameEvent) => {
     const id = ++ids.current;
     switch (event.type) {
+      case 'graphics':
+        setError(event.text); changePhase('paused');
+        break;
       case 'hit':
         setFx(f => ({ ...f, hitmark: { id, kill: event.kill } }));
         break;
@@ -205,9 +208,9 @@ export default function App() {
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && <ResultsScreen r={results} onRedeploy={deploy} onMenu={quit} />}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
-      <div className="absolute top-3 right-4 z-50 flex gap-2">
-        <button onClick={fullscreen} className="util-btn">FULLSCREEN</button>
-      </div>
+      {phase !== 'playing' && !showSettings && <div className="fullscreen-control">
+        <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>
+      </div>}
       {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
       {launching && <BootScreen />}
     </div>

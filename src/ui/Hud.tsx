@@ -88,7 +88,7 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
       </div>
 
       {/* ============ KILL FEED + FPS ============ */}
-      <div className="absolute top-4 right-5 flex flex-col items-end gap-1.5">
+      <div className="absolute top-14 right-5 flex flex-col items-end gap-1.5">
         {fx.feed.map(f => (
           <div key={f.id} className="feed-row text-right">
             <span className="text-[var(--acc)] font-black">YOU</span>
@@ -97,10 +97,10 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
             <span className="text-white/90">{f.text.split('  ')[2]}</span>
           </div>
         ))}
-        {s.showFps && (
-          <span className="fps-chip cut-xs hud-chip" style={{ color: fpsColor }}>{hud.fps} FPS</span>
-        )}
       </div>
+      {s.showFps && (
+        <span className="fps-chip cut-xs hud-chip absolute bottom-3 left-1/2 -translate-x-1/2" style={{ color: fpsColor }}>{hud.fps} FPS</span>
+      )}
 
       {/* ============ CENTER STACK ============ */}
       {hud.ads < 0.3 && !hud.sprinting && (
@@ -132,8 +132,8 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
             </div>
           ) : (
             <div className="relative w-9 h-9 flex items-center justify-center">
-              <div className="absolute w-6 h-6 rounded-full border border-[var(--danger)]/30" />
-              <div className="absolute w-1.5 h-1.5 rounded-full bg-[var(--danger)] shadow-[0_0_8px_var(--danger)]" />
+
+              <div className="absolute w-[3px] h-[3px] rounded-full bg-red-400 shadow-[0_0_3px_1px_#ff3333]" />
             </div>
           )}
         </div>
@@ -287,7 +287,7 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
             <i /><span className="keycap">G</span> HOLD FRAG
             <i /><span className="keycap">Q/E</span> LEAN
             <i /><span className="keycap">SPACE</span> VAULT
-            <i /><span className="keycap">X</span> HOLD PLANT
+            <i /><span className="keycap">X</span> ATTACH / BLAST
           </span>
         </div>
       )}

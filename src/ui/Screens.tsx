@@ -35,12 +35,12 @@ export function MainMenu({ s, onDeploy, onSettings, onMap }: {
 
       <Ticker aria-hidden="true">
         <span className="ticker-item"><b>RECOIL FPS</b></span>
-        <span className="ticker-item">SECTOR <i>AL-RASUL CROSSING</i></span>
-        <span className="ticker-item">SECTOR <i>KASBAH RIDGE</i></span>
+        <span className="ticker-item">SECTOR <i>Sandblast</i></span>
+        <span className="ticker-item">SECTOR <i>Town</i></span>
         <span className="ticker-item">THREAT LEVEL <b>{s.difficulty.toUpperCase()}</b></span>
         <span className="ticker-item">SUPPLY <i>UNLIMITED AMMO</i></span>
-        <span className="ticker-item">COMMAND LINK <i>STABLE</i></span>
-        <span className="ticker-item">BUILD <b>2.1.0 // VOLT PROTOCOL</b></span>
+
+        <span className="ticker-item">BUILD <b>3.0.0 // GROUND ZERO</b></span>
       </Ticker>
 
       <header className="menu-header">
@@ -48,7 +48,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap }: {
           <span className="slash-mark" aria-hidden="true">///</span> RECOIL
         </a>
         <div className="flex items-center gap-2.5">
-          <span className="sys-chip"><span className="live-dot" />SYS LINK</span>
+
           <button className="util-btn" onClick={onSettings}>SETTINGS</button>
         </div>
       </header>
@@ -84,12 +84,12 @@ export function MainMenu({ s, onDeploy, onSettings, onMap }: {
           {MAPS.map((map, index) => {
             const option = getMission(map.id);
             return (
-              <button key={map.id} onClick={() => onMap(map.id)} aria-pressed={map.id === s.map}
+              <button key={map.id} title={map.desc} onClick={() => onMap(map.id)} aria-pressed={map.id === s.map}
                 className={`map-card ${map.id === s.map ? 'selected' : ''}`}>
                 <span className="map-num">0{index + 1}</span>
                 <span className="min-w-0">
-                  <span className="map-name">{option.name}</span>
-                  <span className="map-type">{map.name}</span>
+                  <span className="map-name">{map.name}</span>
+                  <span className="map-type">{map.id === 'alrasul' ? 'Desert river valley' : 'Fortified market town'}</span>
                 </span>
                 <span className="map-tag">{option.phases.length} PHASES</span>
                 <span className="map-sel" aria-hidden="true" />
@@ -108,8 +108,8 @@ export function MainMenu({ s, onDeploy, onSettings, onMap }: {
                     <span className="route-title">{phase.title}</span>
                     <span className="route-loc">{phase.location}</span>
                   </div>
-                  {phase.type === 'hold' && <span className="route-timing">60 SEC</span>}
-                  {phase.type === 'destroy' && <span className="route-timing">25 SEC FUSE</span>}
+                  {(phase.type === 'hold' || phase.type === 'defend') && <span className="route-timing">{phase.seconds} SEC{phase.type === 'defend' ? ' / RELAY' : ''}</span>}
+                  {phase.type === 'destroy' && <span className="route-timing">{phase.fuse} SEC FUSE</span>}
                 </li>
               ))}
             </ol>

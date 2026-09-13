@@ -136,9 +136,9 @@ test('SSR output exposes the mission verbs, actual objective progress, and a nor
   const at = mission.current.at;
   const snapshot = { ...mission.snapshot(at), waypoint: { x: 50, y: 50, visible: false }, live: 3, targetPressure: 3, totalSpawned: 3 };
   const html = renderToStaticMarkup(React.createElement(MissionObjective, { mission: snapshot }));
-  assert.match(html, /Reach the market/);
+  assert.match(html, /Take the south checkpoint/);
   assert.match(html, /Current mission objective/);
-  assert.match(html, /SANDGLASS/);
+  assert.match(html, /SANDBLAST/);
   assert.equal(missionClock(59.9), '01:00');
   assert.equal(missionClock(0), '00:00');
   const menu = renderToStaticMarkup(React.createElement(MainMenu, { s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {} }));

@@ -15,6 +15,14 @@ export interface TextureSet {
   tileFloor: THREE.MeshStandardMaterial;
   plaster: THREE.MeshStandardMaterial;
   whitewash: THREE.MeshStandardMaterial;
+  stoneBlock: THREE.MeshStandardMaterial;
+  firedBrick: THREE.MeshStandardMaterial;
+  packedEarth: THREE.MeshStandardMaterial;
+  corrugatedMetal: THREE.MeshStandardMaterial;
+  timber: THREE.MeshStandardMaterial;
+  wadiBed: THREE.MeshStandardMaterial;
+  cobble: THREE.MeshStandardMaterial;
+  terracePaver: THREE.MeshStandardMaterial;
 }
 
 function cv(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -336,6 +344,165 @@ export function getMaterials(): TextureSet {
     const [b, bc] = cv(256, 256); bc.fillStyle = '#909090'; bc.fillRect(0, 0, 256, 256);
     for (let y = 0; y < 256; y += 64) for (let x = 0; x < 256; x += 64) { bc.fillStyle = '#c8c8c8'; bc.fillRect(x + 4, y + 4, 56, 56); }
     cached.tileFloor = mat(d, b, 8, 8, 0.8, 0, 0.05);
+  }
+
+  // ---------- STONE BLOCK (citadel, retaining walls) 512px: big ashlar + mortar ----------
+  {
+    const S = 512;
+    const [d, c] = cv(S, S);
+    c.fillStyle = '#6E6A5E'; c.fillRect(0, 0, S, S);
+    speckle(c, S, S, 4000, [['#8A8680', 0.35], ['#4E4A42', 0.35]], 1, 2);
+    const rows = 6, cols = 8;
+    const bh = S / rows, bw = S / cols;
+    for (let r = 0; r < rows; r++) for (let cc = 0; cc < cols; cc++) {
+      const ox = (r % 2) * (bw / 2) + cc * bw;
+      const x = ox + 3, y = r * bh + 3, w = bw - 6, h = bh - 6;
+      const v = 138 + ((Math.random() * 30) | 0);
+      c.fillStyle = `rgb(${v},${(v * 0.97) | 0},${(v * 0.9) | 0})`;
+      c.fillRect(x, y, w, h);
+      c.save(); c.beginPath(); c.rect(x, y, w, h); c.clip();
+      speckle(c, S, S, 40, [['#000', 0.08], ['#fff', 0.06]], 1, 2);
+      c.restore();
+      c.fillStyle = 'rgba(255,255,255,0.12)'; c.fillRect(x, y, w, 3); c.fillRect(x, y, 3, h);
+      c.fillStyle = 'rgba(0,0,0,0.28)'; c.fillRect(x, y + h - 3, w, 3); c.fillRect(x + w - 3, y, 3, h);
+    }
+    cracks(c, S, S, 4, 'rgba(40,38,34,0.35)', 1.2);
+    valueNoise(c, S, S, 4, 0.1);
+    const [b, bc] = cv(S, S); bc.fillStyle = '#3a3a3a'; bc.fillRect(0, 0, S, S);
+    for (let r = 0; r < rows; r++) for (let cc = 0; cc < cols; cc++) { const ox = (r % 2) * (bw/2)+cc*bw; bc.fillStyle='#c8c8c8'; bc.fillRect(ox+5, r*bh+5, bw-10, bh-10); }
+    cached.stoneBlock = mat(d, b, 3, 3, 0.78, 0, 0.09);
+  }
+
+  // ---------- FIRED BRICK (kiln quarter) 512px: deep red with dark mortar ----------
+  {
+    const S = 512;
+    const [d, c] = cv(S, S);
+    c.fillStyle = '#4A2520'; c.fillRect(0, 0, S, S);
+    const rows = 9, bh = S/rows, bw = 64;
+    for (let r=0;r<rows;r++) for(let col=-1;col<=8;col++){
+      const ox=(r%2)*(bw/2)+col*bw;
+      const v= 145+((Math.random()*38)|0);
+      c.fillStyle=`rgb(${v},${(v*0.35)|0},${(v*0.22)|0})`;
+      c.fillRect(ox+3, r*bh+3, bw-6, bh-6);
+      if(Math.random()<0.12){ c.fillStyle='rgba(20,10,8,0.35)'; c.fillRect(ox+6, r*bh+6, bw-12, 3); }
+    }
+    valueNoise(c,S,S,5,0.12);
+    const [b,bc]=cv(S,S); bc.fillStyle='#2a2a2a'; bc.fillRect(0,0,S,S);
+    for(let r=0;r<rows;r++) for(let col=-1;col<=8;col++){ const ox=(r%2)*(bw/2)+col*bw; bc.fillStyle='#c8a090'; bc.fillRect(ox+5,r*bh+5,bw-10,bh-10); }
+    cached.firedBrick = mat(d,b,2.5,2.5,0.9,0,0.1);
+  }
+
+  // ---------- PACKED EARTH RENDER (souk) ----------
+  {
+    const S=512;
+    const [d,c]=cv(S,S);
+    c.fillStyle='#B79A6B'; c.fillRect(0,0,S,S);
+    speckle(c,S,S,10000, [['#000',0.04], ['#fff',0.04], ['#8A6D48',0.03]],1,2);
+    valueNoise(c,S,S,4,0.07);
+    ctxHorizontalBands(c,S);
+    // faint hairline cracks
+    cracks(c,S,S,6,'rgba(80,60,35,0.22)',1.0);
+    const [b,bc]=cv(S,S); bc.fillStyle='#808080'; bc.fillRect(0,0,S,S);
+    speckle(bc,S,S,6000,[['#b0b0b0',0.3],['#505050',0.3]],1,2);
+    cached.packedEarth = mat(d,b,3,3,0.95,0,0.04);
+  }
+
+  // ---------- CORRUGATED METAL (depot sheds) 256px ----------
+  {
+    const S=256;
+    const [d,c]=cv(S,S);
+    c.fillStyle='#5A5E60'; c.fillRect(0,0,S,S);
+    for(let x=0;x<S;x+=10){
+      const g=c.createLinearGradient(x,0,x+10,0);
+      g.addColorStop(0,'rgba(40,40,42,0.45)'); g.addColorStop(0.5,'rgba(180,185,190,0.35)'); g.addColorStop(1,'rgba(40,40,42,0.45)');
+      c.fillStyle=g; c.fillRect(x,0,10,S);
+    }
+    speckle(c,S,S,800,[['#c07030',0.22],['#202020',0.35]],1,2);
+    valueNoise(c,S,S,5,0.12);
+    const [b,bc]=cv(S,S); bc.fillStyle='#808080'; bc.fillRect(0,0,S,S);
+    for(let x=0;x<S;x+=10){ bc.fillStyle=x%20===0?'#3a3a3a':'#e8e8e8'; bc.fillRect(x,0,10,S); }
+    cached.corrugatedMetal = mat(d,b,3,3,0.55,0.45,0.06);
+  }
+
+  // ---------- TIMBER (bridges, stalls) ----------
+  {
+    const [d,c]=cv(256,256);
+    c.fillStyle='#6B4E2E'; c.fillRect(0,0,256,256);
+    for(let i=0;i<30;i++){
+      c.strokeStyle=Math.random()>0.5?'rgba(30,18,8,0.35)':'rgba(160,120,70,0.25)';
+      c.lineWidth=1+Math.random()*2;
+      c.beginPath(); const y=Math.random()*256; c.moveTo(0,y);
+      for(let x=0;x<=256;x+=12) c.lineTo(x,y+Math.sin(x*0.05)*4+Math.cos(x*0.02)*2);
+      c.stroke();
+    }
+    for(let x=0;x<=256;x+=48){ c.fillStyle='rgba(0,0,0,0.18)'; c.fillRect(x,0,4,256); }
+    const [b,bc]=cv(256,256); bc.fillStyle='#808080'; bc.fillRect(0,0,256,256);
+    for(let x=0;x<=256;x+=48){ bc.fillStyle='#606060'; bc.fillRect(x-2,0,4,256); }
+    cached.timber = mat(d,b,1,1,0.88,0,0.05);
+  }
+
+  // ---------- WADI BED (cracked earth) 512px ----------
+  {
+    const S=512;
+    const [d,c]=cv(S,S);
+    c.fillStyle='#8E7A55'; c.fillRect(0,0,S,S);
+    valueNoise(c,S,S,5,0.18);
+    speckle(c,S,S,6000, [['#B8A080',0.35], ['#5E4E30',0.35]],1,2);
+    // network of dark cracks
+    c.strokeStyle='rgba(48,36,22,0.55)'; c.lineWidth=2.2;
+    for(let i=0;i<18;i++){
+      let x=Math.random()*S, y=Math.random()*S;
+      c.beginPath(); c.moveTo(x,y);
+      for(let s=0;s<6;s++){ x+=(Math.random()-0.5)*90; y+=(Math.random()-0.5)*90; c.lineTo(x,y); }
+      c.stroke();
+    }
+    // small pebbles in cracks
+    for(let i=0;i<120;i++){ const x=Math.random()*S, y=Math.random()*S, r=1+Math.random()*2; c.fillStyle='#6A5A3A'; c.beginPath(); c.arc(x,y,r,0,7); c.fill(); }
+    const [b,bc]=cv(S,S); bc.fillStyle='#808080'; bc.fillRect(0,0,S,S);
+    speckle(bc,S,S,8000,[['#d0d0d0',0.4],['#505050',0.4]],1,2);
+    c.strokeStyle='rgba(40,30,18,0.5)'; // bump for cracks
+    cached.wadiBed = mat(d,b,6,6,0.95,0,0.07);
+  }
+
+  // ---------- COBBLE LANE 512px ----------
+  {
+    const S=512;
+    const [d,c]=cv(S,S);
+    c.fillStyle='#7D7462'; c.fillRect(0,0,S,S);
+    for(let y=0;y<S;y+=38) for(let x=0;x<S;x+=54){
+      const jx=(Math.random()-0.5)*6, jy=(Math.random()-0.5)*6;
+      const rx= x+4+jx, ry=y+4+jy, rw=46, rh=30;
+      const v=130+((Math.random()*30)|0);
+      c.fillStyle=`rgb(${v},${(v*0.93)|0},${(v*0.82)|0})`;
+      // rounded cobble via ellipse
+      c.beginPath(); c.ellipse(rx+rw/2, ry+rh/2, rw/2-2, rh/2-2,0,0,Math.PI*2); c.fill();
+      c.strokeStyle='rgba(0,0,0,0.22)'; c.lineWidth=2; c.stroke();
+      c.fillStyle='rgba(255,255,255,0.12)'; c.beginPath(); c.ellipse(rx+rw/2-5, ry+rh/2-6, 8,5, -0.4,0, Math.PI*2); c.fill();
+    }
+    valueNoise(c,S,S,5,0.1);
+    const [b,bc]=cv(S,S); bc.fillStyle='#505050'; bc.fillRect(0,0,S,S);
+    for(let y=0;y<S;y+=38) for(let x=0;x<S;x+=54){ bc.fillStyle='#c8c8c8'; bc.beginPath(); bc.ellipse(x+27,y+19,20,13,0,0,Math.PI*2); bc.fill(); }
+    cached.cobble = mat(d,b,5,5,0.84,0,0.09);
+  }
+
+  // ---------- TERRACE PAVER (stone terrace pavers) ----------
+  {
+    const S=512;
+    const [d,c]=cv(S,S);
+    c.fillStyle='#8A8275'; c.fillRect(0,0,S,S);
+    const n=4, s=S/n;
+    for(let gy=0;gy<n;gy++) for(let gx=0;gx<n;gx++){
+      const v=160+((Math.random()*28)|0);
+      c.fillStyle=`rgb(${v},${(v*0.94)|0},${(v*0.85)|0})`;
+      c.fillRect(gx*s+3, gy*s+3, s-6, s-6);
+      c.fillStyle='rgba(255,255,255,0.12)'; c.fillRect(gx*s+3, gy*s+3, s-6, 3);
+      c.fillStyle='rgba(0,0,0,0.2)'; c.fillRect(gx*s+3, gy*s+s-6, s-6,3);
+    }
+    cracks(c,S,S,4,'rgba(60,55,45,0.28)',1.3);
+    valueNoise(c,S,S,4,0.1);
+    const [b,bc]=cv(S,S); bc.fillStyle='#6a6a6a'; bc.fillRect(0,0,S,S);
+    for(let gy=0;gy<n;gy++) for(let gx=0;gx<n;gx++){ bc.fillStyle='#d0d0d0'; bc.fillRect(gx*s+5, gy*s+5, s-10, s-10); }
+    cached.terracePaver = mat(d,b,6,6,0.82,0,0.08);
   }
 
   return cached as TextureSet;

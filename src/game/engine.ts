@@ -150,6 +150,8 @@ export class Engine {
   private vmScene = new THREE.Scene();
   private vmCamera: THREE.PerspectiveCamera;
   private world: World;
+  private clouds: THREE.Mesh[] = [];
+  private cloudSpeeds: number[] = [];
   private effects: Effects;
   private ai: AIManager;
   private missionRuntime!: MissionRuntime;
@@ -316,6 +318,14 @@ export class Engine {
     this.addSkyDome();
 
     this.world = buildWorld(this.scene, mapId);
+    // Dustier horizon per-map: warm ochre for AL-RASUL, cooler haze for KASBAH ridge
+    if (mapId === 'alrasul') {
+      (this.scene.fog as THREE.Fog).color.setHex(0xC9B99A);
+      (this.scene.background as THREE.Color).setHex(0xC2B8A6);
+    } else {
+      (this.scene.fog as THREE.Fog).color.setHex(0xBFCBD6);
+      (this.scene.background as THREE.Color).setHex(0xA8BCCD);
+    }
     this.buildSolidGrid();
     const maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     this.world.group.traverse(o => {
@@ -325,7 +335,7 @@ export class Engine {
       if (m.map) m.map.anisotropy = maxAniso;
       if (m.bumpMap) m.bumpMap.anisotropy = maxAniso;
     });
-    // Warm interior point lights near the map centre (capped at 2 — each one re-lights every merged mesh)
+    // Warm interior point lights — keep 2 active to stay within budget, pick best-placed
     const spots = [...this.world.lightSpots].sort((a, b) => a.length() - b.length()).slice(0, 2);
     for (const s of spots) {
       const pl = new THREE.PointLight(0xFFD9A0, 14, 16, 1.8);
@@ -558,7 +568,20 @@ void main(){
       detonate: at => {
         // Use the existing blast resolution for damage, glass, particles and spatial audio.
         this.explode({ mesh: this.missionRuntime.markers.cache, pos: at, vel: new THREE.Vector3(), fuse: 0, kind: 'frag', fromAI: false });
+        // Lasting scorch decal at blast site — zero perf cost, strong payoff
+        try {
+          const decal = new THREE.Mesh(new THREE.CircleGeometry(3.2, 24), new THREE.MeshBasicMaterial({ color: 0x1A1410, transparent: true, opacity: 0.52, depthWrite: false }));
+          decal.rotation.x = -Math.PI / 2;
+          decal.position.set(at.x, 0.03, at.z);
+          decal.renderOrder = 2;
+          this.scene.add(decal);
+        } catch {}
+        // Dirt plume + lingering smoke already via this.effects.explosion
+        // World-state payoff hook: footbridge / hoist collapse if world exposes it
+        const w2 = this.world as unknown as { onDetonate?: (at: THREE.Vector3) => void };
+        if (w2.onDetonate) w2.onDetonate(at);
         this.rebuildHittables();
+        this.buildSolidGrid();
       },
       finish: win => this.endMatch(win),
     }, mapId);
@@ -724,6 +747,7 @@ void main(){
     c.width = 4; c.height = 256;
     const ctx = c.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    // Dustier horizon per-map will be tweaked after world load; base is neutral
     grad.addColorStop(0, '#4A78A6');   // zenith blue
     grad.addColorStop(0.4, '#93B6C8');
     grad.addColorStop(0.58, '#D8C7A0'); // haze band
@@ -755,13 +779,35 @@ void main(){
     sunSpr.position.set(-220, 200, 150);
     sunSpr.scale.setScalar(110);
     this.scene.add(sunSpr);
-    // A few flat drifting clouds
-    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xF4EAD2, transparent: true, opacity: 0.75, fog: false, depthWrite: false });
-    for (let i = 0; i < 7; i++) {
-      const cl = new THREE.Mesh(new THREE.SphereGeometry(14 + Math.random() * 16, 10, 6), cloudMat);
-      cl.position.set((Math.random() - 0.5) * 560, 130 + Math.random() * 60, (Math.random() - 0.5) * 560);
-      cl.scale.y = 0.28;
+    // Low drifting cumulus — primary layer
+    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xF4EAD2, transparent: true, opacity: 0.78, fog: false, depthWrite: false });
+    for (let i = 0; i < 8; i++) {
+      const cl = new THREE.Mesh(new THREE.SphereGeometry(15 + Math.random() * 16, 10, 6), cloudMat);
+      cl.position.set((Math.random() - 0.5) * 560, 135 + Math.random() * 40, (Math.random() - 0.5) * 560);
+      cl.scale.set(1.2 + Math.random() * 0.5, 0.32, 0.9 + Math.random() * 0.4);
       this.scene.add(cl);
+      this.clouds.push(cl);
+      this.cloudSpeeds.push(0.6 + Math.random() * 1.2);
+    }
+    // High thin cirrus — parallax second layer, slower, more translucent
+    const cirrusMat = new THREE.MeshBasicMaterial({ color: 0xFFF6E0, transparent: true, opacity: 0.38, fog: false, depthWrite: false });
+    for (let i = 0; i < 5; i++) {
+      const cl = new THREE.Mesh(new THREE.SphereGeometry(22 + Math.random() * 18, 8, 5), cirrusMat);
+      cl.position.set((Math.random() - 0.5) * 700, 210 + Math.random() * 30, (Math.random() - 0.5) * 700);
+      cl.scale.set(1.8, 0.18, 1.1);
+      this.scene.add(cl);
+      this.clouds.push(cl);
+      this.cloudSpeeds.push(0.25 + Math.random() * 0.5);
+    }
+  }
+
+  private updateClouds(dt: number) {
+    for (let i = 0; i < this.clouds.length; i++) {
+      const cl = this.clouds[i];
+      cl.position.x += this.cloudSpeeds[i] * dt;
+      if (cl.position.x > 360) cl.position.x -= 720;
+      // subtle vertical bob for life
+      cl.position.y += Math.sin(performance.now() * 0.0003 + i) * 0.002 * dt * 60;
     }
   }
 
@@ -1546,8 +1592,9 @@ void main(){
   private update(dt: number) {
     const k = this.keys;
 
-    // Animated film grain
+    // Animated film grain + drifting clouds
     this.vignettePass.uniforms.uTime.value = performance.now() / 1000;
+    this.updateClouds(dt);
 
     // UPDATE SPATIAL AUDIO LISTENER POSITION & FORWARD/UP ORIENTATION
     const eye = this.eyePos();

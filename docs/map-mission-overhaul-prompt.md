@@ -51,12 +51,20 @@ twice and execute every section.
 
 `buildWorld()` returns:
 `group` (THREE.Group), `solids` (AABB collision), `occluders` (raycast targets),
-`coverNodes` (Vector3[] the AI uses for cover), `squadSpawns` (5 initial squads:
-`{ leader, a, b, patrol[] }`), `playerSpawn`, `interiors` (AABB), `concrete` (AABB —
-footstep surfaces AND the radar map), `wood` (AABB), `half` (map half-extent in meters),
-`lightSpots` (Vector3[] — engine keeps the 2 nearest as real point lights),
-`windows` (WindowHole[] — **drives the SPACE-vault mechanic**: `{x,y,z,nx,nz}`),
-`glass` (InstancedMesh) + `breakGlass(instanceId)`.
+`coverNodes` (Vector3[] the AI uses for cover), `playerSpawn`, `interiors` (AABB),
+`concrete` (AABB — footstep surfaces AND the radar map), `wood` (AABB), `half` (map
+half-extent in meters), `lightSpots` (Vector3[] — engine keeps the 2 nearest as real
+point lights), `windows` (WindowHole[] — **drives the SPACE-vault mechanic**:
+`{x,y,z,nx,nz}`), `glass` (InstancedMesh) + `breakGlass(instanceId)`.
+
+**Note (post Phase 2):** `squadSpawns` and `MAPS.enemies` no longer exist — the world
+does NOT place initial enemies. `AIManager` is constructed with an empty spawn list and
+ALL hostile presence flows through the reinforcement pressure director (insertions in
+`missions.json`). If your design needs *initial* defenders (it should — see §7.4), you
+either (a) re-introduce a spawn list to `AIManager`'s constructor (its signature still
+accepts `{leader,a,b,patrol}[]`; engine currently passes `[]`), or (b) request opening
+squads through the pressure system at mission start. Either is test-safe if done with
+the budgets in §4.2.
 
 Everything the gameplay needs flows out of these arrays. Break one and you break the
 game. The radar map generator (`engine.ts generateMapImage`) **reads `solids` and
@@ -106,9 +114,11 @@ plaster, whitewash, sand, asphalt, plaza, concrete, rustedMetal…).
 6. **No story, no escalation, no identity.** "Reach the market", "Break the market
    defence". The radio is a rules reminder, not a narrator. The hold phase is standing in
    a circle; the extract is a jog.
-7. **Enemy presence is uniform mush.** Five initial squads patrol loops; reinforcements
-   trickle from a symmetric ring of identical insertion points. No defending *place*,
-   no front line, no flanks that mean anything.
+7. **Enemy presence is uniform mush — or absent.** Since Phase 2 removed initial squads,
+   the world deploys empty and enemies trickle in as symmetric reinforcement waves from a
+   ring of identical insertion points. No defending *place*, no front line, no flanks
+   that mean anything. (And before Phase 2 it was five identical patrol loops — same
+   disease, different symptom.)
 8. **Nothing dies.** The cache detonates with an effect and then the map is… the same.
    No gates blown open, no route changed, no world state, no payoff.
 
@@ -207,10 +217,15 @@ each `{id, from, at:[x,y,z]}` and optional `members` = exactly 3 positions.
   collision in that band blocks nav. Props like crates must be *cover* (`cover()`), not
   nav-blockers, unless you want them as real walls. Keep 2m-wide walkable lanes everywhere
   AI must go; do not wedge AI squads into sub-2m gaps.
-- **Spawning**: `world.squadSpawns` = exactly 5 initial squads with `leader/a/b` positions
-  and a patrol loop of ≥3 ground-reachable points. Reinforcements arrive via
-  `missions.json insertions` — every insertion `at` must be ground-reachable and outside
-  the player's deployment sightline (no spawn-kill deaths, ever).
+- **Spawning**: since Phase 2, there are NO initial squads — the world deploys empty and
+  every hostile arrives via the pressure director from `missions.json insertions`. Your
+  missions must therefore *open the show themselves*: request the first squads at mission
+  start (the cleanest hook is the mission-runtime `phase-started` path or an opening
+  `pressure.request(...)`), so phase 1 has believable early contact without spawn-kill
+  deaths. Every insertion `at` must be ground-reachable, outside the player's deployment
+  sightline, and ≥40m from the deployment point. If you reintroduce `AIManager` spawn
+  lists for initial defenders, keep ≤2 initial squads and their patrol loops on
+  nav-free ground.
 - **Radar**: engine auto-generates the top-down map from `solids`/`concrete`. After your
   rebuild, verify the radar reads correctly (it is the player's primary navigation tool).
 
@@ -412,12 +427,14 @@ a mechanic the onboarding strip already teaches. Example quality bar:
 Write 5–7 lines per mission. `radio(text, at)` already exists; the phase `brief` field IS
 the radio line. Kill lines that sound like tutorials.
 
-### 7.4 Squads & patrols
-Rewrite `squadSpawns` for both maps: initial squads must **own territory** (one per
-district/choke, not random loops) — a squad at the checkpoint, one holding the bridge
-head, one patrolling the souk perimeter, one on the ramparts approach, one reserve.
-Patrol loops must stay on 2m-nav-free ground, ≥3 points, and must not patrol through
-the player's deploy sightline for the first 20s.
+### 7.4 Squads & patrols — "the world must be alive before the mission starts"
+Phase 2 removed initial squads, so an empty map is the current first impression — the
+single biggest "boring" kill you must reverse. Reinstate an initial presence through
+one of the §1.1 mechanisms (AIManager spawn list or opening `pressure.request`), then
+design it to **own territory**: one squad at the checkpoint, one holding the bridge head
+/ gate, one patrolling the market perimeter, one overwatching the ramparts approach.
+Patrol loops stay on 2m-nav-free ground, ≥3 points each, never crossing the player's
+deploy sightline in the first 20s, and never camping the deployment point.
 
 ---
 

@@ -6,10 +6,10 @@ import { MAPS } from '../game/world';
 import { Panel, SectionTitle, Slider, Toggle, Segmented, ColorPick, CBtn } from './components';
 
 const PRESETS: { id: string; label: string; hint: string; tag: string; v: Partial<GameSettings> }[] = [
-  { id: 'perf', label: 'PERFORMANCE', hint: 'Max FPS', tag: 'FPS', v: { resolutionScale: 50, shadowQuality: 'off', bloom: false, vignette: 0, filmGrain: 0 } },
-  { id: 'bal', label: 'BALANCED', hint: 'Recommended', tag: 'DEFAULT', v: { resolutionScale: 60, shadowQuality: 'low', bloom: true, bloomStrength: 24, vignette: 14, filmGrain: 0 } },
-  { id: 'qual', label: 'QUALITY', hint: 'Strong GPU', tag: 'GPU', v: { resolutionScale: 80, shadowQuality: 'medium', bloom: true, bloomStrength: 30, vignette: 18, filmGrain: 0 } },
-  { id: 'ultra', label: 'ULTRA', hint: 'Screenshots', tag: 'MAX', v: { resolutionScale: 100, shadowQuality: 'high', bloom: true, bloomStrength: 34, vignette: 20, filmGrain: 6 } },
+  { id: 'perf', label: 'PERFORMANCE', hint: 'Max FPS', tag: 'FPS', v: { resolutionScale: 60, shadowQuality: 'off', bloom: false, vignette: 0, filmGrain: 0 } },
+  { id: 'bal', label: 'BALANCED', hint: 'Recommended', tag: 'DEFAULT', v: { resolutionScale: 100, shadowQuality: 'low', bloom: false, bloomStrength: 22, vignette: 12, filmGrain: 0 } },
+  { id: 'qual', label: 'QUALITY', hint: 'Strong GPU', tag: 'GPU', v: { resolutionScale: 100, shadowQuality: 'medium', bloom: true, bloomStrength: 30, vignette: 18, filmGrain: 0 } },
+  { id: 'ultra', label: 'CINEMATIC', hint: 'Soft highlights', tag: 'MAX', v: { resolutionScale: 100, shadowQuality: 'medium', bloom: true, bloomStrength: 34, vignette: 20, filmGrain: 0 } },
 ];
 
 type Tab = 'gameplay' | 'graphics' | 'audio' | 'crosshair' | 'controls';
@@ -27,11 +27,11 @@ const BINDS: [string, string][] = [
   ['JUMP / VAULT', 'SPACE'], ['FIRE', 'MOUSE 1'], ['SCOPE (ADS)', 'MOUSE 2'], ['RELOAD', 'R'],
   ['LEAN LEFT', 'Q'], ['LEAN RIGHT', 'E'], ['FRAG (5×)', 'HOLD G'], ['FLASHBANG', 'F'],
   ['PRIMARY WEAPONS', '1 M4 / 2 AK / 4 AWM / 5 MP7'], ['SIDEARM', '3 M1911'],
-  ['PLANT CHARGE', 'HOLD X'], ['PAUSE', 'ESC'],
+  ['ATTACH / DETONATE', 'X'], ['PAUSE', 'ESC'],
 ];
 
 export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p: Partial<GameSettings>) => void; onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('gameplay');
+  const [tab, setTab] = useState<Tab>('graphics');
 
   return (
     <div className="settings-layer anim-fade">
@@ -39,8 +39,8 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
         {/* header */}
         <div className="settings-head">
           <div>
-            <h2>SYSTEM CONFIGURATION</h2>
-            <p className="mono">OPERATOR PREFERENCES // APPLIED LIVE</p>
+            <h2>Settings</h2>
+            <p className="mono">Changes apply instantly</p>
           </div>
           <CBtn onClick={onClose}>✕ CLOSE</CBtn>
         </div>
@@ -108,10 +108,11 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   })}
                 </div>
                 <SectionTitle sub="Lower these first if the game feels sluggish">PERFORMANCE</SectionTitle>
-                <Slider label="RESOLUTION SCALE" value={s.resolutionScale} min={40} max={100} unit="%" onChange={v => set({ resolutionScale: v })} hint="Biggest FPS lever — 60-70% is nearly indistinguishable" />
+                <Slider label="RESOLUTION SCALE" value={s.resolutionScale} min={40} max={100} unit="%" onChange={v => set({ resolutionScale: v })} hint="Render resolution. Higher values improve distant detail." />
                 <Segmented label="SHADOW QUALITY" value={s.shadowQuality}
                   options={[{ v: 'off', l: 'OFF' }, { v: 'low', l: 'LOW' }, { v: 'medium', l: 'MED' }, { v: 'high', l: 'HIGH' }]}
                   onChange={v => set({ shadowQuality: v })} hint="Second biggest FPS cost" />
+                <Toggle label="ADAPTIVE RESOLUTION" value={s.adaptiveResolution ?? true} onChange={v => set({adaptiveResolution:v})} hint="Lower resolution under sustained load. Disable for fixed image quality." />
                 <Toggle label="SHOW FPS COUNTER" value={s.showFps} onChange={v => set({ showFps: v })} />
 
                 <div className="mt-6">

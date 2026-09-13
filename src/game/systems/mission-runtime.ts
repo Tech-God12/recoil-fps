@@ -60,8 +60,11 @@ export class MissionRuntime {
   }
 
   start() {
+    if (this.mission.status !== 'briefing') return;
     this.mission.start();
     this.consumeEvents();
+    // Opening request still obeys off-screen, walkability and live-cap safeguards.
+    this.pressure.request(3);
   }
 
   private isWalkable(at: Position) {
@@ -98,7 +101,7 @@ export class MissionRuntime {
         const clear = event.phase.type === 'advance'
           ? this.mission.definition.phases.slice(event.index + 1).find(p => p.type === 'clear')
           : event.phase.type === 'clear' ? event.phase : undefined;
-        this.pressure.setPolicy(event.phase.pressure, clear?.zone ?? null, clear?.at ?? event.phase.at);
+        this.pressure.setPolicy(event.phase.pressure, clear?.zone ?? null, event.index === 0 ? event.phase.at : clear?.at ?? event.phase.at);
         this.markers.setPhase(event.phase);
         h.phaseChanged(event.phase, event.index);
         h.radio(event.phase.brief);
@@ -115,11 +118,12 @@ export class MissionRuntime {
         break;
       case 'cache-detonated':
         this.markers.destroyCache(h.world);
+        h.world.detonate?.();
         h.detonate(new THREE.Vector3(...event.at));
         break;
       case 'reinforcement-request':
         this.pressure.request(event.count, event.from);
-        h.radio('Another squad is moving in. Hold your perimeter.');
+        h.radio(this.mission.current.type === 'defend' ? 'They are pushing the relay. Cut them off before they reach the courtyard.' : 'Movement on the wadi banks. Keep the crossing covered.');
         break;
     }
   }
@@ -130,8 +134,17 @@ export class MissionRuntime {
     const close = p.type === 'destroy' && Math.hypot(p.at[0] - player[0], p.at[1] - player[1], p.at[2] - player[2]) <= p.radius;
     const visible = close && this.lineOfSight([p.at[0], p.at[1] + 0.8, p.at[2]], true);
     this.targetVisible = visible;
-    this.mission.update(dt, { player, interact, targetVisible: visible, alive: this.host.isAlive() });
+    let hostilesInObjective = 0;
+    if (p.type === 'defend') for (const enemy of this.host.ai.enemies) {
+      if (!enemy.dead && Math.abs(enemy.pos.y - p.at[1]) <= 2.5 && Math.hypot(enemy.pos.x - p.at[0], enemy.pos.z - p.at[2]) <= p.radius) hostilesInObjective++;
+    }
+    this.mission.update(dt, { hostilesInObjective, player, interact, targetVisible: visible, alive: this.host.isAlive() });
     this.consumeEvents();
+    if (p.type === 'destroy') {
+      const snapshot=this.mission.snapshot(player);
+      this.markers.setCharge(snapshot.plantProgress,snapshot.armed,snapshot.elapsed);
+    }
+    if (p.type === 'defend' && this.mission.current === p) this.markers.setContested(hostilesInObjective > 0);
     if (this.mission.status !== 'active') return;
     this.pressureTime += dt;
     if (this.pressureTime < 0.5) return;

@@ -26,7 +26,7 @@ const tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 1);
 export class Effects {
   private bursts: BurstSlot[] = [];
   private burstIdx = 0;
-  private tracers: { mesh: THREE.Mesh; life: number; active: boolean }[] = [];
+  private tracers: { mesh: THREE.Mesh; life: number; active: boolean; from: THREE.Vector3; direction: THREE.Vector3; distance: number; travel: number; speed: number }[] = [];
   private tracerIdx = 0;
   private holes: THREE.Mesh[] = [];
   private holeIdx = 0;
@@ -70,7 +70,7 @@ export class Effects {
       mesh.visible = false;
       mesh.frustumCulled = false;
       scene.add(mesh);
-      this.tracers.push({ mesh, life: 0, active: false });
+      this.tracers.push({ mesh, life: 0, active: false, from: new THREE.Vector3(), direction: new THREE.Vector3(), distance: 0, travel: 0, speed: 220 });
     }
     // ambient ground-level sand drift
     const N = 320;
@@ -142,7 +142,8 @@ export class Effects {
   }
 
   enemyMuzzle(pos: THREE.Vector3) {
-    this.burst(pos, 5, 0xFFC060, 1.5, 0.08, 0, 0.09);
+    this.burst(pos, 9, 0xFFE7A0, 0.6, 0.14, 0, 0.24);
+    this.burst(pos, 4, 0xD1C7B5, 0.8, 0.32, -0.3, 0.12);
   }
 
   playerFlash(worldPos: THREE.Vector3) {
@@ -151,18 +152,19 @@ export class Effects {
     this.flashTimer = 0.045;
   }
 
-  tracer(from: THREE.Vector3, to: THREE.Vector3) {
+  tracer(from: THREE.Vector3, to: THREE.Vector3, hostile = false) {
     this._v1.subVectors(to, from);
     const len = this._v1.length();
     if (len < 1) return;
     const t = this.tracers[this.tracerIdx];
     this.tracerIdx = (this.tracerIdx + 1) % this.tracers.length;
-    const l = Math.min(len, 4);
+    const l = Math.min(len, hostile ? 2.0 : 2.8);
+    t.from.copy(from); t.direction.copy(this._v1).normalize(); t.distance = len; t.travel = 0; t.speed = hostile ? 150 : 240;
     t.mesh.position.copy(from).addScaledVector(this._v1.normalize(), l / 2);
-    t.mesh.scale.set(1, 1, l);
+    t.mesh.scale.set(hostile ? 1.7 : 1.25, hostile ? 1.7 : 1.25, l);
     t.mesh.lookAt(to);
     t.mesh.visible = true;
-    t.life = 0.09;
+    t.life = Math.max(0.12,len/t.speed);
     t.active = true;
   }
 
@@ -199,6 +201,8 @@ export class Effects {
       const t = this.tracers[i];
       if (!t.active) continue;
       t.life -= dt;
+      t.travel = Math.min(t.distance,t.travel + dt*t.speed);
+      t.mesh.position.copy(t.from).addScaledVector(t.direction,Math.max(t.mesh.scale.z/2,t.travel-t.mesh.scale.z/2));
       if (t.life <= 0) { t.active = false; t.mesh.visible = false; }
     }
     if (this.flashTimer > 0) {

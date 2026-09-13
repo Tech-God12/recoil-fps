@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 process.chdir(root);
-const tests = ['tests/mission.test.js', 'tests/reinforcements.test.js', 'tests/mission-integration.test.js'];
+const tests = ['tests/mission.test.js', 'tests/mission-defense.test.js', 'tests/reinforcements.test.js', 'tests/mission-integration.test.js'];
 function run() {
   const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...tests], { cwd: root, encoding: 'utf8', timeout: 60000 });
   if (result.error) throw result.error;
@@ -20,14 +20,18 @@ if (baseline.status !== 0) {
 const mission = 'src/game/systems/mission.ts';
 const pressure = 'src/game/systems/reinforcements.ts';
 const mutations = [
+  { name: 'relay never takes hostile damage', file: mission, from: 'this.defense - hostiles * p.drain! * step', to: 'this.defense - 0 * step' },
+  { name: 'overrun relay cannot fail', file: mission, from: 'if (this.defense <= 0) { this.fail(); break; }', to: 'if (false) { this.fail(); break; }' },
+  { name: 'relay clock secretly requires player inside', file: mission, from: 'this.holdTime += step;', to: 'if (inside) this.holdTime += step;' },
+  { name: 'relay drains beyond completion deadline', file: mission, from: 'const step = Math.min(dt, Math.max(0, p.seconds! - this.holdTime));', to: 'const step = dt;' },
   { name: 'advance/extract radius removed', file: mission, from: 'if (inside) this.completePhase();', to: 'this.completePhase();' },
   { name: 'clear threshold bypassed', file: mission, from: 'if ((this.credits.get(p.id)?.size ?? 0) >= p.count!) this.completePhase();', to: 'this.completePhase();' },
   { name: 'kills outside the objective accepted', file: mission, from: 'if (event.zone === p.zone || within(event.at, p.at, p.radius)) credit.add(event.id);', to: 'credit.add(event.id);' },
   { name: 'duplicate victim IDs earn credit twice', file: mission, from: 'if (event.zone === p.zone || within(event.at, p.at, p.radius)) credit.add(event.id);', to: 'if (event.zone === p.zone || within(event.at, p.at, p.radius)) credit.add(event.id + credit.size);' },
   { name: 'clear credit limit removed', file: mission, from: "if (p.type !== 'clear' || !credit || credit.size >= p.count!) continue;", to: "if (p.type !== 'clear' || !credit) continue;" },
-  { name: 'charge can be planted through walls', file: mission, from: 'inside && frame.interact && frame.targetVisible', to: 'inside && frame.interact' },
-  { name: 'plant interaction does not reset', file: mission, from: 'else this.plantTime = 0;', to: 'else this.plantTime += 0;' },
-  { name: 'fuse detonates early', file: mission, from: 'if (this.fuseTime >= p.fuse!) {', to: 'if (this.fuseTime >= 0) {' },
+  { name: 'charge can be planted through walls', file: mission, from: 'inside && pressed && frame.targetVisible', to: 'inside && pressed' },
+  { name: 'attachment loses saved progress behind cover', file: mission, from: 'if (this.attaching && inside && frame.targetVisible)', to: 'if (!inside || !frame.targetVisible) this.plantTime = 0; if (this.attaching && inside && frame.targetVisible)' },
+  { name: 'fuse detonates early', file: mission, from: 'this.fuseTime >= p.fuse! ||', to: 'this.fuseTime >= 0 ||' },
   { name: 'hold progresses outside its perimeter', file: mission, from: 'if (inside) this.holdTime = Math.min(p.seconds!, this.holdTime + dt);', to: 'this.holdTime = Math.min(p.seconds!, this.holdTime + dt);' },
   { name: 'pause no longer freezes clocks', file: mission, from: "if (this.status !== 'active' || frame.paused) return;", to: "if (this.status !== 'active') return;" },
   { name: 'mission clock keeps running after extraction', file: mission, from: "if (this.status !== 'active' || frame.paused) return;", to: 'if (frame.paused) return;' },

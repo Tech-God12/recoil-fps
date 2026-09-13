@@ -1,123 +1,517 @@
 {
   "alrasul": {
-    "id": "sandglass",
-    "name": "SANDGLASS",
+    "id": "sandblast",
+    "name": "Sandblast",
     "map": "alrasul",
-    "deployment": [0, 0, 96],
-    "brief": "Break the market defence, destroy the Garrison cache, and get out before the counterattack closes in.",
+    "deployment": [
+      -12,
+      0,
+      94
+    ],
+    "brief": "Cross the wadi. Break the souk. Burn the garrison armory, then fight your way to the water tower before the last crossing closes.",
     "extractionCallsign": "Nomad",
     "phases": [
       {
-        "id": "market-approach", "type": "advance", "title": "Reach the market",
-        "location": "Market approach", "at": [-25, 0, 28], "radius": 7,
-        "brief": "Take the west lane to the market square. Use the buildings to break sightlines.",
-        "pressure": { "target": 3, "interval": 12 },
-        "onComplete": { "alert": "market" }
+        "id": "checkpoint",
+        "type": "advance",
+        "title": "Secure the checkpoint office",
+        "location": "Checkpoint office",
+        "at": [
+          -29,
+          0,
+          68
+        ],
+        "radius": 2,
+        "pressure": {
+          "target": 3,
+          "interval": 12
+        },
+        "brief": "Leave the exposed road and secure the white checkpoint office. From there, cross the bridge and push into the souk.",
+        "onComplete": {
+          "alert": "checkpoint"
+        }
       },
       {
-        "id": "market-clear", "type": "clear", "title": "Break the market defence",
-        "location": "Market quarter", "at": [-25, 0, 20], "radius": 22, "zone": "market", "count": 6,
-        "brief": "Neutralise six market defenders. Check both rows of stalls and the side lanes.",
-        "pressure": { "target": 6, "interval": 8 },
-        "onComplete": { "reinforce": 3, "from": "north", "resupply": true }
+        "id": "souk-clear",
+        "type": "clear",
+        "title": "Clear the souk defenders",
+        "location": "Souk courtyard",
+        "at": [
+          -29,
+          0,
+          -39
+        ],
+        "radius": 20,
+        "pressure": {
+          "target": 6,
+          "interval": 8
+        },
+        "brief": "You are across. Push into the courtyard. Their spotters own the covered lanes, but the houses open at both ends.",
+        "zone": "souk",
+        "count": 6,
+        "onComplete": {
+          "reinforce": 3,
+          "from": "west",
+          "resupply": true
+        }
       },
       {
-        "id": "garrison-cache", "type": "destroy", "title": "Demolish the cache",
-        "location": "Garrison courtyard", "at": [35, 0, 26], "radius": 3,
-        "brief": "Hold X at the courtyard cache to plant a charge. The fuse is 25 seconds. Get clear.",
-        "plantSeconds": 2.5, "fuse": 25,
-        "pressure": { "target": 6, "interval": 9 },
-        "onComplete": { "alert": "all", "reinforce": 6 }
+        "id": "garrison-cache",
+        "type": "destroy",
+        "title": "Sabotage the garrison armory",
+        "location": "Fort armory",
+        "at": [
+          46,
+          0,
+          36
+        ],
+        "radius": 3,
+        "pressure": {
+          "target": 6,
+          "interval": 9
+        },
+        "brief": "Find the strapped supply case in the armory court. Tap X to attach the charge, cover your exit, then trigger it from safety.",
+        "plantSeconds": 1.8,
+        "fuse": 18,
+        "onComplete": {
+          "alert": "all",
+          "reinforce": 6
+        }
       },
       {
-        "id": "garrison-hold", "type": "hold", "title": "Hold for extraction",
-        "location": "Garrison perimeter", "at": [35, 0, 26], "radius": 16, "seconds": 60,
-        "brief": "Nomad needs 60 seconds. Choose your cover inside the marked perimeter. More squads are inbound.",
-        "pressure": { "target": 9, "interval": 4.5 },
-        "escalate": { "every": 15, "count": 3 }
+        "id": "bridge-hold",
+        "type": "hold",
+        "title": "Hold the bridge plaza",
+        "location": "South bridgehead",
+        "at": [
+          -12,
+          0,
+          21
+        ],
+        "radius": 15,
+        "pressure": {
+          "target": 9,
+          "interval": 4.5
+        },
+        "brief": "The footbridge is down. You have one crossing left. Keep the road bridge open; Nomad is looking for another landing site.",
+        "seconds": 60,
+        "escalate": {
+          "every": 15,
+          "count": 3
+        }
       },
       {
-        "id": "south-extract", "type": "extract", "title": "Get to the pickup",
-        "location": "South service road", "at": [44, 0, 87], "radius": 6,
-        "brief": "Nomad is ready at the south service road. Break contact and reach the pickup alive.",
-        "pressure": { "target": 6, "interval": 10 }
+        "id": "tower-extract",
+        "type": "extract",
+        "title": "Extract at the water tower",
+        "location": "Water tower LZ",
+        "at": [
+          53,
+          0,
+          73
+        ],
+        "radius": 6,
+        "pressure": {
+          "target": 6,
+          "interval": 8
+        },
+        "brief": "Your pickup is under the blue tank. Take the depot lanes east of the fort. North bank squads are chasing you over the bridge."
       }
     ],
     "insertions": [
-      { "id": "south-west", "from": "south", "at": [-44, 0, 96] },
-      { "id": "south-east", "from": "south", "at": [44, 0, 96] },
-      { "id": "west-service", "from": "west", "at": [-84, 0, 44] },
-      { "id": "east-service", "from": "east", "at": [84, 0, 44] },
-      { "id": "north-west", "from": "north", "at": [-44, 0, -87] },
-      { "id": "north-east", "from": "north", "at": [44, 0, -87] },
-      { "id": "market-west", "from": "west", "at": [-44, 0, 4] },
-      { "id": "depot-east", "from": "east", "at": [44, 0, -4] },
-      { "id": "west-crossing", "from": "west", "at": [-84, 0, -4] },
-      { "id": "east-crossing", "from": "east", "at": [84, 0, 4] },
-      { "id": "north-crossing", "from": "north", "at": [-4, 0, -44] },
-      { "id": "south-crossing", "from": "south", "at": [4, 0, 44] },
-      { "id": "market-delivery-lane", "from": "west", "at": [-51, 0, 44], "members": [[-51, 0, 42.5], [-51, 0, 44], [-51, 0, 45.5]] },
-      { "id": "garrison-east", "from": "east", "at": [44, 0, 54] },
-      { "id": "market-south", "from": "south", "at": [-44, 0, 54] },
-      { "id": "north-service-west", "from": "north", "at": [-84, 0, -44] },
-      { "id": "north-service-east", "from": "north", "at": [84, 0, -44] }
+      {
+        "id": "souk-west",
+        "from": "west",
+        "at": [
+          -85,
+          0,
+          -30
+        ]
+      },
+      {
+        "id": "mosque-rear",
+        "from": "west",
+        "at": [
+          -80,
+          0,
+          -58
+        ]
+      },
+      {
+        "id": "souk-north",
+        "from": "north",
+        "at": [
+          -35,
+          0,
+          -95
+        ]
+      },
+      {
+        "id": "market-north",
+        "from": "north",
+        "at": [
+          0,
+          0,
+          -95
+        ]
+      },
+      {
+        "id": "old-east",
+        "from": "east",
+        "at": [
+          55,
+          0,
+          -75
+        ]
+      },
+      {
+        "id": "east-bank",
+        "from": "east",
+        "at": [
+          79,
+          0,
+          -31
+        ]
+      },
+      {
+        "id": "wadi-west",
+        "from": "west",
+        "at": [
+          -57,
+          0,
+          25
+        ]
+      },
+      {
+        "id": "wadi-east",
+        "from": "east",
+        "at": [
+          40,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "bridge-north",
+        "from": "north",
+        "at": [
+          -12,
+          0,
+          -25
+        ]
+      },
+      {
+        "id": "north-bank",
+        "from": "north",
+        "at": [
+          22,
+          0,
+          -28
+        ]
+      },
+      {
+        "id": "depot-east",
+        "from": "east",
+        "at": [
+          98,
+          0,
+          60
+        ]
+      },
+      {
+        "id": "depot-south",
+        "from": "south",
+        "at": [
+          84,
+          0,
+          80
+        ]
+      },
+      {
+        "id": "service-west",
+        "from": "west",
+        "at": [
+          -80,
+          0,
+          34
+        ]
+      },
+      {
+        "id": "fort-rear",
+        "from": "south",
+        "at": [
+          30,
+          0,
+          68
+        ]
+      }
     ]
   },
   "kasbah": {
     "id": "ridgeline",
-    "name": "RIDGELINE",
+    "name": "Town",
     "map": "kasbah",
-    "deployment": [0, 0, 66],
-    "brief": "Open a route through the western market, sabotage the citadel supply cache, and withdraw to the west gate.",
+    "deployment": [
+      0,
+      0,
+      100
+    ],
+    "brief": "Climb into a fortress built on six trades. Destroy its armory, keep the relay alive, and escape through the western gate.",
     "extractionCallsign": "Nomad",
     "phases": [
       {
-        "id": "ridge-approach", "type": "advance", "title": "Reach the western market",
-        "location": "West market approach", "at": [-42, 0, 34], "radius": 7,
-        "brief": "Follow the outer lane west. Reach the market without crossing the citadel square.",
-        "pressure": { "target": 3, "interval": 12 }, "onComplete": { "alert": "west-market" }
+        "id": "switchback",
+        "type": "advance",
+        "title": "Secure the workshop lookout",
+        "location": "Workshop lookout",
+        "at": [
+          -16,
+          0,
+          57
+        ],
+        "radius": 2,
+        "pressure": {
+          "target": 3,
+          "interval": 13
+        },
+        "brief": "Get off the exposed road. Reach the brick workshop beside the kiln approach, then push north into the market.",
+        "onComplete": {
+          "alert": "terraces"
+        }
       },
       {
-        "id": "ridge-clear", "type": "clear", "title": "Clear the western market",
-        "location": "West market", "at": [-42, 0, 27.5], "radius": 20, "zone": "west-market", "count": 6,
-        "brief": "Neutralise six defenders. Clear a route between the stalls and the inner ring road.",
-        "pressure": { "target": 6, "interval": 8 }, "onComplete": { "reinforce": 3, "from": "north", "resupply": true }
+        "id": "market-clear",
+        "type": "clear",
+        "title": "Silence the covered market",
+        "location": "Northern awning street",
+        "at": [
+          16,
+          0,
+          -71
+        ],
+        "radius": 22,
+        "pressure": {
+          "target": 6,
+          "interval": 7
+        },
+        "brief": "You have reached their supply street. Cut out the market defenders. Teal banners lead back toward the keep.",
+        "zone": "market",
+        "count": 8,
+        "onComplete": {
+          "reinforce": 3,
+          "from": "west",
+          "resupply": true
+        }
       },
       {
-        "id": "ridge-cache", "type": "destroy", "title": "Destroy the citadel cache",
-        "location": "Citadel east court", "at": [18, 0, -4], "radius": 3,
-        "brief": "Plant the charge with X at the east court. Pull back before the 25-second fuse expires.",
-        "plantSeconds": 2.5, "fuse": 25,
-        "pressure": { "target": 6, "interval": 9 }, "onComplete": { "alert": "all", "reinforce": 6 }
+        "id": "citadel-cache",
+        "type": "destroy",
+        "title": "Destroy the citadel armory",
+        "location": "Keep side court",
+        "at": [
+          17,
+          0,
+          -10
+        ],
+        "radius": 3,
+        "pressure": {
+          "target": 6,
+          "interval": 8
+        },
+        "brief": "Find the strapped supply case in the armory court. Tap X to attach the charge, cover your exit, then trigger it from safety.",
+        "plantSeconds": 1.8,
+        "fuse": 18,
+        "onComplete": {
+          "alert": "all",
+          "reinforce": 6
+        }
       },
       {
-        "id": "ridge-hold", "type": "hold", "title": "Defend the citadel perimeter",
-        "location": "Citadel east perimeter", "at": [18, 0, -4], "radius": 15, "seconds": 60,
-        "brief": "Hold the perimeter for 60 seconds. Use the towers as cover. Do not chase the counterattack.",
-        "pressure": { "target": 9, "interval": 4.5 }, "escalate": { "every": 15, "count": 3 }
+        "id": "relay-defense",
+        "type": "defend",
+        "title": "Protect the courtyard relay",
+        "location": "Signal relay court",
+        "at": [
+          0,
+          0,
+          5
+        ],
+        "radius": 12,
+        "pressure": {
+          "target": 9,
+          "interval": 4
+        },
+        "brief": "The granary hoist is down; your shortcut is buried. Protect the relay in this court while Nomad fixes your escape corridor.",
+        "seconds": 75,
+        "defense": 100,
+        "drain": 4,
+        "escalate": {
+          "every": 18,
+          "count": 3
+        }
       },
       {
-        "id": "ridge-extract", "type": "extract", "title": "Withdraw to the west gate",
-        "location": "West gate", "at": [-88, 0, 0], "radius": 6,
-        "brief": "Nomad is at the west gate. Cross the inner ring, break contact, and extract.",
-        "pressure": { "target": 6, "interval": 10 }
+        "id": "gate-run",
+        "type": "advance",
+        "title": "Break toward the west passage",
+        "location": "Caravanserai junction",
+        "at": [
+          -38,
+          0,
+          2
+        ],
+        "radius": 7,
+        "pressure": {
+          "target": 9,
+          "interval": 5
+        },
+        "brief": "You have a corridor, not a ceasefire. Drop past the teal galleries. Keep left of the fallen hoist; the gate tunnel is ahead."
+      },
+      {
+        "id": "west-extract",
+        "type": "extract",
+        "title": "Escape through the west gate",
+        "location": "West gate tunnel",
+        "at": [
+          -101,
+          0,
+          0
+        ],
+        "radius": 6,
+        "pressure": {
+          "target": 6,
+          "interval": 7
+        },
+        "brief": "Nomad is beyond the western arch. Run the covered tunnel. Both terrace roads are feeding squads into your wake."
       }
     ],
     "insertions": [
-      { "id": "ridge-south-east", "from": "south", "at": [32, 0, 77] },
-      { "id": "ridge-south-west", "from": "south", "at": [-32, 0, 77] },
-      { "id": "ridge-west-gate", "from": "west", "at": [-88, 0, 0] },
-      { "id": "ridge-east-gate", "from": "east", "at": [88, 0, 0] },
-      { "id": "ridge-north-east", "from": "north", "at": [32, 0, -77] },
-      { "id": "ridge-north-west", "from": "north", "at": [-32, 0, -77] },
-      { "id": "ridge-inner-east", "from": "east", "at": [31, 0, 0] },
-      { "id": "ridge-inner-west", "from": "west", "at": [-31, 0, 0] },
-      { "id": "ridge-inner-north", "from": "north", "at": [0, 0, -31] },
-      { "id": "ridge-inner-south", "from": "south", "at": [0, 0, 31] },
-      { "id": "ridge-outer-east", "from": "east", "at": [64, 0, 0] },
-      { "id": "ridge-outer-west", "from": "west", "at": [-64, 0, 0] },
-      { "id": "ridge-outer-north", "from": "north", "at": [0, 0, -64] },
-      { "id": "ridge-outer-south", "from": "south", "at": [0, 0, 66] }
+      {
+        "id": "kiln-road",
+        "from": "south",
+        "at": [
+          -32,
+          0,
+          51
+        ]
+      },
+      {
+        "id": "potters-road",
+        "from": "south",
+        "at": [
+          56,
+          0,
+          59
+        ]
+      },
+      {
+        "id": "market-west",
+        "from": "north",
+        "at": [
+          -22,
+          0,
+          -72
+        ]
+      },
+      {
+        "id": "market-east",
+        "from": "north",
+        "at": [
+          41,
+          0,
+          -81
+        ]
+      },
+      {
+        "id": "north-road",
+        "from": "north",
+        "at": [
+          1,
+          0,
+          -99
+        ]
+      },
+      {
+        "id": "tannery-road",
+        "from": "east",
+        "at": [
+          93,
+          0,
+          -37
+        ]
+      },
+      {
+        "id": "east-terrace",
+        "from": "east",
+        "at": [
+          43,
+          0,
+          -10
+        ]
+      },
+      {
+        "id": "court-west",
+        "from": "west",
+        "at": [
+          -35,
+          0,
+          -9
+        ]
+      },
+      {
+        "id": "court-north",
+        "from": "north",
+        "at": [
+          0,
+          0,
+          -44
+        ]
+      },
+      {
+        "id": "caravan-road",
+        "from": "west",
+        "at": [
+          -61,
+          0,
+          29
+        ]
+      },
+      {
+        "id": "granary-west",
+        "from": "west",
+        "at": [
+          -76,
+          0,
+          -41
+        ]
+      },
+      {
+        "id": "granary-east",
+        "from": "north",
+        "at": [
+          -20,
+          0,
+          -59
+        ]
+      },
+      {
+        "id": "gate-far",
+        "from": "west",
+        "at": [
+          -102,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "south-terrace",
+        "from": "south",
+        "at": [
+          22,
+          0,
+          64
+        ]
+      }
     ]
   }
 }

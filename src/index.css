@@ -236,7 +236,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   position: relative; z-index: 2; flex: 1; display: grid;
   grid-template-columns: minmax(280px, 1.05fr) minmax(330px, .95fr);
   gap: clamp(40px, 7vw, 140px); width: 92%; max-width: 1360px; margin: auto;
-  align-items: center; padding: 30px 0 24px;
+  align-items: center; padding: 30px 0 24px; min-height: 0; overflow-y: auto;
 }
 .menu-eyebrow { display: flex; align-items: center; gap: 8px; color: var(--acc);
   font-size: 10px; font-weight: 700; letter-spacing: .3em; }
@@ -332,7 +332,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   box-shadow: 0 0 10px rgba(255,92,26,.25); }
 .route-title { font-family: 'Orbitron', sans-serif; font-size: 13px; font-weight: 700; color: #EDF0F4; letter-spacing: .06em; }
 .route-loc { display: block; font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,.4); margin-top: 2px; letter-spacing: .1em; }
-.route-timing { margin-left: auto; font-family: var(--mono); font-size: 8px; letter-spacing: .16em; color: var(--warn);
+.route-timing { margin-left: auto; flex-shrink: 0; white-space: nowrap; font-family: var(--mono); font-size: 8px; letter-spacing: .16em; color: var(--warn);
   border: 1px solid rgba(255,196,0,.35); background: rgba(255,196,0,.07); padding: 3px 8px;
   clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
 .menu-rules { font-size: 12px; line-height: 1.5; color: rgba(255,255,255,.5); margin: 16px 0 0;
@@ -902,6 +902,21 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 /* ============================================================
    RESPONSIVE
    ============================================================ */
+/* Six-phase operations must remain reachable on 720p and short viewports. */
+.menu-header, .menu-footer { flex-shrink: 0; }
+@media (max-height: 800px) {
+  .menu-layout { padding: 18px 0; }
+  .route { margin-top: 16px; }
+  .route li { padding: 8px 2px; }
+  .map-card { padding: 12px 16px; margin-top: 10px; }
+}
+@media (max-height: 760px) {
+  .menu-layout { padding: 12px 0; }
+  .menu-title { font-size: 64px; }
+  .route { margin-top: 12px; }
+  .route li { padding: 6px 2px; }
+  .menu-rules { font-size: 10px; margin-top: 10px; }
+}
 @media (max-height: 700px) {
   .menu-title { font-size: 46px; margin: 10px 0 16px; }
   .menu-title small { margin-top: 8px; }
@@ -943,4 +958,93 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .results-actions { gap: 14px; }
   .stats-grid { clip-path: none; }
   .compass-strip { width: 300px; }
+}
+
+/* Sandblast / Town: fit the briefing to the viewport, not a scroll container. */
+.menu-layout { overflow: visible; gap: clamp(24px,4vw,76px); padding: 14px 0; }
+.menu-title { font-size: clamp(44px,7vw,92px); }
+.menu-brief { font-size: 14px; line-height: 1.5; margin: 12px 0 18px; }
+.map-card { padding: 12px 15px; margin-top: 9px; }
+.route { margin-top: 16px; }
+.route ol { display:grid; grid-template-columns:1fr 1fr; gap: 0 14px; }
+.route li { padding:9px 0; min-width:0; }
+.route-title { font-size:10px; letter-spacing:0.02em; }
+.route-loc { font-size:9px; }
+.route-timing { display:none; }
+.fullscreen-control { position:absolute; bottom:48px; right:4%; z-index:35; }
+.settings-panel { border:1px solid #46515a; border-radius:12px; background:#11191f; box-shadow:0 24px 90px #0009; clip-path:none; }
+.settings-head { padding:20px 24px; background:#19232b; }
+.settings-head h2 { font-family:inherit; font-size:25px; letter-spacing:-.02em; }
+.settings-head .mono { letter-spacing:.02em; color:#abb9c3; }
+.settings-rail { width:180px; background:#141e25; }
+.rail-item { letter-spacing:.06em; font-size:11px; padding:15px 20px; }
+.rail-icon,.rail-chev { display:none; }
+.settings-pane { scrollbar-width:thin; scrollbar-color:#52636e transparent; }
+.preset { border-radius:7px; clip-path:none; }
+@media(max-height:760px) {
+ .menu-header { padding-top:12px; padding-bottom:12px; }
+ .menu-title { font-size:52px; margin:10px 0; }
+ .menu-title small { margin-top:6px; }
+ .input-legend { margin-top:12px; }
+ .route li { padding:6px 0; }
+ .menu-rules { margin-top:8px; }
+ .menu-layout { padding:8px 0; }
+}
+@media(max-width:650px) {
+ .menu-layout { grid-template-columns:1fr; gap:12px; align-content:center; width:90%; }
+ .menu-title { font-size:36px; margin:2px 0; }
+ .menu-title small,.menu-eyebrow,.input-legend,.menu-rules,.menu-layout .op-chip { display:none; }
+ .menu-brief { font-size:12px; margin:8px 0; max-width:none; }
+ .deploy-btn { padding:12px 18px; }
+ .menu-secondary-btn { margin-top:8px; }
+ .map-card { padding:8px 12px; }
+ .route { margin-top:8px; }
+ .route li { padding:5px 0; }
+ .menu-footer { padding:10px 5%; font-size:8px; }
+ .fullscreen-control { bottom:58px; right:5%; }
+ .settings-rail { width:112px; }
+ .settings-pane { padding:14px; }
+ .settings-head h2 { font-size:20px; }
+ .settings-pane .grid-cols-4 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-height:560px) and (min-width:651px) {
+ .menu-root .ticker,.menu-title small,.input-legend,.menu-eyebrow,.menu-rules { display:none; }
+ .menu-title { font-size:38px; }
+ .menu-brief { font-size:12px; }
+ .route li { padding:4px 0; }
+ .map-card { padding:7px 12px; }
+}
+/* overflow:hidden still permits focus/scrollIntoView to scroll offscreen animation
+   layers. Clip non-scrolling shells so choosing a map cannot shift the whole UI. */
+html,body,#root,.menu-root { overflow:clip; }
+.app-root { position:fixed; inset:0; overflow:clip; }
+.menu-layout { overflow:clip; }
+.route li::before { display:none; }
+.settings-panel.panel-bg { background:#11191f; }
+.settings-layer { background:#03070cba; backdrop-filter:blur(8px); }
+@media(max-height:560px) and (min-width:651px) {
+ .menu-layout .op-chip { display:none; }
+ .menu-header { padding-top:8px; padding-bottom:8px; }
+ .menu-layout { gap:24px; }
+ .menu-title { margin:0; }
+ .menu-brief { font-size:11px; line-height:1.35; margin:8px 0; }
+ .deploy-btn { padding:12px 18px; }
+ .menu-secondary-btn { margin-top:8px; }
+ .route { margin-top:6px; }
+ .route li { gap:6px; padding:3px 0; }
+ .route-loc { display:none; }
+ .route-title { font-size:9px; }
+ .map-card { margin-top:5px; }
+ .map-num { font-size:18px; }
+ .fullscreen-control { bottom:40px; }
+}
+
+.objective-kind { display:inline-flex; margin:10px 0 2px; padding:3px 7px; border:1px solid #6c879477; color:#bddde0; font-size:9px; letter-spacing:.1em; border-radius:3px; }
+.kind-destroy {color:#ffa46c;border-color:#db814466;}
+.kind-defend {color:#6fcbed;border-color:#4ba1c466;}
+.kind-extract {color:#8cdbc2;border-color:#5fab9166;}
+@media(max-height:560px) and (min-width:651px) {
+ .menu-layout { padding:0; }
+ .menu-brief { font-size:10px; }
+ .menu-layout .sec-label { font-size:8px; }
 }

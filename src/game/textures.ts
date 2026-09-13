@@ -2,6 +2,17 @@
 import * as THREE from 'three';
 
 export interface TextureSet {
+  signage?: THREE.MeshStandardMaterial;
+  stoneBlock?: THREE.MeshStandardMaterial;
+  firedBrick?: THREE.MeshStandardMaterial;
+  packedEarth?: THREE.MeshStandardMaterial;
+  corrugatedMetal?: THREE.MeshStandardMaterial;
+  roughTimber?: THREE.MeshStandardMaterial;
+  terracePavers?: THREE.MeshStandardMaterial;
+  cobbleLane?: THREE.MeshStandardMaterial;
+  wadiBed?: THREE.MeshStandardMaterial;
+  dirtPath?: THREE.MeshStandardMaterial;
+
   sand: THREE.MeshStandardMaterial;
   plaza: THREE.MeshStandardMaterial;
   adobeWall: THREE.MeshStandardMaterial;
@@ -338,5 +349,74 @@ export function getMaterials(): TextureSet {
     cached.tileFloor = mat(d, b, 8, 8, 0.8, 0, 0.05);
   }
 
+  // District surfaces: deterministic hand-drawn masonry, grain and sediment. Small
+  // 256px diffuse/bump pairs are bundled procedurally; no external texture downloads.
+  for (const [key, base, mortar, mode] of [
+    ['stoneBlock', '#a8a18b', '#655f50', 'stone'],
+    ['firedBrick', '#a65e43', '#654a3b', 'brick'],
+    ['packedEarth', '#b29a74', '#8d7355', 'earth'],
+    ['corrugatedMetal', '#788380', '#435452', 'metal'],
+    ['roughTimber', '#87735b', '#4a4033', 'wood'],
+    ['terracePavers', '#b8ad91', '#77705e', 'paver'],
+    ['cobbleLane', '#a29881', '#685f51', 'cobble'],
+    ['wadiBed', '#998669', '#65533f', 'crack'],
+  ] as const) {
+    const [d,c] = cv(256,256), [b,bc] = cv(256,256);
+    c.fillStyle = base; c.fillRect(0,0,256,256);
+    bc.fillStyle = '#aaaaaa'; bc.fillRect(0,0,256,256);
+    const line = (x: number,y: number,xx: number,yy: number,width = 2) => {
+      for (const ctx of [c,bc]) {
+        ctx.strokeStyle = ctx === c ? mortar : '#555555'; ctx.lineWidth = width;
+        ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(xx,yy); ctx.stroke();
+      }
+    };
+    if (['stone','brick','paver','cobble'].includes(mode)) {
+      const h = mode === 'brick' ? 20 : mode === 'cobble' ? 24 : 48;
+      const w = mode === 'brick' ? 55 : mode === 'cobble' ? 38 : 88;
+      for(let y=0,row=0;y<256;y+=h,row++) {
+        line(0,y,256,y,3);
+        for(let x=-(row%2)*w/2;x<256;x+=w) {
+          line(x,y,x,y+h,3);
+          c.fillStyle = `rgba(255,247,221,${0.025+((row*7+x*3)%11)/140})`;
+          c.fillRect(x+3,y+3,w-6,h-6);
+          line(x+3,y+4,x+w-3,y+4,0.6);
+        }
+      }
+    } else if (mode === 'metal' || mode === 'wood') {
+      for(let x=0;x<256;x+=mode==='metal'?12:32) {
+        line(x,0,x,256,3); line(x+3,0,x+3,256,1);
+        if(mode==='wood') for(let j=0;j<7;j++) line(x+5+j*3,0,x+6+j*3,256,0.4);
+        else {c.fillStyle='#b7b2a0';c.fillRect(x+4,6,2,2);c.fillRect(x+4,246,2,2);}
+      }
+    } else {
+      for(let i=0;i<120;i++) {
+        const x=(i*67)%256,y=(i*101)%256;
+        line(x,y,x+8+Math.sin(i)*7,y+Math.cos(i)*13,mode==='crack'?1.2:0.4);
+      }
+    }
+    // Subtle granular weathering, deterministic to keep screenshots reproducible.
+    for(let i=0;i<1800;i++) {
+      c.fillStyle=i%2?'rgba(36,29,21,.07)':'rgba(255,240,215,.08)';
+      c.fillRect((i*73)%256,(i*131+Math.floor(i/256)*17)%256,1,2);
+    }
+    cached[key] = mat(d,b,mode==='wood'?1:2,2,mode==='metal'?0.63:0.94,mode==='metal'?0.35:0,0.07);
+  }
+
+  // Packed earth serves both rendered walls and trampled service paths in one batch.
+  cached.dirtPath = cached.packedEarth;
+  const [signs, sc] = cv(1024, 512);
+  const legends = ['Sandblast / Water 07', 'FORT / ARMORY  →', 'OLD SOUK  ↑', 'NOMAD / LANDING ZONE', 'CITADEL / SIGNAL  ↑', 'WEST GATE  ←', 'CARAVANSERAI', 'GRANARY / NO ACCESS', 'KILN QUARTER', 'TANNERY', 'POTTERS / EAST', 'DEPOT / FREIGHT'];
+  legends.forEach((text, i) => {
+    const x = (i % 2) * 512, y = Math.floor(i / 2) * 80;
+    sc.fillStyle = i % 3 === 0 ? '#1d514f' : '#3a3930'; sc.fillRect(x,y,512,78);
+    sc.strokeStyle = '#bda87c'; sc.lineWidth = 2; sc.strokeRect(x+6,y+6,500,66);
+    sc.font = 'bold 28px monospace'; sc.textBaseline = 'middle'; sc.textAlign = 'center';
+    sc.fillStyle = '#ece0ba'; sc.fillText(text.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()),x+256,y+39,482);
+    sc.globalAlpha = 0.18;
+    for (let j=0;j<65;j++) {sc.fillStyle=j%2?'#e6dbc2':'#111b19';sc.fillRect(x+(j*71)%510,y+(j*31)%78,5+j%9,1);}
+    sc.globalAlpha = 1;
+  });
+  const signTexture = tex(signs,1,1); signTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  cached.signage = new THREE.MeshStandardMaterial({map:signTexture,roughness:0.9,side:THREE.DoubleSide});
   return cached as TextureSet;
 }

@@ -1,7 +1,7 @@
 import definitions from '../config/missions.json';
 
 export type Position = readonly [number, number, number];
-export type PhaseType = 'advance' | 'clear' | 'destroy' | 'hold' | 'extract';
+export type PhaseType = 'advance' | 'clear' | 'destroy' | 'hold' | 'defend' | 'extract';
 export type MissionStatus = 'briefing' | 'active' | 'complete' | 'failed';
 export interface PressurePolicy { target: number; interval: number }
 export interface Consequences { alert?: string; reinforce?: number; from?: string; resupply?: boolean }
@@ -19,6 +19,8 @@ export interface MissionPhase {
   plantSeconds?: number;
   fuse?: number;
   seconds?: number;
+  defense?: number;
+  drain?: number;
   onComplete?: Consequences;
   escalate?: { every: number; count: number };
 }
@@ -30,12 +32,14 @@ export interface MissionDefinition {
   insertions: readonly InsertionPoint[];
 }
 export interface MissionInput {
+  hostilesInObjective?: number;
   player: Position; alive: boolean; paused?: boolean; interact?: boolean; targetVisible?: boolean;
 }
 export interface MissionSnapshot {
   id: string; name: string; status: MissionStatus; index: number; phaseCount: number;
   phaseId: string; type: PhaseType; title: string; location: string; brief: string;
   at: Position; radius: number; elapsed: number; phaseElapsed: number;
+  defense: number; defenseMax: number; contested: boolean;
   completed: number; required: number; progress: number; remaining: number;
   armed: boolean; inside: boolean; canPlant: boolean; plantProgress: number;
   distance: number; bearing: number; relativeBearing: number;
@@ -70,15 +74,16 @@ export function validateMission(definition: MissionDefinition): string[] {
   if (phases[phases.length - 1]?.type !== 'extract') errors.push('The terminal phase must be extract.');
   if (new Set(phases.map(p => p.id)).size !== phases.length) errors.push('Phase IDs must be unique.');
   for (const [i, p] of phases.entries()) {
-    if (!['advance', 'clear', 'destroy', 'hold', 'extract'].includes(p.type)) errors.push(`${p.id}: unsupported type.`);
+    if (!['advance', 'clear', 'destroy', 'hold', 'defend', 'extract'].includes(p.type)) errors.push(`${p.id}: unsupported type.`);
     if (p.type === 'extract' && i !== phases.length - 1) errors.push('Only the terminal phase can extract.');
     if (!p.at || p.at.length !== 3 || !p.at.every(Number.isFinite)) errors.push(`${p.id}: finite position required.`);
     if (!Number.isFinite(p.radius) || p.radius <= 0) errors.push(`${p.id}: positive radius required.`);
     if (!p.pressure || !Number.isInteger(p.pressure.target) || p.pressure.target < 0 || p.pressure.target > 10 || !Number.isFinite(p.pressure.interval) || p.pressure.interval < 0.5) errors.push(`${p.id}: invalid pressure budget.`);
     if (p.type === 'clear' && (!p.zone || !Number.isInteger(p.count) || p.count! < 1 || p.count! > MISSION_BUDGET.maxClearCount)) errors.push(`${p.id}: invalid clear count or zone.`);
     if (p.type === 'clear' && p.pressure?.target < 3) errors.push(`${p.id}: clear objectives require at least one reinforcement squad.`);
-    if (p.type === 'destroy' && (![p.plantSeconds, p.fuse].every(v => Number.isFinite(v) && v! > 0) || p.plantSeconds! > 10 || p.fuse! > 180)) errors.push(`${p.id}: finite planting seconds (1-10) and fuse (1-180) required.`);
-    if (p.type === 'hold' && (!Number.isFinite(p.seconds) || p.seconds! <= 0 || p.seconds! > MISSION_BUDGET.maxHoldSeconds)) errors.push(`${p.id}: invalid hold seconds.`);
+    if (p.type === 'destroy' && (![p.plantSeconds, p.fuse].every(v => Number.isFinite(v) && v! > 0) || p.plantSeconds! < 1 || p.plantSeconds! > 10 || p.fuse! < 1 || p.fuse! > 180)) errors.push(`${p.id}: finite planting seconds (1-10) and fuse (1-180) required.`);
+    if ((p.type === 'hold' || p.type === 'defend') && (!Number.isFinite(p.seconds) || p.seconds! <= 0 || p.seconds! > MISSION_BUDGET.maxHoldSeconds)) errors.push(`${p.id}: invalid hold seconds.`);
+    if (p.type === 'defend' && (!Number.isInteger(p.defense) || p.defense! < 1 || p.defense! > 1000 || !Number.isFinite(p.drain) || p.drain! < 1 || p.drain! > 100)) errors.push(`${p.id}: invalid defense pool or drain.`);
     if (p.escalate && (!Number.isFinite(p.escalate.every) || p.escalate.every < 1 || !Number.isInteger(p.escalate.count) || p.escalate.count < 1)) errors.push(`${p.id}: invalid escalation.`);
   }
   if (!definition.insertions?.length || definition.insertions.length > 64) errors.push('Mission needs 1-64 insertion sites.');
@@ -103,8 +108,12 @@ export class Mission {
   elapsed = 0;
   private phaseElapsed = 0;
   private plantTime = 0;
+  private attaching = false;
+  private interactDown = false;
   private fuseTime = 0;
   private holdTime = 0;
+  private defense = 0;
+  private contested = false;
   private armed = false;
   private nextWave = 0;
   private events: MissionEvent[] = [];
@@ -133,7 +142,8 @@ export class Mission {
   }
 
   private enterPhase() {
-    this.phaseElapsed = 0; this.plantTime = 0; this.fuseTime = 0; this.holdTime = 0; this.armed = false;
+    this.phaseElapsed = 0; this.plantTime = 0; this.attaching = false; this.fuseTime = 0; this.holdTime = 0; this.armed = false;
+    this.defense = this.current.defense ?? 0; this.contested = false;
     this.nextWave = this.current.escalate?.every ?? Infinity;
     this.emit({ type: 'phase-started', index: this.index, phase: this.current });
   }
@@ -177,6 +187,8 @@ export class Mission {
     this.records[this.index].seconds = this.phaseElapsed;
     const p = this.current;
     const inside = within(frame.player, p.at, p.radius);
+    const pressed = !!frame.interact && !this.interactDown;
+    this.interactDown = !!frame.interact;
     switch (p.type) {
       case 'advance':
       case 'extract':
@@ -187,20 +199,38 @@ export class Mission {
         break;
       case 'destroy':
         if (!this.armed) {
-          if (inside && frame.interact && frame.targetVisible) this.plantTime = Math.min(p.plantSeconds!, this.plantTime + dt);
-          else this.plantTime = 0;
+          // Tap to begin attachment; the player can fire and release X. Leaving
+          // the target pauses work without erasing it. Returning resumes it.
+          if (inside && pressed && frame.targetVisible) this.attaching = true;
+          if (this.attaching && inside && frame.targetVisible) this.plantTime = Math.min(p.plantSeconds!, this.plantTime + dt);
           if (this.plantTime >= p.plantSeconds!) {
             this.armed = true;
             this.emit({ type: 'charge-armed', phaseId: p.id, fuse: p.fuse! });
           }
         } else {
           this.fuseTime += dt;
-          if (this.fuseTime >= p.fuse!) {
+          if (this.fuseTime >= p.fuse! || (pressed && this.fuseTime >= 1 && distance(frame.player,p.at) > p.radius + 3)) {
             this.emit({ type: 'cache-detonated', at: p.at });
             this.completePhase();
           }
         }
         break;
+      case 'defend': {
+        // Count comes from the live actors, never the player's location. Cap hostile
+        // input to the live budget; only consume the part of dt before the deadline.
+        const hostiles = Number.isFinite(frame.hostilesInObjective) ? Math.max(0, Math.min(10, Math.floor(frame.hostilesInObjective!))) : 0;
+        this.contested = hostiles > 0;
+        const step = Math.min(dt, Math.max(0, p.seconds! - this.holdTime));
+        this.defense = Math.max(0, this.defense - hostiles * p.drain! * step);
+        this.holdTime += step;
+        if (this.defense <= 0) { this.fail(); break; }
+        while (p.escalate && this.nextWave < p.seconds! && this.holdTime >= this.nextWave) {
+          this.emit({ type: 'reinforcement-request', count: p.escalate.count });
+          this.nextWave += p.escalate.every;
+        }
+        if (this.holdTime >= p.seconds!) this.completePhase();
+        break;
+      }
       case 'hold':
         if (inside) this.holdTime = Math.min(p.seconds!, this.holdTime + dt);
         while (p.escalate && this.nextWave < p.seconds! && this.holdTime >= this.nextWave) {
@@ -216,10 +246,10 @@ export class Mission {
     const p = this.current;
     const inside = within(player, p.at, p.radius);
     const completed = this.credits.get(p.id)?.size ?? 0;
-    const remaining = p.type === 'hold' ? Math.max(0, p.seconds! - this.holdTime)
+    const remaining = (p.type === 'hold' || p.type === 'defend') ? Math.max(0, p.seconds! - this.holdTime)
       : p.type === 'destroy' ? Math.max(0, p.fuse! - this.fuseTime) : 0;
     const progress = p.type === 'clear' ? completed / p.count!
-      : p.type === 'hold' ? this.holdTime / p.seconds!
+      : (p.type === 'hold' || p.type === 'defend') ? this.holdTime / p.seconds!
       : p.type === 'destroy' ? (this.armed ? this.fuseTime / p.fuse! : this.plantTime / p.plantSeconds!)
       : inside ? 1 : 0;
     return {
@@ -227,6 +257,7 @@ export class Mission {
       index: this.index, phaseCount: this.definition.phases.length,
       phaseId: p.id, type: p.type, title: p.title, location: p.location, brief: p.brief,
       at: p.at, radius: p.radius, elapsed: this.elapsed, phaseElapsed: this.phaseElapsed,
+      defense: this.defense, defenseMax: p.defense ?? 0, contested: this.contested,
       completed, required: p.count ?? 0, progress: Math.min(1, progress), remaining,
       armed: this.armed, inside, canPlant: p.type === 'destroy' && !this.armed && inside,
       plantProgress: p.type === 'destroy' ? this.plantTime / p.plantSeconds! : 0,

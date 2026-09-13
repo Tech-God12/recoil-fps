@@ -8,13 +8,16 @@ export class SpatialAudioEngine {
   indoor = false;
   private windStarted = false;
   private noiseBuf: AudioBuffer | null = null;
+  // Volume is stored even before the AudioContext exists: a settings tweak on the main
+  // menu must not spin up the context (and the wind bed!) outside a live mission.
+  private volume01 = 1;
 
   ensure(): AudioContext {
     if (!this.ctx) {
       const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.85;
+      this.master.gain.value = Math.max(0, Math.min(1.2, this.volume01)) * 0.85;
       this.master.connect(this.ctx.destination);
 
       // Reverb/Echo bus
@@ -98,8 +101,19 @@ export class SpatialAudioEngine {
   }
 
   setMasterVolume(v: number) {
-    this.ensure();
-    if (this.master) this.master.gain.value = Math.max(0, Math.min(1.2, v)) * 0.85;
+    this.volume01 = Math.max(0, Math.min(1.2, v));
+    // Deliberately does NOT call ensure(): adjusting volume from the menu before the
+    // first deploy must not wake the AudioContext and start the ambient wind forever.
+    if (this.ctx && this.master) this.master.gain.value = this.volume01 * 0.85;
+  }
+
+  /** Freeze the whole audio bed (wind + echo + in-flight one-shots) while paused or between missions. */
+  suspend() {
+    if (this.ctx && this.ctx.state === 'running') void this.ctx.suspend();
+  }
+
+  resume() {
+    if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
   setIndoor(indoor: boolean) {

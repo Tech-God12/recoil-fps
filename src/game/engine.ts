@@ -21,6 +21,7 @@ export interface GameSettings {
   sensitivity: number;      // 0.5 - 10
   adsSensitivity: number;   // 0.2 - 1.5 multiplier
   invertY: boolean;
+  adsToggle: boolean;       // click MMB to keep scoped instead of holding
   fov: number;              // 70 - 120
   difficulty: string;
   map: MapId;
@@ -49,6 +50,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   sensitivity: 2.2,
   adsSensitivity: 0.7,
   invertY: false,
+  adsToggle: false,
   fov: 95,
   difficulty: 'Normal',
   map: 'alrasul',
@@ -56,14 +58,14 @@ export const DEFAULT_SETTINGS: GameSettings = {
   shadowQuality: 'low',
   bloom: false,
   bloomStrength: 22,
-  vignette: 18,
+  vignette: 12,
   filmGrain: 0,
-  brightness: 125,
+  brightness: 110,
   cameraShake: 100,
   showFps: true,
   masterVolume: 85,
   voices: true,
-  crosshairColor: '#F2A93B',
+  crosshairColor: '#FF5C1A',
   crosshairSize: 9,
   crosshairGap: 8,
   crosshairThickness: 2,
@@ -73,7 +75,6 @@ export const DEFAULT_SETTINGS: GameSettings = {
 export interface HudState {
   hp: number;
   mag: number;
-  reserve: number;
   weapon: string;
   reloading: boolean;
   reloadStage: 'idle' | 'magOut' | 'magIn' | 'ready';
@@ -81,23 +82,24 @@ export interface HudState {
   flashes: number;
   bearing: number;
   kills: number;
+  score: number;
   enemiesLeft: number;
   cooking: boolean;
   sprinting: boolean;
-  interacting: boolean;
   canVault: boolean;
   ads: number;
   spread: number;
   pings: { dir: number; age: number }[];
-  radarEnemies: { x: number; y: number; isPlayer?: boolean }[];
   grenadeDist?: number;
   grenadeAngle?: number;
   // Accurate tactical map (rendered from real world geometry)
   mapImage: string;
   playerMap: { nx: number; nz: number };
   enemiesMap: { nx: number; nz: number }[];
+  missionMap?: { nx: number; nz: number; ringPct: number; extract: boolean };
   fps: number;
   magSize: number;
+  worldHalf: number;
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
 }
@@ -106,12 +108,11 @@ export type GameEvent =
   | { type: 'hit'; kill: boolean }
   | { type: 'kill'; name: string; weapon: string; headshot: boolean }
   | { type: 'damage'; dir: number; amount: number }
-  | { type: 'grenadeWarn'; dir: number; dist: number }
   | { type: 'flash'; power: number }
   | { type: 'callout'; text: string }
   | { type: 'streak'; label: string }
   | { type: 'objective'; phase: MissionPhase; index: number }
-  | { type: 'end'; win: boolean; kills: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats };
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats };
 
 interface WeaponDef {
   name: string;
@@ -247,6 +248,7 @@ export class Engine {
   fovSetting = 95;
   adsSensMul = 0.7;
   invertY = false;
+  private adsToggle = false;
   private fps = 60;
   private fpsAcc = 0;
   private fpsFrames = 0;
@@ -260,6 +262,7 @@ export class Engine {
 
   // Stats
   private kills = 0;
+  private score = 0;
   private shots = 0;
   private hits = 0;
   private ended = false;
@@ -285,9 +288,10 @@ export class Engine {
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 5);
 
-    // Clear bright desert daylight — high visibility, light fog only at distance
+    // Clear bright desert daylight — high visibility, light fog only at distance.
+    // Slightly desaturated so enemy silhouettes stay readable instead of washing out.
     this.scene.background = new THREE.Color(0xB8CCDA);
-    this.scene.fog = new THREE.Fog(0xD9CDB0, 110, 420); // starts far out, never muddies gameplay range
+    this.scene.fog = new THREE.Fog(0xC6BEA8, 130, 430);
     // strong sky fill so shadowed faces stay readable
     const hemi = new THREE.HemisphereLight(0xCFE0EE, 0xB89A66, 1.15);
     this.scene.add(hemi);
@@ -526,6 +530,9 @@ void main(){
             mandown: 'Contact down!', fallback: 'They are falling back!', push: 'They are pushing!',
           };
           this.onEvent({ type: 'callout', text: labels[k] || 'Contact!' });
+          // The settings menu advertises "enemy squad chatter" — actually speak the barks.
+          // voice.enemyCallout carries its own 9s anti-spam cooldown.
+          voice.enemyCallout(k);
         }
       },
       aiThrowGrenade: (from, target) => this.spawnGrenade(from, target, true),
@@ -547,6 +554,7 @@ void main(){
         if (text !== this.missionRuntime.mission.current.brief) this.onEvent({ type: 'callout', text });
       },
       resupply: () => { this.hp = 100; this.frags = 5; this.flashes = 2; },
+      scoreBonus: pts => { this.score += pts; },
       detonate: at => {
         // Use the existing blast resolution for damage, glass, particles and spatial audio.
         this.explode({ mesh: this.missionRuntime.markers.cache, pos: at, vel: new THREE.Vector3(), fuse: 0, kind: 'frag', fromAI: false });
@@ -592,7 +600,7 @@ void main(){
     if (e.code === 'KeyF' && this.flashes > 0 && this.reloadT < 0) {
       this.flashes--;
       const dir = this.camDir();
-      this.spawnGrenade(this.eyePos().addScaledVector(dir, 0.4), this.eyePos().addScaledVector(dir, 20), false, 'flash');
+      this.spawnGrenade(this.throwOrigin(dir), this.eyePos().addScaledVector(dir, 20), false, 'flash');
       audio.throwWhoosh();
     }
 
@@ -626,7 +634,10 @@ void main(){
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
-    if (e.code === 'KeyG' && this.cooking) this.throwFrag();
+    // Never let a frag loose on a key release that arrives while paused, dead or
+    // between missions (ESC mid-cook used to throw into the pause menu).
+    if (e.code === 'KeyG' && this.cooking && !this.paused && !this.dead && !this.ended
+      && document.pointerLockElement === this.canvas) this.throwFrag();
   };
 
   private onMouseMove = (e: MouseEvent) => {
@@ -651,9 +662,11 @@ void main(){
 
   private onMouseDown2 = (e: MouseEvent) => {
     if (e.button === 2 && !this.paused && !this.dead && !this.ended && document.pointerLockElement === this.canvas) {
-      this.rmb = true;
+      // ADS toggle mode: MMB click keeps the scope in until the next MMB click.
+      const want = this.adsToggle ? !this.rmb : true;
+      this.rmb = want;
       // Cannot sprint while aiming down sights
-      if (this.sprinting) {
+      if (want && this.sprinting) {
         this.sprinting = false;
         this.sprintToAdsDelay = 0.2; // 200ms delay
       }
@@ -661,7 +674,7 @@ void main(){
   };
 
   private onMouseUp2 = (e: MouseEvent) => {
-    if (e.button === 2) this.rmb = false;
+    if (e.button === 2 && !this.adsToggle) this.rmb = false;
   };
 
   private onContext = (e: Event) => e.preventDefault();
@@ -691,6 +704,19 @@ void main(){
     this.vmCamera.aspect = w / h;
     this.vmCamera.updateProjectionMatrix();
   };
+
+  /**
+   * Single source of truth for render resolution. The EffectComposer caches its own
+   * pixel ratio at construction and only updates it through setPixelRatio() — without
+   * this, the resolution-scale slider and the adaptive scaler changed the canvas buffer
+   * while the whole post-FX chain (scene + bloom + vignette) kept rendering at the old
+   * full resolution, i.e. the "biggest FPS lever" was a placebo.
+   */
+  private syncPixelRatio() {
+    const pr = Math.min(window.devicePixelRatio, this.dynPR);
+    this.renderer.setPixelRatio(pr);
+    this.composer.setPixelRatio(pr);
+  }
 
   /** Gradient sky dome + sun glow + drifting clouds (cheap, huge visual payoff) */
   private addSkyDome() {
@@ -744,21 +770,28 @@ void main(){
   private eyePos(): THREE.Vector3 { return V().set(this.pos.x, this.pos.y + this.eyeH, this.pos.z); }
   private camDir(): THREE.Vector3 { const d = V(); this.camera.getWorldDirection(d); return d; }
 
-  private nearestWindow() {
-    let best: { x: number; y: number; z: number } | null = null;
+  private nearestWindow(): { w: { x: number; y: number; z: number }; glassIndex: number } | null {
+    let best: { w: { x: number; y: number; z: number }; glassIndex: number } | null = null;
     let bd = 1.55;
     const ey = this.pos.y + this.eyeH;
-    for (const w of this.world.windows) {
+    // world.windows and the glass InstancedMesh are index-aligned (both pushed together
+    // in buildWorld's wallRun) — so the pane index lets a vault shatter its own glass.
+    for (let i = 0; i < this.world.windows.length; i++) {
+      const w = this.world.windows[i];
       if (Math.abs(w.y - ey) > 1.1) continue;
       const d = Math.hypot(w.x - this.pos.x, w.z - this.pos.z);
-      if (d < bd) { bd = d; best = w; }
+      if (d < bd) { bd = d; best = { w, glassIndex: i }; }
     }
     return best;
   }
 
   private tryVault(): boolean {
-    const w = this.nearestWindow();
-    if (!w) return false;
+    const hit = this.nearestWindow();
+    if (!hit) return false;
+    const w = hit.w;
+    // Climbing through a closed window should break the pane, not phase through it.
+    const center = this.world.breakGlass(hit.glassIndex);
+    if (center) { this.effects.glassShatter(center); audio.glassBreakSpatial(center.x, center.y, center.z); }
     const dx = w.x - this.pos.x, dz = w.z - this.pos.z;
     const len = Math.hypot(dx, dz) || 1;
     this.pos.x = w.x + (dx / len) * 1.5;
@@ -776,42 +809,87 @@ void main(){
    * World X maps to canvas X, world Z maps to canvas Y.
    */
   private generateMapImage(): string {
-    const S = 256;
+    const S = 512;
     const span = this.world.half * 2;
     const scale = S / span;
     const px = (wx: number) => (wx + span / 2) * scale;
     const pz = (wz: number) => (wz + span / 2) * scale;
     const [c, ctx] = this.makeCanvas(S, S);
-    // Terrain base
-    ctx.fillStyle = '#96A084';
+
+    // --- terrain base: packed desert sand ---
+    ctx.fillStyle = '#7D735A';
     ctx.fillRect(0, 0, S, S);
-    // grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    // subtle large-scale mottling
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    for (let i = 0; i < 26; i++) {
+      const r = 28 + Math.random() * 70;
+      ctx.beginPath();
+      ctx.arc(Math.random() * S, Math.random() * S, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // --- walkability shading (real solids: dark where you cannot walk) ---
+    const blockers = this.world.solids.filter(b => b.maxY > 1.35 && b.minY < 1.75);
+    const STEP = 4; // 512px / 4 = 128 samples per axis ≈ 1.7m per cell
+    ctx.fillStyle = 'rgba(24,21,16,0.5)';
+    for (let gy = 0; gy < S; gy += STEP) {
+      for (let gx = 0; gx < S; gx += STEP) {
+        const wx = (gx + STEP / 2) / scale - span / 2;
+        const wz = (gy + STEP / 2) / scale - span / 2;
+        let blocked = false;
+        for (const b of blockers) {
+          if (wx > b.minX && wx < b.maxX && wz > b.minZ && wz < b.maxZ) { blocked = true; break; }
+        }
+        if (blocked) ctx.fillRect(gx, gy, STEP, STEP);
+      }
+    }
+
+    // --- roads / paved zones ---
+    ctx.fillStyle = '#8C8877';
+    for (const b of this.world.concrete) {
+      ctx.fillRect(px(b.minX), pz(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (const b of this.world.concrete) {
+      ctx.fillRect(px(b.minX), pz(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
+    }
+
+    // --- faint survey grid ---
+    ctx.strokeStyle = 'rgba(0,0,0,0.07)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= S; i += 32) {
       ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, S); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(S, i); ctx.stroke();
     }
-    // Roads (concrete/asphalt zones)
-    ctx.fillStyle = '#5A564C';
-    for (const b of this.world.concrete) {
-      ctx.fillRect(px(b.minX), pz(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
-    }
-    // Buildings & cover footprints (accurate from real solids)
-    for (const b of this.world.solids) {
+
+    // --- building & cover footprints, low → tall so heights stack correctly ---
+    const sorted = [...this.world.solids].sort((a, b) => a.maxY - b.maxY);
+    for (const b of sorted) {
       const x = px(b.minX), y = pz(b.minZ);
-      const w = Math.max(1.5, (b.maxX - b.minX) * scale);
-      const h = Math.max(1.5, (b.maxZ - b.minZ) * scale);
+      const w = Math.max(2.5, (b.maxX - b.minX) * scale);
+      const h = Math.max(2.5, (b.maxZ - b.minZ) * scale);
       const tall = b.maxY > 3.4;
-      ctx.fillStyle = tall ? '#B8956A' : '#6E6750';
+      const mid = !tall && b.maxY > 1.9;
+      // drop shadow for depth
+      ctx.fillStyle = 'rgba(20,16,10,0.35)';
+      ctx.fillRect(x + 3, y + 3, w, h);
+      // body colour by height class
+      ctx.fillStyle = tall ? '#A98D68' : mid ? '#7C7558' : '#5E5A4B';
       ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-      ctx.lineWidth = 1;
+      // sunlit top edge + shaded bottom edge for readable 3D-ish footprint
+      ctx.fillStyle = 'rgba(255,244,214,0.28)';
+      ctx.fillRect(x, y, w, Math.max(2, Math.min(4, h * 0.16)));
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(x, y + h - Math.max(2, Math.min(4, h * 0.16)), w, Math.max(2, Math.min(4, h * 0.16)));
+      // crisp outline
+      ctx.strokeStyle = 'rgba(12,9,5,0.55)';
+      ctx.lineWidth = 1.5;
       ctx.strokeRect(x, y, w, h);
     }
-    // border
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth = 3;
+
+    // --- border ---
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 4;
     ctx.strokeRect(0, 0, S, S);
     return c.toDataURL();
   }
@@ -1101,6 +1179,8 @@ void main(){
         const killed = enemy.takeDamage(dmg, part === 'head');
         if (killed) {
           this.kills++;
+          // Matches the HUD score popups exactly: 100 per elimination, 150 for a headshot.
+          this.score += part === 'head' ? 150 : 100;
           audio.killConfirm();
           const isHead = part === 'head';
           if (isHead) {
@@ -1206,6 +1286,25 @@ void main(){
     });
   }
 
+  /** Eye-height throw origin that refuses to spawn a grenade inside a wall. */
+  private throwOrigin(dir: THREE.Vector3): THREE.Vector3 {
+    const eye = this.eyePos();
+    for (const d of [0.5, 0.28, 0.12]) {
+      const p = eye.clone().addScaledVector(dir, d);
+      if (!this.pointInSolid(p, 0.12)) return p;
+    }
+    return eye;
+  }
+
+  private pointInSolid(p: THREE.Vector3, r: number): boolean {
+    const near = this.nearSolids(p.x, p.z, r + 0.2);
+    for (let i = 0; i < near.length; i++) {
+      const b = near[i];
+      if (p.x + r > b.minX && p.x - r < b.maxX && p.z + r > b.minZ && p.z - r < b.maxZ && p.y > b.minY && p.y < b.maxY) return true;
+    }
+    return false;
+  }
+
   private throwFrag() {
     if (!this.cooking) return;
     this.cooking = false;
@@ -1221,7 +1320,7 @@ void main(){
       new THREE.MeshStandardMaterial({ color: 0x2E382E, roughness: 0.55, metalness: 0.55 })
     );
     mesh.castShadow = true;
-    const from = this.eyePos().addScaledVector(dir, 0.5);
+    const from = this.throwOrigin(dir);
     mesh.position.copy(from);
     this.scene.add(mesh);
     this.grenades.push({
@@ -1259,6 +1358,7 @@ void main(){
           const killed = e.takeDamage(dmg, false);
           if (killed && !g.fromAI) {
             this.kills++;
+            this.score += 100;
             if (this.kills === 1) voice.firstBlood();
             if (this.kills % 3 === 0) {
               this.frags = Math.min(5, this.frags + 1);
@@ -1402,9 +1502,10 @@ void main(){
     if (win && this.missionRuntime.mission.status !== 'complete') return;
     this.ended = true;
     if (!win) this.missionRuntime.mission.fail();
+    if (win) this.score += 1000; // extraction bonus, mirrors the debrief footnote
     const mission = this.missionRuntime.mission.report();
     this.pendingResult = {
-      type: 'end', win, kills: this.kills, shots: this.shots, hits: this.hits,
+      type: 'end', win, kills: this.kills, score: this.score, shots: this.shots, hits: this.hits,
       headshots: this.headshots, timeSec: mission.duration,
       mission, pressure: this.missionRuntime.pressure.stats(),
     };
@@ -1843,25 +1944,25 @@ void main(){
     this.missionRuntime.start();
   }
 
-  setVoiceEnabled(v: boolean) {
-    voice.setEnabled(v);
-  }
-
   /** Live-apply graphics/gameplay settings (safe to call any time, including mid-match) */
   applySettings(s: GameSettings) {
     this.mouseSens = s.sensitivity * 0.001;
     this.adsSensMul = s.adsSensitivity;
     this.invertY = s.invertY;
+    this.adsToggle = s.adsToggle;
     this.fovSetting = s.fov;
     voice.setEnabled(s.voices);
     audio.setMasterVolume(s.masterVolume / 100);
 
-    // Resolution scale (biggest perf lever) — adaptive scaler works down from here
+    // Resolution scale (biggest perf lever) — adaptive scaler works down from here.
+    // NOTE: must go through syncPixelRatio so the composer (post-FX) follows too —
+    // otherwise this slider only resized the canvas buffer while the whole
+    // post-processed scene kept rendering at the stale cached resolution.
     const cap = s.resolutionScale / 100;
     this.userPR = cap * 2;
     this.dynPR = this.userPR;
     this.goodStreak = 0;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.userPR));
+    this.syncPixelRatio();
 
     // Shadows
     const shadowSize = s.shadowQuality === 'off' ? 0 : s.shadowQuality === 'low' ? 1024 : s.shadowQuality === 'medium' ? 2048 : 4096;
@@ -1901,27 +2002,33 @@ void main(){
     this.lastAdaptT = t;
     if (this.fps < 45 && this.dynPR > 0.6) {
       this.dynPR = Math.max(0.6, this.dynPR * 0.88);
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.dynPR));
+      this.syncPixelRatio();
       this.goodStreak = 0;
     } else if (this.fps > 57 && this.dynPR < this.userPR) {
       if (++this.goodStreak >= 2) {
         this.goodStreak = 0;
         this.dynPR = Math.min(this.userPR, this.dynPR * 1.12);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.dynPR));
+        this.syncPixelRatio();
       }
     } else {
       this.goodStreak = 0;
     }
   }
 
-  get voiceOn() {
-    return voice.enabled;
-  }
-
   setPaused(p: boolean) {
     this.paused = p;
-    if (p) { this.keys.clear(); this.triggerHeld = false; this.rmb = false; }
-    if (!p) this.lastT = performance.now();
+    if (p) {
+      this.keys.clear();
+      this.triggerHeld = false;
+      this.rmb = false;
+      // Freeze every sound source while paused (wind bed, queued TTS), but never the
+      // tail of the end-of-match line — the results flow manages its own timing.
+      if (!this.ended) { audio.suspend(); voice.suspend(); }
+    } else {
+      audio.resume();
+      voice.resume();
+      this.lastT = performance.now();
+    }
   }
 
   hud(): HudState {
@@ -1934,26 +2041,9 @@ void main(){
       const d = e.pos.distanceTo(this.pos);
       if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(e.pos), dist: d, above: e.pos.y - this.pos.y }; }
     }
-    const radarEnemies: { x: number; y: number }[] = [];
-    const maxRadarRange = 60;
-    for (const e of this.ai.enemies) {
-      if (e.dead) continue;
-      const dx = e.pos.x - this.pos.x;
-      const dz = e.pos.z - this.pos.z;
-      // Rotate by player yaw so Up is always player's forward direction
-      const sin = Math.sin(-this.yaw);
-      const cos = Math.cos(-this.yaw);
-      const rx = (dx * cos - dz * sin) / maxRadarRange;
-      const ry = (dx * sin + dz * cos) / maxRadarRange;
-      if (Math.hypot(rx, ry) <= 1.0) {
-        radarEnemies.push({ x: rx, y: ry });
-      }
-    }
-
     return {
       hp: Math.round(this.hp),
       mag: this.mags[this.cur],
-      reserve: this.reserves[this.cur],
       weapon: this.def().name,
       reloading: this.reloadT >= 0,
       reloadStage: this.currentReloadStage,
@@ -1961,25 +2051,34 @@ void main(){
       flashes: this.flashes,
       bearing: ((-this.yaw * 180 / Math.PI) % 360 + 360) % 360,
       kills: this.kills,
+      score: this.score,
       enemiesLeft: this.ai.aliveCount(),
       cooking: this.cooking,
       sprinting: this.sprinting,
-      interacting: false,
       ads: this.ads,
       spread: this.spreadNow,
       pings: this.pings.map(p => ({ dir: p.dir, age: p.age })),
-      radarEnemies,
       grenadeDist: this.lastGrenadeDist,
       grenadeAngle: this.lastGrenadeAngle,
-      // Accurate map data
+      // Accurate map data (consumed by the HUD tactical radar)
       mapImage: this.mapImage,
       playerMap: { nx: (this.pos.x + H) / (2 * H), nz: (this.pos.z + H) / (2 * H) },
       enemiesMap: this.ai.enemies
         .filter(e => !e.dead)
         .map(e => ({ nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H) })),
+      missionMap: (() => {
+        const phase = this.missionRuntime.mission.current;
+        if (!phase) return undefined;
+        return {
+          nx: (phase.at[0] + H) / (2 * H), nz: (phase.at[2] + H) / (2 * H),
+          ringPct: (phase.radius / (2 * H)) * 100,
+          extract: phase.type === 'extract',
+        };
+      })(),
       nearest,
       fps: Math.round(this.fps),
       magSize: this.def().magSize,
+      worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
       mission: this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
     };
@@ -1988,6 +2087,9 @@ void main(){
   dispose() {
     this.disposed = true;
     this.pendingResult = null;
+    // Leaving a mission must not leave wind or queued radio lines playing behind the menu.
+    voice.cancel();
+    audio.suspend();
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('mousemove', this.onMouseMove);

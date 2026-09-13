@@ -132,11 +132,12 @@ export class Effects {
     this.burst(pos, 12, 0x8C1010, 2.6, 0.45, 6, 0.06);
   }
 
-  bloodDecal(pos: THREE.Vector3) {
+  /** Blood pools on the actual standing surface (crate/roof included), not the ground plane. */
+  bloodDecal(pos: THREE.Vector3, surfaceY = 0) {
     const m = this.bloods[this.bloodIdx];
     this.bloodIdx = (this.bloodIdx + 1) % this.bloods.length;
     m.visible = true;
-    m.position.set(pos.x, 0.035, pos.z);
+    m.position.set(pos.x, surfaceY + 0.035, pos.z);
     m.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI);
   }
 

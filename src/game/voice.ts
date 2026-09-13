@@ -25,9 +25,20 @@ class VoiceManager {
 
   setEnabled(v: boolean) {
     this.enabled = v;
-    if (!v) {
-      try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
-    }
+    if (!v) this.cancel();
+  }
+
+  /** Called on pause: park queued lines so the announcer never talks over the menus. */
+  suspend() {
+    try { window.speechSynthesis?.pause(); } catch { /* noop */ }
+  }
+
+  resume() {
+    try { window.speechSynthesis?.resume(); } catch { /* noop */ }
+  }
+
+  cancel() {
+    try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
   }
 
   private pickVoice(kind: VoiceKind): SpeechSynthesisVoice | null {
@@ -70,17 +81,9 @@ class VoiceManager {
     this.speak(short, 'announcer', { key: `objective:${text}`, cooldownMs: 2500, rate: 1.0, volume: 0.6 });
   }
 
-  missionStart() {
-    const lines = ['Eliminate all hostiles. Weapons free.', 'All units, you are cleared hot.', 'Move in. Take the crossing.'];
-    this.speak(lines[Math.floor(Math.random() * lines.length)], 'announcer', { key: 'mission', cooldownMs: 60000 });
-  }
   firstBlood() {
     const lines = ['First blood.', 'Confirmed kill.', 'Target down.'];
     this.speak(lines[Math.floor(Math.random() * lines.length)], 'announcer', { key: 'firstblood', cooldownMs: 60000 });
-  }
-  halfway() {
-    const lines = ['Half the squad is down. Keep pushing.', 'They are breaking. Press the attack.', 'More than half down. Finish it.'];
-    this.speak(lines[Math.floor(Math.random() * lines.length)], 'announcer', { key: 'half', cooldownMs: 60000 });
   }
   streak(label: string) {
     const map: Record<string, string> = {
@@ -93,7 +96,6 @@ class VoiceManager {
   }
   headshot() { this.speak('Headshot.', 'announcer', { key: 'hs', cooldownMs: 5000, volume: 0.6 }); }
   lowAmmo() { this.speak('Reloading.', 'announcer', { key: 'lowammo', cooldownMs: 15000, volume: 0.55 }); }
-  victory() { this.speak('Crossing secured. Outstanding work.', 'announcer', { key: 'win', cooldownMs: 60000 }); }
   defeat() { this.speak('Operator down. Mission failed.', 'announcer', { key: 'lose', cooldownMs: 60000 }); }
 
   // ---------- Enemy squad voices (short barks, anti-spam) ----------

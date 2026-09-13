@@ -11,14 +11,12 @@ import { getMaterials, type TextureSet } from './textures';
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export type MapId = 'alrasul' | 'kasbah';
-export const MAPS: { id: MapId; name: string; desc: string; enemies: number }[] = [
-  { id: 'alrasul', name: 'AL-RASUL CROSSING', desc: 'Grid-plan desert township. Central plaza, mosque, market, depot and residential compounds.', enemies: 21 },
-  { id: 'kasbah', name: 'KASBAH RIDGE', desc: 'Radial hill-fortress. A central citadel with ring roads, spoke streets and tight wedge alleys.', enemies: 15 },
+export const MAPS: { id: MapId; name: string; desc: string }[] = [
+  { id: 'alrasul', name: 'AL-RASUL CROSSING', desc: 'Grid-plan desert township. Central plaza, mosque, market, depot and residential compounds.' },
+  { id: 'kasbah', name: 'KASBAH RIDGE', desc: 'Radial hill-fortress. A central citadel with ring roads, spoke streets and tight wedge alleys.' },
 ];
 
 export interface AABB { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
-export interface SquadSpawn { leader: THREE.Vector3; a: THREE.Vector3; b: THREE.Vector3; patrol: THREE.Vector3[] }
-
 export interface WindowHole { x: number; y: number; z: number; nx: number; nz: number } // center + outward normal (horizontal)
 
 export interface World {
@@ -26,7 +24,6 @@ export interface World {
   solids: AABB[];
   occluders: THREE.Object3D[];
   coverNodes: THREE.Vector3[];
-  squadSpawns: SquadSpawn[];
   playerSpawn: THREE.Vector3;
   interiors: AABB[];
   concrete: AABB[];
@@ -337,7 +334,6 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const [tx, tz] of [[-half, -half], [half, -half], [-half, half], [half, half]] as const) box(tx, 4.2, tz, 4, 8.4, 4, pm);
   }
 
-  let squadSpawns: SquadSpawn[] = [];
   const playerSpawn = new THREE.Vector3();
   let half = 104;
 
@@ -380,13 +376,6 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const bx of [-94, -60, -25, 25, 60, 94]) { house(bx, -94, 12, 9, { wallMat: mats[seed++ % 4], door: 'south' }); house(bx, 94, 12, 9, { wallMat: mats[seed++ % 4], door: 'north' }); }
     for (const bz of [-60, -25, 25, 60]) { house(-94, bz, 9, 12, { wallMat: mats[seed++ % 4], door: 'east' }); house(94, bz, 9, 12, { wallMat: mats[seed++ % 4], door: 'west' }); }
     playerSpawn.set(0, 0, 96);
-    squadSpawns = [
-      { leader: new THREE.Vector3(6, 0, 8), a: new THREE.Vector3(-8, 0, 6), b: new THREE.Vector3(8, 0, -6), patrol: [new THREE.Vector3(0, 0, 14), new THREE.Vector3(16, 0, 0), new THREE.Vector3(0, 0, -14), new THREE.Vector3(-16, 0, 0)] },
-      { leader: new THREE.Vector3(25, 0, 20), a: new THREE.Vector3(18, 0, 26), b: new THREE.Vector3(32, 0, 20), patrol: [new THREE.Vector3(25, 0, 22), new THREE.Vector3(44, 0, 22), new THREE.Vector3(44, 0, 64), new THREE.Vector3(20, 0, 44)] },
-      { leader: new THREE.Vector3(-25, 0, 18), a: new THREE.Vector3(-32, 0, 16), b: new THREE.Vector3(-18, 0, 22), patrol: [new THREE.Vector3(-25, 0, 18), new THREE.Vector3(-44, 0, 44), new THREE.Vector3(-64, 0, 64), new THREE.Vector3(-20, 0, 44)] },
-      { leader: new THREE.Vector3(-25, 0, -18), a: new THREE.Vector3(-30, 0, -22), b: new THREE.Vector3(-18, 0, -20), patrol: [new THREE.Vector3(-25, 0, -18), new THREE.Vector3(-44, 0, -44), new THREE.Vector3(-64, 0, -64), new THREE.Vector3(0, 0, -44)] },
-      { leader: new THREE.Vector3(25, 0, -26), a: new THREE.Vector3(30, 0, -22), b: new THREE.Vector3(20, 0, -30), patrol: [new THREE.Vector3(25, 0, -26), new THREE.Vector3(44, 0, -44), new THREE.Vector3(64, 0, -64), new THREE.Vector3(64, 0, -25)] },
-    ];
   }
 
   // =====================================================================
@@ -441,13 +430,6 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       house(Math.cos(a2) * 92, Math.sin(a2) * 92, 9, 9, { wallMat: mats[seed++ % 4], door: 'south' });
     }
     playerSpawn.set(0, 0, 100);
-    squadSpawns = [
-      { leader: new THREE.Vector3(4, 0, 24), a: new THREE.Vector3(-6, 0, 28), b: new THREE.Vector3(8, 0, 32), patrol: [new THREE.Vector3(0, 0, 26), new THREE.Vector3(24, 0, 0), new THREE.Vector3(0, 0, -26), new THREE.Vector3(-24, 0, 0)] },
-      { leader: new THREE.Vector3(52, 0, 10), a: new THREE.Vector3(56, 0, 16), b: new THREE.Vector3(48, 0, 4), patrol: [new THREE.Vector3(54, 0, 10), new THREE.Vector3(34, 0, 34), new THREE.Vector3(0, 0, 46), new THREE.Vector3(-34, 0, 34)] },
-      { leader: new THREE.Vector3(-52, 0, 12), a: new THREE.Vector3(-48, 0, 6), b: new THREE.Vector3(-56, 0, 18), patrol: [new THREE.Vector3(-54, 0, 10), new THREE.Vector3(-34, 0, -34), new THREE.Vector3(0, 0, -46), new THREE.Vector3(34, 0, -34)] },
-      { leader: new THREE.Vector3(0, 0, -54), a: new THREE.Vector3(7, 0, -50), b: new THREE.Vector3(-7, 0, -58), patrol: [new THREE.Vector3(0, 0, -54), new THREE.Vector3(70, 0, 0), new THREE.Vector3(0, 0, 70), new THREE.Vector3(-70, 0, 0)] },
-      { leader: new THREE.Vector3(70, 0, -54), a: new THREE.Vector3(76, 0, -48), b: new THREE.Vector3(64, 0, -60), patrol: [new THREE.Vector3(70, 0, -54), new THREE.Vector3(88, 0, 0), new THREE.Vector3(44, 0, 76), new THREE.Vector3(-44, 0, 76)] },
-    ];
   }
 
   // =====================================================================
@@ -487,7 +469,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   };
 
   scene.add(group);
-  return { group, solids, occluders, coverNodes, squadSpawns, playerSpawn, interiors, concrete, wood, half, lightSpots, windows, glass, breakGlass };
+  return { group, solids, occluders, coverNodes, playerSpawn, interiors, concrete, wood, half, lightSpots, windows, glass, breakGlass };
 }
 
 export function pointInAABB(x: number, y: number, z: number, b: AABB): boolean {

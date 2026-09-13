@@ -36,6 +36,11 @@ export interface AIContext {
   aiThrowGrenade(from: THREE.Vector3, target: THREE.Vector3): void;
   onEnemyFire(pos: THREE.Vector3): void;
   onEliminated?(enemy: Enemy): void;
+  /**
+   * Opening grace window: while this returns false hostiles cannot acquire the player
+   * at all, so a deployment is never met by squads that are already firing.
+   */
+  canAcquire?(): boolean;
 }
 
 /* ================= NAV GRID (A*) ================= */
@@ -163,6 +168,15 @@ ray.firstHitOnly = true;
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 let enemyCounter = 0;
+
+/**
+ * Effective rifle range. Perception still reaches much further (see checkLOS) so
+ * squads react and manoeuvre on sight, but they will not pull the trigger from
+ * across the map — they close to this distance first. Without it a hostile that
+ * spotted you at its 48m perception ceiling was already firing bursts before it
+ * was anywhere near you.
+ */
+export const ENGAGE_RANGE = 30;
 const NAMES = ['Aslan', 'Verik', 'Dmitri', 'Kolya', 'Rustam', 'Bekzat', 'Timur', 'Marat', 'Oleg', 'Sasha', 'Yuri', 'Anton', 'Farid', 'Nazar', 'Ilya'];
 
 export class Enemy {
@@ -213,6 +227,12 @@ export class Enemy {
   private pathGoal = new THREE.Vector3();
   private repathT = 0;
   private stuckT = 0;
+  // Committed obstacle-avoidance: a side picked once and held, plus the cumulative
+  // time this goal has been unreachable. Re-rolling the sidestep direction on every
+  // logic tick is what made blocked actors visibly vibrate in place.
+  private escapeDir = 0;
+  private escapeT = 0;
+  private blockedT = 0;
   private personality: number; // 0 cautious .. 1 aggressive
   stunTimer = 0;
 
@@ -232,6 +252,11 @@ export class Enemy {
   get seesPlayer() { return this.hasLOS; }
   eyePos() { return tmpV2.set(this.pos.x, this.pos.y + 1.62 - (this.crouched ? 0.4 : 0), this.pos.z).clone(); }
 
+  /** Sight *and* inside effective rifle range. Squads advance before they shoot. */
+  private canFire(): boolean {
+    return this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) <= ENGAGE_RANGE;
+  }
+
   resetForInsertion(squad: Squad, role: Enemy['role'], at: Position, focus: Position, zone: string | null) {
     this.id = enemyCounter++;
     this.name = NAMES[this.id % NAMES.length];
@@ -247,6 +272,7 @@ export class Enemy {
     this.grenadeCD = 4; this.crouched = false; this.stunTimer = 0;
     this.strafeDir = 0; this.strafeT = 0; this.strafeCD = 0;
     this.path = null; this.repathT = 0; this.stuckT = 0; this.patrolIdx = 0;
+    this.escapeDir = 0; this.escapeT = 0; this.blockedT = 0;
     this.walkPhase = 0; this.locomotion = 0; this.shotPose = 0; this.lastX = at[0]; this.lastZ = at[2];
     this.yaw = Math.atan2(at[0] - focus[0], at[2] - focus[2]);
     const g = this.model.group;
@@ -266,6 +292,8 @@ export class Enemy {
 
   checkLOS(): boolean {
     if (!this.ctx.playerAlive()) return false;
+    // Deployment grace: no acquisition at all until the mission lets hostiles engage.
+    if (this.ctx.canAcquire && !this.ctx.canAcquire()) return false;
     const eye = this.eyePos(); const pp = this.ctx.playerPos();
     const dist = eye.distanceTo(pp);
     if (dist > 70) return false;
@@ -374,13 +402,36 @@ export class Enemy {
     const moved = Math.hypot(this.pos.x - bx, this.pos.z - bz);
     if (moved < speed * dt * 0.25) {
       this.stuckT += dt;
-      if (this.stuckT > 0.4) { // sidestep + force repath
-        const side = Math.random() > 0.5 ? 1 : -1;
-        this.ctx.moveCollide(this.pos, (-dz / d) * side * speed * dt * 2.5, (dx / d) * side * speed * dt * 2.5, 0.36);
-        this.path = null; this.repathT = Math.max(this.repathT,0.45);
-        if (this.stuckT > 1.8) { this.stuckT = 0; return true; }
+      this.blockedT += dt;
+      if (this.stuckT > 0.35) {
+        // Pick a side once and hold it. The previous code re-rolled the direction on
+        // every logic tick, so a blocked actor shuffled left/right in place and read
+        // as a glitch — most visibly in the riverbed under the bridge decks.
+        if (this.escapeT <= 0) {
+          this.escapeDir = this.escapeDir === 0 ? (this.personality > 0.5 ? 1 : -1) : -this.escapeDir;
+          this.escapeT = 0.8;
+          this.path = null; this.repathT = Math.max(this.repathT, 0.45);
+        }
+        this.escapeT -= dt;
+        // Arc around the obstruction (mostly sideways, a little forward) instead of
+        // grinding straight into it.
+        const side = this.escapeDir;
+        this.ctx.moveCollide(this.pos,
+          ((-dz / d) * side * 0.9 + (dx / d) * 0.4) * speed * dt * 1.6,
+          ((dx / d) * side * 0.9 + (dz / d) * 0.4) * speed * dt * 1.6, 0.36);
+        // Genuinely unreachable: release the goal, but only after a real attempt and
+        // with a repath cooldown, so we never re-target the same wall every tick.
+        if (this.blockedT > 3) {
+          this.blockedT = 0; this.stuckT = 0; this.escapeT = 0;
+          this.path = null; this.repathT = Math.max(this.repathT, 1.2);
+          return true;
+        }
       }
-    } else this.stuckT = Math.max(0, this.stuckT - dt * 2);
+    } else {
+      this.stuckT = Math.max(0, this.stuckT - dt * 2);
+      this.escapeT = Math.max(0, this.escapeT - dt);
+      this.blockedT = Math.max(0, this.blockedT - dt);
+    }
     this.yaw = Math.atan2(-dx, -dz);
     // Local separation prevents three actors collapsing onto the same path waypoint.
     for (const teammate of this.squad.members) {
@@ -505,9 +556,15 @@ export class Enemy {
   }
 
   private doEngage(dt: number, suppress: boolean) {
+    const pf = this.ctx.playerFeet();
+    const range = this.pos.distanceTo(pf);
+    // Spotted you from across the sector: close the distance instead of spraying from
+    // the edge of perception. This is what made a fresh deployment feel like the squad
+    // was already firing before it had any business shooting.
+    if (this.hasLOS && range > ENGAGE_RANGE) { this.startAdvance(); return; }
     // A visible nearby threat takes priority over running to a distant cover node.
-    if (this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) < 18) {
-      this.crouched = false; this.faceTarget(this.ctx.playerFeet());
+    if (this.hasLOS && range < 18) {
+      this.crouched = false; this.faceTarget(pf);
       this.burstTimer -= dt;
       if (this.burstTimer <= 0) {
         this.fireShot(); this.burstLeft++;
@@ -529,7 +586,7 @@ export class Enemy {
     const atCover = this.pos.distanceTo(this.coverPos) < 0.6;
     if (!atCover) {
       this.goTo(this.coverPos, 3.5, dt); this.crouched = false;
-      if (this.hasLOS) { this.faceTarget(this.ctx.playerFeet()); this.burstTimer -= dt; if (this.burstTimer <= 0) { this.fireShot(); this.burstTimer = 0.4; } }
+      if (this.canFire()) { this.faceTarget(this.ctx.playerFeet()); this.burstTimer -= dt; if (this.burstTimer <= 0) { this.fireShot(); this.burstTimer = 0.4; } }
     }
     else {
       this.crouched = this.hasRealCover && !this.peeking;
@@ -545,7 +602,9 @@ export class Enemy {
       }
       if (this.peeking) {
         this.peekTimer -= dt; this.burstTimer -= dt;
-        if (this.burstLeft > 0 && this.burstTimer <= 0) { this.burstTimer = 0.1 + Math.random() * 0.04; this.burstLeft--; this.fireShot(); }
+        // Blind suppressive fire still respects effective range — no shots from
+        // across the map at a stale last-known position.
+        if (this.burstLeft > 0 && this.burstTimer <= 0 && this.pos.distanceTo(this.lastKnown) <= ENGAGE_RANGE) { this.burstTimer = 0.1 + Math.random() * 0.04; this.burstLeft--; this.fireShot(); }
         if (this.peekTimer <= 0 || (this.burstLeft <= 0 && Math.random() < 0.02)) { this.peeking = false; this.waitTimer = 0.7 + Math.random() * 1.3 * (1 - this.personality * 0.5); }
       } else {
         this.waitTimer -= dt;
@@ -569,8 +628,8 @@ export class Enemy {
       const c = this.findCover(true);
       this.moveTarget = c ?? this.lastKnown.clone();
     }
-    // fire on the move if we can see the player
-    if (this.hasLOS) { this.burstTimer -= dt; if (this.burstTimer <= 0) { this.burstTimer = 0.28; this.burstIdx = 1; this.fireShot(); } }
+    // fire on the move once the player is inside effective range
+    if (this.canFire()) { this.burstTimer -= dt; if (this.burstTimer <= 0) { this.burstTimer = 0.28; this.burstIdx = 1; this.fireShot(); } }
     if (this.goTo(this.moveTarget, 4.8, dt) || this.stateTime > 7) { this.moveTarget = null; this.coverPos = null; this.setState('ENGAGE'); }
   }
 

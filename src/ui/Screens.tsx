@@ -32,7 +32,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap }: {
           <p>{mission.brief}</p>
           <button className="mission-primary" onClick={onDeploy}>Start mission <Arrow /></button>
           <button className="mission-secondary" onClick={onSettings}>Settings <span>Controls, audio &amp; graphics</span></button>
-          <div className="operation-input-note"><span>WASD</span> Move <span>RMB</span> Scope <span>1-5</span> Weapons <span>G</span> Frag (5×) <span>X</span> Plant <span>ESC</span> Pause</div>
+          <div className="operation-input-note"><span>WASD</span> Move <span>RMB</span> Scope <span>1-5</span> Weapons <span>G</span> Frag (2×) <span>X</span> Plant <span>ESC</span> Pause</div>
         </section>
         <section className="operation-selection" aria-label="Choose a mission">
           <div className="mission-section-label"><span>AREA OF OPERATIONS</span><span>{s.map === 'kasbah' ? '02' : '01'} / 02</span></div>
@@ -60,7 +60,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap }: {
           <p className="mission-rules">Reach the pickup to extract. Clearing the map is not the objective.</p>
         </section>
       </div>
-      <footer className="operations-footer"><span>{selectedMap.name}</span><span>{s.difficulty.toUpperCase()} DIFFICULTY <i /> UNLIMITED AMMO</span></footer>
+      <footer className="operations-footer"><span>{selectedMap.name}</span><span>{s.difficulty.toUpperCase()} DIFFICULTY <i /> LIVE AMMO</span></footer>
     </main>
   );
 }

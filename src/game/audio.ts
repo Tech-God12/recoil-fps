@@ -150,40 +150,21 @@ export class SpatialAudioEngine {
   fireM4() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    // Layer 1: Sharp transient punch
-    this.burstDirect({ dur: 0.035, gain: 0.95, freq: 3400, q: 0.7, hp: 800 });
-    // Layer 2: Mid body crack
-    this.burstDirect({ dur: 0.11, gain: 0.75, freq: 950, q: 0.8, toEcho: 0.45 });
-    // Layer 3: Bass thump / pressure wave
-    this.burstDirect({ dur: 0.18, gain: 0.55, freq: 160, q: 0.6, type: 'lowpass' });
-    // Layer 4: Sub harmonic punch
-    const o = ctx.createOscillator();
-    o.type = 'triangle';
-    o.frequency.setValueAtTime(155, t);
-    o.frequency.exponentialRampToValueAtTime(45, t + 0.09);
-    const og = ctx.createGain();
-    og.gain.setValueAtTime(0.55, t);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
-    o.connect(og); og.connect(this.master!);
-    o.start(t); o.stop(t + 0.11);
-    // Bolt mechanical slap
-    this.burstDirect({ dur: 0.045, gain: 0.18, freq: 4800, q: 2.2, when: 0.045 });
+    this.burstDirect({ dur: 0.028, gain: 1.0, freq: 4200, q: 0.55, hp: 1100 });
+    this.burstDirect({ dur: 0.09, gain: 0.72, freq: 1450, q: 0.7, hp: 400 });
+    this.burstDirect({ dur: 0.16, gain: 0.58, freq: 240, q: 0.55, type: 'lowpass', toEcho: 0.32 });
+    this.tone(t, 'triangle', 190, 52, 0.09, 0.48);
+    this.burstDirect({ dur: 0.04, gain: 0.22, freq: 6200, q: 2.4, when: 0.038 });
+    this.burstDirect({ dur: 0.03, gain: 0.12, freq: 2400, q: 3.2, when: 0.07 });
   }
 
   firePistol() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    this.burstDirect({ dur: 0.03, gain: 0.85, freq: 2800, q: 0.8, hp: 700 });
-    this.burstDirect({ dur: 0.09, gain: 0.55, freq: 720, q: 0.9, toEcho: 0.35 });
-    const o = ctx.createOscillator();
-    o.type = 'triangle';
-    o.frequency.setValueAtTime(130, t);
-    o.frequency.exponentialRampToValueAtTime(50, t + 0.08);
-    const og = ctx.createGain();
-    og.gain.setValueAtTime(0.45, t);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
-    o.connect(og); og.connect(this.master!);
-    o.start(t); o.stop(t + 0.095);
+    this.burstDirect({ dur: 0.022, gain: 0.9, freq: 3100, q: 0.7, hp: 900 });
+    this.burstDirect({ dur: 0.07, gain: 0.5, freq: 880, q: 0.85, toEcho: 0.22 });
+    this.tone(t, 'square', 210, 70, 0.055, 0.22);
+    this.burstDirect({ dur: 0.035, gain: 0.2, freq: 1800, q: 2.8, when: 0.04 });
   }
 
   dryFire() {
@@ -195,16 +176,11 @@ export class SpatialAudioEngine {
   fireAK() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    this.burstDirect({ dur: 0.05, gain: 0.95, freq: 2300, q: 0.7, hp: 500 });
-    this.burstDirect({ dur: 0.14, gain: 0.7, freq: 620, q: 0.8, toEcho: 0.4 });
-    this.burstDirect({ dur: 0.22, gain: 0.6, freq: 120, q: 0.5, type: 'lowpass' });
-    const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.11);
-    const og = ctx.createGain();
-    og.gain.setValueAtTime(0.5, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-    o.connect(og); og.connect(this.master!); o.start(t); o.stop(t + 0.13);
-    this.burstDirect({ dur: 0.05, gain: 0.16, freq: 4400, q: 1.8, when: 0.06 });
+    this.burstDirect({ dur: 0.045, gain: 1.0, freq: 1680, q: 0.55, hp: 280 });
+    this.burstDirect({ dur: 0.16, gain: 0.78, freq: 480, q: 0.7, toEcho: 0.48 });
+    this.burstDirect({ dur: 0.28, gain: 0.7, freq: 92, q: 0.45, type: 'lowpass' });
+    this.tone(t, 'sawtooth', 108, 34, 0.14, 0.55);
+    this.burstDirect({ dur: 0.06, gain: 0.2, freq: 3100, q: 1.4, when: 0.055 });
   }
 
   // AWM .338 Lapua: huge, distant boom + sharp supersonic crack
@@ -227,9 +203,10 @@ export class SpatialAudioEngine {
   // MP7A1 4.6mm: tight, fast, sharp PDW crack
   fireSMG() {
     this.ensure();
-    this.burstDirect({ dur: 0.03, gain: 0.85, freq: 3800, q: 0.9, hp: 900 });
-    this.burstDirect({ dur: 0.08, gain: 0.55, freq: 1050, q: 0.8, toEcho: 0.3 });
-    this.burstDirect({ dur: 0.12, gain: 0.4, freq: 200, q: 0.5, type: 'lowpass' });
+    this.burstDirect({ dur: 0.02, gain: 0.82, freq: 4600, q: 0.85, hp: 1200 });
+    this.burstDirect({ dur: 0.055, gain: 0.48, freq: 1280, q: 0.75, toEcho: 0.18 });
+    this.burstDirect({ dur: 0.09, gain: 0.32, freq: 260, q: 0.55, type: 'lowpass' });
+    this.burstDirect({ dur: 0.025, gain: 0.14, freq: 7200, q: 3.5, when: 0.018 });
   }
 
   // SPATIAL: Enemy Gunfire with exact 3D HRTF Panning
@@ -505,6 +482,31 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.05, gain: 0.35 * a, freq: 1500, q: 2 });
   }
 
+  pickup() {
+    this.ensure();
+    this.burstDirect({ dur: 0.07, gain: 0.32, freq: 2100, q: 2.4 });
+    this.burstDirect({ dur: 0.11, gain: 0.2, freq: 780, q: 1.3, when: 0.035 });
+  }
+
+  radioSpeech() {
+    this.ensure();
+    this.burstDirect({ dur: 0.04, gain: 0.12, freq: 2600, q: 4.2 });
+    this.burstDirect({ dur: 0.16, gain: 0.08, freq: 880, q: 1.1, when: 0.03, type: 'lowpass' });
+  }
+
+  extractRumble() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    this.tone(t, 'sawtooth', 72, 36, 0.95, 0.26);
+    this.burstDirect({ dur: 0.85, gain: 0.32, freq: 88, q: 0.45, type: 'lowpass' });
+  }
+
+  distantGun() {
+    this.ensure();
+    this.burstDirect({ dur: 0.07, gain: 0.11, freq: 920, q: 0.8, hp: 180, toEcho: 0.55 });
+    this.burstDirect({ dur: 0.22, gain: 0.07, freq: 210, q: 0.5, type: 'lowpass', when: 0.04 });
+  }
+
   radioCallout(kind: string) {
     const ctx = this.ensure();
     const t = ctx.currentTime;
@@ -529,6 +531,19 @@ export class SpatialAudioEngine {
       o.start(t + 0.05 + i * 0.08);
       o.stop(t + 0.13 + i * 0.08);
     });
+  }
+
+  private tone(t: number, type: OscillatorType, from: number, to: number, dur: number, gain: number) {
+    const ctx = this.ensure();
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(from, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(20, to), t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + dur + 0.02);
   }
 
   private burstDirect(opts: {

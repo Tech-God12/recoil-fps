@@ -9,7 +9,7 @@ export interface HudFx {
   dmgArcs: { id: number; dir: number; opacity: number }[];
   scorePops: { id: number; text: string; headshot: boolean }[];
   banner: { id: number; label: string } | null;
-  callout: { id: number; text: string } | null;
+  callout: { id: number; text: string; speaker?: string } | null;
   flashPow: number;
   missionBanner: { id: number; title: string; index: number } | null;
 }
@@ -34,36 +34,8 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
       {hud.mission && <MissionObjective mission={hud.mission} />}
 
-      {/* ============ THREAT PROXIMITY INDICATOR ============ */}
-      {/* A ring around the crosshair: the arrow points at the closest hostile, the readout shows range. */}
-      {hud.nearest && (() => {
-        const n = hud.nearest;
-        const hot = n.dist < 12, warm = n.dist < 30;
-        const color = hot ? '#FF3B30' : warm ? '#F2A93B' : 'rgba(255,255,255,0.55)';
-        const R = 92; // ring radius (px)
-        const a = (n.angle - 90) * Math.PI / 180;
-        const ax = Math.cos(a) * R, ay = Math.sin(a) * R;
-        return (
-          <div className="absolute left-1/2 top-1/2" style={{ opacity: hud.ads > 0.6 ? 0.35 : 1, transition: 'opacity .2s' }}>
-            {/* faint ring */}
-            <div className="absolute rounded-full border" style={{ width: R * 2, height: R * 2, left: -R, top: -R, borderColor: 'rgba(255,255,255,0.07)' }} />
-            {/* arrow on the ring */}
-            <div className={`absolute ${hot ? 'prox-hot' : ''}`} style={{ left: ax, top: ay, transform: `translate(-50%,-50%) rotate(${n.angle}deg)` }}>
-              <svg width="26" height="26" viewBox="0 0 26 26"><path d="M13 2 L22 20 L13 15 L4 20 Z" fill={color} style={{ filter: `drop-shadow(0 0 6px ${color})` }} /></svg>
-            </div>
-            {/* range readout under the crosshair */}
-            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 chamfer-xs hud-chip px-2 py-0.5" style={{ top: 34 }}>
-              <span className="w-1.5 h-1.5 rotate-45" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
-              <span className="tabnum text-[11px] font-black" style={{ color }}>{n.dist < 10 ? n.dist.toFixed(1) : Math.round(n.dist)}m</span>
-              {Math.abs(n.above) > 1.8 && <span className="text-[9px] text-white/60">{n.above > 0 ? '▲' : '▼'}</span>}
-              <span className="text-[8px] tracking-[0.2em] text-white/40 ml-1">{hud.enemiesLeft} LEFT</span>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ============ COMPASS ============ */}
-      <div className="absolute top-5 left-1/2 -translate-x-1/2">
+      {/* ============ COMPASS (objective bearing only — no threat ring / range chip) ============ */}
+      <div className="absolute top-5 left-1/2 -translate-x-1/2" style={{ opacity: hud.ads > 0.55 ? 0.18 : 1, transition: 'opacity .2s' }}>
         <div className="relative w-[420px] h-9 overflow-hidden" style={{ maskImage: 'linear-gradient(90deg,transparent,#000 16%,#000 84%,transparent)' }}>
           <div className="absolute top-0 inset-x-0 h-px bg-white/25" />
           {Array.from({ length: 73 }, (_, i) => i * 5).map(deg => {
@@ -202,7 +174,26 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
       )}
       {fx.callout && (
         <div key={fx.callout.id} className="mission-radio">
-          <span>RADIO</span> {fx.callout.text}
+          <span>{fx.callout.speaker ?? 'RADIO'}</span> {fx.callout.text}
+        </div>
+      )}
+      {hud.pickupNote && (
+        <div className="absolute left-1/2 top-[48%] -translate-x-1/2 chamfer-xs hud-chip px-3 py-1 text-[11px] tracking-[0.22em] font-black text-[#00FF88]">
+          {hud.pickupNote}
+        </div>
+      )}
+      {hud.tutorial && (
+        <div className="tutorial-rail" aria-label="Onboarding">
+          {([
+            ['move', 'WASD', 'Move'],
+            ['sprint', 'SHIFT', 'Sprint'],
+            ['ads', 'RMB', 'Aim'],
+            ['lean', 'Q / E', 'Lean'],
+            ['vault', 'SPACE', 'Vault'],
+            ['slide', 'SPRINT+C', 'Slide'],
+          ] as const).filter(([k]) => !hud.tutorial![k]).slice(0, 3).map(([k, key, label]) => (
+            <div key={k} className="tutorial-step"><span className="keycap">{key}</span>{label}</div>
+          ))}
         </div>
       )}
       <div className="absolute left-1/2 top-[57%] -translate-x-1/2 flex flex-col items-center gap-1">
@@ -225,7 +216,7 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
           <span key={displayedMag} className={`ammo-num tabnum ${displayedMag === 0 ? 'ammo-empty' : displayedMag <= 5 ? 'ammo-warn' : 'text-white'}`}>
             {displayedMag}
           </span>
-          <span className="mb-1.5 text-[11px] tracking-[0.2em] text-[#00FF88] chamfer-xs px-1.5 py-0.5 border border-[#00FF88]/35 bg-[#00FF88]/10">∞</span>
+          <span className="mb-1.5 text-[12px] tracking-[0.12em] text-white/55 tabnum">/ {Number.isFinite(hud.reserve) ? hud.reserve : '∞'}</span>
         </div>
         {/* segmented magazine bar */}
         <div className="flex gap-[2px] justify-end mt-2">
@@ -257,7 +248,6 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         </div>
         <div className="text-[9px] tracking-[0.24em] text-white/45 space-y-0.5">
           <div>ELIMINATIONS <span className="text-white font-black ml-1">{hud.kills}</span></div>
-          <div>HOSTILES <span className="text-[#FF5544] font-black ml-1">{hud.enemiesLeft}</span></div>
         </div>
       </div>
 

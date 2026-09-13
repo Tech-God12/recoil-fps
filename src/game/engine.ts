@@ -62,7 +62,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   cameraShake: 100,
   showFps: true,
   masterVolume: 85,
-  voices: true,
+  voices: false,
   crosshairColor: '#F2A93B',
   crosshairSize: 9,
   crosshairGap: 8,
@@ -100,6 +100,8 @@ export interface HudState {
   magSize: number;
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
+  tutorial?: { age: number; move: boolean; sprint: boolean; ads: boolean; lean: boolean; vault: boolean; slide: boolean };
+  pickupNote?: string;
 }
 
 export type GameEvent =
@@ -108,7 +110,8 @@ export type GameEvent =
   | { type: 'damage'; dir: number; amount: number }
   | { type: 'grenadeWarn'; dir: number; dist: number }
   | { type: 'flash'; power: number }
-  | { type: 'callout'; text: string }
+  | { type: 'callout'; text: string; speaker?: string }
+  | { type: 'pickup'; text: string }
   | { type: 'streak'; label: string }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'end'; win: boolean; kills: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats };
@@ -129,6 +132,17 @@ interface WeaponDef {
   adsFov: number;      // FOV while ADS (lower = more zoom); sniper gets a real scope
   tacReload: number;
   emptyReload: number;
+  kick: number;
+  recover: number;
+}
+
+function recoilSpray(shots: number, rise: number, sway: number): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < shots; i++) {
+    const t = i / Math.max(1, shots - 1);
+    out.push([rise * (0.45 + t * 0.8), Math.sin(i * 0.9) * sway + (t > 0.3 ? sway * 0.55 : 0)]);
+  }
+  return out;
 }
 
 interface Grenade {
@@ -206,14 +220,32 @@ export class Engine {
   private solidGrid = new Map<string, AABB[]>();
   private readonly GRID_CELL = 4;
   private scratch: AABB[] = [];
-  // INFINITE AMMO: reserves never deplete — the fight never pauses for scavenging
-  private readonly INFINITE_AMMO = true;
+  private readonly INFINITE_AMMO = false;
 
   // Camera Shake & Recoil
   private recoilP = 0;
   private recoilY = 0;
   private shake = 0;
+  private punchP = 0;
+  private punchY = 0;
+  private hitStop = 0;
   private eyeH = 1.62;
+  private tutorialAge = 0;
+  private tutorial = { move: false, sprint: false, ads: false, lean: false, vault: false, slide: false };
+  private pickupNote = '';
+  private pickupNoteT = 0;
+  private clouds: THREE.Object3D[] = [];
+  private birds: { mesh: THREE.Object3D; a: number; r: number; y: number; s: number }[] = [];
+  private flags: THREE.Object3D[] = [];
+  private playerFill!: THREE.PointLight;
+  private extractRig: THREE.Group | null = null;
+  private extractSmokeT = 0;
+  private supplyMesh: THREE.Object3D | null = null;
+  private supplyPos = new THREE.Vector3();
+  private supplyLive = false;
+  private loot: { mesh: THREE.Mesh; kind: 'ammo' | 'frag'; pos: THREE.Vector3; age: number }[] = [];
+  private lootPool: THREE.Mesh[] = [];
+  private distantGunT = 8;
 
   // Weapons
   private weapons: WeaponDef[];
@@ -235,8 +267,8 @@ export class Engine {
   private vmLight: THREE.PointLight;
 
   // Grenades
-  private frags = 5;
-  private flashes = 2;
+  private frags = 2;
+  private flashes = 1;
   private cooking = false;
   private cookT = 0;
   private grenades: Grenade[] = [];
@@ -289,7 +321,7 @@ export class Engine {
     this.scene.background = new THREE.Color(0xB8CCDA);
     this.scene.fog = new THREE.Fog(0xD9CDB0, 110, 420); // starts far out, never muddies gameplay range
     // strong sky fill so shadowed faces stay readable
-    const hemi = new THREE.HemisphereLight(0xCFE0EE, 0xB89A66, 1.15);
+    const hemi = new THREE.HemisphereLight(0xCFE0EE, 0xB89A66, 1.28);
     this.scene.add(hemi);
     // key sun — high and bright, crisp shadows
     const sun = new THREE.DirectionalLight(0xFFF4DE, 2.6);
@@ -307,7 +339,7 @@ export class Engine {
     const fill = new THREE.DirectionalLight(0xAFC6DC, 0.45);
     fill.position.set(55, 30, -45);
     this.scene.add(fill);
-    this.scene.add(new THREE.AmbientLight(0x8A7A60, 0.4));
+    this.scene.add(new THREE.AmbientLight(0x8A7A60, 0.52));
 
     this.addSkyDome();
 
@@ -324,11 +356,20 @@ export class Engine {
     // Warm interior point lights near the map centre (capped at 2 — each one re-lights every merged mesh)
     const spots = [...this.world.lightSpots].sort((a, b) => a.length() - b.length()).slice(0, 2);
     for (const s of spots) {
-      const pl = new THREE.PointLight(0xFFD9A0, 14, 16, 1.8);
+      const pl = new THREE.PointLight(0xFFD9A0, 24, 22, 1.4);
       pl.position.copy(s);
       this.scene.add(pl);
     }
+    this.playerFill = new THREE.PointLight(0xFFE2B0, 3.4, 12, 1.8);
+    this.scene.add(this.playerFill);
     this.effects = new Effects(this.scene);
+    const lootMat = new THREE.MeshStandardMaterial({ color: 0xC6A45A, emissive: 0x6A4A18, emissiveIntensity: 0.55, roughness: 0.5 });
+    for (let i = 0; i < 8; i++) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.22), lootMat);
+      mesh.visible = false;
+      this.scene.add(mesh);
+      this.lootPool.push(mesh);
+    }
 
     // ==================== AAA POST-PROCESSING (bloom + tone-mapped output) ====================
     this.composer = new EffectComposer(this.renderer);
@@ -401,13 +442,15 @@ void main(){
         headMul: 2.3,
         limbMul: 0.85,
         magSize: 30,
-        reserve: 150,
+        reserve: 90,
         hipSpread: 0.008,
-        adsSpread: 0.000,
-        pattern: [[0, 0]],
+        adsSpread: 0.0012,
+        pattern: recoilSpray(30, 1.15, 0.32),
         adsFov: 56,
         tacReload: 2.1,
         emptyReload: 2.7,
+        kick: 1,
+        recover: 0.11,
       },
       {
         name: 'AK-47 TACTICAL',
@@ -418,13 +461,15 @@ void main(){
         headMul: 2.5,
         limbMul: 0.8,
         magSize: 30,
-        reserve: 120,
-        hipSpread: 0.010,
-        adsSpread: 0.000,
-        pattern: [[0, 0]],
+        reserve: 90,
+        hipSpread: 0.012,
+        adsSpread: 0.0024,
+        pattern: recoilSpray(30, 1.85, 0.72),
         adsFov: 58,
         tacReload: 2.4,
         emptyReload: 3.0,
+        kick: 1.35,
+        recover: 0.16,
       },
       {
         name: 'M1911 .45',
@@ -435,13 +480,15 @@ void main(){
         headMul: 2.6,
         limbMul: 0.85,
         magSize: 8,
-        reserve: 48,
+        reserve: 24,
         hipSpread: 0.006,
-        adsSpread: 0.000,
-        pattern: [[0, 0]],
+        adsSpread: 0.001,
+        pattern: recoilSpray(8, 1.45, 0.18),
         adsFov: 64,
         tacReload: 1.5,
         emptyReload: 1.8,
+        kick: 1.15,
+        recover: 0.14,
       },
       {
         name: 'AWM .338 SNIPER',
@@ -452,13 +499,15 @@ void main(){
         headMul: 3.0,
         limbMul: 1.0,
         magSize: 5,
-        reserve: 25,
+        reserve: 15,
         hipSpread: 0.045,
-        adsSpread: 0.000,
-        pattern: [[0, 0]],
+        adsSpread: 0.0004,
+        pattern: recoilSpray(5, 3.1, 0.22),
         adsFov: 22,
         tacReload: 2.8,
         emptyReload: 3.4,
+        kick: 2.1,
+        recover: 0.38,
       },
       {
         name: 'MP7A1 PDW',
@@ -469,17 +518,19 @@ void main(){
         headMul: 2.2,
         limbMul: 0.8,
         magSize: 40,
-        reserve: 200,
-        hipSpread: 0.007,
-        adsSpread: 0.000,
-        pattern: [[0, 0]],
+        reserve: 80,
+        hipSpread: 0.009,
+        adsSpread: 0.002,
+        pattern: recoilSpray(40, 0.72, 0.48),
         adsFov: 60,
         tacReload: 1.9,
         emptyReload: 2.3,
+        kick: 0.7,
+        recover: 0.08,
       },
     ];
     this.mags = [30, 30, 8, 5, 40];
-    this.reserves = [Infinity, Infinity, Infinity, Infinity, Infinity];
+    this.reserves = this.weapons.map(w => w.reserve);
 
     // Muzzle Flash
     const fm = new THREE.MeshBasicMaterial({
@@ -519,13 +570,13 @@ void main(){
       damagePlayer: (a, f) => this.damagePlayer(a, f),
       moveCollide: (p, dx, dz, r) => this.moveAxis(p, dx, dz, r, 1.7),
       onCallout: (k, p) => {
-        // Enemy barks stay subtle: only audible voices + a short HUD hint, no radio click spam.
         if (p.distanceTo(this.pos) < 40) {
           const labels: Record<string, string> = {
             contact: 'Contact — ahead!', flank: 'Hostiles flanking!', grenade: 'Frag out!',
             mandown: 'Contact down!', fallback: 'They are falling back!', push: 'They are pushing!',
           };
-          this.onEvent({ type: 'callout', text: labels[k] || 'Contact!' });
+          audio.radioSpeech();
+          this.onEvent({ type: 'callout', text: labels[k] || 'Contact!', speaker: 'HOSTILE' });
         }
       },
       aiThrowGrenade: (from, target) => this.spawnGrenade(from, target, true),
@@ -540,13 +591,18 @@ void main(){
     this.missionRuntime = new MissionRuntime({
       scene: this.scene, world: this.world, camera: this.camera, ai: this.ai, player: this.pos,
       isAlive: () => !this.dead,
-      phaseChanged: (phase, index) => this.onEvent({ type: 'objective', phase, index }),
+      phaseChanged: (phase, index) => {
+        this.onEvent({ type: 'objective', phase, index });
+        if (phase.type === 'extract') this.spawnExtract(phase.at);
+      },
       radio: (text, at) => {
         if (at) { this.addPing(at); audio.radioCallout('contact'); }
+        else audio.radioSpeech();
         voice.objective(text);
-        if (text !== this.missionRuntime.mission.current.brief) this.onEvent({ type: 'callout', text });
+        this.onEvent({ type: 'callout', text, speaker: 'NOMAD' });
       },
-      resupply: () => { this.hp = 100; this.frags = 5; this.flashes = 2; },
+      resupply: () => this.giveResupply(),
+      dropSupply: () => this.dropSupplyCrate(),
       detonate: at => {
         // Use the existing blast resolution for damage, glass, particles and spatial audio.
         this.explode({ mesh: this.missionRuntime.markers.cache, pos: at, vel: new THREE.Vector3(), fuse: 0, kind: 'frag', fromAI: false });
@@ -610,11 +666,10 @@ void main(){
       }
     }
 
-    // JUMP: 1.1m height, 0.47s air time. Cannot jump during slide or lean, 0.3s floor contact cooldown
     if (e.code === 'Space') {
       if (this.tryVault()) {
-        // vaulted through a window
-      } else if (this.grounded && !this.sliding && Math.abs(this.lean) < 0.2 && this.jumpCD <= 0) {
+        this.tutorial.vault = true;
+      } else if (this.grounded && !this.sliding && this.jumpCD <= 0) {
         this.vel.y = 6.2;
         this.grounded = false;
         this.crouched = false;
@@ -655,7 +710,7 @@ void main(){
       // Cannot sprint while aiming down sights
       if (this.sprinting) {
         this.sprinting = false;
-        this.sprintToAdsDelay = 0.2; // 200ms delay
+        this.sprintToAdsDelay = 0.08;
       }
     }
   };
@@ -729,13 +784,27 @@ void main(){
     sunSpr.position.set(-220, 200, 150);
     sunSpr.scale.setScalar(110);
     this.scene.add(sunSpr);
-    // A few flat drifting clouds
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xF4EAD2, transparent: true, opacity: 0.75, fog: false, depthWrite: false });
     for (let i = 0; i < 7; i++) {
       const cl = new THREE.Mesh(new THREE.SphereGeometry(14 + Math.random() * 16, 10, 6), cloudMat);
       cl.position.set((Math.random() - 0.5) * 560, 130 + Math.random() * 60, (Math.random() - 0.5) * 560);
       cl.scale.y = 0.28;
       this.scene.add(cl);
+      this.clouds.push(cl);
+    }
+    const birdMat = new THREE.MeshBasicMaterial({ color: 0x1A1712, side: THREE.DoubleSide, fog: false, depthWrite: false });
+    for (let i = 0; i < 6; i++) {
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.35), birdMat);
+      mesh.position.set((Math.random() - 0.5) * 80, 18 + Math.random() * 10, (Math.random() - 0.5) * 80);
+      this.scene.add(mesh);
+      this.birds.push({ mesh, a: Math.random() * Math.PI * 2, r: 28 + Math.random() * 40, y: 16 + Math.random() * 12, s: 0.35 + Math.random() * 0.25 });
+    }
+    const flagMat = new THREE.MeshBasicMaterial({ color: 0xB0402E, side: THREE.DoubleSide, transparent: true, opacity: 0.92, depthWrite: false });
+    for (const [x, z] of [[-19, 8], [18, -12], [8, 40], [-36, 22]] as const) {
+      const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.1), flagMat);
+      flag.position.set(x, 4.4, z);
+      this.scene.add(flag);
+      this.flags.push(flag);
     }
   }
 
@@ -756,17 +825,52 @@ void main(){
     return best;
   }
 
+  private coverVaultLand(): { x: number; z: number } | null {
+    const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+    const px = this.pos.x, pz = this.pos.z;
+    const near = this.nearSolids(px + fx * 0.9, pz + fz * 0.9, 1.3);
+    let best: AABB | null = null;
+    let bestDist = 1.5;
+    for (let i = 0; i < near.length; i++) {
+      const b = near[i];
+      const h = b.maxY - this.pos.y;
+      if (h < 0.42 || h > 1.28 || b.minY > this.pos.y + 0.35) continue;
+      const cx = (b.minX + b.maxX) * 0.5, cz = (b.minZ + b.maxZ) * 0.5;
+      const dx = cx - px, dz = cz - pz;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 1.5 || dist < 0.18) continue;
+      if ((dx * fx + dz * fz) / (dist || 1) < 0.32) continue;
+      if (dist < bestDist) { bestDist = dist; best = b; }
+    }
+    if (!best) return null;
+    const landX = px + fx * 2.15, landZ = pz + fz * 2.15;
+    const block = this.nearSolids(landX, landZ, 0.45);
+    for (let i = 0; i < block.length; i++) {
+      const b = block[i];
+      if (b.maxY <= this.pos.y + 0.55 || b.minY >= this.pos.y + 1.6) continue;
+      if (landX + 0.3 > b.minX && landX - 0.3 < b.maxX && landZ + 0.3 > b.minZ && landZ - 0.3 < b.maxZ) return null;
+    }
+    return { x: landX, z: landZ };
+  }
+
   private tryVault(): boolean {
     const w = this.nearestWindow();
-    if (!w) return false;
-    const dx = w.x - this.pos.x, dz = w.z - this.pos.z;
-    const len = Math.hypot(dx, dz) || 1;
-    this.pos.x = w.x + (dx / len) * 1.5;
-    this.pos.z = w.z + (dz / len) * 1.5;
+    if (w) {
+      const dx = w.x - this.pos.x, dz = w.z - this.pos.z;
+      const len = Math.hypot(dx, dz) || 1;
+      this.pos.x = w.x + (dx / len) * 1.5;
+      this.pos.z = w.z + (dz / len) * 1.5;
+    } else {
+      const land = this.coverVaultLand();
+      if (!land) return false;
+      this.pos.x = land.x;
+      this.pos.z = land.z;
+    }
     this.vel.y = 3.6;
     this.grounded = false;
     this.crouched = false;
     this.jumpCD = 0.45;
+    this.tutorial.vault = true;
     audio.jumpGrunt();
     return true;
   }
@@ -1003,7 +1107,7 @@ void main(){
   // ==================== SLIDE MECHANIC ====================
   // Trigger: sprint + crouch input simultaneously
   // Start speed: 7.2 m/s. Decelerates to 0 over 0.8s.
-  // Cannot fire or ADS during slide. Cooldown: 1.2s.
+  // Hip-fire allowed. ADS is blocked until the slide ends. Cooldown: 1.2s.
   private startSlide() {
     this.sliding = true;
     this.slideT = 0;
@@ -1012,14 +1116,14 @@ void main(){
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     this.slideDir.set(-sin, 0, -cos);
     audio.slideDrag(this.surfaceAt());
+    this.tutorial.slide = true;
   }
 
   // ==================== 100% ACCURATE LASER BALLISTICS ====================
   private tryFire() {
     if (this.paused || this.dead || this.ended || !this.started) return;
     if (this.fireCD > 0 || this.reloadT >= 0 || this.switchT >= 0 || this.cooking) return;
-    if (this.sprinting || this.sprintToFireDelay > 0) return; // Cannot fire during sprint
-    if (this.sliding) return; // Cannot fire during slide
+    if (this.sprinting) this.sprinting = false;
 
     const d = this.def();
     if (this.mags[this.cur] <= 0) {
@@ -1036,9 +1140,11 @@ void main(){
     // 1. CALCULATE EXACT BULLET TRAJECTORY FIRST BEFORE RECOIL
     // In ADS: spread is 0.000 — 100% exact center of your sight picture
     const isAds = this.ads > 0.65;
-    let spread = isAds ? 0.0 : THREE.MathUtils.lerp(d.hipSpread, d.adsSpread, this.ads);
+    let spread = isAds ? d.adsSpread : THREE.MathUtils.lerp(d.hipSpread, d.adsSpread, this.ads);
     if (!isAds) {
       if (this.inputMoving()) spread *= 1.2;
+      if (this.sprinting) spread *= 1.7;
+      if (this.sliding) spread *= 2.1;
       if (this.crouched) spread *= 0.7;
     }
     this.spreadNow = spread;
@@ -1099,20 +1205,18 @@ void main(){
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         const killed = enemy.takeDamage(dmg, part === 'head');
+        this.hitStop = Math.max(this.hitStop, killed ? 0.055 : 0.022);
+        this.punchP -= killed ? 0.018 : 0.008;
         if (killed) {
           this.kills++;
           audio.killConfirm();
+          this.dropLoot(enemy.pos);
           const isHead = part === 'head';
           if (isHead) {
             this.headshots++;
             voice.headshot();
           }
           if (this.kills === 1) voice.firstBlood();
-          // Field resupply: every 3rd kill restocks a grenade so utility never runs dry
-          if (this.kills % 3 === 0) {
-            this.frags = Math.min(5, this.frags + 1);
-            this.flashes = Math.min(2, this.flashes + 1);
-          }
           const now = performance.now();
           if (now - this.lastKillT < 2600) this.streak++;
           else this.streak = 1;
@@ -1138,19 +1242,19 @@ void main(){
       this.effects.tracer(muzzleWorld, origin.clone().addScaledVector(dir, 140));
     }
 
-    // 2. NOW APPLY SOFTENED RECOIL AFTER THE BULLET HAS BEEN FIRED
-    // (~40% gentler than before — present but never annoying)
     const pat = d.pattern[Math.min(this.shotIdx, d.pattern.length - 1)];
     this.shotIdx++;
-    const adsRecoilReduction = isAds ? 0.6 : 1.0;
-    const kickP = pat[0] * 0.0052 * adsRecoilReduction;
-    const kickY = pat[1] * 0.0032 * adsRecoilReduction;
-    this.pitch += kickP * 0.32;
-    this.yaw += kickY * 0.32;
-    this.recoilP += kickP * 0.45;
-    this.recoilY += kickY * 0.45;
-    this.vmKick = 1;
-    this.vmKickRot = 1;
+    const adsRecoilReduction = isAds ? 0.62 : 1.0;
+    const kickP = pat[0] * 0.012 * adsRecoilReduction * d.kick;
+    const kickY = pat[1] * 0.009 * adsRecoilReduction * d.kick;
+    this.pitch += kickP * 0.5;
+    this.yaw += kickY * 0.5;
+    this.recoilP += kickP * 0.85;
+    this.recoilY += kickY * 0.85;
+    this.punchP += 0.01 * d.kick;
+    this.punchY += (Math.random() - 0.5) * 0.006 * d.kick;
+    this.vmKick = d.kick;
+    this.vmKickRot = d.kick;
 
     // Audio & Muzzle Flash — each weapon gets its own signature report
     if (this.cur === 0) audio.fireM4();
@@ -1260,10 +1364,7 @@ void main(){
           if (killed && !g.fromAI) {
             this.kills++;
             if (this.kills === 1) voice.firstBlood();
-            if (this.kills % 3 === 0) {
-              this.frags = Math.min(5, this.frags + 1);
-              this.flashes = Math.min(2, this.flashes + 1);
-            }
+            this.dropLoot(e.pos);
             audio.killConfirm();
             this.onEvent({ type: 'kill', name: e.name, weapon: 'FRAG', headshot: false });
             this.rebuildHittables();
@@ -1430,6 +1531,11 @@ void main(){
     if (this.fpsAcc >= 0.25) { this.fps = this.fpsFrames / this.fpsAcc; this.fpsAcc = 0; this.fpsFrames = 0; }
     this.adaptResolution(t);
     if (this.paused) return;
+    if (this.hitStop > 0) {
+      this.hitStop -= dt;
+      this.render();
+      return;
+    }
     if (this.ended) {
       this.finishDelay -= dt;
       if (this.finishDelay <= 0 && this.pendingResult) {
@@ -1499,8 +1605,8 @@ void main(){
       && this.ads < 0.25 && this.reloadT < 0 && this.switchT < 0 && Math.abs(this.lean) < 0.25 && moving;
 
     if (wasSprinting && !this.sprinting) {
-      this.sprintToFireDelay = 0.2; // 200ms sprint-to-fire delay
-      this.sprintToAdsDelay = 0.2;  // 200ms sprint-to-ads delay
+      this.sprintToFireDelay = 0;
+      this.sprintToAdsDelay = 0.08;
     }
 
     let speed = 0;
@@ -1600,11 +1706,7 @@ void main(){
     if (this.pos.distanceTo(this.lastPos) < 0.4) this.staticTime += dt;
     else { this.staticTime = 0; this.lastPos.copy(this.pos); }
 
-    // Health regen (to 50 HP after 5s)
     this.lastDamageT += dt;
-    if (!this.dead && this.lastDamageT > 5 && this.hp < 50) {
-      this.hp = Math.min(50, this.hp + dt * 10);
-    }
 
     // Auto weapon fire
     this.fireCD -= dt;
@@ -1612,10 +1714,11 @@ void main(){
     this.shotResetT -= dt;
     if (this.shotResetT <= 0) this.shotIdx = 0;
 
-    // Recoil recovery (80ms snappy return)
-    const rec = Math.min(1, dt / 0.08);
+    const rec = Math.min(1, dt / this.def().recover);
     this.recoilP *= 1 - rec;
     this.recoilY *= 1 - rec;
+    this.punchP *= Math.exp(-dt * 10);
+    this.punchY *= Math.exp(-dt * 9);
 
     // Staged reload
     if (this.reloadT >= 0) {
@@ -1643,6 +1746,7 @@ void main(){
       if (pointInAABB(this.pos.x, this.pos.y + 1, this.pos.z, b)) { isIndoor = true; break; }
     }
     audio.setIndoor(isIndoor);
+    this.playerFill.intensity = isIndoor ? 4.2 : 1.6;
 
     // Age pings
     for (const p of this.pings) p.age += dt;
@@ -1659,6 +1763,152 @@ void main(){
       this.rosterVersion = this.ai.rosterVersion;
       this.rebuildHittables();
     }
+    this.updateWorldLife(dt);
+    this.updateLoot(dt);
+    this.updateTutorial(dt);
+  }
+
+
+  private giveResupply() {
+    this.hp = Math.min(100, this.hp + 55);
+    this.frags = Math.min(3, this.frags + 2);
+    this.flashes = Math.min(2, this.flashes + 1);
+    for (let i = 0; i < this.weapons.length; i++) {
+      this.reserves[i] = Math.min(this.weapons[i].reserve, this.reserves[i] + this.weapons[i].magSize * 2);
+    }
+    this.notePickup('RESUPPLY');
+    audio.pickup();
+  }
+
+  private notePickup(text: string) {
+    this.pickupNote = text;
+    this.pickupNoteT = 1.6;
+    this.onEvent({ type: 'pickup', text });
+  }
+
+  private dropLoot(at: THREE.Vector3) {
+    const mesh = this.lootPool.find(m => !m.visible);
+    if (!mesh) return;
+    const kind: 'ammo' | 'frag' = Math.random() < 0.18 && this.frags < 3 ? 'frag' : 'ammo';
+    mesh.visible = true;
+    mesh.position.set(at.x, 0.18, at.z);
+    (mesh.material as THREE.MeshStandardMaterial).color.setHex(kind === 'frag' ? 0x3A5A32 : 0xC6A45A);
+    this.loot.push({ mesh, kind, pos: new THREE.Vector3(at.x, 0.18, at.z), age: 0 });
+  }
+
+  private updateLoot(dt: number) {
+    for (let i = this.loot.length - 1; i >= 0; i--) {
+      const L = this.loot[i];
+      L.age += dt;
+      L.mesh.position.y = 0.18 + Math.sin(L.age * 4) * 0.06;
+      L.mesh.rotation.y += dt * 1.6;
+      if (L.age > 24) { L.mesh.visible = false; this.loot.splice(i, 1); continue; }
+      if (this.pos.distanceTo(L.pos) > 1.45) continue;
+      L.mesh.visible = false;
+      this.loot.splice(i, 1);
+      if (L.kind === 'frag') {
+        this.frags = Math.min(3, this.frags + 1);
+        this.notePickup('FRAG +1');
+      } else {
+        const w = this.def();
+        this.reserves[this.cur] = Math.min(w.reserve, this.reserves[this.cur] + w.magSize);
+        this.notePickup(`AMMO +${w.magSize}`);
+      }
+      audio.pickup();
+    }
+    if (this.supplyLive && this.supplyMesh) {
+      this.supplyMesh.rotation.y += dt * 0.4;
+      if (this.pos.distanceTo(this.supplyPos) < 1.8) {
+        this.supplyLive = false;
+        this.supplyMesh.visible = false;
+        this.giveResupply();
+      }
+    }
+    if (this.pickupNoteT > 0) {
+      this.pickupNoteT -= dt;
+      if (this.pickupNoteT <= 0) this.pickupNote = '';
+    }
+  }
+
+  dropSupplyCrate() {
+    const p = this.missionRuntime.mission.current.at;
+    if (!this.supplyMesh) {
+      const g = new THREE.Group();
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.45, 0.55), new THREE.MeshStandardMaterial({ color: 0x3A4A32, roughness: 0.7 }));
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.08, 0.58), new THREE.MeshStandardMaterial({ color: 0xC6A45A }));
+      band.position.y = 0.05;
+      g.add(box, band);
+      this.scene.add(g);
+      this.supplyMesh = g;
+    }
+    this.supplyPos.set(p[0] + 2.4, 0.28, p[2] + 1.8);
+    this.supplyMesh.position.copy(this.supplyPos);
+    this.supplyMesh.visible = true;
+    this.supplyLive = true;
+    this.effects.smoke(this.supplyPos.clone().setY(0.4), 0xC8B080);
+  }
+
+  private spawnExtract(at: readonly [number, number, number]) {
+    if (this.extractRig) this.scene.remove(this.extractRig);
+    const g = new THREE.Group();
+    const bodyM = new THREE.MeshStandardMaterial({ color: 0x3A4638, roughness: 0.78 });
+    const darkM = new THREE.MeshStandardMaterial({ color: 0x242A22, roughness: 0.7 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(5.6, 2.0, 2.4), bodyM);
+    body.position.set(0, 1.25, 0);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.5, 2.3), darkM);
+    cab.position.set(-2.3, 2.15, 0);
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.7, 2.2), bodyM);
+    bed.position.set(0.9, 2.15, 0);
+    g.add(body, cab, bed);
+    for (const [x, z] of [[-1.8, 1.15], [-1.8, -1.15], [1.6, 1.15], [1.6, -1.15]] as const) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.32, 10), darkM);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 0.52, z);
+      g.add(wheel);
+    }
+    g.position.set(at[0], 0, at[2]);
+    this.scene.add(g);
+    this.extractRig = g;
+    this.extractSmokeT = 0;
+    audio.extractRumble();
+    this.effects.smoke(new THREE.Vector3(at[0], 0.4, at[2]), 0x7dccb4);
+  }
+
+  private updateWorldLife(dt: number) {
+    for (const c of this.clouds) {
+      c.position.x += dt * 1.4;
+      if (c.position.x > 300) c.position.x -= 600;
+    }
+    const t = performance.now() / 1000;
+    for (const b of this.birds) {
+      b.a += dt * b.s;
+      b.mesh.position.set(Math.cos(b.a) * b.r, b.y + Math.sin(t * 2 + b.a) * 0.6, Math.sin(b.a) * b.r);
+      b.mesh.rotation.y = -b.a + Math.PI / 2;
+      b.mesh.rotation.z = Math.sin(t * 8 + b.a) * 0.35;
+    }
+    for (let i = 0; i < this.flags.length; i++) {
+      this.flags[i].rotation.y = Math.sin(t * 1.8 + i) * 0.35;
+    }
+    this.distantGunT -= dt;
+    if (this.distantGunT <= 0) {
+      this.distantGunT = 7 + Math.random() * 10;
+      if (this.tutorialAge > 8) audio.distantGun();
+    }
+    if (this.missionRuntime.mission.current.type === 'extract' && this.extractRig) {
+      this.extractSmokeT -= dt;
+      if (this.extractSmokeT <= 0) {
+        this.extractSmokeT = 0.45;
+        this.effects.smoke(this.extractRig.position.clone().setY(0.5), 0x7dccb4);
+      }
+    }
+  }
+
+  private updateTutorial(dt: number) {
+    this.tutorialAge += dt;
+    if (this.inputMoving()) this.tutorial.move = true;
+    if (this.sprinting) this.tutorial.sprint = true;
+    if (this.ads > 0.5) this.tutorial.ads = true;
+    if (Math.abs(this.lean) > 0.4) this.tutorial.lean = true;
   }
 
   // ==================== CAMERA POSITION & LEAN ====================
@@ -1680,17 +1930,18 @@ void main(){
     const bob = Math.sin(this.footPhase) * bobAmp * (this.grounded ? 1 : 0);
     eye.y += bob;
 
-    // Camera shake (scaled by user setting)
+    const k = this.motionBlurAmount;
+    const t = performance.now() / 1000;
     if (this.shake > 0.001) {
-      const k = this.motionBlurAmount;
-      eye.x += (Math.random() - 0.5) * this.shake * 0.14 * k;
-      eye.y += (Math.random() - 0.5) * this.shake * 0.14 * k;
+      eye.x += Math.sin(t * 38) * this.shake * 0.05 * k;
+      eye.y += Math.cos(t * 31) * this.shake * 0.04 * k;
     }
 
     this.camera.position.copy(eye);
+    this.playerFill.position.copy(eye);
     this.camera.rotation.set(
-      this.pitch + this.recoilP + (this.sprinting ? -0.02 : 0) + (this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.05 : 0),
-      this.yaw + this.recoilY,
+      this.pitch + this.recoilP + this.punchP * k + (this.sprinting ? -0.02 : 0) + Math.sin(t * 38) * this.shake * 0.03 * k,
+      this.yaw + this.recoilY + this.punchY * k,
       roll
     );
 
@@ -1980,7 +2231,9 @@ void main(){
       nearest,
       fps: Math.round(this.fps),
       magSize: this.def().magSize,
-      canVault: !!this.nearestWindow(),
+      canVault: !!this.nearestWindow() || !!this.coverVaultLand(),
+      tutorial: this.tutorialAge < 32 ? { age: this.tutorialAge, ...this.tutorial } : undefined,
+      pickupNote: this.pickupNote || undefined,
       mission: this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
     };
   }

@@ -15,36 +15,46 @@ function fill(ctx: CanvasRenderingContext2D, r: Region, S: number, color: string
   ctx.fillStyle = color; ctx.fillRect(x, y, w, h); noise(ctx, x, y, w, h, grain, ga);
 }
 
+export type SoldierKind = 'rifle' | 'rusher' | 'marksman';
+
 // soldier atlas regions
 const SR = {
   camo: [0, 0, .5, .5] as Region, vest: [.5, 0, 1, .5] as Region, skin: [0, .5, .25, .75] as Region,
   black: [.25, .5, .5, .75] as Region, boot: [.5, .5, .75, .75] as Region, helmet: [.75, .5, 1, .75] as Region,
   webbing: [0, .75, .25, 1] as Region, visor: [.25, .75, .5, 1] as Region, olive: [.5, .75, .75, 1] as Region,
 };
-let soldierMat: THREE.MeshStandardMaterial | null = null;
-function getSoldierMat() {
-  if (soldierMat) return soldierMat;
+const soldierMatCache = new Map<SoldierKind, THREE.MeshStandardMaterial>();
+function getSoldierMat(kind: SoldierKind = 'rifle') {
+  const cached = soldierMatCache.get(kind);
+  if (cached) return cached;
+  const palettes: Record<SoldierKind, { camo: string; camoCols: string[]; vest: string; helmet: string; olive: string }> = {
+    rifle: { camo: '#4A5340', camoCols: ['#3A4330', '#6A7554', '#2E3526', '#7A8462'], vest: '#1C1A16', helmet: '#3A3A28', olive: '#3E4A30' },
+    rusher: { camo: '#3A3C40', camoCols: ['#2A2C30', '#4A3A38', '#1A1C1E', '#5A5048'], vest: '#12100E', helmet: '#2A2420', olive: '#4A3028' },
+    marksman: { camo: '#334232', camoCols: ['#243024', '#4A5A40', '#1C281C', '#5A6A48'], vest: '#1A1E16', helmet: '#2E3A28', olive: '#2A3828' },
+  };
+  const pal = palettes[kind];
   const S = 512; const [c, ctx] = canvas(S, S);
-  // desert camo
-  fill(ctx, SR.camo, S, '#8A7A57', 0);
+  fill(ctx, SR.camo, S, pal.camo, 0);
   const cx = SR.camo[0] * S, cy = SR.camo[1] * S, cw = .5 * S;
-  const camoCols = ['#6E6142', '#A0906A', '#5A4E33', '#B7A57C'];
-  for (let i = 0; i < 260; i++) { ctx.fillStyle = camoCols[i % 4]; ctx.beginPath(); ctx.ellipse(cx + Math.random() * cw, cy + Math.random() * cw, 6 + Math.random() * 16, 4 + Math.random() * 10, Math.random() * 3, 0, 7); ctx.fill(); }
+  for (let i = 0; i < 260; i++) { ctx.fillStyle = pal.camoCols[i % 4]; ctx.beginPath(); ctx.ellipse(cx + Math.random() * cw, cy + Math.random() * cw, 6 + Math.random() * 16, 4 + Math.random() * 10, Math.random() * 3, 0, 7); ctx.fill(); }
   noise(ctx, cx, cy, cw, cw, 3000, 0.06);
-  fill(ctx, SR.vest, S, '#2F2D26', 1500, 0.07);
-  // vest stitching / molle rows
+  fill(ctx, SR.vest, S, pal.vest, 1500, 0.07);
   ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2;
   for (let y = 0; y < cw; y += 22) { ctx.beginPath(); ctx.moveTo(SR.vest[0] * S, cy + y); ctx.lineTo(S, cy + y); ctx.stroke(); }
   fill(ctx, SR.skin, S, '#A67B58', 400, 0.05);
   fill(ctx, SR.black, S, '#17181A', 500, 0.05);
   fill(ctx, SR.boot, S, '#2B2118', 500, 0.08);
-  fill(ctx, SR.helmet, S, '#4A4A34', 800, 0.07);
-  fill(ctx, SR.webbing, S, '#7A6A46', 600, 0.08);
+  fill(ctx, SR.helmet, S, pal.helmet, 800, 0.07);
+  fill(ctx, SR.webbing, S, kind === 'rusher' ? '#6A2A22' : '#7A6A46', 600, 0.08);
   fill(ctx, SR.visor, S, '#0B0E12', 200, 0.03);
-  fill(ctx, SR.olive, S, '#55603A', 600, 0.07);
+  fill(ctx, SR.olive, S, pal.olive, 600, 0.07);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  soldierMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.88, metalness: 0.05 });
-  return soldierMat;
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex, roughness: 0.88, metalness: 0.05,
+    emissive: new THREE.Color(0x1a140c), emissiveIntensity: 0.16,
+  });
+  soldierMatCache.set(kind, mat);
+  return mat;
 }
 
 /* ---------- geometry helpers ---------- */
@@ -556,8 +566,8 @@ export interface SoldierModel {
   hitMeshes: THREE.Mesh[];
 }
 
-export function buildSoldier(): SoldierModel {
-  const m = getSoldierMat();
+export function buildSoldier(kind: SoldierKind = 'rifle'): SoldierModel {
+  const m = getSoldierMat(kind);
   const g = new THREE.Group();
   const hitMeshes: THREE.Mesh[] = [];
   // Enemies don't cast shadows (21 hostiles × 6 meshes was a shadow-pass disaster).
@@ -639,7 +649,13 @@ export function buildSoldier(): SoldierModel {
   r.box(0.03, 0.05, 0.05, SR.black, 0, 0.07, -0.05);             // optic
   const rifleMesh = r.mesh(m); rifleMesh.castShadow = false; rifle.add(rifleMesh);
   rifle.position.set(0.09, 0.32, -0.42);
+  if (kind === 'marksman') rifle.scale.set(1, 1, 1.35);
+  if (kind === 'rusher') rifle.scale.set(0.92, 0.92, 0.72);
   torso.add(rifle);
+  const idColor = kind === 'rusher' ? 0xFF3B30 : kind === 'marksman' ? 0x37B6FF : 0xF2A93B;
+  const tab = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.07, 0.018), new THREE.MeshBasicMaterial({ color: idColor }));
+  tab.position.set(0.18, 0.36, -0.155);
+  torso.add(tab);
 
   // ---- generous invisible hit proxies ----
   const ghost = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });

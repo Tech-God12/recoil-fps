@@ -325,6 +325,8 @@ h1, h2, h3, .tabnum, .ammo-num { font-family: 'Orbitron', sans-serif; }
 @keyframes mission-phase-wipe { 0% { clip-path: inset(0 100% 0 0); opacity: 1; } 9.615%,86.538% { clip-path: inset(0 0 0 0); opacity: 1; } 100% { clip-path: inset(0 0 0 0); opacity: 0; } }
 .mission-radio { position: absolute; bottom: 19%; left: 50%; transform: translateX(-50%); max-width: min(520px,65vw); color: #f0eedccc; font-size: 12px; line-height: 1.5; text-align: center; text-shadow: 0 1px 4px #000; }
 .mission-radio > span { color: #dcc49a; font-size: 9px; margin-right: 8px; letter-spacing: .14em; }
+.tutorial-rail { position: absolute; left: 50%; bottom: 26%; transform: translateX(-50%); display: flex; gap: 10px; }
+.tutorial-step { display: flex; align-items: center; gap: 7px; padding: 6px 10px; background: #101916d4; border: 1px solid #ddc49b44; color: #efe8d4; font-size: 11px; letter-spacing: .12em; font-weight: 700; }
 
 .mission-pause-layer { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: #09110ed6; padding: 24px; }
 .mission-pause { display: grid; grid-template-columns: minmax(240px,.9fr) 1.1fr; gap: 65px; width: min(790px,100%); }

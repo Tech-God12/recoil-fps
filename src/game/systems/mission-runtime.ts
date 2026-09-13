@@ -19,6 +19,7 @@ export interface MissionHost {
   radio(text: string, at?: THREE.Vector3): void;
   detonate(at: THREE.Vector3): void;
   resupply(): void;
+  dropSupply(): void;
   finish(win: boolean): void;
 }
 
@@ -38,6 +39,7 @@ export class MissionRuntime {
   private activePolicy = { target: 3, interval: 12 };
   private noticeUntil = 0;
   private targetVisible = false;
+  private holdBeats = new Set<number>();
 
   constructor(host: MissionHost, map: string) {
     this.host = host;
@@ -93,6 +95,7 @@ export class MissionRuntime {
     if (this.mission.status === 'failed') return;
     switch (event.type) {
       case 'phase-started': {
+        this.holdBeats.clear();
         this.activePolicy = event.phase.pressure;
         const clear = event.phase.type === 'advance'
           ? this.mission.definition.phases.slice(event.index + 1).find(p => p.type === 'clear')
@@ -115,10 +118,12 @@ export class MissionRuntime {
         this.markers.destroyCache(h.world);
         h.detonate(new THREE.Vector3(...event.at));
         break;
-      case 'reinforcement-request':
+      case 'reinforcement-request': {
         this.pressure.request(event.count, event.from);
-        h.radio('Another squad is moving in. Hold your perimeter.');
+        const waves = ['North squad inbound. Hold your corner.', 'They are committing. Stay inside the perimeter.', 'Last push. Do not chase them.'];
+        h.radio(waves[Math.min(this.holdBeats.size, waves.length - 1)]);
         break;
+      }
     }
   }
 
@@ -131,6 +136,7 @@ export class MissionRuntime {
     this.mission.update(dt, { player, interact, targetVisible: visible, alive: this.host.isAlive() });
     this.consumeEvents();
     if (this.mission.status !== 'active') return;
+    this.tickHoldBeats(player);
     this.pressureTime += dt;
     if (this.pressureTime < 0.5) return;
     this.actors.length = 0;
@@ -157,6 +163,25 @@ export class MissionRuntime {
       waypoint: { x: (p.x * 0.5 + 0.5) * 100, y: (0.5 - p.y * 0.5) * 100, visible: p.z >= -1 && p.z <= 1 && Math.abs(p.x) < 0.86 && Math.abs(p.y) < 0.76 },
       live: this.host.ai.aliveCount(), targetPressure: this.activePolicy.target, totalSpawned: this.pressure.stats().totalSpawned,
     };
+  }
+
+  private tickHoldBeats(player: Position) {
+    const p = this.mission.current;
+    if (p.type !== 'hold') return;
+    const held = (p.seconds ?? 60) - this.mission.snapshot(player).remaining;
+    const beats: [number, () => void][] = [
+      [30, () => {
+        this.host.dropSupply();
+        this.host.radio('Supply crate on the courtyard. Grab it and stay inside the ring.');
+      }],
+      [58, () => this.host.radio('Pickup inbound. Break contact after the clock.')],
+    ];
+    for (const [t, fn] of beats) {
+      if (held >= t && !this.holdBeats.has(t)) {
+        this.holdBeats.add(t);
+        fn();
+      }
+    }
   }
 
   dispose() { this.markers.dispose(); }

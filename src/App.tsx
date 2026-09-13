@@ -7,8 +7,8 @@ import { MainMenu, PauseMenu, ResultsScreen, type Results } from './ui/Screens';
 type Phase = 'menu' | 'playing' | 'paused' | 'results';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const DEFAULT_HUD: HudState = {
-  hp: 100, mag: 30, magSize: 30, reserve: Infinity, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
-  frags: 5, flashes: 2, bearing: 0, kills: 0, enemiesLeft: 0, cooking: false, sprinting: false,
+  hp: 100, mag: 30, magSize: 30, reserve: 90, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
+  frags: 2, flashes: 1, bearing: 0, kills: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   interacting: false, canVault: false, ads: 0, spread: 0, pings: [], radarEnemies: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60,
 };
@@ -86,8 +86,12 @@ export default function App() {
         later(() => setFx(f => ({ ...f, flashPow: 0 })), 300);
         break;
       case 'callout':
-        setFx(f => ({ ...f, callout: { id, text: event.text } }));
-        later(() => setFx(f => f.callout?.id === id ? { ...f, callout: null } : f), 4000);
+        setFx(f => ({ ...f, callout: { id, text: event.text, speaker: event.speaker } }));
+        later(() => setFx(f => f.callout?.id === id ? { ...f, callout: null } : f), 4200);
+        break;
+      case 'pickup':
+        setFx(f => ({ ...f, scorePops: [...f.scorePops.slice(-2), { id, text: event.text, headshot: false }] }));
+        later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1400);
         break;
       case 'streak':
         setFx(f => ({ ...f, banner: { id, label: event.label } }));

@@ -25,7 +25,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 const BINDS: [string, string][] = [
   ['MOVE', 'W A S D'], ['SPRINT', 'SHIFT'], ['CROUCH', 'C'], ['SLIDE', 'SPRINT + C'],
   ['JUMP / VAULT', 'SPACE'], ['FIRE', 'MOUSE 1'], ['SCOPE (ADS)', 'MOUSE 2'], ['RELOAD', 'R'],
-  ['LEAN LEFT', 'Q'], ['LEAN RIGHT', 'E'], ['FRAG (5×)', 'HOLD G'], ['FLASHBANG', 'F'],
+  ['LEAN LEFT', 'Q'], ['LEAN RIGHT', 'E'], ['FRAG (2×)', 'HOLD G'], ['FLASHBANG', 'F'],
   ['PRIMARY WEAPONS', '1 M4 / 2 AK / 4 AWM / 5 MP7'], ['SIDEARM', '3 M1911'],
   ['PLANT CHARGE', 'HOLD X'], ['PAUSE', 'ESC'],
 ];
@@ -127,7 +127,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
               <div className="anim-fade-fast">
                 <SectionTitle sub="Spatial HRTF audio mix">SOUND</SectionTitle>
                 <Slider label="MASTER VOLUME" value={s.masterVolume} min={0} max={100} unit="%" onChange={v => set({ masterVolume: v })} />
-                <Toggle label="VOICE LINES" value={s.voices} onChange={v => set({ voices: v })} hint="Announcer callouts and enemy squad chatter" />
+                <Toggle label="VOICE LINES" value={s.voices} onChange={v => set({ voices: v })} hint="Optional extra chatter. Radio captions stay on." />
                 <div className="mt-6 p-4 chamfer-sm bg-white/[0.03] border border-white/10">
                   <p className="text-[9px] tracking-[0.2em] text-white/40 leading-relaxed">
                     AUDIO ENGINE: WEB AUDIO HRTF · INVERSE DISTANCE MODEL · REF 1M · MAX 80M<br />

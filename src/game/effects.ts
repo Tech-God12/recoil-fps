@@ -178,6 +178,10 @@ export class Effects {
     this.burst(pos, 3, 0xC8B080, 0.7, 0.35, 1.2, 0.05);
   }
 
+  smoke(pos: THREE.Vector3, color = 0x9fd4c4) {
+    this.burst(pos, 16, color, 1.1, 2.2, -0.55, 0.22, 1.6);
+  }
+
   update(dt: number, playerPos: THREE.Vector3) {
     for (let i = 0; i < this.bursts.length; i++) {
       const b = this.bursts[i];

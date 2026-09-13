@@ -53,7 +53,8 @@ test('soldier draw/triangle budget is unchanged; the reinforcement pool cannot g
     const spawned = ai.enemies.filter(e => !e.dead);
     assert.equal(spawned.length, 3);
     assert.ok(spawned.every(e => !firstIds.has(e.id)), 'pooled actors need fresh kill-credit IDs');
-    assert.ok(spawned.every(e => e.hp === 100 && e.state === 'ALERT' && e.model.group.visible));
+    const fullHp = { rifle: 100, rusher: 72, marksman: 90 };
+    assert.ok(spawned.every(e => e.hp === fullHp[e.kind] && e.state === 'ALERT' && e.model.group.visible));
     assert.equal(ai.allocationCount(), 10);
     ai.dispose();
     assert.equal(ai.allocationCount(), 0);
@@ -89,7 +90,8 @@ test('the engine rejects victory before extraction, irrespective of enemy count'
   const source = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /aliveCount\(\)\s*===\s*0\)\s*this\.endMatch/);
   assert.match(source, /new AIManager\(ctx, \[\]\)/, 'the engine must not reintroduce its legacy fixed roster');
-  assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 5, 'do not restore recoil during a mission update');
+  assert.equal((source.match(/pattern: recoilSpray\(/g) ?? []).length, 5, 'each weapon keeps a distinct recoil spray');
+  assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 0, 'zero-recoil placeholders must stay gone');
 });
 
 test('a full scripted operation escalates above eighteen total spawns with a ten-live ceiling', () => {

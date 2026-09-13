@@ -1,6 +1,6 @@
 // Recoil FPS — Enemy AI v3: grid A* navigation, unpredictable tactics, squad pushes, grenades
 import * as THREE from 'three';
-import { buildSoldier, type SoldierModel } from './models';
+import { buildSoldier, type SoldierKind, type SoldierModel } from './models';
 import type { Effects } from './effects';
 import type { AABB } from './world';
 import { PRESSURE_BUDGET, type ReinforcementBatch } from './systems/reinforcements';
@@ -158,6 +158,7 @@ export class Enemy {
   hp = 100;
   state: AIState = 'PATROL';
   role: 'leader' | 'flankA' | 'flankB';
+  kind: SoldierKind = 'rifle';
   squad: Squad;
   ctx: AIContext;
   nav: NavGrid;
@@ -198,14 +199,15 @@ export class Enemy {
   private personality: number; // 0 cautious .. 1 aggressive
   stunTimer = 0;
 
-  constructor(ctx: AIContext, nav: NavGrid, squad: Squad, role: Enemy['role'], spawn: THREE.Vector3) {
-    this.ctx = ctx; this.nav = nav; this.squad = squad; this.role = role;
-    this.model = buildSoldier();
+  constructor(ctx: AIContext, nav: NavGrid, squad: Squad, role: Enemy['role'], spawn: THREE.Vector3, kind: SoldierKind = 'rifle') {
+    this.ctx = ctx; this.nav = nav; this.squad = squad; this.role = role; this.kind = kind;
+    this.model = buildSoldier(kind);
     this.pos = spawn.clone();
     this.model.group.position.copy(this.pos);
     ctx.scene.add(this.model.group);
     for (const m of this.model.hitMeshes) m.userData.enemy = this;
-    this.personality = Math.random();
+    this.personality = kind === 'rusher' ? 0.88 : kind === 'marksman' ? 0.22 : Math.random();
+    this.hp = kind === 'rusher' ? 72 : kind === 'marksman' ? 90 : 100;
   }
 
   get dead() { return this.state === 'DEAD'; }
@@ -216,7 +218,7 @@ export class Enemy {
     this.id = enemyCounter++;
     this.name = NAMES[this.id % NAMES.length];
     this.squad = squad; this.role = role; this.missionZone = zone ?? undefined;
-    this.pos.set(...at); this.hp = 100; this.state = 'ALERT'; this.dormant = false;
+    this.pos.set(...at); this.hp = this.kind === 'rusher' ? 72 : this.kind === 'marksman' ? 90 : 100; this.state = 'ALERT'; this.dormant = false;
     this.deadAge = 0; this.deathT = -1; this.stateTime = 0; this.lastSeenT = 999;
     this.reactTimer = -1; this.hasLOS = false; this.losTimer = (this.id % 5) * 0.04;
     this.lastKnown.set(...focus); this.moveTarget = new THREE.Vector3(...focus);
@@ -308,7 +310,7 @@ export class Enemy {
       const dir = new THREE.Vector3().copy(pp).sub(eye); const dist = dir.length(); dir.normalize();
       ray.set(eye.clone(), dir); ray.far = Math.min(dist - 0.3, 60);
       if (ray.intersectObjects(this.ctx.occluders, false).length === 0) continue;
-      const ideal = preferClose ? 9 : 16 + this.personality * -6;
+      const ideal = this.kind === 'marksman' ? 26 : this.kind === 'rusher' || preferClose ? 8 : 16 + this.personality * -6;
       const score = d * 0.7 + Math.abs(dp - ideal) * 0.6 + Math.random() * 3;
       if (score < bestScore) { bestScore = score; best = node; }
     }
@@ -364,6 +366,8 @@ export class Enemy {
     let acc = ctx.difficulty.accuracy * Math.max(0.3, 1 - dist / 75);
     acc *= 1 - Math.min(0.45, ctx.playerVel() * 0.06);
     acc *= this.burstIdx === 0 ? 0.55 : this.burstIdx === 1 ? 0.8 : 1;
+    if (this.kind === 'marksman') acc *= 1.18;
+    if (this.kind === 'rusher') acc *= 0.72;
     if (suppressing) acc *= 0.25;
     this.burstIdx++;
     if (this.hasLOS && Math.random() < acc && ctx.playerAlive()) {
@@ -465,7 +469,10 @@ export class Enemy {
       if (next && next.distanceTo(this.coverPos) > 3) { this.coverPos = next; this.coverAge = 0; }
     }
     const atCover = this.pos.distanceTo(this.coverPos) < 0.6;
-    if (!atCover) { this.goTo(this.coverPos, 4.4, dt); this.crouched = false; }
+    if (this.kind === 'rusher' && this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) > 7 && this.stateTime > 1.1) {
+      this.setState('ADVANCE'); return;
+    }
+    if (!atCover) { this.goTo(this.coverPos, this.kind === 'rusher' ? 5.2 : 4.4, dt); this.crouched = false; }
     else {
       this.crouched = this.hasRealCover && !this.peeking;
       this.faceTarget(this.hasLOS ? this.ctx.playerFeet() : this.lastKnown);
@@ -629,8 +636,9 @@ export class AIManager {
     this.nav = new NavGrid(ctx.solids, ctx.half);
     const reserve = new Squad([new THREE.Vector3()]);
     // Allocate once. Reinforcements reuse these models instead of growing the scene graph.
+    const kinds: SoldierKind[] = ['rifle', 'rusher', 'marksman', 'rifle', 'rusher', 'marksman', 'rifle', 'rusher', 'rifle', 'marksman'];
     for (let i = 0; i < PRESSURE_BUDGET.liveCap; i++) {
-      const enemy = new Enemy(ctx, this.nav, reserve, 'leader', new THREE.Vector3());
+      const enemy = new Enemy(ctx, this.nav, reserve, 'leader', new THREE.Vector3(), kinds[i]);
       enemy.dormant = true;
       enemy.model.group.visible = false;
       this.pool.push(enemy);

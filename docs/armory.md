@@ -99,8 +99,7 @@ rail with vented handguard, AKM slant brake + ribbed dust cover, 1911 beavertail
 wire stock + side plates, KRISS slab receiver, SPAS-12 side saddle + ghost ring,
 SCAR-H FDE rail + PWS comp, Deagle triangular slide + gas housing, M249 belt +
 carry handle + QD barrel. Display names are full real-steel (ids and shorts
-unchanged): Colt M4A1, Kalashnikov AK-47, Colt M1911, AI AWM .338, H&K MP7A1,
-KRISS Vector .45, Franchi SPAS-12, FN SCAR-H, Desert Eagle .50 AE, FN M249 SAW.
+unchanged): M416, AK-47, 1911, AWM, MP, Vector, SPAS, SCAR, Deagle, M249.
 
 Rebuild rules, all covered by tests: socket names/positions, muzzle, removable
 groups, `adsHidden`, `sightY` and arm anchors are preserved so every attachment
@@ -112,6 +111,21 @@ scope instead of clipping fitted optics, and its forend reaches the bipod
 spigot. The armory UI is a floating-glass command bar over the 3D stage (no
 title slab, no loadout strip); no emoji anywhere in UI chrome — SVG lock, CSS
 status dots, text glyphs.
+
+## Iteration 5: M416, short names, bare spawns
+
+The M4 is now an HK416-pattern build (see the rebuild rules above — same
+sockets, muzzle, sight height and arm anchors) displayed as **M416** (id
+`m4a1` unchanged for save compatibility). The SCAR carries its signature
+reciprocating side charger, gas dial and chambered brake. Gun display names
+are short with no manufacturers: M416, AK-47, 1911, AWM, MP, Vector, SPAS,
+SCAR, Deagle, M249. Mag/optic names are basic industry terms: Red Dot Sight,
+Holographic Sight, ACOG Scope, Hybrid Sight, Sniper Scope, Pistol Red Dot,
+Extended Mag, Drum Mag, Fast Mag, Extended Tube, Large Ammo Box, 10-Round
+Mag. Fresh profiles spawn bare (iron sights, stock mags); a one-time
+`recoilfps.profile.v1` → `v2` migration strips equipped kits from stale
+saves while keeping cash, weapons, owned parts and finishes. Buy-auto-equip
+is unchanged: parts bought in the armory still mount immediately.
 
 ## Measured deviations from the prompt draft
 

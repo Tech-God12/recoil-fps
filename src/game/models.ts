@@ -301,9 +301,9 @@ export function buildM4(): WeaponModel {
   const brb = new GunBuilder(); const brG = new THREE.Group();   // barrel assembly (removable)
   const ubb = new GunBuilder(); const ubG = new THREE.Group();   // vertical foregrip (removable)
   const opb = new GunBuilder(); const opG = new THREE.Group();   // sights (removable)
-  // ---- receivers: anodized flat-top upper over a polymer lower ----
+  // ---- HK416 receivers: tall piston upper over an ambi lower ----
   b.box(0.038, 0.036, 0.17, P, 0, -0.012, -0.10);                 // lower receiver
-  b.box(0.040, 0.034, 0.21, MS, 0, 0.020, -0.12);                 // flat-top upper
+  b.box(0.040, 0.034, 0.21, MS, 0, 0.020, -0.12);                 // tall flat-top upper
   b.box(0.0405, 0.005, 0.21, D, 0, 0.002, -0.12);                 // receiver seam
   b.box(0.041, 0.008, 0.05, P, 0, 0.032, -0.03);                  // rail riser base
   for (let i = 0; i < 9; i++) b.box(0.032, 0.007, 0.015, D, 0, 0.040, -0.045 - i * 0.024);
@@ -317,31 +317,35 @@ export function buildM4(): WeaponModel {
   b.cyl(0.004, 0.004, 0.014, D, 0.024, 0.020, -0.088, 0, 0, Math.PI / 2); // assist plunger
   b.box(0.006, 0.010, 0.022, S, -0.021, -0.006, -0.075);            // selector L
   b.box(0.006, 0.010, 0.022, S, 0.021, -0.006, -0.075);             // selector R
-  b.box(0.008, 0.006, 0.014, S, 0.021, 0.002, -0.055);              // mag release
-  b.box(0.006, 0.020, 0.012, S, -0.021, 0.004, -0.120);             // bolt catch
+  b.box(0.008, 0.006, 0.014, S, 0.021, 0.002, -0.055);              // mag release R
+  b.box(0.008, 0.006, 0.014, S, -0.021, 0.002, -0.055);             // mag release L (ambi)
+  b.box(0.006, 0.020, 0.012, S, -0.021, 0.004, -0.120);             // bolt catch L
+  b.box(0.006, 0.020, 0.012, S, 0.021, 0.004, -0.120);              // bolt catch R (ambi)
   b.box(0.020, 0.026, 0.032, P, 0, -0.030, -0.160);                 // magwell flare
   b.box(0.022, 0.006, 0.034, D, 0, -0.043, -0.160);                 // magwell bevel
   b.box(0.006, 0.004, 0.050, P, 0, -0.040, -0.095);                 // trigger guard
+  b.box(0.006, 0.020, 0.006, P, 0, -0.048, -0.075);                 // winter guard F
+  b.box(0.006, 0.018, 0.006, P, 0, -0.047, -0.115);                 // winter guard R
   b.box(0.005, 0.018, 0.005, DS, 0, -0.030, -0.093);                // trigger
-  b.box(0.028, 0.088, 0.036, G, 0, -0.056, -0.045, -0.32);          // MOE grip
+  b.box(0.028, 0.088, 0.036, G, 0, -0.056, -0.045, -0.32);          // HK grip
   for (let i = 0; i < 4; i++) b.box(0.029, 0.004, 0.028, D, 0, -0.040 - i * 0.015, -0.041 - i * 0.004, -0.32); // grip texture
   b.box(0.012, 0.030, 0.020, G, 0, -0.045, -0.022, -0.32);          // beavertail
   b.box(0.030, 0.010, 0.034, G, 0, -0.100, -0.058, -0.32);          // grip base
-  // ---- CTR stock ----
+  // ---- HK slimline stock ----
   skb.cyl(0.015, 0.015, 0.10, S, 0, 0.012, 0.065, Math.PI / 2);    // buffer tube
   for (let i = 0; i < 4; i++) skb.cyl(0.0158, 0.0158, 0.003, D, 0, 0.012, 0.035 + i * 0.018, Math.PI / 2); // notches
   skb.box(0.007, 0.007, 0.020, D, 0, 0.012, 0.030);                 // castle nut
   skb.box(0.010, 0.014, 0.006, S, 0, 0.012, 0.022);                 // end plate
-  skb.box(0.036, 0.050, 0.082, P, 0, -0.004, 0.140);                // CTR body
-  skb.box(0.030, 0.018, 0.060, P, 0, 0.028, 0.130);                 // cheek riser
-  skb.box(0.020, 0.008, 0.070, D, 0, 0.022, 0.130);                 // riser seam
-  skb.box(0.040, 0.070, 0.016, R, 0, -0.010, 0.185);                // buttpad
-  for (let i = 0; i < 3; i++) skb.box(0.041, 0.006, 0.017, D, 0, -0.030 + i * 0.018, 0.185); // pad ribs
-  skb.box(0.038, 0.012, 0.075, P, 0, -0.034, 0.135);                // stock toe
-  skb.box(0.010, 0.006, 0.030, D, -0.020, -0.004, 0.140);           // adjustment lever
-  skb.box(0.006, 0.020, 0.030, D, 0.019, -0.004, 0.140);            // sling slot
-  skb.cyl(0.006, 0.006, 0.004, D, -0.019, 0.006, 0.150, 0, 0, Math.PI / 2); // QD socket
-  // ---- cylindrical RIS handguard with vents + quad rails ----
+  skb.box(0.030, 0.052, 0.095, P, 0, -0.004, 0.145);                // slimline body
+  skb.box(0.026, 0.016, 0.070, P, 0, 0.028, 0.140);                 // cheek riser
+  skb.box(0.018, 0.008, 0.075, D, 0, 0.022, 0.140);                 // riser seam
+  skb.box(0.034, 0.068, 0.016, R, 0, -0.008, 0.196);                // buttpad
+  for (let i = 0; i < 3; i++) skb.box(0.035, 0.006, 0.017, D, 0, -0.028 + i * 0.018, 0.196); // pad ribs
+  skb.box(0.032, 0.012, 0.085, P, 0, -0.034, 0.140);                // stock toe
+  skb.box(0.010, 0.006, 0.030, D, -0.017, -0.004, 0.145);           // adjustment lever
+  skb.box(0.006, 0.020, 0.030, D, 0.016, -0.004, 0.145);            // sling slot
+  skb.cyl(0.006, 0.006, 0.004, D, -0.016, 0.006, 0.155, 0, 0, Math.PI / 2); // QD socket
+  // ---- fat HK quad rail with round cooling holes + quad rails ----
   b.cyl(0.023, 0.023, 0.20, P, 0, 0.020, -0.315, Math.PI / 2, 0, 0, 12);
   b.cyl(0.024, 0.024, 0.020, D, 0, 0.020, -0.225, Math.PI / 2, 0, 0, 12); // cap R
   b.cyl(0.024, 0.024, 0.020, D, 0, 0.020, -0.405, Math.PI / 2, 0, 0, 12); // cap F
@@ -353,20 +357,25 @@ export function buildM4(): WeaponModel {
       b.box(0.008, 0.003, 0.016, D, Math.cos(av) * 0.0225, 0.020 + Math.sin(av) * 0.0225, -0.25 - i * 0.03, 0, 0, av - Math.PI / 2);
     }
   }
+  for (let i = 0; i < 4; i++) {  // signature round cooling holes, both flanks
+    b.cyl(0.005, 0.005, 0.002, D, 0.0235, 0.020, -0.261 - i * 0.032, 0, 0, Math.PI / 2);
+    b.cyl(0.005, 0.005, 0.002, D, -0.0235, 0.020, -0.261 - i * 0.032, 0, 0, Math.PI / 2);
+  }
   b.cyl(0.007, 0.007, 0.004, D, 0.0245, 0.020, -0.30, 0, 0, Math.PI / 2); // QD socket rail
-  // ---- barrel assembly: government profile + A2 birdcage ----
-  brb.cyl(0.0085, 0.0085, 0.17, S, 0, 0.020, -0.490, Math.PI / 2);
-  brb.cyl(0.0095, 0.0095, 0.010, S, 0, 0.020, -0.445, Math.PI / 2);  // M203 step ring
-  brb.box(0.018, 0.022, 0.024, DS, 0, 0.026, -0.430);               // gas block
+  // ---- heavy barrel + tall gas block with integral flip-up front sight ----
+  brb.cyl(0.0105, 0.0105, 0.17, S, 0, 0.020, -0.490, Math.PI / 2);
+  brb.cyl(0.0115, 0.0115, 0.010, S, 0, 0.020, -0.445, Math.PI / 2);  // barrel step ring
+  brb.box(0.020, 0.034, 0.026, DS, 0, 0.028, -0.430);               // tall gas block
   brb.cyl(0.004, 0.004, 0.13, S, 0, 0.034, -0.365, Math.PI / 2);    // gas tube
   brb.box(0.006, 0.012, 0.008, DS, 0, 0.006, -0.430);               // sling swivel base
-  brb.box(0.005, 0.030, 0.005, D, 0, 0.052, -0.430);                // flip front post (up)
-  brb.box(0.004, 0.022, 0.014, D, -0.011, 0.048, -0.430);           // post wing L
-  brb.box(0.004, 0.022, 0.014, D, 0.011, 0.048, -0.430);            // post wing R
-  brb.cyl(0.011, 0.010, 0.048, S, 0, 0.020, -0.592, Math.PI / 2);   // A2 birdcage
+  brb.box(0.005, 0.024, 0.005, D, 0, 0.058, -0.430);                // flip front post (up)
+  brb.box(0.004, 0.020, 0.014, D, -0.011, 0.056, -0.430);           // post wing L
+  brb.box(0.004, 0.020, 0.014, D, 0.011, 0.056, -0.430);            // post wing R
+  brb.cyl(0.011, 0.010, 0.048, S, 0, 0.020, -0.592, Math.PI / 2);   // HK birdcage
   for (let i = 0; i < 5; i++) { const a2 = (i / 5) * Math.PI * 2 + 0.3; brb.box(0.005, 0.005, 0.030, D, Math.cos(a2) * 0.0105, 0.020 + Math.sin(a2) * 0.0105, -0.592); }
   brb.cyl(0.004, 0.004, 0.050, D, 0, 0.020, -0.592, Math.PI / 2);   // bore shadow
   brb.cyl(0.012, 0.012, 0.006, DS, 0, 0.020, -0.568, Math.PI / 2);  // crush washer
+  brb.cyl(0.0125, 0.0125, 0.008, DS, 0, 0.020, -0.562, Math.PI / 2); // notched collar
   // ---- vertical foregrip ----
   ubb.box(0.022, 0.058, 0.028, P, 0, -0.020, -0.340, 0.10);
   ubb.cyl(0.013, 0.013, 0.024, G, 0, -0.020, -0.340, Math.PI / 2, 0, 0); // finger groove ring
@@ -378,8 +387,10 @@ export function buildM4(): WeaponModel {
   b.cyl(0.005, 0.005, 0.006, D, 0.030, 0.030, -0.300, Math.PI / 2); // emitter
   b.cyl(0.006, 0.006, 0.004, D, 0.030, 0.036, -0.345);              // dial
   b.box(0.010, 0.004, 0.016, D, 0.030, 0.041, -0.330);              // fire button
-  // ---- folded rear BUIS (low profile, never blocks sight) ----
-  opb.box(0.030, 0.008, 0.030, D, 0, 0.044, -0.045);
+  // ---- HK diopter drum (rear BUIS, hides with the optic) ----
+  opb.box(0.030, 0.006, 0.030, D, 0, 0.043, -0.045);                 // diopter base
+  opb.cyl(0.009, 0.009, 0.020, D, 0, 0.050, -0.045, 0, 0, Math.PI / 2, 12); // rotating drum
+  opb.cyl(0.003, 0.003, 0.022, D, 0, 0.050, -0.045, 0, 0, Math.PI / 2, 8); // aperture bore
   // ---- EXPS holo (open frame, see-through) ----
   opb.box(0.038, 0.010, 0.050, D, 0, 0.048, -0.11);                 // QD mount
   opb.box(0.012, 0.014, 0.030, D, -0.024, 0.048, -0.11);            // QD lever
@@ -406,7 +417,7 @@ export function buildM4(): WeaponModel {
   (ring.material as THREE.MeshBasicMaterial).opacity = 0.9;
   ring.position.set(0, SIGHT_Y, -0.0895); g.add(ring);
   adsHidden.push(dot, ring);
-  // ---- PMAG (animated) ----
+  // ---- STANAG (animated) ----
   const mag = new THREE.Group();
   const mb = new GunBuilder();
   mb.box(0.027, 0.070, 0.056, S, 0, -0.045, 0, 0.12);
@@ -901,15 +912,20 @@ export function buildSCARH(): WeaponModel {
   b.box(0.030, 0.014, 0.040, D, 0, 0.040, -0.36);
   const ch = new THREE.Group(); ch.position.set(0, 0.040, -0.36);
   const chb = new GunBuilder();
-  chb.box(0.056, 0.010, 0.022, D, 0, 0, 0);                          // CH wings
-  chb.box(0.020, 0.008, 0.030, DS, 0, 0, 0.01);                       // CH stem
+  chb.box(0.018, 0.008, 0.034, DS, 0, 0, 0.008);                       // CH stem
+  chb.box(0.022, 0.014, 0.026, D, -0.020, 0, 0);                      // side handle L
+  chb.box(0.006, 0.010, 0.020, DS, -0.028, 0, 0);                      // handle serrations
+  chb.box(0.012, 0.010, 0.020, D, 0.015, 0, 0);                       // nub R
   chb.build(ch); ch.userData.homeZ = 0; g.add(ch);
   // reciprocating bolt visible in the ejection cutout (right side)
   b.box(0.002, 0.022, 0.060, D, 0.0235, 0.018, -0.26);               // ejection cutout
   b.box(0.002, 0.016, 0.040, S, 0.0232, 0.018, -0.26);               // bolt in cutout
+  for (let i = 0; i < 3; i++) b.box(0.002, 0.014, 0.003, D, 0.0234, 0.018, -0.272 + i * 0.012); // bolt serrations
+  b.box(0.002, 0.006, 0.014, DS, 0.0234, 0.023, -0.245);              // extractor
   b.box(0.006, 0.020, 0.030, TD, 0.0245, 0.020, -0.215);              // brass deflector
   b.box(0.030, 0.035, 0.012, DS, 0, 0.008, -0.005);                // QD end plate
-  b.box(0.034, 0.010, 0.16, TD, 0, 0.040, -0.47);                    // forend top rail
+  b.box(0.034, 0.010, 0.19, TD, 0, 0.040, -0.4775);                   // forend top rail
+  b.box(0.020, 0.012, 0.012, TD, 0, 0.050, -0.56);                   // sight riser
   b.box(0.028, 0.025, 0.025, TD, 0, -0.045, -0.035);                 // beavertail
   skb.box(0.016, 0.014, 0.030, DS, 0, -0.022, 0.003);                // stock latch
   b.box(0.042, 0.020, 0.050, TD, 0, -0.040, -0.125, -0.22);              // magwell flare
@@ -920,7 +936,11 @@ export function buildSCARH(): WeaponModel {
   b.box(0.006, 0.004, 0.050, P, 0, -0.048, -0.155);                  // trigger guard
   b.box(0.005, 0.020, 0.006, S, 0, -0.038, -0.150);                  // trigger
   for (const sx of [-1, 1]) b.box(0.004, 0.008, 0.026, S, sx * 0.017, -0.028, -0.095); // selector
-  b.box(0.006, 0.010, 0.016, S, -0.017, -0.024, -0.075);             // mag release
+  b.box(0.006, 0.010, 0.016, S, -0.017, -0.024, -0.075);             // mag release L
+  b.box(0.006, 0.010, 0.016, S, 0.017, -0.024, -0.075);              // mag release R
+  b.box(0.006, 0.018, 0.012, S, -0.017, -0.020, -0.115);             // bolt catch
+  b.cyl(0.003, 0.003, 0.032, DS, 0, -0.030, -0.120, 0, 0, Math.PI / 2); // trigger pin
+  b.cyl(0.003, 0.003, 0.032, DS, 0, -0.030, -0.085, 0, 0, Math.PI / 2); // hammer pin
   // free-float forend with vent slots + QD sockets
   b.box(0.046, 0.052, 0.16, T, 0, 0.008, -0.47);                     // forend
   for (let i = 0; i < 7; i++) {
@@ -928,14 +948,24 @@ export function buildSCARH(): WeaponModel {
     b.box(0.002, 0.020, 0.012, TD, 0.0235, 0.008, -0.41 - i * 0.020);
   }
   for (let i = 0; i < 5; i++) b.box(0.020, 0.002, 0.012, TD, 0, -0.0185, -0.42 - i * 0.022); // bottom slots
+  for (let i = 0; i < 3; i++) {
+    b.box(0.003, 0.006, 0.120, TD, -0.024, 0.002 + i * 0.010, -0.47);
+    b.box(0.003, 0.006, 0.120, TD, 0.024, 0.002 + i * 0.010, -0.47);
+  }
+  b.cyl(0.004, 0.004, 0.003, DS, -0.0235, -0.005, -0.02, 0, 0, Math.PI / 2); // rear QD
   b.cyl(0.004, 0.004, 0.003, D, -0.0235, 0.020, -0.55, 0, 0, Math.PI / 2); // QD L
   b.cyl(0.004, 0.004, 0.003, D, 0.0235, 0.020, -0.55, 0, 0, Math.PI / 2); // QD R
   b.cyl(0.014, 0.014, 0.030, DS, 0, 0.020, -0.545, Math.PI / 2);      // gas block
   b.cyl(0.005, 0.005, 0.020, S, 0, 0.038, -0.545);                    // gas regulator
+  b.cyl(0.008, 0.008, 0.010, DS, 0, 0.050, -0.545, 0, 0, 0, 12);       // regulator dial
+  b.box(0.017, 0.004, 0.004, D, 0, 0.050, -0.545);                    // dial notch
+  b.box(0.004, 0.004, 0.017, D, 0, 0.050, -0.545);                    // dial notch 2
   // heavy barrel + PWS-style compensator with prongs
   brb.cyl(0.0085, 0.0085, 0.14, S, 0, 0.020, -0.60, Math.PI / 2, 0, 0, 20);
   brb.cyl(0.013, 0.013, 0.050, DS, 0, 0.020, -0.685, Math.PI / 2, 0, 0, 20);
-  for (let i = 0; i < 3; i++) { const ma = (i / 3) * Math.PI * 2; brb.box(0.005, 0.005, 0.036, D, Math.cos(ma) * 0.012, 0.020 + Math.sin(ma) * 0.012, -0.685); }
+  brb.cyl(0.0145, 0.0145, 0.006, DS, 0, 0.020, -0.670, Math.PI / 2);   // chamber ring F
+  brb.cyl(0.0145, 0.0145, 0.006, DS, 0, 0.020, -0.700, Math.PI / 2);   // chamber ring R
+  for (let i = 0; i < 3; i++) { const ma = (i / 3) * Math.PI * 2; brb.box(0.006, 0.008, 0.040, D, Math.cos(ma) * 0.0125, 0.020 + Math.sin(ma) * 0.0125, -0.685); }
   brb.cyl(0.004, 0.004, 0.052, D, 0, 0.020, -0.685, Math.PI / 2);     // bore shadow
   // FDE pistol grip with palm swell
   b.box(0.030, 0.085, 0.036, T, 0, -0.075, -0.055, -0.30);
@@ -958,6 +988,13 @@ export function buildSCARH(): WeaponModel {
   skb.box(0.034, 0.014, 0.090, TD, 0, 0.042, 0.055);                 // cheek riser
   skb.cyl(0.008, 0.008, 0.044, S, 0, 0.008, 0.003, 0, 0, Math.PI / 2); // hinge pin
   skb.box(0.020, 0.020, 0.016, DS, 0, 0.008, 0.003);                 // hinge block
+  skb.cyl(0.005, 0.005, 0.004, DS, -0.021, 0.008, 0.055, 0, 0, Math.PI / 2); // QD L
+  skb.cyl(0.005, 0.005, 0.004, DS, 0.021, 0.008, 0.055, 0, 0, Math.PI / 2); // QD R
+  skb.box(0.008, 0.006, 0.028, DS, 0, -0.022, 0.055);                // fold lever
+  skb.box(0.006, 0.018, 0.026, DS, 0.017, 0.008, 0.080);             // sling slot
+  for (let i = 0; i < 2; i++) skb.box(0.037, 0.005, 0.023, DS, 0, -0.005 + i * 0.020, 0.115); // pad ribs
+  skb.cyl(0.004, 0.004, 0.036, DS, 0, 0.036, 0.030, 0, 0, Math.PI / 2); // riser knob F
+  skb.cyl(0.004, 0.004, 0.036, DS, 0, 0.036, 0.080, 0, 0, Math.PI / 2); // riser knob R
   skb.build(skG); skG.userData.homeZ = 0; g.add(skG);
   // 20-round 7.62 curved steel mag
   mb.box(0.032, 0.11, 0.052, S, 0, -0.09, -0.135, -0.22);
@@ -1106,7 +1143,7 @@ export function buildSPAS12(): WeaponModel {
   const pbb = new GunBuilder(); const pump = new THREE.Group();
   const skb = new GunBuilder(); const skG = new THREE.Group();
 
-  // Chunky SPAS-12 receiver with top rail + side plates
+  // Chunky SPAS receiver with top rail + side plates
   b.box(0.046, 0.070, 0.30, S, 0, 0.005, -0.05);
   b.box(0.040, 0.012, 0.32, D, 0, 0.044, -0.05);                     // top rail spine
   for (let i = 0; i < 10; i++) b.box(0.034, 0.006, 0.014, DS, 0, 0.052, 0.075 - i * 0.027);

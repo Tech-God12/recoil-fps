@@ -287,7 +287,7 @@ export class SpatialAudioEngine {
   }
 
   fireSCAR() {
-    // SCAR-H: deeper, heavier M4 — 7.62 punch with a longer pressure wave.
+    // SCAR: deeper, heavier M4 — 7.62 punch with a longer pressure wave.
     this.burstDirect({ dur: 0.04, gain: 1.0, freq: 2800, q: 0.6, hp: 600 });
     this.burstDirect({ dur: 0.13, gain: 0.8, freq: 750, q: 0.7, toEcho: 0.5 });
     this.burstDirect({ dur: 0.22, gain: 0.62, freq: 130, q: 0.6, type: 'lowpass' });
@@ -324,7 +324,7 @@ export class SpatialAudioEngine {
   }
 
   fireDeagle() {
-    // Desert Eagle: huge low thump with a long metallic ring.
+    // Deagle: huge low thump with a long metallic ring.
     const ctx = this.ensure();
     const t = ctx.currentTime;
     this.burstDirect({ dur: 0.05, gain: 1.0, freq: 2200, q: 0.6, hp: 400 });

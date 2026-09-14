@@ -25,7 +25,8 @@ export interface PlayerProfile {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
-export const PROFILE_KEY = 'recoilfps.profile.v1';
+export const PROFILE_KEY = 'recoilfps.profile.v2';
+const LEGACY_PROFILE_KEY = 'recoilfps.profile.v1';
 
 export const DEFAULT_PROFILE: PlayerProfile = {
   v: 1,
@@ -142,8 +143,26 @@ export function loadProfile(storage?: Store): PlayerProfile {
   if (!store) return structuredClone(DEFAULT_PROFILE);
   try {
     const raw = store.getItem(PROFILE_KEY);
-    if (!raw) return structuredClone(DEFAULT_PROFILE);
-    return migrateProfile(raw);
+    if (raw) return migrateProfile(raw);
+    // One-time v1 → v2 migration: stale saves kept long-equipped kits forever,
+    // so spawns arrived with silencers and drum mags. Keep all progress and
+    // ownership, but strip every equipped attachment — spawns are bare
+    // iron-sight guns with stock mags until the armory equips something new.
+    const legacy = store.getItem(LEGACY_PROFILE_KEY);
+    if (!legacy) return structuredClone(DEFAULT_PROFILE);
+    const moved = migrateProfile(legacy);
+    for (const [w, build] of Object.entries(moved.builds)) {
+      if (build) moved.builds[w as WeaponId] = { weapon: build.weapon, attachments: {} };
+    }
+    for (const s of ['primary', 'secondary'] as SlotId[]) {
+      const slot = moved.loadout[s];
+      moved.loadout[s] = slot.skin
+        ? { weapon: slot.weapon, attachments: {}, skin: slot.skin }
+        : { weapon: slot.weapon, attachments: {} };
+    }
+    try { store.setItem(PROFILE_KEY, JSON.stringify(moved)); } catch { /* optional */ }
+    try { (store as unknown as { removeItem?: (k: string) => void }).removeItem?.(LEGACY_PROFILE_KEY); } catch { /* optional */ }
+    return moved;
   } catch {
     return structuredClone(DEFAULT_PROFILE);
   }

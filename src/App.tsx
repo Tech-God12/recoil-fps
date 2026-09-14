@@ -19,7 +19,7 @@ const afterPaint = () => new Promise<void>(resolve => {
   requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
 });
 const DEFAULT_HUD: HudState = {
-  hp: 100, mag: 30, magSize: 30, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
+  hp: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
   bipodDeployed: false, reticle: 'none', lpvoHigh: false, pumping: false, pings: [],

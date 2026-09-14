@@ -89,7 +89,7 @@ test('the engine rejects victory before extraction, irrespective of enemy count'
   const source = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /aliveCount\(\)\s*===\s*0\)\s*this\.endMatch/);
   assert.match(source, /new AIManager\(ctx, \[\]\)/, 'the engine must not reintroduce its legacy fixed roster');
-  assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 4, 'only the explicitly reworked MP7 changes its recoil pattern');
+  assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 4, 'only the explicitly reworked MP changes its recoil pattern');
 });
 
 test('a full scripted operation escalates above eighteen total spawns with a ten-live ceiling', () => {

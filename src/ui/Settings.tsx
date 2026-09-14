@@ -25,8 +25,8 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 const BINDS: [string, string][] = [
   ['MOVE', 'W A S D'], ['SPRINT', 'SHIFT'], ['CROUCH', 'C'], ['SLIDE', 'SPRINT + C'],
   ['JUMP / VAULT', 'SPACE'], ['FIRE', 'MOUSE 1'], ['SCOPE (ADS)', 'MOUSE 2'], ['RELOAD', 'R'],
-  ['LEAN LEFT', 'Q'], ['LEAN RIGHT', 'E'], ['FRAG (5×)', 'HOLD G'], ['FLASHBANG', 'F'],
-  ['PRIMARY WEAPONS', '1 M4 / 2 AK / 4 AWM / 5 MP7'], ['SIDEARM', '3 M1911'],
+  ['LEAN LEFT (HOLD)', 'Q'], ['LEAN RIGHT (HOLD)', 'E'], ['FRAG (5×)', 'HOLD G'], ['FLASHBANG', 'F'],
+  ['PRIMARY / SIDEARM', '1 / 2'], ['LAST WEAPON (TAP)', 'Q'],
   ['ATTACH / DETONATE', 'X'], ['PAUSE', 'ESC'],
 ];
 

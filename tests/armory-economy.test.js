@@ -228,14 +228,55 @@ test('profile migration keeps valid finishes and drops unknown ids', () => {
 
 test('catalog uses full real-steel display names with stable ids and shorts', () => {
   const names = {
-    m4a1: ['Colt M4A1', 'M4A1'], ak47: ['Kalashnikov AK-47', 'AK-47'],
-    m1911: ['Colt M1911', '1911'], awm: ['AI AWM .338', 'AWM'],
-    mp7: ['H&K MP7A1', 'MP7'], vector: ['KRISS Vector .45', 'VECTOR'],
-    spas12: ['Franchi SPAS-12', 'SPAS-12'], scar_h: ['FN SCAR-H', 'SCAR-H'],
-    deagle: ['Desert Eagle .50 AE', 'DEAGLE'], m249: ['FN M249 SAW', 'M249'],
+    m4a1: ['M416', 'M416'], ak47: ['AK-47', 'AK-47'],
+    m1911: ['1911', '1911'], awm: ['AWM', 'AWM'],
+    mp7: ['MP', 'MP'], vector: ['Vector', 'Vector'],
+    spas12: ['SPAS', 'SPAS'], scar_h: ['SCAR', 'SCAR'],
+    deagle: ['Deagle', 'Deagle'], m249: ['M249', 'M249'],
   };
   assert.deepEqual(Object.keys(names).sort(), WEAPON_CATALOG.map(w => w.id).sort());
   for (const w of WEAPON_CATALOG) {
     assert.deepEqual([w.name, w.short], names[w.id], `${w.id} display name drifted`);
   }
+});
+
+test('fresh spawns are bare: no scope, stock mag, basic gear', () => {
+  for (const b of [loadout.DEFAULT_LOADOUT.primary, loadout.DEFAULT_LOADOUT.secondary]) {
+    assert.deepEqual(b.attachments, {}, 'default loadout spawns bare');
+  }
+  for (const b of [profile.DEFAULT_PROFILE.loadout.primary, profile.DEFAULT_PROFILE.loadout.secondary]) {
+    assert.deepEqual(b.attachments, {}, 'default profile spawns bare');
+  }
+  const store = new Map();
+  const memory = { getItem: k => store.get(k) ?? null, setItem: (k, v) => { store.set(k, v); } };
+  const fresh = profile.loadProfile(memory);
+  assert.deepEqual(fresh.loadout.primary.attachments, {});
+  assert.deepEqual(fresh.loadout.secondary.attachments, {});
+});
+
+test('v1 profiles migrate to v2 stripped of equipped attachments but keep the rest', () => {
+  const store = new Map();
+  const memory = { getItem: k => store.get(k) ?? null, setItem: (k, v) => { store.set(k, v); } };
+  // a stale v1 save with suppressor + extended mag equipped long ago
+  let p = { ...profile.DEFAULT_PROFILE, cash: 5000 };
+  p = profile.buyAttachment(p, 'm4a1', 'muz_suppressor').value;
+  p = profile.buyAttachment(p, 'm4a1', 'mag_extended').value;
+  store.set('recoilfps.profile.v1', JSON.stringify(p));
+  const back = profile.loadProfile(memory);
+  assert.deepEqual(back.loadout.primary.attachments, {}, 'equipped kit stripped on migrate');
+  assert.deepEqual(back.builds.m4a1.attachments, {}, 'saved build stripped on migrate');
+  assert.ok(back.ownedAttachments.m4a1.includes('muz_suppressor'), 'ownership kept');
+  assert.ok(back.ownedAttachments.m4a1.includes('mag_extended'), 'ownership kept');
+  assert.equal(back.cash, 5000 - 800 - 600);
+  assert.ok(store.get('recoilfps.profile.v2'), 'migrated save written as v2');
+});
+
+test('mags and optics use basic industry-standard names', () => {
+  const names = {
+    opt_reddot: 'Red Dot Sight', opt_holo: 'Holographic Sight', opt_acog: 'ACOG Scope',
+    opt_hybrid: 'Hybrid Sight', opt_sniper_hp: 'Sniper Scope', opt_pistol_rmr: 'Pistol Red Dot',
+    mag_extended: 'Extended Mag', mag_drum: 'Drum Mag', mag_fast: 'Fast Mag',
+    mag_shell_tube: 'Extended Tube', mag_belt_box: 'Large Ammo Box', mag_sr_10: '10-Round Mag',
+  };
+  for (const [id, name] of Object.entries(names)) assert.equal(attachmentById(id).name, name, id);
 });

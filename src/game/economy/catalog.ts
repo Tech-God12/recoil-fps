@@ -65,7 +65,7 @@ function base(o: Partial<BaseWeaponStats> & Pick<BaseWeaponStats, 'rpm' | 'damag
 }
 export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   {
-    id: 'm4a1', name: 'Colt M4A1', short: 'M4A1', cls: 'AR', slot: 'primary',
+    id: 'm4a1', name: 'M416', short: 'M416', cls: 'AR', slot: 'primary',
     price: 0, starter: true,
     blurb: 'The workhorse. Flat-shooting, fast-handling carbine that does everything well and forgives everything else.',
     base: base({ auto: true, rpm: 780, damage: 34, headMul: 2.3, limbMul: 0.85, magSize: 30, reserve: 150, hipSpread: 0.008, adsFov: 56, tacReload: 2.1, emptyReload: 2.7, adsTime: 0.22 }),
@@ -73,7 +73,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'm4',
   },
   {
-    id: 'ak47', name: 'Kalashnikov AK-47', short: 'AK-47', cls: 'AR', slot: 'primary',
+    id: 'ak47', name: 'AK-47', short: 'AK-47', cls: 'AR', slot: 'primary',
     price: 3800, starter: false,
     blurb: 'Hard-hitting 7.62. Slower, louder, heavier — and every round lands like a slammed door.',
     base: base({ auto: true, rpm: 600, damage: 46, headMul: 2.5, limbMul: 0.8, magSize: 30, reserve: 120, hipSpread: 0.010, adsFov: 58, tacReload: 2.4, emptyReload: 3.0, adsTime: 0.25 }),
@@ -81,7 +81,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'ak',
   },
   {
-    id: 'm1911', name: 'Colt M1911', short: '1911', cls: 'PISTOL', slot: 'secondary',
+    id: 'm1911', name: '1911', short: '1911', cls: 'PISTOL', slot: 'secondary',
     price: 0, starter: true,
     blurb: 'Old warhorse in .45 ACP. Eight rounds of authority for when the primary runs dry.',
     base: base({ auto: false, rpm: 420, damage: 42, headMul: 2.6, limbMul: 0.85, magSize: 8, reserve: 48, hipSpread: 0.006, adsFov: 64, tacReload: 1.5, emptyReload: 1.8, adsTime: 0.16, noiseRadius: 50, moveSpeedMul: 1.05 }),
@@ -89,7 +89,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'pistol', slideBlowback: true,
   },
   {
-    id: 'awm', name: 'AI AWM .338', short: 'AWM', cls: 'SR', slot: 'primary',
+    id: 'awm', name: 'AWM', short: 'AWM', cls: 'SR', slot: 'primary',
     price: 7800, starter: false,
     blurb: 'Bolt-action .338 Lapua. One round, one silhouette down — if you can stand the scope sway and the report.',
     base: base({ auto: false, rpm: 48, damage: 78, headMul: 3.0, limbMul: 1.0, magSize: 5, reserve: 25, hipSpread: 0.045, adsFov: 22, tacReload: 2.25, emptyReload: 2.7, adsTime: 0.42, noiseRadius: 90, moveSpeedMul: 0.96 }),
@@ -97,7 +97,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'sniper', boltAction: true, scoped: true,
   },
   {
-    id: 'mp7', name: 'H&K MP7A1', short: 'MP7', cls: 'PDW', slot: 'primary',
+    id: 'mp7', name: 'MP', short: 'MP', cls: 'PDW', slot: 'primary',
     price: 2400, starter: false,
     blurb: 'Pocket firestorm. 900 RPM of 4.6mm for room-clearing on a budget — climbs if you hold the trigger.',
     base: base({ auto: true, rpm: 900, damage: 24, headMul: 2.2, limbMul: 0.8, magSize: 40, reserve: 200, hipSpread: 0.011, pattern: [[0.6, 0.15], [0.75, -0.2], [0.85, 0.25], [0.9, -0.1]], adsFov: 60, tacReload: 1.9, emptyReload: 2.3, adsTime: 0.18, noiseRadius: 55 }),
@@ -105,7 +105,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'smg',
   },
   {
-    id: 'vector', name: 'KRISS Vector .45', short: 'VECTOR', cls: 'SMG', slot: 'primary',
+    id: 'vector', name: 'Vector', short: 'Vector', cls: 'SMG', slot: 'primary',
     price: 4600, starter: false,
     blurb: '1,100 RPM Super-V laser. Weak per round, absurd per second — recoil practically deletes itself.',
     base: base({ auto: true, rpm: 1100, damage: 24, headMul: 2.0, limbMul: 0.85, magSize: 25, reserve: 175, hipSpread: 0.011, adsFov: 62, tacReload: 2.0, emptyReload: 2.5, adsTime: 0.17, recoilMul: 0.7, falloffStart: 22, noiseRadius: 58 }),
@@ -113,7 +113,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'vector',
   },
   {
-    id: 'spas12', name: 'Franchi SPAS-12', short: 'SPAS-12', cls: 'SG', slot: 'primary',
+    id: 'spas12', name: 'SPAS', short: 'SPAS', cls: 'SG', slot: 'primary',
     price: 5200, starter: false,
     blurb: 'Pump-action devastation. Eight pellets of 12-gauge diplomacy inside 12 metres — nothing argues back.',
     base: base({ auto: false, rpm: 80, damage: 14, headMul: 1.6, limbMul: 0.9, magSize: 8, reserve: 40, hipSpread: 0.045, adsSpread: 0.028, adsFov: 66, tacReload: 3.2, emptyReload: 3.2, adsTime: 0.24, recoilMul: 1.5, falloffStart: 12, falloffMul: 0.45, noiseRadius: 80 }),
@@ -121,7 +121,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'shotgun', pump: true, pellets: 8,
   },
   {
-    id: 'scar_h', name: 'FN SCAR-H', short: 'SCAR-H', cls: 'BR', slot: 'primary',
+    id: 'scar_h', name: 'SCAR', short: 'SCAR', cls: 'BR', slot: 'primary',
     price: 6400, starter: false,
     blurb: 'Two-tap battle rifle. Slow, surgical, and heavy — the muzzle climbs like it has somewhere to be.',
     base: base({ auto: true, rpm: 600, damage: 52, headMul: 2.4, limbMul: 0.85, magSize: 20, reserve: 100, hipSpread: 0.010, adsFov: 55, tacReload: 2.3, emptyReload: 2.9, adsTime: 0.26, recoilMul: 1.35, falloffStart: 45, falloffMul: 0.9, noiseRadius: 75 }),
@@ -129,7 +129,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'scar',
   },
   {
-    id: 'deagle', name: 'Desert Eagle .50 AE', short: 'DEAGLE', cls: 'PISTOL', slot: 'secondary',
+    id: 'deagle', name: 'Deagle', short: 'Deagle', cls: 'PISTOL', slot: 'secondary',
     price: 3200, starter: false,
     blurb: 'Hand cannon in .50 AE. Two rounds centre-mass ends the conversation — and nearly your wrist.',
     base: base({ auto: false, rpm: 240, damage: 62, headMul: 2.8, limbMul: 0.8, magSize: 7, reserve: 35, hipSpread: 0.009, adsFov: 64, tacReload: 1.7, emptyReload: 2.0, adsTime: 0.19, recoilMul: 1.8, falloffStart: 30, noiseRadius: 85, moveSpeedMul: 1.03 }),
@@ -137,7 +137,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'deagle', slideBlowback: true,
   },
   {
-    id: 'm249', name: 'FN M249 SAW', short: 'M249', cls: 'LMG', slot: 'primary',
+    id: 'm249', name: 'M249', short: 'M249', cls: 'LMG', slot: 'primary',
     price: 8600, starter: false,
     blurb: '100-round belt of suppression. Slow to shoulder, slow to reload, impossible to ignore downrange.',
     base: base({ auto: true, rpm: 800, damage: 36, headMul: 2.2, limbMul: 0.85, magSize: 100, reserve: 200, hipSpread: 0.016, adsFov: 60, tacReload: 5.4, emptyReload: 5.4, adsTime: 0.40, recoilMul: 1.15, falloffStart: 40, noiseRadius: 80, moveSpeedMul: 0.92, swapTime: 0.32 }),
@@ -215,7 +215,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
   },
   // ---------------- OPTIC ----------------
   {
-    id: 'opt_reddot', slot: 'optic', name: 'RMR Red Dot', price: 450, tier: 1,
+    id: 'opt_reddot', slot: 'optic', name: 'Red Dot Sight', price: 450, tier: 1,
     compat: ['m4a1', 'ak47', 'scar_h', 'vector', 'mp7', 'spas12', 'm249'],
     desc: 'Single glowing dot, both eyes open. Snaps onto target faster than irons — no magnification, no excuses.',
     pros: ['Clean dot reticle', 'Faster ADS'],
@@ -224,7 +224,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'reddot',
   },
   {
-    id: 'opt_holo', slot: 'optic', name: 'EOTech Holo', price: 700, tier: 2,
+    id: 'opt_holo', slot: 'optic', name: 'Holographic Sight', price: 700, tier: 2,
     compat: ['m4a1', 'ak47', 'scar_h', 'vector', 'mp7', 'spas12', 'm249'],
     desc: '68-MOA ring with a 1-MOA dot. Built for snap shots on the move — the ring does the leading for you.',
     pros: ['Ring reticle, fast pickup', 'Tighter hip fire'],
@@ -233,7 +233,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'holo',
   },
   {
-    id: 'opt_acog', slot: 'optic', name: 'ACOG 4×', price: 1050, tier: 2,
+    id: 'opt_acog', slot: 'optic', name: 'ACOG Scope', price: 1050, tier: 2,
     compat: ['m4a1', 'ak47', 'scar_h', 'm249'],
     desc: 'Fixed 4× chevron with bullet-drop ticks. Turns mid-range into your personal range day — tunnel vision included.',
     pros: ['4× magnification', '+10 m effective range'],
@@ -242,7 +242,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'acog',
   },
   {
-    id: 'opt_hybrid', slot: 'optic', name: 'LPVO 1–6×', price: 1400, tier: 3,
+    id: 'opt_hybrid', slot: 'optic', name: 'Hybrid Sight', price: 1400, tier: 3,
     compat: ['m4a1', 'ak47', 'scar_h'],
     desc: 'Low-power variable with true 1×. Tap V while scoped to swing between chevron speed and 6× reach.',
     pros: ['1× / 6× on demand (T)', 'Chevron reticle'],
@@ -251,7 +251,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'lpvo',
   },
   {
-    id: 'opt_sniper_hp', slot: 'optic', name: 'High-Power 12×', price: 1650, tier: 3,
+    id: 'opt_sniper_hp', slot: 'optic', name: 'Sniper Scope', price: 1650, tier: 3,
     compat: ['awm'],
     desc: 'Replaces the factory scope with a 12× precision tube. Steadier glass for prone-quality shots from a crouch.',
     pros: ['Stronger magnification', 'Steadier when crouched'],
@@ -260,7 +260,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'scope_hp',
   },
   {
-    id: 'opt_pistol_rmr', slot: 'optic', name: 'Slide-Mount Micro Dot', price: 500, tier: 2,
+    id: 'opt_pistol_rmr', slot: 'optic', name: 'Pistol Red Dot', price: 500, tier: 2,
     compat: ['m1911', 'deagle'],
     desc: 'Milled micro dot riding the slide. Snappier pickup than notches — the dot does not lie about your wobble.',
     pros: ['Dot reticle on a pistol', 'Faster ADS'],
@@ -279,7 +279,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'mag_ext',
   },
   {
-    id: 'mag_drum', slot: 'magazine', name: 'Drum Magazine', price: 1350, tier: 3,
+    id: 'mag_drum', slot: 'magazine', name: 'Drum Mag', price: 1350, tier: 3,
     compat: ['m4a1', 'ak47', 'vector'],
     desc: '75-round drum slung under the receiver. Suppressive fire without the pause — reloading it is a project.',
     pros: ['2.5× magazine'],
@@ -288,7 +288,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'mag_drum',
   },
   {
-    id: 'mag_fast', slot: 'magazine', name: 'Fast Mag (Coupled)', price: 700, tier: 2,
+    id: 'mag_fast', slot: 'magazine', name: 'Fast Mag', price: 700, tier: 2,
     compat: ['m4a1', 'ak47', 'vector', 'mp7'],
     desc: 'Two mags clamped base-to-base. Flip, seat, back in the fight — the reload animation is half the show.',
     pros: ['Much faster reloads'],
@@ -297,7 +297,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'mag_coupled',
   },
   {
-    id: 'mag_shell_tube', slot: 'magazine', name: 'Extended Tube (+4)', price: 700, tier: 2,
+    id: 'mag_shell_tube', slot: 'magazine', name: 'Extended Tube', price: 700, tier: 2,
     compat: ['spas12'],
     desc: 'Longer tube under the barrel, four more shells. Twelve rounds of pump-action persuasion.',
     pros: ['+4 shells'],
@@ -306,16 +306,16 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     visual: 'shell_tube',
   },
   {
-    id: 'mag_belt_box', slot: 'magazine', name: '200-Round Soft Pack', price: 1300, tier: 3,
+    id: 'mag_belt_box', slot: 'magazine', name: 'Large Ammo Box', price: 1300, tier: 3,
     compat: ['m249'],
-    desc: 'Doubled belt box hanging off the SAW. Two hundred rounds before the long reload — plan accordingly.',
+    desc: 'Doubled belt box hanging off the gun. Two hundred rounds before the long reload — plan accordingly.',
     pros: ['2× belt capacity'],
     cons: ['Slower belt reload', 'Heavier'],
     mods: { magMul: 2, emptyReloadMul: 1.35, moveSpeedMul: 0.96 },
     visual: 'belt_box_large',
   },
   {
-    id: 'mag_sr_10', slot: 'magazine', name: '10-Round Detachable Box', price: 750, tier: 2,
+    id: 'mag_sr_10', slot: 'magazine', name: '10-Round Mag', price: 750, tier: 2,
     compat: ['awm'],
     desc: 'Double-stack box, ten rounds of .338. Twice the follow-ups before the bolt goes lonely.',
     pros: ['5 → 10 rounds'],

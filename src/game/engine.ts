@@ -524,7 +524,7 @@ void main(){
     this.vmLight = new THREE.PointLight(0xFFC070, 0, 4);
     this.vmScene.add(this.vmLight);
 
-    // Weapons: 1. M4A1 SOPMOD, 2. AK-47, 3. M1911, 4. AWM Sniper, 5. MP7A1 PDW
+    // Weapons: 1. M416, 2. AK-47, 3. 1911, 4. AWM, 5. MP
     await nextFrame();
     const m4 = buildM4();
     const ak = buildAK47();
@@ -539,7 +539,7 @@ void main(){
 
     this.weapons = [
       {
-        name: 'M4A1 SOPMOD',
+        name: 'M416',
         model: m4,
         auto: true,
         rpm: 780,
@@ -556,7 +556,7 @@ void main(){
         emptyReload: 2.7,
       },
       {
-        name: 'AK-47 TACTICAL',
+        name: 'AK-47',
         model: ak,
         auto: true,
         rpm: 600,
@@ -573,7 +573,7 @@ void main(){
         emptyReload: 3.0,
       },
       {
-        name: 'M1911 .45',
+        name: '1911',
         model: m1911,
         auto: false,
         rpm: 420,
@@ -590,7 +590,7 @@ void main(){
         emptyReload: 1.8,
       },
       {
-        name: 'AWM .338 SNIPER',
+        name: 'AWM',
         model: awm,
         auto: false,
         rpm: 48,
@@ -607,7 +607,7 @@ void main(){
         emptyReload: 2.7,
       },
       {
-        name: 'MP7A1 PDW',
+        name: 'MP',
         model: mp7,
         auto: true,
         rpm: 900,

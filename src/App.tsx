@@ -3,8 +3,11 @@ import { Engine, DEFAULT_SETTINGS, type GameEvent, type GameSettings, type HudSt
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
+import Armory from './ui/armory/Armory';
+import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
+import { gradeBonus, gradeFor } from './game/economy/rewards';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
 /**
@@ -18,10 +21,13 @@ const afterPaint = () => new Promise<void>(resolve => {
 const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, weapon: 'M4A1 SOPMOD', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
-  canVault: false, ads: 0, spread: 0, pings: [],
+  canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
+  bipodDeployed: false, reticle: 'none', lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
+
+export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
 function loadSettings(): GameSettings {
   try {
@@ -44,12 +50,34 @@ export default function App() {
   const [error, setError] = useState('');
   const [hud, setHud] = useState(DEFAULT_HUD);
   const [results, setResults] = useState<Results | null>(null);
+  const [wallet, setWallet] = useState<ResultsWallet | null>(null);
   const [fx, setFx] = useState<HudFx>(emptyFx);
+  const [profile, setProfile] = useState<PlayerProfile>(loadProfile);
+  const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
 
   const changePhase = useCallback((next: Phase) => {
     phaseRef.current = next;
     setPhase(next);
   }, []);
+
+  const updateProfile = useCallback((next: PlayerProfile) => {
+    profileRef.current = next;
+    setProfile(next);
+    saveProfile(next);
+  }, []);
+
+  // Hidden balance-testing affordance: #cash=50000 on the menu grants it once per pageload.
+  useEffect(() => {
+    const m = window.location.hash.match(/#cash=(\d+)/);
+    if (!m) return;
+    const amt = Math.min(999999, parseInt(m[1], 10));
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (amt > 0) {
+      updateProfile(grantCash(profileRef.current, amt, 'DEV'));
+    }
+  }, [updateProfile]);
 
   const later = useCallback((fn: () => void, delay: number) => {
     const epoch = session.current;
@@ -89,6 +117,13 @@ export default function App() {
         later(() => setFx(f => ({ ...f, feed: f.feed.filter(row => row.id !== id) })), 5200);
         later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1300);
         break;
+      case 'cash':
+        setFx(f => ({
+          ...f,
+          scorePops: [...f.scorePops.slice(-2), { id, text: `+$${event.amount}`, headshot: false, cash: true }],
+        }));
+        later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1300);
+        break;
       case 'damage':
         setFx(f => ({ ...f, dmgArcs: [...f.dmgArcs.slice(-3), { id, dir: event.dir, opacity: Math.min(1, Math.max(0.35, event.amount / 80)) }] }));
         later(() => setFx(f => ({ ...f, dmgArcs: f.dmgArcs.filter(row => row.id !== id) })), 1500);
@@ -109,14 +144,25 @@ export default function App() {
         setFx(f => ({ ...f, missionBanner: { id, title: event.phase.title, index: event.index } }));
         later(() => setFx(f => f.missionBanner?.id === id ? { ...f, missionBanner: null } : f), 2600);
         break;
-      case 'end':
+      case 'end': {
         engineRef.current?.setPaused(true);
+        // Debrief payout: run cash × difficulty, plus the grade bonus on a win.
+        // (Losses keep 100% of earned cash but forfeit extraction + grade.)
+        const gb = event.win ? gradeBonus(gradeFor(event).grade) : 0;
+        const earned = Math.round(event.cash * event.difficultyMul) + gb;
+        const before = profileRef.current;
+        const next = grantCash(before, earned, 'MISSION');
+        next.missions += 1;
+        next.kills += event.kills;
+        updateProfile(next);
+        setWallet({ before: before.cash, after: next.cash, gradeBonus: gb, earned });
         changePhase('results');
         setResults({ ...event });
         if (document.pointerLockElement) document.exitPointerLock();
         break;
+      }
     }
-  }, [changePhase, later]);
+  }, [changePhase, later, updateProfile]);
 
   useEffect(() => {
     if (phase !== 'playing') return;
@@ -129,7 +175,7 @@ export default function App() {
   useEffect(() => {
     const lockChanged = () => {
       const engine = engineRef.current;
-      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu') return;
+      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory') return;
       if (document.pointerLockElement === canvasRef.current) {
         engine.setPaused(false);
         changePhase('playing');
@@ -163,7 +209,7 @@ export default function App() {
     if (!canvasRef.current || launching) return;
     const epoch = ++session.current;
     clearTimers();
-    setLaunching(true); setError(''); setShowSettings(false); setResults(null); setFx(emptyFx());
+    setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
     engineRef.current?.dispose(); engineRef.current = null;
     // Let React commit and the browser actually paint the boot screen before any of the
     // heavy mission build starts. Without this the deploy click blocked the main thread
@@ -171,7 +217,7 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, settings.map);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, settings.map, profileRef.current.loadout);
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -207,6 +253,16 @@ export default function App() {
     changePhase('menu'); setShowSettings(false); setError(''); setFx(emptyFx()); setHud(DEFAULT_HUD);
     if (document.pointerLockElement) document.exitPointerLock();
   };
+
+  const openArmory = (from: 'menu' | 'results') => {
+    setArmoryFrom(from);
+    setShowSettings(false);
+    changePhase('armory');
+    if (document.pointerLockElement) document.exitPointerLock();
+  };
+  const armoryBack = () => {
+    changePhase(armoryFrom === 'results' && results ? 'results' : 'menu');
+  };
   const fullscreen = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -218,9 +274,10 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud hud={hud} s={settings} fx={fx} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
-      {phase === 'results' && results && <ResultsScreen r={results} onRedeploy={deploy} onMenu={quit} />}
+      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={deploy} onMenu={quit} onArmory={() => openArmory('results')} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={deploy} onBack={armoryBack} />}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>

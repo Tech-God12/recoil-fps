@@ -18,7 +18,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'gameplay', label: 'GAMEPLAY', icon: '◈' },
   { id: 'graphics', label: 'GRAPHICS', icon: '◆' },
   { id: 'audio', label: 'AUDIO', icon: '◉' },
-  { id: 'crosshair', label: 'RETICLE', icon: '✛' },
+  { id: 'crosshair', label: 'RETICLE', icon: '+' },
   { id: 'controls', label: 'CONTROLS', icon: '⌨' },
 ];
 
@@ -42,7 +42,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
             <h2>Settings</h2>
             <p className="mono">Changes apply instantly</p>
           </div>
-          <CBtn onClick={onClose}>✕ CLOSE</CBtn>
+          <CBtn onClick={onClose}>× CLOSE</CBtn>
         </div>
 
         <div className="settings-body">

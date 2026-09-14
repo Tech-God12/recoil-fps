@@ -8,7 +8,13 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { buildWorld, pointInAABB, type World, type MapId, type AABB } from './world';
-import { buildM4, buildAK47, buildM1911, buildAWM, buildMP7, type WeaponModel } from './models';
+import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, WEAPON_BUILDERS, type WeaponModel } from './models';
+import { applyBuild } from './attachments';
+import { attachmentById, weaponById, type WeaponId } from './economy/catalog';
+import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
+import { REWARDS, difficultyMultiplier, streakAward } from './economy/rewards';
+import { skinById } from './economy/skins';
+import type { Loadout, WeaponBuild } from './economy/loadout';
 import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
@@ -92,6 +98,13 @@ export interface HudState {
   canVault: boolean;
   ads: number;
   spread: number;
+  cash: number;
+  secondaryWeapon: string;
+  heldSlot: 'primary' | 'secondary';
+  bipodDeployed: boolean;
+  reticle: ScopeReticle;
+  lpvoHigh: boolean;
+  pumping: boolean;
   pings: { dir: number; age: number }[];
   grenadeDist?: number;
   grenadeAngle?: number;
@@ -102,6 +115,7 @@ export interface HudState {
   missionMap?: { nx: number; nz: number; ringPct: number; extract: boolean };
   fps: number;
   magSize: number;
+  masterkey?: { shells: number; reloading: boolean };
   worldHalf: number;
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
@@ -116,7 +130,10 @@ export type GameEvent =
   | { type: 'callout'; text: string }
   | { type: 'streak'; label: string }
   | { type: 'objective'; phase: MissionPhase; index: number }
-  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats };
+  | { type: 'cash'; amount: number; reason: string; total: number }
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number };
+
+export interface CashLogEntry { reason: string; amount: number; t: number }
 
 interface WeaponDef {
   name: string;
@@ -134,6 +151,30 @@ interface WeaponDef {
   adsFov: number;      // FOV while ADS (lower = more zoom); sniper gets a real scope
   tacReload: number;
   emptyReload: number;
+  // Loadout-driven extras (optional so legacy stock defs keep compiling)
+  falloffStart?: number;
+  falloffMul?: number;
+  adsTime?: number;
+  recoilMul?: number;
+  noiseRadius?: number;
+  swapTime?: number;
+  spreadX?: number;
+  spreadY?: number;
+  flashMul?: number;
+  swayMul?: number;
+  swayMulCrouched?: number;
+  recoilYawMul?: number;
+  moveSpeedMul?: number;
+  suppressed?: boolean;
+  boltAction?: boolean;
+  reticle?: ScopeReticle;
+  lpvo?: boolean;
+  lpvoHigh?: boolean;
+  pumpShotgun?: boolean;
+  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'vector' | 'lmg' | 'deagle';
+  laser?: boolean;
+  flashlight?: boolean;
+  masterkey?: boolean;
 }
 
 interface Grenade {
@@ -186,6 +227,11 @@ const ADAPT_DOWN_WINDOWS = 2;
 const ADAPT_UP_WINDOWS = 3;
 /** A frame longer than this is a hitch, not sustained throughput; it must not drive scaling. */
 const ADAPT_STALL_SECONDS = 0.25;
+// Maps armory weapon ids to the engine's legacy audio tags for loadout-built guns.
+const LOADOUT_AUDIO: Record<WeaponId, NonNullable<WeaponDef['audioTag']>> = {
+  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', m249: 'lmg', vector: 'vector', mp7: 'smg',
+  spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle',
+};
 
 export class Engine {
   // Assigned in init(), which Engine.create() awaits before handing the instance out.
@@ -246,6 +292,8 @@ export class Engine {
   private spreadNow = 0;
   private lastKillT = -9999;
   private streak = 0;
+  private streakPaidMark = 0;
+  private streakPaidRun = 0;
   private headshots = 0;
   private readonly VM_S = 1.95;
   // Scratch vectors — hot paths must not allocate per frame
@@ -269,6 +317,19 @@ export class Engine {
   // Weapons
   private weapons!: WeaponDef[];
   private cur = 0;
+  private lastCur = 1;
+  private qDownT = -1;
+  private slideKick = 0;
+  private laserDot: THREE.Mesh | null = null;
+  private laserBeam: THREE.Line | null = null;
+  private torch: THREE.SpotLight | null = null;
+  private cashEarned = 0;
+  private cashLog: CashLogEntry[] = [];
+  private runStartT = 0;
+  private difficultyId = 'Normal';
+  private pumpT = 0;
+  private mkAmmo = 3;
+  private mkReloadT = -1;
   private mags!: number[];
   private reserves!: number[];
   private fireCD = 0;
@@ -337,13 +398,13 @@ export class Engine {
    * could even paint. create() stages it across frames and pre-compiles shaders off the
    * blocking path instead.
    */
-  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul'): Promise<Engine> {
+  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null): Promise<Engine> {
     const engine = new Engine(canvas);
-    await engine.init(difficulty, onEvent, mapId);
+    await engine.init(difficulty, onEvent, mapId, loadout);
     return engine;
   }
 
-  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul') {
+  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null) {
     this.onEvent = onEvent;
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     // Cap pixel ratio at 1.25 — the single biggest FPS win on high-DPI screens
@@ -565,6 +626,8 @@ void main(){
     ];
     this.mags = [30, 30, 8, 5, 40];
     this.reserves = [Infinity, Infinity, Infinity, Infinity, Infinity];
+    this.difficultyId = difficulty;
+    if (loadout) this.armLoadout(loadout);
 
     // Muzzle Flash
     const fm = new THREE.MeshBasicMaterial({
@@ -652,7 +715,7 @@ void main(){
         if (text !== this.missionRuntime.mission.current.brief) this.onEvent({ type: 'callout', text });
       },
       resupply: () => { this.hp = 100; this.frags = 5; this.flashes = 2; },
-      scoreBonus: pts => { this.score += pts; },
+      scoreBonus: pts => { this.score += pts; this.earnCash(REWARDS.phase, 'phase'); },
       detonate: at => {
         // Use the existing blast resolution for damage, glass, particles and spatial audio.
         this.explode({ mesh: this.missionRuntime.markers.cache, pos: at, vel: new THREE.Vector3(), fuse: 0, kind: 'frag', fromAI: false });
@@ -703,6 +766,9 @@ void main(){
     if (e.code === 'Digit3') this.switchWeapon(2);
     if (e.code === 'Digit4') this.switchWeapon(3);
     if (e.code === 'Digit5') this.switchWeapon(4);
+    if (e.code === 'KeyQ' && !e.repeat) this.qDownT = performance.now();
+    if (e.code === 'KeyB') this.fireMasterkey();
+    if (e.code === 'KeyV' && this.def().lpvo) this.def().lpvoHigh = !this.def().lpvoHigh;
 
     // GRENADES
     if (e.code === 'KeyG' && this.frags > 0 && !this.cooking && this.reloadT < 0) {
@@ -747,6 +813,11 @@ void main(){
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
+    // Q is dual-purpose: tap = quick-swap to last weapon, hold = lean left.
+    if (e.code === 'KeyQ' && this.qDownT >= 0 && !this.paused && !this.dead && !this.ended) {
+      if (performance.now() - this.qDownT < 220 && Math.abs(this.lean) < 0.15) this.switchWeapon(this.lastCur);
+      this.qDownT = -1;
+    }
     // Never let a frag loose on a key release that arrives while paused, dead or
     // between missions (ESC mid-cook used to throw into the pause menu).
     if (e.code === 'KeyG' && this.cooking && !this.paused && !this.dead && !this.ended
@@ -1190,15 +1261,18 @@ void main(){
   private def() { return this.weapons[this.cur]; }
 
   private switchWeapon(i: number) {
-    if (i === this.cur || this.switchT >= 0 || this.reloadT >= 0 || i >= this.weapons.length) return;
+    if (i === this.cur || this.switchT >= 0 || this.reloadT >= 0 || i >= this.weapons.length || i < 0) return;
     this.switchT = 0;
     this.cooking = false;
+    const from = this.cur;
+    const ms = Math.round((this.def().swapTime ?? 0.13) * 1000);
     setTimeout(() => {
       if (this.disposed || this.ended) return;
-      this.weapons[this.cur].model.group.visible = false;
+      this.weapons[from].model.group.visible = false;
+      this.lastCur = from;
       this.cur = i;
       this.weapons[i].model.group.visible = true;
-    }, 130);
+    }, ms);
   }
 
   private startReload() {
@@ -1210,18 +1284,26 @@ void main(){
     this.reloadDur = empty ? d.emptyReload : d.tacReload;
     this.reloadT = 0;
     this.currentReloadStage = 'idle';
+    if (d.pumpShotgun) {
+      // Shell-by-shell loading clicks across the reload.
+      for (const ms of [420, 700, 980, 1260]) {
+        setTimeout(() => { if (!this.disposed && !this.ended && this.reloadT >= 0) audio.shellInsert(); }, ms);
+      }
+    }
 
     const stages: { t: number; stage: HudState['reloadStage']; fn: () => void }[] = [
       {
         t: 0.28, stage: 'magOut', fn: () => {
           this.currentReloadStage = 'magOut';
-          audio.magOut();
+          if (d.audioTag === 'lmg') audio.beltCoverOpen(); else audio.magOut();
         },
       },
       {
         t: this.reloadDur * 0.55, stage: 'magIn', fn: () => {
           this.currentReloadStage = 'magIn';
-          audio.magIn();
+          if (d.audioTag === 'lmg') audio.beltCoverClose();
+          else if (d.pumpShotgun) audio.shellInsert();
+          else audio.magIn();
           // Counter jumps to new count on magazine in.
           // INFINITE AMMO: always refill to full; never let reserve drift to a finite number.
           const need = d.magSize - this.mags[this.cur];
@@ -1293,8 +1375,13 @@ void main(){
     this.mags[this.cur]--;
     this.fireCD = 60 / d.rpm;
     this.shots++;
-    if (this.cur === 3) { this.boltCycle = 1.25; this.rmb = false; }
+    if (d.boltAction ?? this.cur === 3) { this.boltCycle = 1.25; this.rmb = false; }
     this.shotResetT = 0.28;
+    if (d.pumpShotgun) {
+      this.pumpT = 0.5;
+      setTimeout(() => { if (!this.disposed && !this.ended) audio.pump(); }, 200);
+    }
+    if (d.audioTag === 'pistol' || d.audioTag === 'scar') this.slideKick = 1;
 
     // 1. CALCULATE EXACT BULLET TRAJECTORY FIRST BEFORE RECOIL
     // In ADS: spread is 0.000 — 100% exact center of your sight picture
@@ -1312,8 +1399,8 @@ void main(){
     const dir = this._t1;
     this.camera.getWorldDirection(dir);
     if (spread > 0.0001) {
-      dir.x += (Math.random() - 0.5) * spread;
-      dir.y += (Math.random() - 0.5) * spread;
+      dir.x += (Math.random() - 0.5) * spread * (d.spreadX ?? 1);
+      dir.y += (Math.random() - 0.5) * spread * (d.spreadY ?? 1);
       dir.z += (Math.random() - 0.5) * spread;
       dir.normalize();
     }
@@ -1350,14 +1437,14 @@ void main(){
     }
 
     if (h) {
-      this.effects.tracer(muzzleWorld, h.point);
+      if (!d.suppressed) this.effects.tracer(muzzleWorld, h.point);
       const enemy = (h.object.userData.enemy as Enemy | undefined);
       if (enemy && !enemy.dead) {
         const part = h.object.userData.part as string;
         let dmg = d.damage;
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
-        if (h.distance > 35) dmg *= 0.85;
+        if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
         this.hits++;
         this.effects.blood(h.point);
         audio.fleshImpact(0);
@@ -1366,6 +1453,7 @@ void main(){
           this.kills++;
           // Matches the HUD score popups exactly: 100 per elimination, 150 for a headshot.
           this.score += part === 'head' ? 150 : 100;
+          this.earnCash(part === 'head' ? REWARDS.headshot : REWARDS.kill, part === 'head' ? 'headshot' : 'kill');
           audio.killConfirm();
           const isHead = part === 'head';
           if (isHead) {
@@ -1380,12 +1468,18 @@ void main(){
           }
           const now = performance.now();
           if (now - this.lastKillT < 2600) this.streak++;
-          else this.streak = 1;
+          else { this.streak = 1; this.streakPaidMark = 0; }
           this.lastKillT = now;
           if (this.streak >= 2) {
             const label = this.streak >= 5 ? 'UNSTOPPABLE' : this.streak === 4 ? 'MEGA KILL' : this.streak === 3 ? 'MULTI KILL' : 'DOUBLE KILL';
             voice.streak(label);
             this.onEvent({ type: 'streak', label });
+            const sb = streakAward(this.streak, this.streakPaidMark, 500 - this.streakPaidRun);
+            if (sb > 0) {
+              this.streakPaidMark = this.streak;
+              this.streakPaidRun += sb;
+              this.earnCash(sb, 'streak');
+            }
           }
           this.onEvent({ type: 'hit', kill: true });
           this.onEvent({ type: 'kill', name: enemy.name, weapon: d.name, headshot: part === 'head' });
@@ -1408,8 +1502,9 @@ void main(){
     const pat = d.pattern[Math.min(this.shotIdx, d.pattern.length - 1)];
     this.shotIdx++;
     const adsRecoilReduction = isAds ? 0.6 : 1.0;
-    const kickP = pat[0] * 0.0052 * adsRecoilReduction;
-    const kickY = pat[1] * 0.0032 * adsRecoilReduction;
+    const recoilMul = (d.recoilMul ?? 1) * (this.bipodDeployed() ? 0.4 : 1);
+    const kickP = pat[0] * 0.0052 * adsRecoilReduction * recoilMul;
+    const kickY = pat[1] * 0.0032 * adsRecoilReduction * recoilMul * (d.recoilYawMul ?? 1);
     this.pitch += kickP * 0.32;
     this.yaw += kickY * 0.32;
     this.recoilP += kickP * 0.45;
@@ -1418,20 +1513,183 @@ void main(){
     this.vmKickRot = 1;
 
     // Audio & Muzzle Flash — each weapon gets its own signature report
-    if (this.cur === 0) audio.fireM4();
-    else if (this.cur === 1) audio.fireAK();
-    else if (this.cur === 2) audio.firePistol();
-    else if (this.cur === 3) audio.fireSniper();
-    else audio.fireSMG();
+    if (d.suppressed) audio.fireSuppressed();
+    else {
+      const tag = d.audioTag ?? (['m4', 'ak', 'pistol', 'sniper', 'smg'] as const)[this.cur] ?? 'm4';
+      if (tag === 'm4') audio.fireM4();
+      else if (tag === 'ak') audio.fireAK();
+      else if (tag === 'pistol') audio.firePistol();
+      else if (tag === 'sniper') audio.fireSniper();
+      else if (tag === 'shotgun') audio.fireShotgun();
+      else if (tag === 'scar') audio.fireSCAR();
+      else if (tag === 'vector') audio.fireVector();
+      else if (tag === 'lmg') audio.fireLMG();
+      else if (tag === 'deagle') audio.fireDeagle();
+      else audio.fireSMG();
+    }
 
     const mf = this.muzzleFlash.material as THREE.MeshBasicMaterial;
     mf.opacity = 1;
     this.muzzleFlash.rotation.z = Math.random() * Math.PI;
-    this.muzzleFlash.scale.setScalar((0.85 + Math.random() * 0.5) * 1.6);
-    this.vmLight.intensity = 3.5;
-    this.effects.playerFlash(origin.clone().addScaledVector(dir, 1.0));
-    this.ai.notifyGunshot(this.pos, 65);
+    this.muzzleFlash.scale.setScalar((0.85 + Math.random() * 0.5) * (d.suppressed ? 0.45 : 1.6) * (d.flashMul ?? 1));
+    this.vmLight.intensity = d.suppressed ? 1.2 : 3.5;
+    if (!d.suppressed) this.effects.playerFlash(origin.clone().addScaledVector(dir, 1.0));
+    this.ai.notifyGunshot(this.pos, d.noiseRadius ?? 65);
     this.staticTime = 0;
+  }
+
+  /** Replace the stock arsenal with the player's armory loadout (primary + sidearm). */
+  private armLoadout(loadout: Loadout): void {
+    for (const w of this.weapons) this.vmScene.remove(w.model.group);
+    this.weapons = [this.buildLoadoutWeapon(loadout.primary), this.buildLoadoutWeapon(loadout.secondary)];
+    for (const w of this.weapons) this.vmScene.add(w.model.group);
+    this.weapons[1].model.group.visible = false;
+    this.mags = this.weapons.map(w => w.magSize);
+    this.reserves = this.weapons.map(() => Infinity);
+    this.cur = 0;
+    this.lastCur = 1;
+  }
+
+  private buildLoadoutWeapon(build: WeaponBuild): WeaponDef {
+    const id: WeaponId = build.weapon;
+    const entry = weaponById(id) ?? weaponById('m4a1')!;
+    const mods = Object.values(build.attachments)
+      .map(aid => attachmentById(aid)?.mods)
+      .filter((m): m is NonNullable<typeof m> => !!m);
+    const stats = resolveWeaponStats(entry.base, mods);
+    const model = (WEAPON_BUILDERS[id] ?? WEAPON_BUILDERS.m4a1)();
+    applyBuild(model, build);
+    // Finishes need per-gun materials — clone once, then paint the chosen skin.
+    const owned = new Map<THREE.Material, THREE.Material>();
+    model.group.traverse(o => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || Array.isArray(mesh.material)) return;
+      const m = mesh.material as THREE.Material;
+      if (!owned.has(m)) owned.set(m, m.clone());
+      mesh.material = owned.get(m)!;
+    });
+    applySkin(model.group, skinById(build.skin ?? 'factory'));
+    return {
+      name: entry.name.toUpperCase(),
+      model,
+      auto: stats.auto, rpm: stats.rpm, damage: stats.damage,
+      headMul: stats.headMul, limbMul: stats.limbMul,
+      magSize: stats.magSize, reserve: stats.reserve,
+      hipSpread: stats.hipSpread, adsSpread: stats.adsSpread,
+      pattern: stats.pattern.map(pat => [...pat] as [number, number]),
+      adsFov: stats.adsFov, tacReload: stats.tacReload, emptyReload: stats.emptyReload,
+      falloffStart: stats.falloffStart, falloffMul: stats.falloffMul,
+      adsTime: stats.adsTime, recoilMul: stats.recoilMul,
+      noiseRadius: stats.noiseRadius, swapTime: stats.swapTime,
+      spreadX: stats.spreadXMul, spreadY: stats.spreadYMul, flashMul: stats.flashMul,
+      swayMul: stats.swayMul, swayMulCrouched: stats.swayMulCrouched,
+      recoilYawMul: stats.recoilYawMul, moveSpeedMul: stats.moveSpeedMul,
+      suppressed: stats.suppressed,
+      boltAction: id === 'awm', audioTag: LOADOUT_AUDIO[id], masterkey: stats.masterkey,
+      reticle: stats.reticle, lpvo: stats.lpvo, pumpShotgun: id === 'spas12',
+      laser: stats.laser, flashlight: stats.flashlight,
+    };
+  }
+
+  /** Cash ledger: every paid event flows through here so HUD toasts and the debrief agree. */
+  private earnCash(amount: number, reason: string): void {
+    this.cashEarned += amount;
+    this.cashLog.push({ reason, amount, t: (performance.now() - this.runStartT) / 1000 });
+    this.onEvent({ type: 'cash', amount, reason, total: this.cashEarned });
+  }
+
+  /** Effective ADS zoom: LPVO on high power nearly doubles magnification. */
+  private adsFovEff(): number {
+    const w = this.def();
+    return w.lpvo && w.lpvoHigh ? w.adsFov * 0.55 : w.adsFov;
+  }
+
+  /** Bipod counts as deployed when prone and still with legs fitted (hip or ADS). */
+  private bipodDeployed(): boolean {
+    return this.crouched && this.grounded && Math.hypot(this.vx, this.vz) < 0.6 && !!this.def().model.attached.underbarrel?.userData.legs;
+  }
+
+  /** Masterkey underbarrel shotgun (B): 7-pellet cone with its own 3-shell tube. */
+  private fireMasterkey(): void {
+    const d = this.def();
+    if (!d.masterkey || this.mkReloadT >= 0 || this.reloadT >= 0 || this.switchT >= 0 || this.dead || this.ended) return;
+    if (this.mkAmmo <= 0) { audio.dryFire(); return; }
+    this.mkAmmo--;
+    if (this.mkAmmo <= 0) this.mkReloadT = 0;
+    audio.fireShotgun();
+    this.shots++;
+    const mf = this.muzzleFlash.material as THREE.MeshBasicMaterial;
+    mf.opacity = 1;
+    this.muzzleFlash.rotation.z = Math.random() * Math.PI;
+    this.muzzleFlash.scale.setScalar(1.1);
+    this.vmLight.intensity = 3;
+    this.pitch += 0.014;
+    this.recoilP += 0.02;
+    this.vmKick = 1;
+    this.vmKickRot = 1;
+    const skip = 0.55 + Math.abs(this.lean) * 0.95;
+    const origin = this._t2.copy(this.camera.position);
+    const base = this._t1;
+    this.camera.getWorldDirection(base);
+    const me = this.camera.matrix.elements;
+    let anyHit = false;
+    let anyKill = false;
+    for (let i = 0; i < 7; i++) {
+      const dir = new THREE.Vector3(
+        base.x + (Math.random() - 0.5) * 0.09 * (d.spreadX ?? 1),
+        base.y + (Math.random() - 0.5) * 0.09 * (d.spreadY ?? 1),
+        base.z + (Math.random() - 0.5) * 0.09,
+      ).normalize();
+      this.raycaster.set(origin, dir);
+      this.raycaster.far = 60;
+      const rawHits = this.raycaster.intersectObjects(this.hittables, false);
+      let h: THREE.Intersection | null = null;
+      for (const cand of rawHits) {
+        const isEnemy = (cand.object.userData.enemy as Enemy | undefined) !== undefined;
+        if (!isEnemy && cand.distance < skip) continue;
+        h = cand;
+        break;
+      }
+      const mw = this._t3.copy(origin).addScaledVector(dir, 0.55);
+      mw.x += me[0] * 0.09 + me[4] * -0.07;
+      mw.y += me[1] * 0.09 + me[5] * -0.07;
+      mw.z += me[2] * 0.09 + me[6] * -0.07;
+      if (!h) {
+        this.effects.tracer(mw, origin.clone().addScaledVector(dir, 40));
+        continue;
+      }
+      this.effects.tracer(mw, h.point);
+      const enemy = (h.object.userData.enemy as Enemy | undefined);
+      if (!enemy || enemy.dead) continue;
+      const part = h.object.userData.part as string;
+      let dmg = 13;
+      if (part === 'head') dmg *= d.headMul;
+      else if (part === 'limb') dmg *= d.limbMul;
+      if (h.distance > 14) dmg *= 0.4;
+      this.hits++;
+      anyHit = true;
+      this.effects.blood(h.point);
+      audio.fleshImpact(0);
+      const isHead = part === 'head';
+      if (enemy.takeDamage(dmg, isHead)) {
+        this.kills++;
+        this.score += 100;
+        this.earnCash(isHead ? REWARDS.headshot : REWARDS.kill, isHead ? 'headshot' : 'kill');
+        audio.killConfirm();
+        if (isHead) { this.headshots++; voice.headshot(); }
+        if (this.kills === 1) voice.firstBlood();
+        if (this.kills % 3 === 0) {
+          this.frags = Math.min(5, this.frags + 1);
+          this.flashes = Math.min(2, this.flashes + 1);
+        }
+        this.onEvent({ type: 'kill', name: enemy.name, weapon: 'MASTERKEY', headshot: isHead });
+        anyKill = true;
+      }
+    }
+    this.raycaster.far = 300;
+    if (anyHit && !anyKill) { audio.hitMarker(); this.onEvent({ type: 'hit', kill: false }); }
+    if (anyKill) { this.onEvent({ type: 'hit', kill: true }); this.rebuildHittables(); }
+    this.ai.notifyGunshot(this.pos, 70);
   }
 
   private rebuildHittables() {
@@ -1544,6 +1802,7 @@ void main(){
           if (killed && !g.fromAI) {
             this.kills++;
             this.score += 100;
+            this.earnCash(REWARDS.grenadeKill, 'grenade');
             if (this.kills === 1) voice.firstBlood();
             if (this.kills % 3 === 0) {
               this.frags = Math.min(5, this.frags + 1);
@@ -1689,10 +1948,12 @@ void main(){
     this.ended = true;
     if (!win) this.missionRuntime.mission.fail();
     if (win) this.score += 1000; // extraction bonus, mirrors the debrief footnote
+    if (win) this.earnCash(REWARDS.extraction, 'extraction');
     const mission = this.missionRuntime.mission.report();
     this.pendingResult = {
       type: 'end', win, kills: this.kills, score: this.score, shots: this.shots, hits: this.hits,
       headshots: this.headshots, timeSec: mission.duration,
+      cash: this.cashEarned, cashLog: [...this.cashLog], difficultyMul: difficultyMultiplier(this.difficultyId),
       mission, pressure: this.missionRuntime.pressure.stats(),
     };
     this.finishDelay = win ? 0.6 : 0.8;
@@ -1771,7 +2032,7 @@ void main(){
     // Smooth, frame-rate independent scope-in/out (fast attack, soft settle — no linear snap)
     {
       const target = wantAds && this.sprintToAdsDelay <= 0 ? 1 : 0;
-      const rate = target ? 15 : 18;
+      const rate = target ? 3.2 / (this.def().adsTime ?? 0.22) : 18;
       this.ads += (target - this.ads) * (1 - Math.exp(-dt * rate));
       if (Math.abs(target - this.ads) < 0.004) this.ads = target;
     }
@@ -1804,6 +2065,7 @@ void main(){
       else if (Math.abs(this.lean) > 0.3) speed = 3.4;
       else if (moving) speed = 4.2;
     }
+    speed *= this.def().moveSpeedMul ?? 1;
 
     // Slide physics: Decelerates from 7.2 m/s to 0 over 0.8s
     if (this.sliding) {
@@ -1923,6 +2185,16 @@ void main(){
         this.reloadStages.shift()!.fn();
       }
     }
+    if (this.pumpT > 0) this.pumpT = Math.max(0, this.pumpT - dt);
+    // Masterkey tube reload (3 shells, 3.5 s)
+    if (this.mkReloadT >= 0) {
+      this.mkReloadT += dt;
+      if (this.mkReloadT >= 3.5) {
+        this.mkReloadT = -1;
+        this.mkAmmo = 3;
+        audio.magIn();
+      }
+    }
     if (this.switchT >= 0) {
       this.switchT += dt;
       if (this.switchT > 0.28) this.switchT = -1;
@@ -1994,7 +2266,7 @@ void main(){
     );
 
     // Smooth FOV — per-weapon ADS zoom (sniper gets a strong scope, others a modest pull-in)
-    const adsFov = this.def().adsFov;
+    const adsFov = this.adsFovEff();
     const targetFov = THREE.MathUtils.lerp(this.sprinting ? this.fovSetting + 5 : this.fovSetting, adsFov, this.ads);
     const fk = 1 - Math.exp(-dt * 16);
     this.camera.fov += (targetFov - this.camera.fov) * fk;
@@ -2021,10 +2293,12 @@ void main(){
     const inAds = a > 0.4;
     for (const obj of d.model.adsHidden) obj.visible = !inAds;
     // Scope overlay owns the whole view; receiver rings/arms must not intrude.
-    g.visible = !(this.cur === 3 && inAds);
-    this.muzzleFlash.visible = !(this.cur === 3 && inAds);
+    const hideInAds = inAds && this.adsFovEff() < 30;
+    g.visible = !hideInAds;
+    this.muzzleFlash.visible = !hideInAds;
     const hip = { x: 0.22, y: -0.19, z: -0.38, ry: 0.035 };
-    const adsY = -d.model.sightY * S;
+    const opticPart = d.model.attached.optic;
+    const adsY = -(d.model.sightY + ((opticPart?.userData.sightYOffset as number | undefined) ?? 0)) * S;
     let px = THREE.MathUtils.lerp(hip.x, 0, a);
     let py = THREE.MathUtils.lerp(hip.y, adsY, a);
     let pz = THREE.MathUtils.lerp(hip.z, -0.34, a);
@@ -2033,7 +2307,7 @@ void main(){
     let rz = 0;
 
     // Idle sway
-    const swayM = 1 - a * 0.95;
+    const swayM = (1 - a * 0.95) * (d.swayMul ?? 1) * (this.crouched ? (d.swayMulCrouched ?? 1) : 1);
     px += Math.sin(t * Math.PI) * 0.004 * S * swayM;
     py += Math.sin(t * Math.PI * 2 + 1) * 0.0035 * S * swayM;
 
@@ -2056,7 +2330,7 @@ void main(){
     pz += this.vmKick * 0.05 * S * kickM;
     rx += this.vmKickRot * 0.075 * kickM;
 
-    if (this.cur === 3 && this.boltCycle > 0) {
+    if ((d.boltAction ?? this.cur === 3) && this.boltCycle > 0) {
       const cycle=1-this.boltCycle/1.25, lift=Math.sin(cycle*Math.PI);
       py -= lift*0.035; rz += lift*0.12;
       d.model.chargingHandle.position.z = Math.sin(Math.max(0,Math.min(1,(cycle-0.2)/0.6))*Math.PI)*0.055;
@@ -2064,17 +2338,25 @@ void main(){
 
     // Reload animation — gun dips/tilts, mag drops, LEFT HAND works the reload
     const magObj = d.model.mag;
+    const magHomeY = (magObj.userData.homeY as number | undefined) ?? 0;
+    const magHomeZ = (magObj.userData.homeZ as number | undefined) ?? 0;
     if (this.reloadT >= 0) {
       const rt = this.reloadT / this.reloadDur;
       const dip = Math.sin(Math.min(1, rt) * Math.PI);
       py -= dip * 0.10 * S;
       rx -= dip * 0.5;
       rz += dip * 0.22;
-      const out = rt > 0.14 && rt < 0.58 ? Math.sin(((rt - 0.14) / 0.44) * Math.PI) : 0;
-      magObj.position.y = (this.cur === 2 ? 0 : -0.03) - out * 0.17 * S;
+      if (d.audioTag === 'lmg') { py -= dip * 0.06 * S; rz += dip * 0.18; rx -= dip * 0.25; }
+      if (!d.pumpShotgun) {
+        const out = rt > 0.14 && rt < 0.58 ? Math.sin(((rt - 0.14) / 0.44) * Math.PI) : 0;
+        magObj.position.y = magHomeY - out * 0.17 * S;
+      }
+      // Belt-fed cover pops during the reload window.
+      if (d.audioTag === 'lmg') d.model.chargingHandle.position.y = dip * 0.05;
       this.poseLArm(d, rt);
     } else {
-      magObj.position.y = this.cur === 0 || this.cur === 1 || this.cur === 4 ? -0.03 : 0;
+      magObj.position.y = magHomeY;
+      if (d.audioTag === 'lmg') d.model.chargingHandle.position.y *= 1 - Math.min(1, dt * 10);
       if (d.model.lArm) {
         d.model.lArm.position.multiplyScalar(1 - Math.min(1, dt * 14));
         d.model.lArm.rotation.x *= 1 - Math.min(1, dt * 14);
@@ -2094,6 +2376,32 @@ void main(){
       px += 0.12 * S; py -= 0.09 * S; rz += 0.32; rx += 0.18;
     }
 
+    // Bipod legs swing down when prone-ADS (deployed), fold otherwise.
+    const legs = d.model.attached.underbarrel?.userData.legs as THREE.Object3D[] | undefined;
+    if (legs) {
+      const open = this.bipodDeployed() ? 0.12 : 1.25;
+      for (const [li, leg] of legs.entries()) {
+        const want = li === 0 ? -open : open;
+        leg.rotation.z += (want - leg.rotation.z) * Math.min(1, dt * 10);
+      }
+    }
+
+    // Pump stroke: the whole gun dips and rolls as the forend cycles.
+    if (this.pumpT > 0) {
+      const pk = Math.sin((1 - this.pumpT / 0.5) * Math.PI);
+      py -= pk * 0.035 * S;
+      rx += pk * 0.10;
+      rz += pk * 0.05;
+      if (d.pumpShotgun) magObj.position.z = magHomeZ + pk * 0.055;
+    } else if (d.pumpShotgun) {
+      magObj.position.z = magHomeZ;
+    }
+    // Reciprocating slide / bolt (pistols + SCAR): snap back, spring home.
+    if (d.audioTag === 'pistol' || d.audioTag === 'scar') {
+      this.slideKick = Math.max(0, this.slideKick - dt * 9);
+      d.model.chargingHandle.position.z = this.slideKick * this.slideKick * 0.038;
+    }
+
     g.position.set(px, py, pz);
     g.rotation.set(rx, ry, rz);
 
@@ -2101,6 +2409,56 @@ void main(){
     d.model.muzzle.getWorldPosition(mw);
     this.muzzleFlash.position.copy(mw);
     this.vmLight.position.copy(mw);
+    this.updateTactical(d);
+  }
+  /** Rail laser dot + weapon flashlight, driven by the fitted rail box. */
+  private updateTactical(d: WeaponDef): void {
+    const wantLaser = !!d.laser && !this.dead && !this.ended;
+    const wantLight = !!d.flashlight && !this.dead && !this.ended;
+    if (wantLaser && !this.laserDot) {
+      this.laserDot = new THREE.Mesh(
+        new THREE.CircleGeometry(0.02, 12),
+        new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false }),
+      );
+      this.laserDot.renderOrder = 999;
+      this.laserBeam = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+        new THREE.LineBasicMaterial({ color: 0xff3333, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false }),
+      );
+      this.laserBeam.frustumCulled = false;
+      this.scene.add(this.laserDot, this.laserBeam);
+    }
+    if (wantLight && !this.torch) {
+      this.torch = new THREE.SpotLight(0xfff2d8, 100, 50, 0.45, 0.5, 1.5);
+      this.scene.add(this.torch);
+      this.scene.add(this.torch.target);
+    }
+    if (this.laserDot) this.laserDot.visible = wantLaser;
+    if (this.laserBeam) this.laserBeam.visible = wantLaser;
+    if (this.torch) this.torch.visible = wantLight;
+    if (!wantLaser && !wantLight) return;
+    const dir = this._t1;
+    this.camera.getWorldDirection(dir);
+    const origin = this._t2.copy(this.camera.position);
+    if (wantLight && this.torch) {
+      this.torch.position.copy(origin);
+      this.torch.target.position.copy(origin).addScaledVector(dir, 18);
+    }
+    if (wantLaser && this.laserDot && this.laserBeam) {
+      this.raycaster.set(origin, dir);
+      this.raycaster.far = 120;
+      const hit = this.raycaster.intersectObjects(this.hittables, false)[0];
+      const end = hit ? hit.point : this._t3.copy(origin).addScaledVector(dir, 80);
+      this.laserDot.position.copy(end);
+      this.laserDot.lookAt(this.camera.position);
+      this.laserDot.scale.setScalar(((hit ? hit.distance : 80) * 0.004 + 0.008) / 0.02);
+      const pos = this.laserBeam.geometry.attributes.position as THREE.BufferAttribute;
+      const me = this.camera.matrix.elements;
+      pos.setXYZ(0, origin.x + me[0] * 0.09 + me[4] * -0.07, origin.y + me[1] * 0.09 + me[5] * -0.07, origin.z + me[2] * 0.09 + me[6] * -0.07);
+      pos.setXYZ(1, end.x, end.y, end.z);
+      pos.needsUpdate = true;
+      this.raycaster.far = 300;
+    }
   }
   private sprintPose = 0;
 
@@ -2146,6 +2504,7 @@ void main(){
 
   // ==================== EXTERNAL API ====================
   start() {
+    this.runStartT = performance.now();
     audio.ensure();
     voice.unlock();
     this.started = true;
@@ -2294,6 +2653,14 @@ void main(){
       hp: Math.round(this.hp),
       mag: this.mags[this.cur],
       weapon: this.def().name,
+      masterkey: this.def().masterkey ? { shells: this.mkAmmo, reloading: this.mkReloadT >= 0 } : undefined,
+      cash: this.cashEarned,
+      secondaryWeapon: (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0] : this.weapons[this.cur === 2 ? 0 : 2])?.name ?? '',
+      heldSlot: (this.weapons.length === 2 ? this.cur === 0 : this.cur !== 2) ? 'primary' : 'secondary',
+      bipodDeployed: this.bipodDeployed(),
+      reticle: this.def().lpvo ? (this.def().lpvoHigh ? 'sniper' : 'acog') : (this.def().reticle ?? (this.adsFovEff() < 30 ? 'sniper' : 'none')),
+      lpvoHigh: this.def().lpvoHigh ?? false,
+      pumping: this.pumpT > 0,
       reloading: this.reloadT >= 0,
       reloadStage: this.currentReloadStage,
       frags: this.frags,

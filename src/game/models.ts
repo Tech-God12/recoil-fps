@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import type { AttachSlot, WeaponId } from './economy/catalog';
+import type { SkinDef, SkinRole } from './economy/skins';
 
 type Region = [number, number, number, number]; // u0 v0 u1 v1
 
@@ -83,9 +85,20 @@ export interface WeaponModel {
   lArm: THREE.Object3D | null;   // animated left arm (reload)
   lArmKeys: LArmKey[];           // reload keyframes, t in 0..1
   adsHidden: THREE.Object3D[];   // in-model reticles/lenses hidden in ADS (HUD draws the single clean sight)
+  sockets: Partial<Record<AttachSlot, THREE.Object3D>>;    // mount points for Armory parts
+  removable: Partial<Record<AttachSlot, THREE.Object3D[]>>; // stock meshes hidden while a part is equipped
+  attached: Partial<Record<AttachSlot, THREE.Object3D>>;    // currently mounted components (runtime)
 }
 
-const WM = {
+/** Empty mount point in gun-local space (barrel along −Z). */
+export function makeSocket(x: number, y: number, z: number): THREE.Object3D {
+  const o = new THREE.Object3D();
+  o.position.set(x, y, z);
+  o.userData.socket = true;
+  return o;
+}
+
+export const WM = {
   poly: new THREE.MeshStandardMaterial({ color: 0x1B1D1F, roughness: 0.5, metalness: 0.4 }),
   steel: new THREE.MeshStandardMaterial({ color: 0x565B62, roughness: 0.32, metalness: 0.9 }),
   darkSteel: new THREE.MeshStandardMaterial({ color: 0x2A2D31, roughness: 0.45, metalness: 0.8 }),
@@ -101,8 +114,60 @@ const WM = {
   glove: new THREE.MeshStandardMaterial({ color: 0x2E2820, roughness: 0.9 }),
   glass: new THREE.MeshBasicMaterial({ color: 0x9FD4E8, transparent: true, opacity: 0.16, depthWrite: false }),
   reticle: new THREE.MeshBasicMaterial({ color: 0xFF2828 }),
+  scopeInner: new THREE.MeshBasicMaterial({ color: 0x060708, side: THREE.DoubleSide }),
   tritium: new THREE.MeshBasicMaterial({ color: 0x7CFF5A }),
+  fde: new THREE.MeshStandardMaterial({ color: 0x9B7E55, roughness: 0.72, metalness: 0.08 }),
+  chrome: new THREE.MeshStandardMaterial({ color: 0xC9CDD2, roughness: 0.15, metalness: 1.0 }),
+  midSteel: new THREE.MeshStandardMaterial({ color: 0x35393E, roughness: 0.42, metalness: 0.75 }),
+  od: new THREE.MeshStandardMaterial({ color: 0x4C5B3C, roughness: 0.78, metalness: 0.05 }),
 };
+
+/* ---------- Weapon finishes ---------- */
+
+// Palette roles a finish may repaint. Arms (sleeve/glove), ammo (brass),
+// rubber furniture, glass and emissive marks are never touched.
+const SKIN_ROLES: SkinRole[] = ['poly', 'steel', 'darkSteel', 'dark', 'tan', 'wood', 'woodDark', 'fde', 'chrome', 'midSteel', 'od'];
+// Built lazily: the wood grain block below re-tints WM.wood after definition.
+let SKIN_HEX: Map<number, SkinRole> | null = null;
+function skinHex(): Map<number, SkinRole> {
+  if (!SKIN_HEX) SKIN_HEX = new Map(SKIN_ROLES.map(role => [(WM[role] as THREE.MeshStandardMaterial).color.getHex(), role]));
+  return SKIN_HEX;
+}
+
+interface SkinSnap { c: number; r: number; m: number }
+
+/**
+ * Repaint a gun group with a finish. Matches materials against the stock WM
+ * palette by their original color, so repaints are idempotent and switching
+ * back to Factory restores stock values. CALLERS MUST OWN THE MATERIALS:
+ * clone per gun first (the viewer and the engine both do) — never run this
+ * on shared WM or every gun changes color.
+ */
+export function applySkin(root: THREE.Object3D, skin: SkinDef): void {
+  const coats = skin?.coats ?? {};
+  root.traverse(o => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || Array.isArray(mesh.material)) return;
+    const mat = mesh.material as THREE.MeshStandardMaterial;
+    if (!mat.color || typeof mat.roughness !== 'number' || typeof mat.metalness !== 'number') return;
+    let snap = (mat.userData.skinSnap ?? null) as SkinSnap | null;
+    if (!snap) {
+      snap = { c: mat.color.getHex(), r: mat.roughness, m: mat.metalness };
+      mat.userData.skinSnap = snap;
+    }
+    const role = skinHex().get(snap.c);
+    const coat = role ? coats[role] : undefined;
+    if (!coat) {
+      mat.color.setHex(snap.c);
+      mat.roughness = snap.r;
+      mat.metalness = snap.m;
+      return;
+    }
+    mat.color.setHex(coat.color ?? snap.c);
+    mat.roughness = coat.roughness ?? snap.r;
+    mat.metalness = coat.metalness ?? snap.m;
+  });
+}
 
 // Deterministic lacquer grain: no external assets or runtime canvas allocation.
 const grainData = new Uint8Array(128*256*4);
@@ -119,7 +184,7 @@ WM.wood.map=woodGrain; WM.wood.color.setHex(0x886445); WM.wood.roughness=0.34;
 WM.woodDark.map=woodGrain; WM.woodDark.color.setHex(0x8B5C30);
 
 /** Collects parts per-material and merges → 1 draw call per material. */
-class GunBuilder {
+export class GunBuilder {
   private buckets = new Map<THREE.Material, THREE.BufferGeometry[]>();
   private static M = new THREE.Matrix4();
   private static Q = new THREE.Quaternion();
@@ -135,7 +200,14 @@ class GunBuilder {
     if (!a) { a = []; this.buckets.set(mat, a); }
     a.push(geo);
   }
-  box(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.put(new RoundedBoxGeometry(w, h, d, 1, Math.min(w,h,d)*0.13), mat, x, y, z, rx, ry, rz); return this; }
+  box(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) {
+    // Small detail prims (teeth, pins, ribs, slots) don't need rounded edges:
+    // plain boxes cost 12 tris instead of ~150, which funds the extra detail.
+    const geo = Math.max(w, h, d) < 0.035
+      ? new THREE.BoxGeometry(w, h, d)
+      : new RoundedBoxGeometry(w, h, d, 1, Math.min(w,h,d)*0.13);
+    this.put(geo, mat, x, y, z, rx, ry, rz); return this;
+  }
   cyl(rt: number, rb: number, h: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, seg = 16, open = false) { this.put(new THREE.CylinderGeometry(rt, rb, h, seg, 1, open), mat, x, y, z, rx, ry, rz); return this; }
   sph(r: number, mat: THREE.Material, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1) {
     const g = new THREE.SphereGeometry(r, 10, 8); g.scale(sx, sy, sz); this.put(g, mat, x, y, z); return this;
@@ -175,7 +247,7 @@ interface ArmAnchors { fore: [number, number, number]; mag: [number, number, num
  */
 function attachArms(gun: THREE.Group, a: ArmAnchors): { lArm: THREE.Group; keys: LArmKey[] } {
   // ---- right arm (static grip) ----
-  const r = new THREE.Group(); gun.add(r);
+  const r = new THREE.Group(); r.userData.arm = true; gun.add(r);
   const rS = new THREE.Vector3(0.21, -0.40, 0.20), rE = new THREE.Vector3(0.155, -0.31, -0.03), rW = new THREE.Vector3(0.035, -0.115, -0.055);
   limb(r, rS, rE, 0.052, 0.046, WM.sleeve);
   limb(r, rE, rW, 0.044, 0.038, WM.sleeveDark);
@@ -191,7 +263,7 @@ function attachArms(gun: THREE.Group, a: ArmAnchors): { lArm: THREE.Group; keys:
   gloveBox(r, 0.02, 0.05, 0.02, 0.028, -0.075, -0.03, -0.3, 0, -0.4); // thumb
 
   // ---- left arm (animated) ----
-  const lArm = new THREE.Group(); gun.add(lArm);
+  const lArm = new THREE.Group(); lArm.userData.arm = true; gun.add(lArm);
   const lS = new THREE.Vector3(-0.23, -0.40, 0.16), lE = new THREE.Vector3(-0.175, -0.29, -0.15);
   const fw = new THREE.Vector3(...a.fore);
   limb(lArm, lS, lE, 0.052, 0.046, WM.sleeve);
@@ -223,12 +295,17 @@ function attachArms(gun: THREE.Group, a: ArmAnchors): { lArm: THREE.Group; keys:
 export function buildM4(): WeaponModel {
   const g = new THREE.Group();
   const SIGHT_Y = 0.07;
-  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, T = WM.tan, D = WM.dark, G = WM.grip, R = WM.rubber, B = WM.brass;
+  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, T = WM.tan, D = WM.dark, G = WM.grip, R = WM.rubber, B = WM.brass, MS = WM.midSteel;
   const b = new GunBuilder();
-  // ---- receivers ----
-  b.box(0.038, 0.036, 0.17, P, 0, -0.012, -0.10);
-  b.box(0.040, 0.034, 0.21, P, 0, 0.020, -0.12);
-  b.box(0.041, 0.008, 0.05, P, 0, 0.032, -0.03);                    // rail riser base
+  const skb = new GunBuilder(); const skG = new THREE.Group();   // stock (removable)
+  const brb = new GunBuilder(); const brG = new THREE.Group();   // barrel assembly (removable)
+  const ubb = new GunBuilder(); const ubG = new THREE.Group();   // vertical foregrip (removable)
+  const opb = new GunBuilder(); const opG = new THREE.Group();   // sights (removable)
+  // ---- receivers: anodized flat-top upper over a polymer lower ----
+  b.box(0.038, 0.036, 0.17, P, 0, -0.012, -0.10);                 // lower receiver
+  b.box(0.040, 0.034, 0.21, MS, 0, 0.020, -0.12);                 // flat-top upper
+  b.box(0.0405, 0.005, 0.21, D, 0, 0.002, -0.12);                 // receiver seam
+  b.box(0.041, 0.008, 0.05, P, 0, 0.032, -0.03);                  // rail riser base
   for (let i = 0; i < 9; i++) b.box(0.032, 0.007, 0.015, D, 0, 0.040, -0.045 - i * 0.024);
   b.box(0.008, 0.008, 0.008, DS, -0.021, 0.004, -0.045, 0, 0, 0);   // takedown pin F
   b.box(0.008, 0.008, 0.008, DS, -0.021, 0.004, -0.155, 0, 0, 0);   // takedown pin R
@@ -237,59 +314,84 @@ export function buildM4(): WeaponModel {
   b.box(0.005, 0.016, 0.020, S, 0.022, 0.020, -0.125);              // bolt face
   b.box(0.006, 0.013, 0.024, P, 0.023, 0.011, -0.105);              // shell deflector
   b.cyl(0.006, 0.006, 0.012, S, 0.024, 0.020, -0.088, 0, 0, Math.PI / 2); // forward assist
+  b.cyl(0.004, 0.004, 0.014, D, 0.024, 0.020, -0.088, 0, 0, Math.PI / 2); // assist plunger
   b.box(0.006, 0.010, 0.022, S, -0.021, -0.006, -0.075);            // selector L
   b.box(0.006, 0.010, 0.022, S, 0.021, -0.006, -0.075);             // selector R
   b.box(0.008, 0.006, 0.014, S, 0.021, 0.002, -0.055);              // mag release
   b.box(0.006, 0.020, 0.012, S, -0.021, 0.004, -0.120);             // bolt catch
   b.box(0.020, 0.026, 0.032, P, 0, -0.030, -0.160);                 // magwell flare
+  b.box(0.022, 0.006, 0.034, D, 0, -0.043, -0.160);                 // magwell bevel
   b.box(0.006, 0.004, 0.050, P, 0, -0.040, -0.095);                 // trigger guard
   b.box(0.005, 0.018, 0.005, DS, 0, -0.030, -0.093);                // trigger
   b.box(0.028, 0.088, 0.036, G, 0, -0.056, -0.045, -0.32);          // MOE grip
+  for (let i = 0; i < 4; i++) b.box(0.029, 0.004, 0.028, D, 0, -0.040 - i * 0.015, -0.041 - i * 0.004, -0.32); // grip texture
   b.box(0.012, 0.030, 0.020, G, 0, -0.045, -0.022, -0.32);          // beavertail
   b.box(0.030, 0.010, 0.034, G, 0, -0.100, -0.058, -0.32);          // grip base
-  // ---- stock ----
-  b.cyl(0.015, 0.015, 0.10, S, 0, 0.012, 0.065, Math.PI / 2);
-  b.box(0.007, 0.007, 0.020, D, 0, 0.012, 0.030);                   // castle nut
-  b.box(0.036, 0.050, 0.082, P, 0, -0.004, 0.140);                  // CTR body
-  b.box(0.030, 0.018, 0.060, P, 0, 0.028, 0.130);                   // cheek riser
-  b.box(0.040, 0.070, 0.016, R, 0, -0.010, 0.185);                  // buttpad
-  b.box(0.038, 0.012, 0.075, P, 0, -0.034, 0.135);                  // stock toe
-  b.box(0.010, 0.006, 0.030, D, -0.020, -0.004, 0.140);             // adjustment lever
-  b.cyl(0.006, 0.006, 0.004, D, -0.019, 0.006, 0.150, 0, 0, Math.PI / 2); // QD socket
-  // ---- railed handguard ----
-  b.cyl(0.023, 0.023, 0.20, P, 0, 0.020, -0.315, Math.PI / 2, 0, 0, 8);
+  // ---- CTR stock ----
+  skb.cyl(0.015, 0.015, 0.10, S, 0, 0.012, 0.065, Math.PI / 2);    // buffer tube
+  for (let i = 0; i < 4; i++) skb.cyl(0.0158, 0.0158, 0.003, D, 0, 0.012, 0.035 + i * 0.018, Math.PI / 2); // notches
+  skb.box(0.007, 0.007, 0.020, D, 0, 0.012, 0.030);                 // castle nut
+  skb.box(0.010, 0.014, 0.006, S, 0, 0.012, 0.022);                 // end plate
+  skb.box(0.036, 0.050, 0.082, P, 0, -0.004, 0.140);                // CTR body
+  skb.box(0.030, 0.018, 0.060, P, 0, 0.028, 0.130);                 // cheek riser
+  skb.box(0.020, 0.008, 0.070, D, 0, 0.022, 0.130);                 // riser seam
+  skb.box(0.040, 0.070, 0.016, R, 0, -0.010, 0.185);                // buttpad
+  for (let i = 0; i < 3; i++) skb.box(0.041, 0.006, 0.017, D, 0, -0.030 + i * 0.018, 0.185); // pad ribs
+  skb.box(0.038, 0.012, 0.075, P, 0, -0.034, 0.135);                // stock toe
+  skb.box(0.010, 0.006, 0.030, D, -0.020, -0.004, 0.140);           // adjustment lever
+  skb.box(0.006, 0.020, 0.030, D, 0.019, -0.004, 0.140);            // sling slot
+  skb.cyl(0.006, 0.006, 0.004, D, -0.019, 0.006, 0.150, 0, 0, Math.PI / 2); // QD socket
+  // ---- cylindrical RIS handguard with vents + quad rails ----
+  b.cyl(0.023, 0.023, 0.20, P, 0, 0.020, -0.315, Math.PI / 2, 0, 0, 12);
+  b.cyl(0.024, 0.024, 0.020, D, 0, 0.020, -0.225, Math.PI / 2, 0, 0, 12); // cap R
+  b.cyl(0.024, 0.024, 0.020, D, 0, 0.020, -0.405, Math.PI / 2, 0, 0, 12); // cap F
   for (let i = 0; i < 6; i++) b.box(0.030, 0.007, 0.014, D, 0, 0.0445, -0.245 - i * 0.028);
   for (let i = 0; i < 5; i++) { b.box(0.005, 0.028, 0.014, D, 0.0245, 0.020, -0.245 - i * 0.032); b.box(0.005, 0.028, 0.014, D, -0.0245, 0.020, -0.245 - i * 0.032); }
   for (let i = 0; i < 5; i++) b.box(0.028, 0.006, 0.014, D, 0, -0.0035, -0.245 - i * 0.032);
+  for (const av of [Math.PI / 4, 3 * Math.PI / 4, 5 * Math.PI / 4, 7 * Math.PI / 4]) {
+    for (let i = 0; i < 5; i++) {
+      b.box(0.008, 0.003, 0.016, D, Math.cos(av) * 0.0225, 0.020 + Math.sin(av) * 0.0225, -0.25 - i * 0.03, 0, 0, av - Math.PI / 2);
+    }
+  }
   b.cyl(0.007, 0.007, 0.004, D, 0.0245, 0.020, -0.30, 0, 0, Math.PI / 2); // QD socket rail
-  // ---- barrel assembly ----
-  b.cyl(0.0085, 0.0085, 0.17, S, 0, 0.020, -0.490, Math.PI / 2);
-  b.box(0.018, 0.022, 0.024, DS, 0, 0.026, -0.430);                 // gas block
-  b.cyl(0.004, 0.004, 0.13, S, 0, 0.034, -0.365, Math.PI / 2);      // gas tube
-  b.box(0.005, 0.030, 0.005, D, 0, 0.052, -0.430);                  // flip front post (up)
-  b.box(0.004, 0.022, 0.014, D, -0.011, 0.048, -0.430);             // post wing L
-  b.box(0.004, 0.022, 0.014, D, 0.011, 0.048, -0.430);              // post wing R
-  b.cyl(0.011, 0.010, 0.048, S, 0, 0.020, -0.592, Math.PI / 2);     // A2 birdcage
-  for (let i = 0; i < 5; i++) { const a2 = (i / 5) * Math.PI * 2; b.box(0.004, 0.004, 0.030, D, Math.cos(a2) * 0.010, 0.020 + Math.sin(a2) * 0.010, -0.592); }
-  b.cyl(0.012, 0.012, 0.006, DS, 0, 0.020, -0.568, Math.PI / 2);    // crush washer
+  // ---- barrel assembly: government profile + A2 birdcage ----
+  brb.cyl(0.0085, 0.0085, 0.17, S, 0, 0.020, -0.490, Math.PI / 2);
+  brb.cyl(0.0095, 0.0095, 0.010, S, 0, 0.020, -0.445, Math.PI / 2);  // M203 step ring
+  brb.box(0.018, 0.022, 0.024, DS, 0, 0.026, -0.430);               // gas block
+  brb.cyl(0.004, 0.004, 0.13, S, 0, 0.034, -0.365, Math.PI / 2);    // gas tube
+  brb.box(0.006, 0.012, 0.008, DS, 0, 0.006, -0.430);               // sling swivel base
+  brb.box(0.005, 0.030, 0.005, D, 0, 0.052, -0.430);                // flip front post (up)
+  brb.box(0.004, 0.022, 0.014, D, -0.011, 0.048, -0.430);           // post wing L
+  brb.box(0.004, 0.022, 0.014, D, 0.011, 0.048, -0.430);            // post wing R
+  brb.cyl(0.011, 0.010, 0.048, S, 0, 0.020, -0.592, Math.PI / 2);   // A2 birdcage
+  for (let i = 0; i < 5; i++) { const a2 = (i / 5) * Math.PI * 2 + 0.3; brb.box(0.005, 0.005, 0.030, D, Math.cos(a2) * 0.0105, 0.020 + Math.sin(a2) * 0.0105, -0.592); }
+  brb.cyl(0.004, 0.004, 0.050, D, 0, 0.020, -0.592, Math.PI / 2);   // bore shadow
+  brb.cyl(0.012, 0.012, 0.006, DS, 0, 0.020, -0.568, Math.PI / 2);  // crush washer
   // ---- vertical foregrip ----
-  b.box(0.022, 0.058, 0.028, P, 0, -0.020, -0.340, 0.10);
-  b.cyl(0.013, 0.013, 0.024, G, 0, -0.020, -0.340, Math.PI / 2, 0, 0); // finger groove ring
-  b.box(0.024, 0.008, 0.030, G, 0, -0.050, -0.343, 0.10);           // base cap
+  ubb.box(0.022, 0.058, 0.028, P, 0, -0.020, -0.340, 0.10);
+  ubb.cyl(0.013, 0.013, 0.024, G, 0, -0.020, -0.340, Math.PI / 2, 0, 0); // finger groove ring
+  ubb.cyl(0.0125, 0.0125, 0.024, G, 0, -0.035, -0.3415, Math.PI / 2, 0, 0); // groove 2
+  ubb.box(0.024, 0.008, 0.030, G, 0, -0.050, -0.343, 0.10);         // base cap
   // ---- PEQ-15 ----
   b.box(0.024, 0.018, 0.055, T, 0.030, 0.030, -0.330);
+  b.box(0.026, 0.006, 0.057, D, 0.030, 0.020, -0.330);              // clamp
   b.cyl(0.005, 0.005, 0.006, D, 0.030, 0.030, -0.300, Math.PI / 2); // emitter
   b.cyl(0.006, 0.006, 0.004, D, 0.030, 0.036, -0.345);              // dial
+  b.box(0.010, 0.004, 0.016, D, 0.030, 0.041, -0.330);              // fire button
   // ---- folded rear BUIS (low profile, never blocks sight) ----
-  b.box(0.030, 0.008, 0.030, D, 0, 0.044, -0.045);
+  opb.box(0.030, 0.008, 0.030, D, 0, 0.044, -0.045);
   // ---- EXPS holo (open frame, see-through) ----
-  b.box(0.038, 0.010, 0.050, D, 0, 0.048, -0.11);                   // QD mount
-  b.box(0.012, 0.014, 0.030, D, -0.024, 0.048, -0.11);              // QD lever
-  b.box(0.040, 0.014, 0.052, D, 0, 0.058, -0.11);                   // battery housing
-  b.box(0.005, 0.028, 0.042, D, -0.019, 0.072, -0.11);              // left wall
-  b.box(0.005, 0.028, 0.042, D, 0.019, 0.072, -0.11);               // right wall
-  b.box(0.043, 0.005, 0.042, D, 0, 0.088, -0.11);                   // top hood
-  b.box(0.043, 0.008, 0.006, D, 0, 0.082, -0.132);                  // front brow
+  opb.box(0.038, 0.010, 0.050, D, 0, 0.048, -0.11);                 // QD mount
+  opb.box(0.012, 0.014, 0.030, D, -0.024, 0.048, -0.11);            // QD lever
+  opb.box(0.040, 0.014, 0.052, D, 0, 0.058, -0.11);                 // battery housing
+  opb.box(0.005, 0.028, 0.042, D, -0.019, 0.072, -0.11);            // left wall
+  opb.box(0.005, 0.028, 0.042, D, 0.019, 0.072, -0.11);             // right wall
+  opb.box(0.043, 0.005, 0.042, D, 0, 0.088, -0.11);                 // top hood
+  opb.box(0.043, 0.008, 0.006, D, 0, 0.082, -0.132);                // front brow
+  skb.build(skG); g.add(skG);
+  brb.build(brG); g.add(brG);
+  ubb.build(ubG); g.add(ubG);
+  opb.build(opG); g.add(opG);
   b.build(g);
   // glass panes + glowing reticle (center dot + 65MOA ring) — hidden in ADS, HUD draws the single clean sight
   const adsHidden: THREE.Object3D[] = [];
@@ -312,7 +414,7 @@ export function buildM4(): WeaponModel {
   for (let i = 0; i < 4; i++) mb.box(0.029, 0.004, 0.050, D, 0, -0.035 - i * 0.020, 0.004 + i * 0.004, 0.16);
   mb.box(0.030, 0.010, 0.058, D, 0, -0.132, 0.020, 0.28);
   mb.build(mag);
-  mag.position.set(0, -0.03, -0.155); g.add(mag);
+  mag.position.set(0, -0.03, -0.155); mag.userData.homeY = -0.03; mag.userData.homeZ = -0.155; g.add(mag);
   // ---- charging handle ----
   const ch = new THREE.Group();
   const cb = new GunBuilder();
@@ -324,56 +426,92 @@ export function buildM4(): WeaponModel {
   // ---- arms ----
   const { lArm, keys } = attachArms(g, { fore: [0, -0.028, -0.340], mag: [0, -0.150, -0.155], fa: [0.024, 0.020, -0.090] });
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.02, -0.625); g.add(muzzle);
-  return { group: g, mag, chargingHandle: ch, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden };
+  const sockets = {
+    muzzle: makeSocket(0, 0.02, -0.615),
+    optic: makeSocket(0, 0.052, -0.11),
+    magazine: makeSocket(0, -0.03, -0.155),
+    underbarrel: makeSocket(0, -0.008, -0.34),
+    stock: makeSocket(0, 0.012, 0.02),
+    rail: makeSocket(-0.028, 0.02, -0.30),
+    barrel: makeSocket(0, 0.02, -0.42),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { optic: [opG, ...adsHidden], magazine: [mag], underbarrel: [ubG], stock: [skG], barrel: [brG] };
+  return { group: g, mag, chargingHandle: ch, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden, sockets, removable, attached: {} };
 }
 
 export function buildAK47(): WeaponModel {
   const g = new THREE.Group();
   const SIGHT_Y = 0.064;
-  const S = WM.steel, W = WM.wood, WD = WM.woodDark, D = WM.dark;
+  const S = WM.steel, W = WM.wood, WD = WM.woodDark, D = WM.dark, MS = WM.midSteel;
   const b = new GunBuilder();
-  // ---- receiver ----
+  const skb = new GunBuilder(); const skG = new THREE.Group();
+  const brb = new GunBuilder(); const brG = new THREE.Group();
+  const opb = new GunBuilder(); const opG = new THREE.Group();
+  // ---- stamped receiver with reinforcements + rivets ----
   b.box(0.038, 0.042, 0.23, S, 0, 0.012, -0.12);
+  b.box(0.039, 0.010, 0.20, MS, 0, -0.004, -0.12);                   // stiffening rail
   b.box(0.040, 0.012, 0.23, S, 0, 0.037, -0.12);                    // ribbed dust cover
   for (let i = 0; i < 5; i++) b.box(0.041, 0.003, 0.004, D, 0, 0.043, -0.12 + (i - 2) * 0.028);
   b.box(0.004, 0.020, 0.060, D, 0.021, 0.016, -0.13);               // ejection port
   b.box(0.008, 0.028, 0.006, S, 0.024, 0.014, -0.07);               // charging knob
   b.box(0.006, 0.030, 0.020, S, 0.021, -0.002, -0.06);              // selector
+  for (let i = 0; i < 3; i++) b.box(0.007, 0.004, 0.016, D, 0.021, -0.010 + i * 0.009, -0.06); // selector notches
   b.box(0.020, 0.012, 0.030, S, 0, -0.012, -0.235);                 // rear trunnion
+  b.box(0.004, 0.016, 0.090, D, -0.0205, 0.018, -0.10);             // dovetail side rail
+  b.box(0.006, 0.010, 0.016, S, -0.022, 0.018, -0.07);              // rail clamp F
+  b.box(0.006, 0.010, 0.016, S, -0.022, 0.018, -0.13);              // rail clamp R
+  b.box(0.024, 0.020, 0.036, S, 0, -0.016, -0.175);                 // magwell dimple block
+  for (const side of [-1, 1]) {
+    for (const z of [-0.045, -0.08, -0.19, -0.215]) b.cyl(0.0025, 0.0025, 0.002, S, side * 0.0205, 0.005, z, 0, 0, Math.PI / 2);
+    b.cyl(0.003, 0.003, 0.002, S, side * 0.0205, -0.016, -0.175, 0, 0, Math.PI / 2); // magwell rivet
+    for (let i = 0; i < 5; i++) b.box(0.002, 0.006, 0.010, WD, side * 0.0225, 0.015, -0.25 - i * 0.023);
+  }
   // ---- wood furniture ----
   b.box(0.042, 0.036, 0.16, W, 0, 0.014, -0.31);                    // upper HG
   b.box(0.044, 0.024, 0.16, W, 0, -0.012, -0.31);                   // lower HG w/ swell
   b.box(0.046, 0.014, 0.10, WD, 0, -0.020, -0.31);                  // palm swell
+  for (let i = 0; i < 3; i++) b.box(0.0465, 0.004, 0.012, WD, 0, -0.024, -0.28 - i * 0.025); // finger grooves
+  b.box(0.046, 0.030, 0.014, S, 0, -0.002, -0.235);                 // HG ferrule R
+  b.box(0.046, 0.030, 0.014, S, 0, -0.002, -0.385);                 // HG ferrule F
   b.box(0.028, 0.085, 0.036, W, 0, -0.052, -0.04, -0.3);            // grip
-  b.box(0.036, 0.055, 0.15, W, 0, -0.004, 0.09);                    // stock
-  b.box(0.040, 0.070, 0.014, D, 0, -0.008, 0.170);                  // buttplate
-  b.box(0.006, 0.020, 0.060, WD, 0, -0.004, 0.09);                  // stock lightening cut look
+  b.box(0.030, 0.010, 0.038, WD, 0, -0.088, -0.052, -0.3);          // grip cap
+  skb.box(0.036, 0.055, 0.15, W, 0, -0.004, 0.09);                  // stock
+  skb.box(0.040, 0.070, 0.014, D, 0, -0.008, 0.170);                // buttplate
+  skb.box(0.020, 0.030, 0.016, WD, 0, -0.020, 0.170);               // trapdoor
+  skb.box(0.006, 0.020, 0.060, WD, 0, -0.004, 0.09);                // stock lightening cut look
+  skb.box(0.008, 0.010, 0.020, S, 0, 0.020, 0.030);                 // rear sling swivel
   // ---- barrel assembly ----
-  b.cyl(0.009, 0.009, 0.23, S, 0, 0.012, -0.50, Math.PI / 2);
-  b.cyl(0.006, 0.006, 0.20, S, 0, 0.032, -0.42, Math.PI / 2);       // gas tube
-  b.box(0.020, 0.030, 0.030, S, 0, 0.030, -0.41);                   // gas block
-  b.box(0.018, 0.006, 0.20, WD, 0, 0.030, -0.42);                   // wooden gas-tube heat guard
-  b.cyl(0.0035, 0.0035, 0.19, D, 0, -0.012, -0.47, Math.PI / 2);    // cleaning rod
+  brb.cyl(0.009, 0.009, 0.23, S, 0, 0.012, -0.50, Math.PI / 2);
+  brb.cyl(0.006, 0.006, 0.20, S, 0, 0.032, -0.42, Math.PI / 2);     // gas tube
+  brb.box(0.020, 0.030, 0.030, S, 0, 0.030, -0.41);                 // gas block
+  brb.box(0.006, 0.016, 0.010, S, 0, 0.004, -0.41);                 // bayonet lug
+  brb.box(0.018, 0.006, 0.20, WD, 0, 0.030, -0.42);                 // wooden gas-tube heat guard
+  brb.cyl(0.0035, 0.0035, 0.19, D, 0, -0.012, -0.47, Math.PI / 2);  // cleaning rod
+  brb.cyl(0.005, 0.005, 0.008, S, 0, -0.012, -0.378, Math.PI / 2);  // rod head
   // classic AK front sight tower with two protective ears
-  b.box(0.020, 0.034, 0.022, S, 0, 0.022, -0.585);
-  b.box(0.006, 0.030, 0.006, D, 0, 0.052, -0.585);
-  b.box(0.004, 0.028, 0.014, D, -0.011, 0.048, -0.585);
-  b.box(0.004, 0.028, 0.014, D, 0.011, 0.048, -0.585);
-  b.cyl(0.011, 0.012, 0.032, S, 0, 0.012, -0.645, Math.PI / 2);     // slant brake
+  brb.box(0.020, 0.034, 0.022, S, 0, 0.022, -0.585);
+  brb.box(0.006, 0.030, 0.006, D, 0, 0.052, -0.585);
+  brb.box(0.004, 0.028, 0.014, D, -0.011, 0.048, -0.585);
+  brb.box(0.004, 0.028, 0.014, D, 0.011, 0.048, -0.585);
+  brb.cyl(0.011, 0.012, 0.032, S, 0, 0.012, -0.645, Math.PI / 2);   // slant brake
+  brb.box(0.012, 0.006, 0.020, D, 0, 0.018, -0.648, 0.35);          // slant cut
+  brb.cyl(0.004, 0.004, 0.034, D, 0, 0.012, -0.645, Math.PI / 2);   // bore shadow
   b.box(0.006, 0.004, 0.030, S, 0, -0.038, -0.09);                  // trigger guard
   b.box(0.005, 0.018, 0.005, S, 0, -0.028, -0.09);                  // trigger
+  b.box(0.008, 0.012, 0.014, S, 0, -0.036, -0.150);                 // mag release paddle
   // ---- rear tangent sight ----
-  b.box(0.024, 0.010, 0.040, S, 0, 0.046, -0.20);
-  b.box(0.024, 0.014, 0.008, D, 0, 0.052, -0.205);                  // slider
-  for (const side of [-1,1]) {
-    for (const z of [-0.045,-0.08,-0.19,-0.215]) b.cyl(0.0025,0.0025,0.002,S,side*0.0205,0.005,z,0,0,Math.PI/2);
-    for (let i=0;i<5;i++) b.box(0.002,0.006,0.010,WD,side*0.0225,0.015,-0.25-i*0.023);
-  }
+  opb.box(0.024, 0.010, 0.040, S, 0, 0.046, -0.20);
+  opb.box(0.024, 0.014, 0.008, D, 0, 0.052, -0.205);                // slider
+  opb.box(0.026, 0.003, 0.006, S, 0, 0.058, -0.205);                // leaf notch
   // ---- Kobra (open frame) ----
-  b.box(0.034, 0.010, 0.046, D, 0, 0.044, -0.12);
-  b.box(0.005, 0.026, 0.038, D, -0.016, 0.062, -0.12);
-  b.box(0.005, 0.026, 0.038, D, 0.016, 0.062, -0.12);
-  b.box(0.037, 0.005, 0.038, D, 0, 0.077, -0.12);
+  opb.box(0.034, 0.010, 0.046, D, 0, 0.044, -0.12);
+  opb.box(0.005, 0.026, 0.038, D, -0.016, 0.062, -0.12);
+  opb.box(0.005, 0.026, 0.038, D, 0.016, 0.062, -0.12);
+  opb.box(0.037, 0.005, 0.038, D, 0, 0.077, -0.12);
+  skb.build(skG); g.add(skG);
+  brb.build(brG); g.add(brG);
+  opb.build(opG); g.add(opG);
   b.build(g);
   const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0016, 12), WM.reticle);
   dot.position.set(0, SIGHT_Y, -0.125); g.add(dot);
@@ -387,34 +525,81 @@ export function buildAK47(): WeaponModel {
   }
   mb.box(0.031,0.008,0.066,D,0,-0.177,0.068,0.77);
   mb.build(mag);
-  mag.position.set(0, -0.03, -0.17); g.add(mag);
+  mag.position.set(0, -0.03, -0.17); mag.userData.homeY = -0.03; mag.userData.homeZ = -0.17; g.add(mag);
   const optic = new THREE.Group(); g.add(optic);
   const { lArm, keys } = attachArms(g, { fore: [-0.01, -0.028, -0.310], mag: [0, -0.155, -0.170], fa: [0.024, 0.014, -0.070] });
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.012, -0.645); g.add(muzzle);
-  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden: [dot] };
+  const sockets = {
+    muzzle: makeSocket(0, 0.012, -0.66),
+    optic: makeSocket(0, 0.050, -0.12),
+    magazine: makeSocket(0, -0.03, -0.17),
+    underbarrel: makeSocket(0, -0.026, -0.31),
+    stock: makeSocket(0, -0.004, 0.015),
+    rail: makeSocket(-0.024, 0.015, -0.28),
+    barrel: makeSocket(0, 0.012, -0.39),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { optic: [opG, dot], magazine: [mag], stock: [skG], barrel: [brG] };
+  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden: [dot], sockets, removable, attached: {} };
 }
 
 export function buildM1911(): WeaponModel {
   const g = new THREE.Group();
   const SIGHT_Y = 0.045;
-  const S = WM.steel, W = WM.wood, D = WM.dark;
+  const S = WM.steel, W = WM.wood, WD = WM.woodDark, D = WM.dark, MS = WM.midSteel;
   const b = new GunBuilder();
-  b.box(0.027, 0.030, 0.200, S, 0, 0.026, -0.05);                   // slide
-  for (let i = 0; i < 6; i++) b.box(0.0285, 0.020, 0.0025, D, 0, 0.026, 0.018 + i * 0.006); // rear serrations
-  for (let i = 0; i < 4; i++) b.box(0.0285, 0.020, 0.0025, D, 0, 0.026, -0.120 + i * 0.006); // front serrations
+  const slb = new GunBuilder(); const slide = new THREE.Group();
+  const brb = new GunBuilder(); const brG = new THREE.Group();
+  const opb = new GunBuilder(); const opG = new THREE.Group();
+  // ---- slide (reciprocates): flat-top slab with cocking serrations ----
+  slb.box(0.027, 0.030, 0.200, S, 0, 0.026, -0.05);                 // slide
+  slb.box(0.020, 0.004, 0.190, MS, 0, 0.041, -0.05);                // flat top rib
+  slb.box(0.002, 0.020, 0.190, MS, -0.0135, 0.026, -0.05, 0, 0, 0.12); // side flat L
+  slb.box(0.002, 0.020, 0.190, MS, 0.0135, 0.026, -0.05, 0, 0, -0.12); // side flat R
+  for (let i = 0; i < 6; i++) slb.box(0.0285, 0.020, 0.0025, D, 0, 0.026, 0.018 + i * 0.006); // rear serrations
+  for (let i = 0; i < 4; i++) slb.box(0.0285, 0.020, 0.0025, D, 0, 0.026, -0.120 + i * 0.006); // front serrations
+  slb.box(0.002, 0.012, 0.040, D, 0.0136, 0.032, -0.09);            // ejection port cut
+  slb.box(0.002, 0.008, 0.030, S, 0.0132, 0.032, -0.09);            // barrel hood in port
+  slb.box(0.003, 0.008, 0.026, D, 0.0125, 0.026, -0.02);            // extractor
+  slb.box(0.024, 0.026, 0.004, D, 0, 0.026, 0.051);                 // rear plate
+  slb.cyl(0.0025, 0.0025, 0.006, S, 0, 0.030, 0.051, Math.PI / 2);  // firing pin
+  // ---- frame ----
   b.box(0.025, 0.026, 0.150, S, 0, 0.002, -0.04);                   // frame
-  b.cyl(0.007, 0.007, 0.032, S, 0, 0.026, -0.155, Math.PI / 2);     // barrel + bushing
+  b.box(0.026, 0.004, 0.150, D, 0, 0.010, -0.04);                   // slide rail seam
+  b.box(0.024, 0.020, 0.060, MS, 0, -0.002, -0.10);                 // dust cover
+  brb.cyl(0.007, 0.007, 0.032, S, 0, 0.026, -0.155, Math.PI / 2);   // barrel + bushing
+  brb.cyl(0.009, 0.009, 0.006, D, 0, 0.026, -0.150, Math.PI / 2);   // bushing ring
+  brb.cyl(0.0035, 0.0035, 0.034, D, 0, 0.026, -0.155, Math.PI / 2); // bore shadow
+  // ---- walnut grips with diamond checkering + screws ----
   b.box(0.026, 0.080, 0.034, W, 0, -0.036, 0.020, -0.25);           // wood grips
+  for (const sx of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      b.box(0.001, 0.030, 0.004, WD, sx * 0.0132, -0.036, 0.008 + i * 0.009, -0.25, 0.5, 0);
+      b.box(0.001, 0.030, 0.004, WD, sx * 0.0132, -0.036, 0.008 + i * 0.009, -0.25, -0.5, 0);
+    }
+  }
   b.sph(0.003, D, -0.008, -0.036, 0.004); b.sph(0.003, D, 0.008, -0.036, 0.004); // grip screws
   b.sph(0.003, D, -0.008, -0.036, 0.036); b.sph(0.003, D, 0.008, -0.036, 0.036);
-  b.box(0.006, 0.004, 0.030, S, 0, -0.022, -0.05);                  // trigger guard area
+  b.box(0.006, 0.004, 0.030, S, 0, -0.022, -0.05);                  // trigger guard
   b.box(0.005, 0.016, 0.005, S, 0, -0.014, -0.045);                 // trigger
+  for (let i = 0; i < 3; i++) b.box(0.0055, 0.002, 0.0055, D, 0, -0.018 + i * 0.005, -0.045); // trigger grooves
   b.box(0.010, 0.016, 0.012, S, 0, 0.032, 0.052);                   // hammer
+  b.box(0.012, 0.006, 0.008, D, 0, 0.040, 0.052);                   // hammer spur
   b.box(0.008, 0.010, 0.020, S, 0, 0.030, 0.028);                   // beavertail safety
   b.box(0.006, 0.008, 0.030, S, -0.014, 0.012, -0.020);             // slide stop
-  b.box(0.004, 0.009, 0.006, D, 0, SIGHT_Y, -0.138);                // front blade
-  b.box(0.005, 0.008, 0.006, D, -0.006, SIGHT_Y, 0.038);            // rear notch L
-  b.box(0.005, 0.008, 0.006, D, 0.006, SIGHT_Y, 0.038);             // rear notch R
+  b.box(0.005, 0.007, 0.022, S, -0.014, 0.016, 0.008);              // thumb safety L
+  b.box(0.005, 0.007, 0.022, S, 0.014, 0.016, 0.008);               // thumb safety R
+  b.cyl(0.0035, 0.0035, 0.004, S, -0.0135, 0.004, 0.006, 0, 0, Math.PI / 2); // mag release
+  b.box(0.020, 0.030, 0.006, MS, 0, -0.052, 0.038, -0.25);          // mainspring housing
+  for (let i = 0; i < 4; i++) b.box(0.021, 0.002, 0.006, D, 0, -0.062 + i * 0.007, 0.036 - i * 0.002, -0.25);
+  for (let i = 0; i < 3; i++) b.box(0.024, 0.002, 0.004, D, 0, -0.024 - i * 0.008, 0.002 + i * 0.002, -0.25); // front strap
+  b.box(0.027, 0.006, 0.035, D, 0, -0.077, 0.030, -0.25);           // magwell bevel
+  opb.box(0.004, 0.009, 0.006, D, 0, SIGHT_Y, -0.138);              // front blade
+  opb.box(0.005, 0.008, 0.006, D, -0.006, SIGHT_Y, 0.038);          // rear notch L
+  opb.box(0.005, 0.008, 0.006, D, 0.006, SIGHT_Y, 0.038);           // rear notch R
+  slb.build(slide); g.add(slide);
+  brb.build(brG); g.add(brG);
+  opb.build(opG); g.add(opG);
   b.build(g);
   // tritium dots (hidden in ADS — HUD crosshair takes over)
   const adsHidden: THREE.Object3D[] = [];
@@ -423,60 +608,100 @@ export function buildM1911(): WeaponModel {
     t.position.set(x, SIGHT_Y + 0.002, z); g.add(t);
     adsHidden.push(t);
   }
-  const mag = new THREE.Group(); g.add(mag);
+  // ---- single-stack mag (hidden in grip, drops on reload) ----
+  const mag = new THREE.Group();
+  const mb = new GunBuilder();
+  mb.box(0.022, 0.075, 0.028, S, 0, -0.038, 0.021, -0.25);
+  mb.box(0.024, 0.008, 0.030, D, 0, -0.077, 0.030, -0.25);
+  mb.build(mag);
+  mag.userData.homeY = 0; mag.userData.homeZ = 0; g.add(mag);
   const optic = new THREE.Group(); g.add(optic);
   // 1911: support hand wraps under the dominant hand
   const { lArm, keys } = attachArms(g, { fore: [0.005, -0.105, -0.030], mag: [0, -0.090, 0.020], fa: [0.0, -0.014, -0.045] });
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.026, -0.175); g.add(muzzle);
-  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden };
+  const sockets = {
+    muzzle: makeSocket(0, 0.026, -0.172),
+    optic: makeSocket(0, 0.042, 0.0),
+    magazine: makeSocket(0, -0.06, 0.03),
+    rail: makeSocket(0.016, 0.002, -0.08),
+    barrel: makeSocket(0, 0.026, -0.10),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { optic: [opG, ...adsHidden], magazine: [mag], barrel: [brG] };
+  return { group: g, mag, chargingHandle: slide, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden, sockets, removable, attached: {} };
 }
 
-// ================= NEW GUN 1: AWM / L115A3 TACTICAL SNIPER RIFLE =================
 export function buildAWM(): WeaponModel {
   const g = new THREE.Group();
   const SIGHT_Y = 0.076;
-  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, D = WM.dark, G = WM.grip, R = WM.rubber;
+  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, D = WM.dark, G = WM.grip, R = WM.rubber, OD = WM.od;
   const b = new GunBuilder();
+  const ubb = new GunBuilder(); const ubG = new THREE.Group();
 
-  // Arctic Warfare thumbhole chassis stock (OD Green / Dark Tan)
-  const chassisMat = WM.tan;
+  // Arctic Warfare olive chassis with thumbhole stock
+  const chassisMat = OD;
   b.box(0.042, 0.065, 0.28, chassisMat, 0, -0.01, -0.14);          // center receiver bedding
   b.box(0.038, 0.050, 0.26, chassisMat, 0, 0.005, 0.12);           // stock spine
+  b.box(0.036, 0.018, 0.18, chassisMat, 0, -0.07, 0.09);           // lower thumbhole rail
+  b.box(0.036, 0.070, 0.023, chassisMat, 0, -0.038, 0.18);         // rear block
+  b.box(0.030, 0.004, 0.150, D, 0, -0.021, 0.09);                  // thumbhole liner top
+  b.box(0.030, 0.004, 0.150, D, 0, -0.060, 0.09);                  // thumbhole liner bottom
   b.box(0.044, 0.080, 0.04, R, 0, 0.0, 0.25);                      // adjustable recoil pad
+  b.box(0.045, 0.006, 0.041, D, 0, 0.020, 0.25);                   // pad spacer
+  b.box(0.045, 0.006, 0.041, D, 0, -0.020, 0.25);                  // pad spacer 2
+  b.cyl(0.004, 0.004, 0.040, S, -0.020, 0.0, 0.25, 0, 0, Math.PI / 2); // pad screw
   b.box(0.032, 0.024, 0.12, chassisMat, 0, 0.042, 0.08);           // adjustable cheekpiece
+  b.cyl(0.005, 0.005, 0.036, D, 0, 0.030, 0.08, 0, 0, Math.PI / 2); // cheek wheel
   b.box(0.036, 0.075, 0.04, G, 0, -0.065, -0.02, -0.25);           // thumbhole pistol grip
+  for (let i = 0; i < 3; i++) b.box(0.037, 0.004, 0.030, D, 0, -0.050 - i * 0.016, -0.014 - i * 0.004, -0.25);
   b.box(0.008, 0.006, 0.08, P, 0, -0.055, -0.09);                  // trigger guard
   b.box(0.005, 0.022, 0.006, S, 0, -0.045, -0.09);                 // match trigger
+  b.box(0.006, 0.012, 0.020, S, 0.022, -0.030, -0.13);             // mag release
+  b.box(0.006, 0.010, 0.018, S, -0.022, 0.030, -0.03);             // safety
+
+  // Long forend carrying the bipod spigot
+  b.box(0.040, 0.050, 0.20, chassisMat, 0, -0.005, -0.36);         // forend
+  b.box(0.042, 0.010, 0.20, D, 0, -0.028, -0.36);                  // forend belly seam
+  for (let i = 0; i < 10; i++) {
+    b.box(0.002, 0.017, 0.014, D, -0.0205, -0.005, -0.28 - i * 0.017);
+    b.box(0.002, 0.017, 0.014, D, 0.0205, -0.005, -0.28 - i * 0.017);
+  }
+  b.box(0.020, 0.014, 0.030, DS, 0, -0.032, -0.42);                // bipod spigot
 
   // Long free-floating fluted barrel
-  b.cyl(0.011, 0.011, 0.38, S, 0, 0.022, -0.47, Math.PI / 2);
+  b.cyl(0.011, 0.011, 0.38, S, 0, 0.022, -0.47, Math.PI / 2, 0, 0, 20);
+  for (let i = 0; i < 6; i++) {
+    const fa = (i / 6) * Math.PI * 2;
+    b.box(0.003, 0.002, 0.30, D, Math.cos(fa) * 0.0105, 0.022 + Math.sin(fa) * 0.0105, -0.47);
+  }
+  b.cyl(0.013, 0.013, 0.020, DS, 0, 0.022, -0.285, Math.PI / 2);   // barrel nut
   // Heavy 2-chamber tactical muzzle brake
   b.box(0.022, 0.022, 0.06, DS, 0, 0.022, -0.68);
-  b.box(0.028, 0.012, 0.012, D, 0, 0.022, -0.67);
-  b.box(0.028, 0.012, 0.012, D, 0, 0.022, -0.69);
+  b.box(0.028, 0.010, 0.010, D, 0, 0.022, -0.665);
+  b.box(0.028, 0.010, 0.010, D, 0, 0.022, -0.695);
+  b.box(0.010, 0.026, 0.010, D, 0, 0.024, -0.680);                 // top port
+  b.cyl(0.005, 0.005, 0.062, D, 0, 0.022, -0.68, Math.PI / 2);     // bore shadow
 
   // Steel bolt-action receiver + bolt handle
-  b.cyl(0.018, 0.018, 0.18, DS, 0, 0.022, -0.12, Math.PI / 2);
+  b.cyl(0.018, 0.018, 0.18, DS, 0, 0.022, -0.12, Math.PI / 2, 0, 0, 20);
+  b.box(0.020, 0.008, 0.060, D, 0.008, 0.038, -0.06);              // bolt raceway
+  b.cyl(0.012, 0.012, 0.025, S, 0, 0.022, -0.025, Math.PI / 2);    // bolt shroud
   const bolt = new THREE.Group(); g.add(bolt);
   const bb = new GunBuilder();
   bb.cyl(0.005, 0.005, 0.04, S, 0.026, 0.032, -0.05, 0, 0, 0.9);   // bolt lever
-  bb.sph(0.009, D, 0.045, 0.048, -0.05); bb.build(bolt);                            // bolt pear handle
+  bb.sph(0.009, D, 0.045, 0.048, -0.05); bb.build(bolt);           // bolt pear handle
 
-  // Folded tactical bipod on forend
-  b.box(0.022, 0.018, 0.04, D, 0, -0.018, -0.42);
-  b.cyl(0.005, 0.005, 0.12, D, -0.018, -0.07, -0.42, 0.15, 0, 0.1);
-  b.cyl(0.005, 0.005, 0.12, D,  0.018, -0.07, -0.42, 0.15, 0, -0.1);
+  // Harris-style bipod on the forend spigot
+  ubb.box(0.022, 0.018, 0.04, D, 0, -0.030, -0.42);
+  ubb.cyl(0.008, 0.008, 0.026, DS, 0, -0.038, -0.42, 0, 0, Math.PI / 2); // cant hinge
+  ubb.cyl(0.005, 0.005, 0.07, D, -0.018, -0.070, -0.42, 0.12, 0, 0.1);
+  ubb.cyl(0.005, 0.005, 0.07, D, 0.018, -0.070, -0.42, 0.12, 0, -0.1);
+  ubb.cyl(0.0035, 0.0035, 0.06, S, -0.022, -0.125, -0.427, 0.12, 0, 0.1); // lower leg L
+  ubb.cyl(0.0035, 0.0035, 0.06, S, 0.022, -0.125, -0.427, 0.12, 0, -0.1); // lower leg R
+  ubb.box(0.010, 0.008, 0.014, R, -0.025, -0.156, -0.430);          // foot L
+  ubb.box(0.010, 0.008, 0.014, R, 0.025, -0.156, -0.430);           // foot R
 
-  for (const z of [-0.045,-0.19]) {
-    b.box(0.032,0.017,0.024,DS,0,0.046,z);
-    b.cyl(0.021,0.021,0.016,DS,0,SIGHT_Y,z,Math.PI/2);
-  }
-  for (let i=0;i<7;i++) {
-    b.box(0.002,0.017,0.014,D,-0.022,-0.01,-0.19-i*0.022);
-    b.box(0.002,0.017,0.014,D,0.022,-0.01,-0.19-i*0.022);
-  }
-  b.box(0.036,0.018,0.18,chassisMat,0,-0.07,0.09); // lower thumbhole stock rail
-  b.box(0.036,0.07,0.023,chassisMat,0,-0.038,0.18);
+  ubb.build(ubG); g.add(ubG);
   b.build(g);
 
   // Scope is its own group so it disappears in ADS — the HUD renders the clean high-zoom scope
@@ -485,6 +710,10 @@ export function buildAWM(): WeaponModel {
   sb.box(0.024, 0.014, 0.08, D, 0, 0.045, -0.12);                         // Picatinny base
   sb.cyl(0.007, 0.007, 0.03, DS, -0.014, 0.045, -0.11, 0, 0, Math.PI / 2); // clamping screws
   sb.cyl(0.007, 0.007, 0.03, DS,  0.014, 0.045, -0.11, 0, 0, Math.PI / 2);
+  for (const z of [-0.045, -0.19]) {                                      // scope rings (leave with the scope)
+    sb.box(0.032, 0.017, 0.024, DS, 0, 0.046, z);
+    sb.cyl(0.021, 0.021, 0.016, DS, 0, SIGHT_Y, z, Math.PI / 2);
+  }
   sb.cyl(0.017, 0.017, 0.23, D, 0, SIGHT_Y, -0.13, Math.PI / 2, 0, 0, 24, true);  // 34mm scope tube
   sb.cyl(0.026, 0.019, 0.06, D, 0, SIGHT_Y, -0.255, Math.PI / 2, 0, 0, 24, true);          // objective bell 50mm
   sb.cyl(0.020, 0.017, 0.05, D, 0, SIGHT_Y, -0.005, Math.PI / 2, 0, 0, 24, true);          // ocular bell
@@ -517,58 +746,104 @@ export function buildAWM(): WeaponModel {
   mb.box(0.028, 0.065, 0.07, S, 0, -0.045, -0.14);
   mb.box(0.030, 0.008, 0.072, D, 0, -0.08, -0.14);
   mb.build(mag);
-  g.add(mag);
+  mag.userData.homeY = 0; mag.userData.homeZ = 0; g.add(mag);
 
   const { lArm, keys } = attachArms(g, { fore: [0, -0.035, -0.36], mag: [0, -0.08, -0.14], fa: [0.045, 0.048, -0.05] });
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.022, -0.72); g.add(muzzle);
-  return { group: g, mag, chargingHandle: bolt, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden };
+  const sockets = {
+    muzzle: makeSocket(0, 0.022, -0.71),
+    optic: makeSocket(0, 0.052, -0.12),
+    magazine: makeSocket(0, -0.01, -0.14),
+    underbarrel: makeSocket(0, -0.028, -0.42),
+    rail: makeSocket(-0.023, 0.0, -0.28),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { optic: [...adsHidden], magazine: [mag], underbarrel: [ubG] };
+  return { group: g, mag, chargingHandle: bolt, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden, sockets, removable, attached: {} };
 }
 
-// ================= NEW GUN 2: MP7A1 SUBMACHINE GUN (PDW) =================
 export function buildMP7(): WeaponModel {
   const g = new THREE.Group();
   const SIGHT_Y = 0.062;
-  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, D = WM.dark, G = WM.grip;
+  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, D = WM.dark, G = WM.grip, MS = WM.midSteel;
   const b = new GunBuilder();
+  const skb = new GunBuilder(); const skG = new THREE.Group();
+  const ubb = new GunBuilder(); const ubG = new THREE.Group();
+  const opb = new GunBuilder(); const opG = new THREE.Group();
 
   // Compact reinforced polymer receiver
   b.box(0.041, 0.059, 0.22, P, 0, 0.01, -0.10);
+  b.box(0.042, 0.010, 0.20, MS, 0, -0.012, -0.10);                   // lower stiffener
   b.box(0.036, 0.012, 0.24, D, 0, 0.04, -0.11);                     // top Picatinny rail
+  for (const sx of [-1, 1]) b.box(0.004, 0.040, 0.18, MS, sx * 0.022, 0.005, -0.02); // side plates
+  for (const sx of [-1, 1]) b.box(0.010, 0.010, 0.18, D, sx * 0.024, 0.030, -0.10); // side rails
+  b.box(0.036, 0.035, 0.09, P, 0, -0.028, -0.125);                   // lower receiver
+  b.box(0.030, 0.025, 0.05, P, 0, -0.025, -0.155);                   // battery compartment
+  b.box(0.028, 0.030, 0.030, G, 0, -0.100, -0.028, -0.32);           // grip backstrap
+  b.cyl(0.016, 0.016, 0.06, P, 0, 0.012, -0.23, Math.PI / 2, 0, 0, 20); // barrel shroud
   for (let i = 0; i < 9; i++) b.box(0.030, 0.006, 0.013, D, 0, 0.048, -0.04 - i * 0.02);
+  // folded flip-up BUIS lying flat on the rail (never block the sight)
+  b.box(0.020, 0.005, 0.030, D, 0, 0.053, -0.205);                  // front flip folded
+  b.box(0.024, 0.005, 0.026, D, 0, 0.053, -0.025);                  // rear flip folded
+  for (const sx of [-1, 1]) b.box(0.006, 0.012, 0.034, D, sx * 0.014, 0.055, -0.205); // sight wings
 
   // Ventilated heat shield, ambidextrous controls and receiver pins.
   for(const side of [-1,1]) {
     for(let i=0;i<5;i++) b.box(0.002,0.008,0.012,DS,side*0.022,0.019,-0.15-i*0.017);
     b.cyl(0.003,0.003,0.002,S,side*0.022,-0.003,-0.025,0,0,Math.PI/2);
     b.box(0.004,0.007,0.026,DS,side*0.024,0.005,-0.062);
+    b.box(0.005,0.008,0.020,S,side*0.023,-0.008,-0.045);             // selector paddle
   }
   b.box(0.002,0.016,0.058,DS,0.022,0.023,-0.064); // ejection port
   b.box(0.004,0.008,0.051,S,0.024,0.014,-0.064);
+  b.box(0.006,0.008,0.012,S,-0.023,-0.002,-0.045);                   // mag release
+  for (let i = 0; i < 4; i++) b.box(0.030, 0.004, 0.010, D, 0, -0.020, -0.13 - i * 0.020); // hand-stop ridges
   // Folding foregrip (extended forward)
-  b.box(0.022, 0.065, 0.025, G, 0, -0.04, -0.21, 0.12);
-  b.box(0.024, 0.012, 0.028, P, 0, -0.005, -0.21);                  // hinge block
+  ubb.box(0.022, 0.065, 0.025, G, 0, -0.04, -0.21, 0.12);
+  ubb.box(0.024, 0.012, 0.028, P, 0, -0.005, -0.21);                // hinge block
+  ubb.cyl(0.006, 0.006, 0.026, S, 0, -0.005, -0.21, 0, 0, Math.PI / 2); // hinge pin
+  for (let i = 0; i < 3; i++) ubb.box(0.023, 0.004, 0.020, D, 0, -0.025 - i * 0.014, -0.208 - i * 0.003, 0.12);
+  ubb.box(0.024, 0.008, 0.027, P, 0, -0.073, -0.218, 0.12);         // pommel cap
 
   // Pistol grip with 40-round magazine inserted inside the grip
   b.box(0.028, 0.095, 0.038, G, 0, -0.055, -0.05, -0.32);
+  for (let i = 0; i < 4; i++) b.box(0.029, 0.004, 0.030, D, 0, -0.035 - i * 0.016, -0.043 - i * 0.005, -0.32);
+  b.box(0.030, 0.008, 0.040, P, 0, -0.100, -0.066, -0.32);          // grip base
   b.box(0.006, 0.004, 0.045, P, 0, -0.045, -0.10);                  // trigger guard
   b.box(0.005, 0.018, 0.005, S, 0, -0.035, -0.098);                 // trigger with safety blade
 
   // Ambi charging handle at rear top (T-handle like MP7)
   b.box(0.045, 0.010, 0.025, D, 0, 0.036, 0.02);
+  b.box(0.056, 0.008, 0.014, D, 0, 0.036, 0.026);                   // T wings
+  for (const sx of [-1, 1]) b.box(0.008, 0.012, 0.030, DS, sx * 0.026, 0.036, 0.020); // T latches
+  b.box(0.008, 0.025, 0.055, P, 0, -0.052, -0.10);                   // trigger bow
+  skb.box(0.036, 0.025, 0.030, P, 0, 0.030, 0.155);                  // pad heel
+  skb.box(0.030, 0.055, 0.012, G, 0, 0.005, 0.160);                   // pad face plate
 
   // Extendable wire stock rails + buttpad
-  b.cyl(0.004, 0.004, 0.16, S, -0.018, 0.01, 0.07, Math.PI / 2);    // left rail
-  b.cyl(0.004, 0.004, 0.16, S,  0.018, 0.01, 0.07, Math.PI / 2);    // right rail
-  b.box(0.036, 0.065, 0.016, P, 0, 0.005, 0.155);                   // buttpad
+  skb.cyl(0.004, 0.004, 0.16, S, -0.018, 0.01, 0.07, Math.PI / 2);  // left rail
+  skb.cyl(0.004, 0.004, 0.16, S,  0.018, 0.01, 0.07, Math.PI / 2);  // right rail
+  for (const sx of [-1, 1]) skb.cyl(0.006, 0.006, 0.05, D, sx * 0.018, 0.01, 0.025, Math.PI / 2, 0, 0, 12);
+  skb.box(0.036, 0.020, 0.028, P, 0, -0.037, 0.155);                 // pad toe
+  for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) skb.cyl(0.0045, 0.0045, 0.004, D, sx * 0.018, 0.01, 0.03 + i * 0.03, Math.PI / 2);
+  skb.box(0.036, 0.065, 0.016, P, 0, 0.005, 0.155);                 // buttpad
+  skb.box(0.030, 0.050, 0.006, G, 0, 0.005, 0.148);                 // pad face
+  skb.cyl(0.005, 0.005, 0.004, D, -0.019, 0.005, 0.155, 0, 0, Math.PI / 2); // QD socket
 
-  // Compact barrel + 3-prong flash hider
+  // Compact barrel + slotted flash hider
   b.cyl(0.007, 0.007, 0.06, S, 0, 0.012, -0.24, Math.PI / 2);
+  b.box(0.022, 0.022, 0.025, D, 0, 0.012, -0.215);                   // barrel collar
   b.cyl(0.010, 0.010, 0.035, DS, 0, 0.012, -0.28, Math.PI / 2);
+  for (let i = 0; i < 4; i++) { const ha = (i / 4) * Math.PI * 2 + 0.4; b.box(0.004, 0.004, 0.024, D, Math.cos(ha) * 0.0095, 0.012 + Math.sin(ha) * 0.0095, -0.28); }
+  b.cyl(0.0035, 0.0035, 0.037, D, 0, 0.012, -0.28, Math.PI / 2);    // bore shadow
 
   // Micro Red Dot Sight (Aimpoint T1 style on high riser)
-  b.box(0.028, 0.016, 0.040, D, 0, 0.052, -0.12);                   // riser mount
-  b.cyl(0.016, 0.016, 0.052, D, 0, SIGHT_Y+0.004, -0.12, Math.PI / 2,0,0,20,true);    // micro tube body
-  b.cyl(0.006, 0.006, 0.008, D, 0.014, SIGHT_Y, -0.12, 0, 0, Math.PI / 2); // battery cap
+  opb.box(0.028, 0.016, 0.040, D, 0, 0.052, -0.12);                 // riser mount
+  opb.cyl(0.016, 0.016, 0.052, D, 0, SIGHT_Y+0.004, -0.12, Math.PI / 2,0,0,20,true);    // micro tube body
+  opb.cyl(0.006, 0.006, 0.008, D, 0.014, SIGHT_Y, -0.12, 0, 0, Math.PI / 2); // battery cap
+  skb.build(skG); g.add(skG);
+  ubb.build(ubG); g.add(ubG);
+  opb.build(opG); g.add(opG);
   b.build(g);
 
   // Lens & bright micro dot (hidden in ADS — HUD draws the clean red dot)
@@ -586,13 +861,533 @@ export function buildMP7(): WeaponModel {
   mb.box(0.028, 0.012, 0.036, D, 0, -0.15, -0.09, -0.32);
   for(const side of [-1,1]) for(let i=0;i<4;i++) mb.box(0.002,0.004,0.023,D,side*0.013,-0.10-i*0.009,-0.073-i*0.003,-0.32);
   mb.build(mag);
-  g.add(mag);
+  mag.userData.homeY = 0; mag.userData.homeZ = 0; g.add(mag);
 
   const optic = new THREE.Group(); g.add(optic);
   const { lArm, keys } = attachArms(g, { fore: [0, -0.05, -0.21], mag: [0, -0.15, -0.09], fa: [0, 0.036, 0.02] });
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.012, -0.31); g.add(muzzle);
-  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden };
+  const sockets = {
+    muzzle: makeSocket(0, 0.012, -0.30),
+    optic: makeSocket(0, 0.056, -0.12),
+    magazine: makeSocket(0, -0.05, -0.055),
+    underbarrel: makeSocket(0, -0.02, -0.21),
+    stock: makeSocket(0, 0.01, 0.0),
+    rail: makeSocket(-0.023, 0.01, -0.10),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { optic: [opG, ...adsHidden], magazine: [mag], underbarrel: [ubG], stock: [skG] };
+  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden, sockets, removable, attached: {} };
 }
+
+export function buildSCARH(): WeaponModel {
+  const g = new THREE.Group();
+  const SIGHT_Y = 0.066;
+  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, D = WM.dark, R = WM.rubber, T = WM.fde, TD = WM.tan, MS = WM.midSteel;
+  const b = new GunBuilder();
+  const skb = new GunBuilder(); const skG = new THREE.Group();
+  const mb = new GunBuilder(); const mag = new THREE.Group();
+  const brb = new GunBuilder(); const brG = new THREE.Group();
+  // FDE flat-top receiver with full-length top rail
+  b.box(0.045, 0.062, 0.40, T, 0, 0.012, -0.20);                     // receiver
+  b.box(0.040, 0.012, 0.42, TD, 0, 0.047, -0.20);                    // top rail spine
+  for (let i = 0; i < 12; i++) b.box(0.034, 0.006, 0.014, TD, 0, 0.055, -0.055 - i * 0.027);
+  b.box(0.002, 0.040, 0.36, TD, -0.0235, 0.012, -0.20);              // side plate L
+  b.box(0.002, 0.040, 0.36, TD, 0.0235, 0.012, -0.20);               // side plate R
+  for (let i = 0; i < 6; i++) b.box(0.004, 0.010, 0.020, TD, -0.0235, 0.012, -0.06 - i * 0.055); // rail covers L
+  for (let i = 0; i < 6; i++) b.box(0.004, 0.010, 0.020, TD, 0.0235, 0.012, -0.06 - i * 0.055); // rail covers R
+  b.cyl(0.004, 0.004, 0.048, S, 0, 0.020, -0.06, 0, 0, Math.PI / 2);  // takedown pin F
+  b.cyl(0.004, 0.004, 0.048, S, 0, 0.020, -0.34, 0, 0, Math.PI / 2);  // takedown pin R
+  // ambi charging handle recess + handle
+  b.box(0.030, 0.014, 0.040, D, 0, 0.040, -0.36);
+  const ch = new THREE.Group(); ch.position.set(0, 0.040, -0.36);
+  const chb = new GunBuilder();
+  chb.box(0.056, 0.010, 0.022, D, 0, 0, 0);                          // CH wings
+  chb.box(0.020, 0.008, 0.030, DS, 0, 0, 0.01);                       // CH stem
+  chb.build(ch); ch.userData.homeZ = 0; g.add(ch);
+  // reciprocating bolt visible in the ejection cutout (right side)
+  b.box(0.002, 0.022, 0.060, D, 0.0235, 0.018, -0.26);               // ejection cutout
+  b.box(0.002, 0.016, 0.040, S, 0.0232, 0.018, -0.26);               // bolt in cutout
+  b.box(0.006, 0.020, 0.030, TD, 0.0245, 0.020, -0.215);              // brass deflector
+  b.box(0.030, 0.035, 0.012, DS, 0, 0.008, -0.005);                // QD end plate
+  b.box(0.034, 0.010, 0.16, TD, 0, 0.040, -0.47);                    // forend top rail
+  b.box(0.028, 0.025, 0.025, TD, 0, -0.045, -0.035);                 // beavertail
+  skb.box(0.016, 0.014, 0.030, DS, 0, -0.022, 0.003);                // stock latch
+  b.box(0.042, 0.020, 0.050, TD, 0, -0.040, -0.125, -0.22);              // magwell flare
+  b.box(0.040, 0.016, 0.10, T, 0, -0.019, -0.44);                     // forend belly
+  b.box(0.026, 0.040, 0.014, TD, 0, -0.040, -0.055);                 // grip cap
+  // SCAR trigger module + ambi selector + mag release
+  b.box(0.030, 0.030, 0.090, TD, 0, -0.030, -0.10);                  // trigger module
+  b.box(0.006, 0.004, 0.050, P, 0, -0.048, -0.155);                  // trigger guard
+  b.box(0.005, 0.020, 0.006, S, 0, -0.038, -0.150);                  // trigger
+  for (const sx of [-1, 1]) b.box(0.004, 0.008, 0.026, S, sx * 0.017, -0.028, -0.095); // selector
+  b.box(0.006, 0.010, 0.016, S, -0.017, -0.024, -0.075);             // mag release
+  // free-float forend with vent slots + QD sockets
+  b.box(0.046, 0.052, 0.16, T, 0, 0.008, -0.47);                     // forend
+  for (let i = 0; i < 7; i++) {
+    b.box(0.002, 0.020, 0.012, TD, -0.0235, 0.008, -0.41 - i * 0.020);
+    b.box(0.002, 0.020, 0.012, TD, 0.0235, 0.008, -0.41 - i * 0.020);
+  }
+  for (let i = 0; i < 5; i++) b.box(0.020, 0.002, 0.012, TD, 0, -0.0185, -0.42 - i * 0.022); // bottom slots
+  b.cyl(0.004, 0.004, 0.003, D, -0.0235, 0.020, -0.55, 0, 0, Math.PI / 2); // QD L
+  b.cyl(0.004, 0.004, 0.003, D, 0.0235, 0.020, -0.55, 0, 0, Math.PI / 2); // QD R
+  b.cyl(0.014, 0.014, 0.030, DS, 0, 0.020, -0.545, Math.PI / 2);      // gas block
+  b.cyl(0.005, 0.005, 0.020, S, 0, 0.038, -0.545);                    // gas regulator
+  // heavy barrel + PWS-style compensator with prongs
+  brb.cyl(0.0085, 0.0085, 0.14, S, 0, 0.020, -0.60, Math.PI / 2, 0, 0, 20);
+  brb.cyl(0.013, 0.013, 0.050, DS, 0, 0.020, -0.685, Math.PI / 2, 0, 0, 20);
+  for (let i = 0; i < 3; i++) { const ma = (i / 3) * Math.PI * 2; brb.box(0.005, 0.005, 0.036, D, Math.cos(ma) * 0.012, 0.020 + Math.sin(ma) * 0.012, -0.685); }
+  brb.cyl(0.004, 0.004, 0.052, D, 0, 0.020, -0.685, Math.PI / 2);     // bore shadow
+  // FDE pistol grip with palm swell
+  b.box(0.030, 0.085, 0.036, T, 0, -0.075, -0.055, -0.30);
+  b.box(0.032, 0.020, 0.020, TD, 0, -0.095, -0.038, -0.30);           // palm swell
+  for (let i = 0; i < 3; i++) b.box(0.031, 0.004, 0.028, TD, 0, -0.055 - i * 0.016, -0.049 - i * 0.005, -0.30);
+  // flip-up BUIS (front post + rear aperture, deployed)
+  b.box(0.006, 0.020, 0.008, D, 0, SIGHT_Y - 0.010, -0.56);          // front post
+  b.box(0.020, 0.006, 0.010, D, 0, 0.058, -0.56);                    // front wings base
+  b.box(0.004, 0.016, 0.010, D, -0.012, SIGHT_Y - 0.012, -0.56);     // wing L
+  b.box(0.004, 0.016, 0.010, D, 0.012, SIGHT_Y - 0.012, -0.56);      // wing R
+  b.box(0.024, 0.006, 0.012, D, 0, 0.058, -0.10);                    // rear housing
+  b.box(0.006, 0.014, 0.010, D, -0.011, SIGHT_Y - 0.011, -0.10);     // ear L
+  b.box(0.006, 0.014, 0.010, D, 0.011, SIGHT_Y - 0.011, -0.10);      // ear R
+  b.box(0.016, 0.003, 0.010, D, 0, SIGHT_Y - 0.004, -0.10);          // aperture deck
+  b.cyl(0.0022, 0.0022, 0.012, MS, 0, SIGHT_Y - 0.004, -0.10, Math.PI / 2); // aperture
+  // side-folding skeleton stock + rubber pad + cheek riser
+  skb.box(0.040, 0.055, 0.10, T, 0, 0.008, 0.055);                   // stock body
+  skb.box(0.030, 0.030, 0.06, TD, 0, 0.008, 0.055);                  // lightening cut
+  skb.box(0.036, 0.050, 0.022, R, 0, 0.008, 0.115);                  // rubber pad
+  skb.box(0.034, 0.014, 0.090, TD, 0, 0.042, 0.055);                 // cheek riser
+  skb.cyl(0.008, 0.008, 0.044, S, 0, 0.008, 0.003, 0, 0, Math.PI / 2); // hinge pin
+  skb.box(0.020, 0.020, 0.016, DS, 0, 0.008, 0.003);                 // hinge block
+  skb.build(skG); skG.userData.homeZ = 0; g.add(skG);
+  // 20-round 7.62 curved steel mag
+  mb.box(0.032, 0.11, 0.052, S, 0, -0.09, -0.135, -0.22);
+  mb.box(0.034, 0.014, 0.054, D, 0, -0.145, -0.15, -0.22);
+  for (let i = 0; i < 4; i++) mb.box(0.033, 0.005, 0.045, DS, 0, -0.065 - i * 0.02, -0.128 - i * 0.005, -0.22);
+  mb.box(0.034, 0.030, 0.054, DS, 0, -0.038, -0.122, -0.22);          // magwell collar
+  mb.build(mag); mag.userData.homeY = 0; mag.userData.homeZ = 0; g.add(mag);
+  brb.build(brG); g.add(brG);
+  b.build(g);
+  const optic = new THREE.Group(); g.add(optic);
+  const { lArm, keys } = attachArms(g, { fore: [0, -0.02, -0.46], mag: [0, -0.12, -0.13], fa: [0, 0.04, -0.36] });
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.020, -0.72); g.add(muzzle);
+  const sockets = {
+    muzzle: makeSocket(0, 0.020, -0.71),
+    optic: makeSocket(0, 0.062, -0.20),
+    magazine: makeSocket(0, -0.03, -0.125),
+    underbarrel: makeSocket(0, -0.024, -0.46),
+    stock: makeSocket(0, 0.008, 0.0),
+    grip: makeSocket(0, -0.06, -0.055),
+    rail: makeSocket(-0.026, 0.012, -0.30),
+    barrel: makeSocket(0, 0.020, -0.54),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { magazine: [mag], stock: [skG], barrel: [brG] };
+  return { group: g, mag, chargingHandle: ch, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden: [], sockets, removable, attached: {} };
+}
+
+export function buildVector(): WeaponModel {
+  const g = new THREE.Group();
+  const SIGHT_Y = 0.068;
+  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, D = WM.dark, G = WM.grip, R = WM.rubber, MS = WM.midSteel;
+  const b = new GunBuilder();
+  const skb = new GunBuilder(); const skG = new THREE.Group();
+  const ubb = new GunBuilder(); const ubG = new THREE.Group();
+  const opb = new GunBuilder(); const opG = new THREE.Group();
+  const brb = new GunBuilder(); const brG = new THREE.Group();
+
+  // Slab-sided Super-V receiver with top rail + side vents
+  b.box(0.048, 0.075, 0.30, P, 0, 0.005, -0.13);
+  b.box(0.040, 0.014, 0.32, D, 0, 0.046, -0.13);                     // top rail
+  for (let i = 0; i < 11; i++) b.box(0.034, 0.006, 0.014, DS, 0, 0.055, -0.01 - i * 0.024);
+  b.box(0.050, 0.020, 0.26, D, 0, -0.028, -0.13);                    // lower clamshell
+  for (let i = 0; i < 6; i++) {
+    b.box(0.002, 0.018, 0.016, DS, -0.0245, 0.005, -0.02 - i * 0.042);
+    b.box(0.002, 0.018, 0.016, DS, 0.0245, 0.005, -0.02 - i * 0.042);
+  }
+  b.box(0.002, 0.020, 0.070, MS, 0.0245, 0.010, -0.20);              // ejection port
+  b.box(0.004, 0.012, 0.050, D, 0.0245, 0.010, -0.20);               // port recess
+  b.cyl(0.004, 0.004, 0.052, S, 0, 0.028, -0.03, 0, 0, Math.PI / 2);  // pin F
+  b.cyl(0.004, 0.004, 0.052, S, 0, 0.028, -0.23, 0, 0, Math.PI / 2);  // pin R
+  // Super-V pivoting trigger module + guard + ambi safety
+  b.box(0.030, 0.034, 0.080, P, 0, -0.045, -0.055);                  // trigger housing
+  b.box(0.006, 0.004, 0.055, D, 0, -0.062, -0.090);                  // trigger guard
+  b.box(0.005, 0.020, 0.006, S, 0, -0.052, -0.085);                  // trigger
+  for (const sx of [-1, 1]) b.box(0.004, 0.008, 0.026, S, sx * 0.017, -0.040, -0.045); // safety
+  // textured pistol grip
+  b.box(0.030, 0.085, 0.036, G, 0, -0.085, -0.020, -0.30);
+  for (let i = 0; i < 4; i++) b.box(0.031, 0.004, 0.028, D, 0, -0.060 - i * 0.015, -0.013 - i * 0.005, -0.30);
+  b.box(0.032, 0.008, 0.038, P, 0, -0.126, -0.032, -0.30);           // grip base
+  // short barrel shroud + threaded muzzle + protector
+  brb.cyl(0.017, 0.017, 0.07, P, 0, 0.010, -0.295, Math.PI / 2, 0, 0, 20);
+  brb.cyl(0.012, 0.012, 0.030, S, 0, 0.010, -0.335, Math.PI / 2);
+  brb.cyl(0.014, 0.014, 0.012, D, 0, 0.010, -0.348, Math.PI / 2);    // thread protector
+  brb.cyl(0.005, 0.005, 0.032, D, 0, 0.010, -0.335, Math.PI / 2);    // bore shadow
+  // non-reciprocating side charger (left)
+  b.box(0.014, 0.012, 0.030, D, -0.028, 0.028, -0.06);
+  b.box(0.012, 0.020, 0.040, G, -0.032, 0.028, -0.06);               // charger knob
+  b.box(0.046, 0.030, 0.20, D, 0, -0.048, -0.18);                     // magwell shroud
+  brb.cyl(0.020, 0.020, 0.05, P, 0, 0.010, -0.265, Math.PI / 2, 0, 0, 20); // shroud ring
+  b.box(0.030, 0.030, 0.025, G, 0, -0.055, -0.26);                   // hand-stop fin
+  b.box(0.046, 0.070, 0.018, D, 0, 0.005, 0.025);                    // rear cap plate
+  b.box(0.014, 0.020, 0.050, DS, 0, 0.002, 0.040);                   // stock latch lever
+  b.box(0.006, 0.040, 0.008, S, 0, -0.040, -0.275);                  // front sling loop
+  b.box(0.046, 0.070, 0.020, D, 0, 0.005, -0.285);                    // front receiver cap
+  b.box(0.028, 0.030, 0.020, P, 0, -0.115, -0.015, -0.30);           // grip plug
+  // flip-up polymer BUIS (deployed)
+  b.box(0.006, 0.018, 0.008, D, 0, SIGHT_Y - 0.009, -0.27);          // front post
+  b.box(0.022, 0.006, 0.010, D, 0, 0.060, -0.27);                    // front base
+  b.box(0.026, 0.006, 0.012, D, 0, 0.060, -0.015);                   // rear housing
+  b.box(0.005, 0.014, 0.010, D, -0.011, SIGHT_Y - 0.009, -0.015);    // ear L
+  b.box(0.005, 0.014, 0.010, D, 0.011, SIGHT_Y - 0.009, -0.015);     // ear R
+  // folding vertical foregrip with finger grooves + hinge
+  ubb.box(0.024, 0.075, 0.028, G, 0, -0.075, -0.21, 0.10);
+  ubb.box(0.026, 0.014, 0.030, P, 0, -0.040, -0.21);                 // hinge block
+  ubb.cyl(0.007, 0.007, 0.028, P, 0, -0.040, -0.21, 0, 0, Math.PI / 2); // hinge pin
+  for (let i = 0; i < 3; i++) ubb.box(0.025, 0.004, 0.022, D, 0, -0.060 - i * 0.016, -0.208 - i * 0.003, 0.10);
+  ubb.box(0.026, 0.008, 0.030, P, 0, -0.112, -0.216, 0.10);          // pommel
+  // 4-position telescoping stock rails + pad
+  skb.cyl(0.005, 0.005, 0.15, S, -0.016, 0.012, 0.075, Math.PI / 2);
+  skb.cyl(0.005, 0.005, 0.15, S, 0.016, 0.012, 0.075, Math.PI / 2);
+  for (const sx of [-1, 1]) for (let i = 0; i < 4; i++) skb.cyl(0.0055, 0.0055, 0.004, D, sx * 0.016, 0.012, 0.02 + i * 0.03, Math.PI / 2);
+  skb.box(0.040, 0.075, 0.020, P, 0, 0.008, 0.155);                  // buttpad
+  skb.box(0.034, 0.060, 0.006, R, 0, 0.008, 0.146);                  // pad face
+  skb.box(0.030, 0.018, 0.10, G, 0, 0.048, 0.10);                    // cheek weld
+  // EOTech-class holographic window (removable optic)
+  opb.box(0.030, 0.014, 0.050, D, 0, 0.062, -0.11);                  // riser
+  opb.box(0.034, 0.030, 0.008, D, 0, SIGHT_Y + 0.004, -0.135);       // window frame
+  opb.box(0.030, 0.020, 0.030, D, 0, SIGHT_Y - 0.002, -0.115);       // hood body
+  opb.box(0.026, 0.010, 0.006, D, 0, SIGHT_Y - 0.012, -0.095);       // battery box
+  skb.build(skG); skG.userData.homeZ = 0; g.add(skG);
+  ubb.build(ubG); g.add(ubG);
+  opb.build(opG); g.add(opG);
+  brb.build(brG); g.add(brG);
+  b.build(g);
+
+  const adsHidden: THREE.Object3D[] = [];
+  const glassF = new THREE.Mesh(new THREE.PlaneGeometry(0.028, 0.024), WM.glass);
+  glassF.position.set(0, SIGHT_Y + 0.004, -0.1305); g.add(glassF);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.0045, 0.0055, 24), WM.reticle);
+  ring.position.set(0, SIGHT_Y + 0.004, -0.130); g.add(ring);
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0011, 10), WM.reticle);
+  dot.position.set(0, SIGHT_Y + 0.004, -0.1295); g.add(dot);
+  adsHidden.push(glassF, ring, dot);
+
+  // Extended .45 ACP stick magazine ahead of the trigger guard
+  const mag = new THREE.Group();
+  const mb = new GunBuilder();
+  mb.box(0.030, 0.13, 0.042, DS, 0, -0.10, -0.145);
+  mb.box(0.032, 0.012, 0.044, D, 0, -0.168, -0.145);
+  for (let i = 0; i < 5; i++) mb.box(0.031, 0.004, 0.036, S, 0, -0.065 - i * 0.02, -0.145);
+  mb.box(0.034, 0.024, 0.046, P, 0, -0.045, -0.145);                 // magwell flare
+  mb.build(mag); mag.userData.homeY = 0; mag.userData.homeZ = 0; g.add(mag);
+
+  const optic = new THREE.Group(); g.add(optic);
+  const { lArm, keys } = attachArms(g, { fore: [0, -0.075, -0.23], mag: [0, -0.14, -0.125], fa: [-0.032, 0.028, -0.06] });
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.010, -0.36); g.add(muzzle);
+  const sockets = {
+    muzzle: makeSocket(0, 0.010, -0.355),
+    optic: makeSocket(0, 0.062, -0.11),
+    magazine: makeSocket(0, -0.04, -0.145),
+    underbarrel: makeSocket(0, -0.042, -0.21),
+    stock: makeSocket(0, 0.012, 0.02),
+    rail: makeSocket(-0.026, 0.005, -0.13),
+    barrel: makeSocket(0, 0.010, -0.28),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { optic: [opG, ...adsHidden], magazine: [mag], underbarrel: [ubG], stock: [skG], barrel: [brG] };
+  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden, sockets, removable, attached: {} };
+}
+
+export function buildSPAS12(): WeaponModel {
+  const g = new THREE.Group();
+  const SIGHT_Y = 0.070;
+  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, D = WM.dark, G = WM.grip, R = WM.rubber, MS = WM.midSteel;
+  const b = new GunBuilder();
+  const pbb = new GunBuilder(); const pump = new THREE.Group();
+  const skb = new GunBuilder(); const skG = new THREE.Group();
+
+  // Chunky SPAS-12 receiver with top rail + side plates
+  b.box(0.046, 0.070, 0.30, S, 0, 0.005, -0.05);
+  b.box(0.040, 0.012, 0.32, D, 0, 0.044, -0.05);                     // top rail spine
+  for (let i = 0; i < 10; i++) b.box(0.034, 0.006, 0.014, DS, 0, 0.052, 0.075 - i * 0.027);
+  b.box(0.002, 0.050, 0.26, DS, -0.024, 0.005, -0.05);               // side plate L
+  b.box(0.002, 0.050, 0.26, DS, 0.024, 0.005, -0.05);                // side plate R
+  for (let i = 0; i < 5; i++) {
+    b.box(0.003, 0.012, 0.024, D, -0.024, 0.005, 0.03 - i * 0.045);
+    b.box(0.003, 0.012, 0.024, D, 0.024, 0.005, 0.03 - i * 0.045);
+  }
+  b.box(0.002, 0.024, 0.080, MS, 0.024, 0.015, -0.10);               // loading port lip
+  b.box(0.004, 0.018, 0.060, D, 0.024, 0.015, -0.10);                // port recess
+  b.box(0.008, 0.016, 0.040, S, -0.025, 0.020, -0.16);               // pump release
+  b.box(0.048, 0.072, 0.050, S, 0, 0.005, -0.215);                    // receiver collar
+  b.box(0.008, 0.050, 0.16, D, -0.027, 0.005, -0.05);                // side saddle plate
+  b.box(0.040, 0.060, 0.050, DS, 0, 0.008, 0.115);                   // stock adapter
+  b.box(0.036, 0.020, 0.030, D, 0, -0.030, 0.10);                    // rear sling plate
+  b.box(0.008, 0.024, 0.070, DS, 0, -0.056, -0.075);                 // trigger bow
+  b.box(0.032, 0.022, 0.022, G, 0, -0.100, -0.002, -0.28);           // palm swell
+  b.box(0.024, 0.024, 0.020, DS, 0, -0.008, -0.28);                  // tube clamp
+  b.cyl(0.016, 0.016, 0.20, DS, 0, 0.018, -0.40, Math.PI / 2, 0, 0, 20); // barrel shroud
+  b.cyl(0.018, 0.018, 0.02, D, 0, 0.018, -0.495, Math.PI / 2);       // shroud ring
+  b.cyl(0.020, 0.020, 0.015, D, 0, 0.018, -0.30, Math.PI / 2, 0, 0, 12); // front band
+  b.cyl(0.008, 0.008, 0.004, D, 0, SIGHT_Y - 0.004, 0.06, Math.PI / 2); // ghost aperture
+  b.cyl(0.004, 0.004, 0.005, MS, 0, SIGHT_Y - 0.004, 0.06, Math.PI / 2); // aperture hole
+  for (let i = 0; i < 6; i++) b.cyl(0.008, 0.008, 0.05, S, -0.033, 0.005, -0.11 + i * 0.024, Math.PI / 2, 0, 0, 10);
+  b.box(0.044, 0.014, 0.080, S, 0, 0.038, 0.13);                     // top cover extension
+  b.cyl(0.013, 0.013, 0.025, DS, 0, 0.018, -0.51, Math.PI / 2, 0, 0, 14); // muzzle ring
+  b.box(0.004, 0.030, 0.090, DS, 0.024, 0.015, -0.02);               // port cover
+  b.box(0.008, 0.040, 0.014, DS, 0, -0.038, -0.105);                 // guard front strap
+  // ghost-ring sights (deployed): front blade + rear ring
+  b.box(0.006, 0.022, 0.008, D, 0, SIGHT_Y - 0.011, -0.30);          // front blade
+  b.box(0.024, 0.006, 0.010, D, 0, 0.060, -0.30);                    // front base
+  b.box(0.028, 0.006, 0.012, D, 0, 0.060, 0.06);                     // rear housing
+  b.box(0.006, 0.018, 0.010, D, -0.013, SIGHT_Y - 0.011, 0.06);      // ear L
+  b.box(0.006, 0.018, 0.010, D, 0.013, SIGHT_Y - 0.011, 0.06);       // ear R
+  // barrel + extended mag tube with cap + barrel ring
+  b.cyl(0.011, 0.011, 0.30, S, 0, 0.018, -0.35, Math.PI / 2, 0, 0, 20);
+  b.cyl(0.010, 0.010, 0.26, DS, 0, -0.008, -0.33, Math.PI / 2, 0, 0, 20); // mag tube
+  b.cyl(0.013, 0.013, 0.020, D, 0, -0.008, -0.465, Math.PI / 2);      // tube cap
+  b.cyl(0.005, 0.005, 0.302, D, 0, 0.018, -0.35, Math.PI / 2);        // bore shadow
+  b.box(0.030, 0.040, 0.020, DS, 0, 0.005, -0.26);                    // barrel ring
+  // sliding pump with action bars (reciprocates)
+  pbb.box(0.040, 0.042, 0.10, G, 0, -0.008, -0.33);
+  pbb.box(0.046, 0.048, 0.020, G, 0, -0.008, -0.385);                // pump cap F
+  pbb.box(0.046, 0.048, 0.020, G, 0, -0.008, -0.235);                // pump cap R
+  pbb.box(0.046, 0.048, 0.024, G, 0, -0.008, -0.31);                 // pump mid-band
+  for (let i = 0; i < 4; i++) pbb.box(0.041, 0.006, 0.012, D, 0, -0.008, -0.29 - i * 0.024); // pump ribs
+  pbb.cyl(0.004, 0.004, 0.10, S, -0.014, 0.005, -0.25, Math.PI / 2);  // action bar L
+  pbb.cyl(0.004, 0.004, 0.10, S, 0.014, 0.005, -0.25, Math.PI / 2);   // action bar R
+  // trigger group + cross-bolt safety + trigger guard
+  b.box(0.006, 0.004, 0.060, D, 0, -0.048, -0.075);                  // trigger guard
+  b.box(0.005, 0.020, 0.006, S, 0, -0.038, -0.070);                  // trigger
+  b.cyl(0.004, 0.004, 0.050, S, 0, -0.030, -0.055, 0, 0, Math.PI / 2); // cross-bolt
+  // pistol grip with finger grooves
+  b.box(0.030, 0.085, 0.036, G, 0, -0.080, -0.010, -0.28);
+  for (let i = 0; i < 3; i++) b.box(0.031, 0.004, 0.028, D, 0, -0.058 - i * 0.016, -0.004 - i * 0.005, -0.28);
+  b.box(0.032, 0.008, 0.038, P, 0, -0.121, -0.021, -0.28);           // grip base
+  // top-folding skeleton stock + struts + pad
+  skb.cyl(0.005, 0.005, 0.20, S, -0.014, 0.015, 0.17, Math.PI / 2);   // strut L
+  skb.cyl(0.005, 0.005, 0.20, S, 0.014, 0.015, 0.17, Math.PI / 2);    // strut R
+  skb.cyl(0.007, 0.007, 0.030, D, 0, 0.015, 0.07, 0, 0, Math.PI / 2); // fold hinge
+  skb.box(0.034, 0.070, 0.016, P, 0, 0.010, 0.270);                   // buttplate
+  skb.box(0.030, 0.056, 0.006, R, 0, 0.010, 0.261);                   // pad face
+  skb.box(0.036, 0.014, 0.06, G, 0, 0.048, 0.25);                     // cheek weld
+  skb.build(skG); skG.userData.homeZ = 0; g.add(skG);
+  pbb.build(pump); pump.userData.homeY = 0; pump.userData.homeZ = 0; g.add(pump);
+  b.build(g);
+
+  const optic = new THREE.Group(); g.add(optic);
+  const { lArm, keys } = attachArms(g, { fore: [0, -0.01, -0.32], mag: [0.02, 0.01, -0.08], fa: [0, 0.03, -0.18] });
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.018, -0.51); g.add(muzzle);
+  const sockets = {
+    muzzle: makeSocket(0, 0.018, -0.50),
+    optic: makeSocket(0, 0.058, -0.05),
+    magazine: makeSocket(0, -0.02, -0.33),
+    underbarrel: makeSocket(0, -0.035, -0.33),
+    stock: makeSocket(0, 0.015, 0.08),
+    rail: makeSocket(-0.025, 0.005, -0.17),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  // The pump IS the reload handle: engine drives `mag` for reload anims.
+  const removable = { stock: [skG] };
+  return { group: g, mag: pump, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden: [], sockets, removable, attached: {} };
+}
+
+export function buildDeagle(): WeaponModel {
+  const g = new THREE.Group();
+  const SIGHT_Y = 0.052;
+  const S = WM.steel, DS = WM.darkSteel, D = WM.dark, G = WM.grip, MS = WM.midSteel;
+  const b = new GunBuilder();
+  const slb = new GunBuilder(); const slide = new THREE.Group();
+  const brb = new GunBuilder(); const brG = new THREE.Group();
+  const opb = new GunBuilder(); const opG = new THREE.Group();
+  // Massive triangular-profile slide with top rib + cocking serrations
+  slb.box(0.034, 0.034, 0.200, S, 0, 0.030, -0.05);
+  slb.box(0.020, 0.006, 0.190, MS, 0, 0.049, -0.05);                 // top rib
+  slb.box(0.002, 0.024, 0.190, MS, -0.017, 0.030, -0.05, 0, 0, 0.10); // side bevel L
+  slb.box(0.002, 0.024, 0.190, MS, 0.017, 0.030, -0.05, 0, 0, -0.10); // side bevel R
+  for (let i = 0; i < 6; i++) slb.box(0.0355, 0.022, 0.0025, D, 0, 0.030, 0.016 + i * 0.006); // rear serrations
+  for (let i = 0; i < 4; i++) slb.box(0.0355, 0.022, 0.0025, D, 0, 0.030, -0.122 + i * 0.006); // front serrations
+  slb.box(0.002, 0.014, 0.045, D, 0.017, 0.036, -0.09);              // ejection port
+  slb.box(0.002, 0.010, 0.035, S, 0.0166, 0.036, -0.09);             // chamber hood
+  slb.box(0.030, 0.030, 0.005, D, 0, 0.030, 0.052);                  // rear plate
+  slb.cyl(0.003, 0.003, 0.007, S, 0, 0.034, 0.052, Math.PI / 2);      // firing pin
+  // gas-operated rotating bolt housing under the muzzle
+  brb.cyl(0.008, 0.008, 0.040, S, 0, 0.030, -0.160, Math.PI / 2);     // barrel
+  brb.box(0.024, 0.020, 0.050, DS, 0, 0.030, -0.135);                 // gas housing
+  brb.cyl(0.010, 0.010, 0.008, D, 0, 0.030, -0.152, Math.PI / 2);     // housing ring
+  brb.cyl(0.0045, 0.0045, 0.042, D, 0, 0.030, -0.160, Math.PI / 2);   // bore shadow
+  // frame with accessory rail + trigger group
+  b.box(0.030, 0.028, 0.150, S, 0, 0.004, -0.04);
+  b.box(0.031, 0.004, 0.150, D, 0, 0.012, -0.04);                     // slide seam
+  b.box(0.028, 0.010, 0.070, D, 0, -0.012, -0.10);                    // accessory rail
+  for (let i = 0; i < 3; i++) b.box(0.029, 0.006, 0.010, DS, 0, -0.014, -0.075 - i * 0.022);
+  b.box(0.006, 0.004, 0.034, DS, 0, -0.024, -0.048);                  // trigger guard
+  b.box(0.005, 0.018, 0.005, S, 0, -0.015, -0.043);                   // trigger
+  for (let i = 0; i < 3; i++) b.box(0.0055, 0.002, 0.0055, D, 0, -0.019 + i * 0.005, -0.043);
+  b.box(0.010, 0.014, 0.012, S, 0, 0.036, 0.048);                     // hammer
+  b.box(0.012, 0.006, 0.008, D, 0, 0.044, 0.048);                     // hammer spur
+  b.box(0.005, 0.008, 0.024, S, -0.016, 0.018, 0.005);                // safety L
+  b.box(0.005, 0.008, 0.024, S, 0.016, 0.018, 0.005);                 // safety R
+  b.box(0.006, 0.008, 0.030, S, -0.016, 0.014, -0.025);               // slide stop
+  b.cyl(0.004, 0.004, 0.005, S, -0.0155, 0.004, 0.002, 0, 0, Math.PI / 2); // mag release
+  // fat rubber grips with finger grooves
+  b.box(0.032, 0.085, 0.040, G, 0, -0.038, 0.022, -0.25);
+  for (let i = 0; i < 3; i++) b.box(0.033, 0.005, 0.030, D, 0, -0.020 - i * 0.018, 0.028 - i * 0.004, -0.25);
+  b.box(0.034, 0.008, 0.042, D, 0, -0.080, 0.032, -0.25);             // grip base
+  opb.box(0.005, 0.010, 0.007, D, 0, SIGHT_Y, -0.138);                // front blade
+  opb.box(0.006, 0.009, 0.007, D, -0.008, SIGHT_Y, 0.038);            // rear notch L
+  opb.box(0.006, 0.009, 0.007, D, 0.008, SIGHT_Y, 0.038);             // rear notch R
+  slb.build(slide); g.add(slide);
+  brb.build(brG); g.add(brG);
+  opb.build(opG); g.add(opG);
+  b.build(g);
+  // tritium dots (hidden in ADS)
+  const adsHidden: THREE.Object3D[] = [];
+  for (const [x, z] of [[0, -0.1415], [-0.008, 0.0345], [0.008, 0.0345]] as const) {
+    const t = new THREE.Mesh(new THREE.CircleGeometry(0.0011, 8), WM.tritium);
+    t.position.set(x, SIGHT_Y + 0.002, z); g.add(t);
+    adsHidden.push(t);
+  }
+  // 7-round single-stack mag (hidden in grip, drops on reload)
+  const mag = new THREE.Group();
+  const mb = new GunBuilder();
+  mb.box(0.026, 0.080, 0.034, DS, 0, -0.040, 0.023, -0.25);
+  mb.box(0.028, 0.008, 0.036, D, 0, -0.081, 0.033, -0.25);
+  mb.build(mag);
+  mag.userData.homeY = 0; mag.userData.homeZ = 0; g.add(mag);
+  const optic = new THREE.Group(); g.add(optic);
+  const { lArm, keys } = attachArms(g, { fore: [0.005, -0.105, -0.030], mag: [0, -0.090, 0.022], fa: [0.0, -0.015, -0.045] });
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.030, -0.185); g.add(muzzle);
+  const sockets = {
+    muzzle: makeSocket(0, 0.030, -0.182),
+    optic: makeSocket(0, 0.046, 0.0),
+    magazine: makeSocket(0, -0.06, 0.032),
+    rail: makeSocket(0.018, -0.01, -0.08),
+    barrel: makeSocket(0, 0.030, -0.10),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { optic: [opG, ...adsHidden], magazine: [mag], barrel: [brG] };
+  return { group: g, mag, chargingHandle: slide, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden, sockets, removable, attached: {} };
+}
+
+export function buildM249(): WeaponModel {
+  const g = new THREE.Group();
+  const SIGHT_Y = 0.075;
+  const P = WM.poly, S = WM.steel, DS = WM.darkSteel, D = WM.dark, G = WM.grip, R = WM.rubber, MS = WM.midSteel;
+  const b = new GunBuilder();
+  const skb = new GunBuilder(); const skG = new THREE.Group();
+  const ubb = new GunBuilder(); const ubG = new THREE.Group();
+  const brb = new GunBuilder(); const brG = new THREE.Group();
+
+  // Stamped-steel SAW receiver with top cover rail
+  b.box(0.052, 0.075, 0.42, DS, 0, 0.005, -0.10);
+  b.box(0.044, 0.012, 0.44, D, 0, 0.046, -0.10);                     // top rail spine
+  for (let i = 0; i < 13; i++) b.box(0.036, 0.006, 0.014, MS, 0, 0.054, 0.075 - i * 0.028);
+  b.box(0.002, 0.055, 0.38, MS, -0.027, 0.005, -0.10);               // side plate L
+  b.box(0.002, 0.055, 0.38, MS, 0.027, 0.005, -0.10);                // side plate R
+  for (let i = 0; i < 6; i++) {
+    b.cyl(0.003, 0.003, 0.003, S, -0.0275, 0.020, 0.02 - i * 0.05, 0, 0, Math.PI / 2);
+    b.cyl(0.003, 0.003, 0.003, S, 0.0275, 0.020, 0.02 - i * 0.05, 0, 0, Math.PI / 2);
+  }
+  // hinged feed cover with latch (opens on reload)
+  b.box(0.046, 0.018, 0.16, P, 0, 0.030, -0.16);                     // feed cover exterior
+  b.cyl(0.006, 0.006, 0.048, S, 0, 0.030, -0.085, 0, 0, Math.PI / 2); // cover hinge
+  b.box(0.014, 0.012, 0.020, S, 0, 0.030, -0.235);                   // cover latch
+  const cover = new THREE.Group(); g.add(cover);
+  const cb = new GunBuilder();
+  cb.box(0.042, 0.008, 0.14, DS, 0, 0.026, -0.16);                   // cover underside
+  cb.box(0.010, 0.006, 0.120, S, 0, 0.021, -0.16);                   // feed pawl rail
+  cb.build(cover);
+  // belt + links feeding into the tray (stay with the receiver)
+  for (let i = 0; i < 5; i++) {
+    b.box(0.012, 0.008, 0.012, S, -0.032, 0.030, -0.12 - i * 0.016); // cartridges
+    b.box(0.014, 0.004, 0.010, D, -0.032, 0.030, -0.128 - i * 0.016); // links
+  }
+  b.box(0.016, 0.006, 0.090, MS, -0.032, 0.026, -0.155);             // belt ramp
+  // 200-round assault box + hanger bracket (the "magazine")
+  b.box(0.070, 0.075, 0.120, P, 0, -0.075, -0.16);                   // ammo box
+  b.box(0.072, 0.010, 0.122, D, 0, -0.040, -0.16);                   // box lid seam
+  b.box(0.074, 0.020, 0.020, D, 0, -0.075, -0.16);                   // box latch band
+  b.box(0.020, 0.030, 0.060, DS, 0, -0.030, -0.16);                  // hanger bracket
+  // quick-change fluted barrel + gas block + slotted hider
+  brb.cyl(0.012, 0.012, 0.30, S, 0, 0.020, -0.46, Math.PI / 2, 0, 0, 20);
+  for (let i = 0; i < 6; i++) {
+    const fa2 = (i / 6) * Math.PI * 2;
+    brb.box(0.003, 0.002, 0.22, D, Math.cos(fa2) * 0.0115, 0.020 + Math.sin(fa2) * 0.0115, -0.46);
+  }
+  b.cyl(0.016, 0.016, 0.030, DS, 0, 0.020, -0.345, Math.PI / 2);      // barrel nut
+  b.box(0.016, 0.012, 0.024, S, 0, 0.020, -0.322);                    // carry-handle lug
+  b.cyl(0.014, 0.014, 0.035, DS, 0, 0.020, -0.52, Math.PI / 2);       // gas block
+  b.cyl(0.005, 0.005, 0.022, S, 0, 0.040, -0.52);                     // gas regulator
+  brb.cyl(0.014, 0.014, 0.055, DS, 0, 0.020, -0.635, Math.PI / 2, 0, 0, 20); // flash hider
+  for (let i = 0; i < 4; i++) { const ha = (i / 4) * Math.PI * 2 + 0.78; brb.box(0.005, 0.005, 0.040, D, Math.cos(ha) * 0.0135, 0.020 + Math.sin(ha) * 0.0135, -0.635); }
+  brb.cyl(0.0045, 0.0045, 0.057, D, 0, 0.020, -0.635, Math.PI / 2);   // bore shadow
+  // skeleton carry handle over the barrel (signature SAW part)
+  b.box(0.010, 0.008, 0.14, P, 0, 0.052, -0.46);                      // handle bar
+  b.box(0.010, 0.030, 0.012, P, 0, 0.036, -0.40);                     // leg F
+  b.box(0.010, 0.030, 0.012, P, 0, 0.036, -0.52);                     // leg R
+  // folding bipod on the gas block with feet
+  ubb.box(0.024, 0.020, 0.045, D, 0, -0.005, -0.52);
+  ubb.cyl(0.009, 0.009, 0.028, DS, 0, -0.012, -0.52, 0, 0, Math.PI / 2); // pivot
+  ubb.cyl(0.005, 0.005, 0.09, D, -0.020, -0.055, -0.52, 0.10, 0, 0.08);
+  ubb.cyl(0.005, 0.005, 0.09, D, 0.020, -0.055, -0.52, 0.10, 0, -0.08);
+  ubb.cyl(0.0035, 0.0035, 0.07, S, -0.024, -0.125, -0.527, 0.10, 0, 0.08); // lower L
+  ubb.cyl(0.0035, 0.0035, 0.07, S, 0.024, -0.125, -0.527, 0.10, 0, -0.08); // lower R
+  ubb.box(0.010, 0.008, 0.016, R, -0.027, -0.162, -0.530);            // foot L
+  ubb.box(0.010, 0.008, 0.016, R, 0.027, -0.162, -0.530);            // foot R
+  // trigger group + pistol grip + fixed skeleton stock
+  b.box(0.006, 0.004, 0.055, D, 0, -0.048, -0.045);                  // trigger guard
+  b.box(0.005, 0.020, 0.006, S, 0, -0.038, -0.040);                  // trigger
+  b.box(0.030, 0.085, 0.036, G, 0, -0.080, 0.005, -0.28);
+  for (let i = 0; i < 3; i++) b.box(0.031, 0.004, 0.028, D, 0, -0.058 - i * 0.016, 0.011 - i * 0.005, -0.28);
+  skb.box(0.036, 0.060, 0.12, P, 0, 0.005, 0.155);                   // stock body
+  skb.box(0.028, 0.036, 0.08, D, 0, 0.005, 0.155);                   // lightening cut
+  skb.box(0.034, 0.058, 0.020, R, 0, 0.005, 0.220);                  // buttpad
+  skb.box(0.030, 0.012, 0.10, G, 0, 0.040, 0.155);                   // cheek rest
+  skb.cyl(0.007, 0.007, 0.040, S, 0, 0.005, 0.098, 0, 0, Math.PI / 2); // stock pin
+  skb.build(skG); skG.userData.homeZ = 0; g.add(skG);
+  ubb.build(ubG); g.add(ubG);
+  brb.build(brG); g.add(brG);
+  b.build(g);
+  // aperture BUIS (post + ring), hidden in ADS
+  const adsHidden: THREE.Object3D[] = [];
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.020, 0.008), WM.dark);
+  post.position.set(0, SIGHT_Y - 0.010, -0.60); g.add(post);
+  const ringShape = new THREE.Mesh(new THREE.TorusGeometry(0.009, 0.0025, 8, 20), WM.dark);
+  ringShape.position.set(0, SIGHT_Y, 0.02); g.add(ringShape);
+  adsHidden.push(post, ringShape);
+
+  // Feed cover flips open + belt box drops on reload
+  const mag = new THREE.Group(); mag.userData.homeY = 0; mag.userData.homeZ = 0; g.add(mag);
+  const optic = new THREE.Group(); g.add(optic);
+  const { lArm, keys } = attachArms(g, { fore: [0, -0.03, -0.40], mag: [0, -0.11, -0.16], fa: [0, 0.04, -0.20] });
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.020, -0.67); g.add(muzzle);
+  const sockets = {
+    muzzle: makeSocket(0, 0.020, -0.66),
+    optic: makeSocket(0, 0.060, -0.10),
+    magazine: makeSocket(0, -0.04, -0.16),
+    underbarrel: makeSocket(0, -0.02, -0.52),
+    stock: makeSocket(0, 0.005, 0.10),
+    rail: makeSocket(-0.028, 0.005, -0.30),
+    barrel: makeSocket(0, 0.020, -0.32),
+  };
+  for (const s of Object.values(sockets)) g.add(s);
+  const removable = { optic: [...adsHidden], magazine: [mag], underbarrel: [ubG], stock: [skG], barrel: [brG] };
+  return { group: g, mag, chargingHandle: cover, muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden, sockets, removable, attached: {} };
+}
+
+export const WEAPON_BUILDERS: Record<WeaponId, () => WeaponModel> = {
+  m4a1: buildM4,
+  ak47: buildAK47,
+  m1911: buildM1911,
+  awm: buildAWM,
+  mp7: buildMP7,
+  scar_h: buildSCARH,
+  vector: buildVector,
+  spas12: buildSPAS12,
+  deagle: buildDeagle,
+  m249: buildM249,
+};
 
 /* ================= ENEMY SOLDIER ================= */
 export interface SoldierModel {

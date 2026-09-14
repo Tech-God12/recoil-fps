@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react';
-import type { GameSettings } from '../game/engine';
+import type { CashLogEntry, GameSettings } from '../game/engine';
+import { weaponById } from '../game/economy/catalog';
+import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
 import { MAPS } from '../game/world';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp, Key, Ticker } from './components';
+import CashCounter from './armory/CashCounter';
+import { gradeFor } from '../game/economy/rewards';
 
 export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
   mission: MissionReport; pressure: PressureStats;
+  cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
 }
 
 const Arrow = () => <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 5l7 7-7 7" stroke="currentColor" strokeWidth="2" fill="none" /></svg>;
@@ -17,10 +22,14 @@ const Arrow = () => <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden=
 /* ================================================================
    MAIN MENU — COMMAND DECK
    ================================================================ */
-export function MainMenu({ s, onDeploy, onSettings, onMap }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: {
   s: GameSettings; onDeploy: () => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
+  onArmory?: () => void; profile?: PlayerProfile;
 }) {
   const mission = getMission(s.map);
+  const prof = profile ?? DEFAULT_PROFILE;
+  const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
+  const secondaryName = weaponById(prof.loadout.secondary.weapon)?.short ?? '—';
   const selectedMap = MAPS.find(map => map.id === s.map) ?? MAPS[0];
   return (
     <main className="menu-root">
@@ -70,12 +79,19 @@ export function MainMenu({ s, onDeploy, onSettings, onMap }: {
               <span>START MISSION</span>
               <Arrow />
             </button>
+            <button className="menu-secondary-btn armory-cta" onClick={onArmory}>
+              ARMORY <span>LOADOUT · WALLET ${prof.cash.toLocaleString('en-US')}</span>
+            </button>
+            <div className="menu-loadout seq" style={{ animationDelay: '.36s' }} aria-label="Fielded loadout">
+              <span className="mono"><b>1</b> {primaryName}</span>
+              <span className="mono"><b>2</b> {secondaryName}</span>
+            </div>
             <button className="menu-secondary-btn" onClick={onSettings}>
               SETTINGS <span>CONTROLS · AUDIO · GRAPHICS</span>
             </button>
           </div>
           <div className="input-legend seq" style={{ animationDelay: '.4s' }}>
-            <Key>WASD</Key><span>MOVE</span><Key>RMB</Key><span>SCOPE</span><Key>1-5</Key><span>WEAPONS</span><Key>G</Key><span>FRAG</span><Key>X</Key><span>PLANT</span><Key>ESC</Key><span>PAUSE</span>
+            <Key>WASD</Key><span>MOVE</span><Key>RMB</Key><span>SCOPE</span><Key>1/2</Key><span>SWAP</span><Key>Q</Key><span>LAST</span><Key>Q·E</Key><span>HOLD LEAN</span><Key>G</Key><span>FRAG</span><Key>X</Key><span>PLANT</span><Key>ESC</Key><span>PAUSE</span>
           </div>
         </section>
 
@@ -209,17 +225,28 @@ export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: 
 /* ================================================================
    RESULTS — AFTER-ACTION REPORT
    ================================================================ */
-function gradeFor(r: Results): { grade: string; tint: string } {
-  const accuracy = r.shots ? Math.round(r.hits / r.shots * 100) : 0;
-  const score = (r.win ? 60 : 0) + Math.min(20, r.kills * 2) + Math.min(20, accuracy / 5);
-  const grade = score >= 95 ? 'S' : score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'D';
-  return { grade, tint: grade === 'S' || grade === 'A' ? '#3FD68E' : grade === 'B' ? '#E8B93C' : '#E5484D' };
-}
 
-export function ResultsScreen({ r, onRedeploy, onMenu }: { r: Results; onRedeploy: () => void; onMenu: () => void }) {
+
+export type ResultsWallet = { before: number; after: number; gradeBonus: number; earned: number };
+
+const CASH_REASONS: Record<string, string> = {
+  kill: 'ELIMINATIONS', headshot: 'HEADSHOTS', grenade: 'GRENADE KILLS',
+  streak: 'STREAK BONUSES', phase: 'PHASES SECURED', extraction: 'EXTRACTION',
+};
+
+export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
+  r: Results; wallet: ResultsWallet; onRedeploy: () => void; onMenu: () => void; onArmory: () => void;
+}) {
   const accuracy = r.shots ? Math.round(r.hits / r.shots * 100) : 0;
   const completed = r.mission.phases.filter(p => p.complete).length;
   const { grade, tint } = gradeFor(r);
+  const cashRows: { label: string; detail: string; total: number }[] = [];
+  for (const reason of Object.keys(CASH_REASONS)) {
+    const entries = r.cashLog.filter(e => e.reason === reason);
+    if (!entries.length) continue;
+    const total = entries.reduce((a, e) => a + e.amount, 0);
+    cashRows.push({ label: CASH_REASONS[reason], detail: `×${entries.length}`, total });
+  }
   return (
     <main className={`results-root ${r.win ? '' : 'lose'}`}>
       <div className="hex-grid" aria-hidden="true" />
@@ -260,6 +287,30 @@ export function ResultsScreen({ r, onRedeploy, onMenu }: { r: Results; onRedeplo
           </div>
         </div>
 
+        <section className="cash-card" aria-label="Cash earned">
+          <div className="sec-label"><span>CASH EARNED</span><CashCounter value={r.cash} /></div>
+          {cashRows.map((row, i) => (
+            <div className="cash-row seq" style={{ animationDelay: `${0.1 + i * 0.08}s` }} key={row.label}>
+              <span className="cash-row-label">{row.label} <small>{row.detail}</small></span>
+              <span className="cash-row-val mono">+${row.total.toLocaleString('en-US')}</span>
+            </div>
+          ))}
+          <div className="cash-row seq" style={{ animationDelay: `${0.1 + cashRows.length * 0.08}s` }}>
+            <span className="cash-row-label">DIFFICULTY <small>×{r.difficultyMul}</small></span>
+            <span className="cash-row-val mono">+${Math.round(r.cash * r.difficultyMul).toLocaleString('en-US')}</span>
+          </div>
+          {wallet.gradeBonus > 0 && (
+            <div className="cash-row seq" style={{ animationDelay: `${0.18 + cashRows.length * 0.08}s` }}>
+              <span className="cash-row-label">GRADE BONUS <small>{grade}</small></span>
+              <span className="cash-row-val mono">+${wallet.gradeBonus.toLocaleString('en-US')}</span>
+            </div>
+          )}
+          <div className="cash-wallet mono seq" style={{ animationDelay: `${0.26 + cashRows.length * 0.08}s` }}>
+            <span>WALLET</span>
+            <span>${wallet.before.toLocaleString('en-US')} → <CashCounter value={wallet.after} /></span>
+          </div>
+        </section>
+
         <section className="timeline" aria-label="Mission phase timings">
           <div className="sec-label" style={{ paddingBottom: 10 }}><span>AFTER-ACTION TIMELINE</span><span>ELAPSED</span></div>
           {r.mission.phases.map((phase, i) => {
@@ -286,7 +337,8 @@ export function ResultsScreen({ r, onRedeploy, onMenu }: { r: Results; onRedeplo
           <b>{r.pressure.totalSpawned}</b> hostiles entered the operation · peak simultaneous pressure <b>{r.pressure.peakLive}</b> · <b>{r.headshots}</b> headshots confirmed.
         </p>
         <div className="results-actions">
-          <button className="deploy-btn" style={{ maxWidth: 300 }} onClick={onRedeploy}><span>REDEPLOY</span><Arrow /></button>
+          <button className="deploy-btn" style={{ maxWidth: 300 }} onClick={onArmory}><span>OPEN ARMORY</span><Arrow /></button>
+          <button className="menu-secondary-btn" onClick={onRedeploy}>REDEPLOY</button>
           <button className="menu-secondary-btn" onClick={onMenu}>RETURN TO BASE</button>
         </div>
       </div>

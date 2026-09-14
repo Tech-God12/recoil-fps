@@ -18,15 +18,15 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'gameplay', label: 'GAMEPLAY', icon: '◈' },
   { id: 'graphics', label: 'GRAPHICS', icon: '◆' },
   { id: 'audio', label: 'AUDIO', icon: '◉' },
-  { id: 'crosshair', label: 'RETICLE', icon: '✛' },
+  { id: 'crosshair', label: 'RETICLE', icon: '+' },
   { id: 'controls', label: 'CONTROLS', icon: '⌨' },
 ];
 
 const BINDS: [string, string][] = [
   ['MOVE', 'W A S D'], ['SPRINT', 'SHIFT'], ['CROUCH', 'C'], ['SLIDE', 'SPRINT + C'],
   ['JUMP / VAULT', 'SPACE'], ['FIRE', 'MOUSE 1'], ['SCOPE (ADS)', 'MOUSE 2'], ['RELOAD', 'R'],
-  ['LEAN LEFT', 'Q'], ['LEAN RIGHT', 'E'], ['FRAG (5×)', 'HOLD G'], ['FLASHBANG', 'F'],
-  ['PRIMARY WEAPONS', '1 M4 / 2 AK / 4 AWM / 5 MP7'], ['SIDEARM', '3 M1911'],
+  ['LEAN LEFT (HOLD)', 'Q'], ['LEAN RIGHT (HOLD)', 'E'], ['FRAG (5×)', 'HOLD G'], ['FLASHBANG', 'F'],
+  ['PRIMARY / SIDEARM', '1 / 2'], ['LAST WEAPON (TAP)', 'Q'],
   ['ATTACH / DETONATE', 'X'], ['PAUSE', 'ESC'],
 ];
 
@@ -42,7 +42,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
             <h2>Settings</h2>
             <p className="mono">Changes apply instantly</p>
           </div>
-          <CBtn onClick={onClose}>✕ CLOSE</CBtn>
+          <CBtn onClick={onClose}>× CLOSE</CBtn>
         </div>
 
         <div className="settings-body">

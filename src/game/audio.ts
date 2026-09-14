@@ -253,6 +253,111 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.12, gain: 0.4, freq: 200, q: 0.5, type: 'lowpass' });
   }
 
+  fireShotgun() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    this.burstDirect({ dur: 0.05, gain: 1.0, freq: 2600, q: 0.6, hp: 500 });
+    this.burstDirect({ dur: 0.16, gain: 0.85, freq: 700, q: 0.7, toEcho: 0.5 });
+    this.burstDirect({ dur: 0.26, gain: 0.7, freq: 130, q: 0.6, type: 'lowpass' });
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.12);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.65, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    o.connect(og); og.connect(this.master!);
+    o.start(t); o.stop(t + 0.15);
+    this.burstDirect({ dur: 0.05, gain: 0.22, freq: 3600, q: 2.0, when: 0.09 });
+  }
+
+  fireSuppressed() {
+    // Suppressed: softened crack + sub thump, ~60% quieter than a rifle report.
+    // The action slap stays loud — cans don't silence the bolt.
+    this.burstDirect({ dur: 0.03, gain: 0.32, freq: 2400, q: 0.8, hp: 900 });
+    this.burstDirect({ dur: 0.12, gain: 0.30, freq: 420, q: 0.7, type: 'lowpass' });
+    this.burstDirect({ dur: 0.16, gain: 0.28, freq: 150, q: 0.6, type: 'lowpass' });
+    this.burstDirect({ dur: 0.04, gain: 0.20, freq: 4800, q: 2.2, when: 0.045 });
+  }
+
+  pump() {
+    // Pump-action cycle: back-clack + forward-slam.
+    this.burstDirect({ dur: 0.03, gain: 0.30, freq: 1800, q: 1.6 });
+    this.burstDirect({ dur: 0.035, gain: 0.36, freq: 2400, q: 1.6, when: 0.14 });
+  }
+
+  fireSCAR() {
+    // SCAR: deeper, heavier M4 — 7.62 punch with a longer pressure wave.
+    this.burstDirect({ dur: 0.04, gain: 1.0, freq: 2800, q: 0.6, hp: 600 });
+    this.burstDirect({ dur: 0.13, gain: 0.8, freq: 750, q: 0.7, toEcho: 0.5 });
+    this.burstDirect({ dur: 0.22, gain: 0.62, freq: 130, q: 0.6, type: 'lowpass' });
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(130, t);
+    o.frequency.exponentialRampToValueAtTime(40, t + 0.11);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.6, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(og); og.connect(this.master!);
+    o.start(t); o.stop(t + 0.13);
+    this.burstDirect({ dur: 0.045, gain: 0.2, freq: 4200, q: 2.0, when: 0.05 });
+  }
+
+  fireVector() {
+    // Vector: fast, dry, snappy 9mm crack with almost no tail.
+    this.burstDirect({ dur: 0.02, gain: 0.75, freq: 3800, q: 0.9, hp: 1200 });
+    this.burstDirect({ dur: 0.05, gain: 0.55, freq: 1100, q: 0.9, toEcho: 0.15 });
+    this.burstDirect({ dur: 0.08, gain: 0.3, freq: 220, q: 0.5, type: 'lowpass' });
+    this.burstDirect({ dur: 0.02, gain: 0.22, freq: 5200, q: 2.4, when: 0.03 });
+  }
+
+  fireLMG() {
+    // M249: AK-weight report with a metallic belt-link rattle riding the tail.
+    this.burstDirect({ dur: 0.035, gain: 0.95, freq: 3000, q: 0.7, hp: 700 });
+    this.burstDirect({ dur: 0.12, gain: 0.75, freq: 800, q: 0.7, toEcho: 0.4 });
+    this.burstDirect({ dur: 0.2, gain: 0.55, freq: 150, q: 0.6, type: 'lowpass' });
+    this.burstDirect({ dur: 0.02, gain: 0.12, freq: 5200, q: 3.0, when: 0.05 });
+    this.burstDirect({ dur: 0.02, gain: 0.10, freq: 4600, q: 3.0, when: 0.09 });
+    this.burstDirect({ dur: 0.02, gain: 0.08, freq: 5800, q: 3.0, when: 0.13 });
+  }
+
+  fireDeagle() {
+    // Deagle: huge low thump with a long metallic ring.
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    this.burstDirect({ dur: 0.05, gain: 1.0, freq: 2200, q: 0.6, hp: 400 });
+    this.burstDirect({ dur: 0.2, gain: 0.85, freq: 600, q: 0.7, toEcho: 0.5 });
+    this.burstDirect({ dur: 0.3, gain: 0.7, freq: 110, q: 0.6, type: 'lowpass' });
+    this.burstDirect({ dur: 0.4, gain: 0.1, freq: 2400, q: 8, when: 0.02 });
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(100, t);
+    o.frequency.exponentialRampToValueAtTime(35, t + 0.16);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.7, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.connect(og); og.connect(this.master!);
+    o.start(t); o.stop(t + 0.2);
+  }
+
+  shellInsert() {
+    // Single shell thumbed into the tube: click-clack.
+    this.burstDirect({ dur: 0.02, gain: 0.3, freq: 2000, q: 1.8 });
+    this.burstDirect({ dur: 0.025, gain: 0.35, freq: 2600, q: 1.8, when: 0.07 });
+  }
+
+  beltCoverOpen() {
+    this.burstDirect({ dur: 0.03, gain: 0.35, freq: 1500, q: 1.4 });
+    this.burstDirect({ dur: 0.05, gain: 0.25, freq: 900, q: 1.2, when: 0.08 });
+  }
+
+  beltCoverClose() {
+    this.burstDirect({ dur: 0.04, gain: 0.4, freq: 1100, q: 1.4 });
+    this.burstDirect({ dur: 0.03, gain: 0.35, freq: 2200, q: 1.6, when: 0.06 });
+  }
+
   // SPATIAL: Enemy Gunfire with exact 3D HRTF Panning
   enemyFireSpatial(wx: number, wy: number, wz: number) {
     const ctx = this.ensure();

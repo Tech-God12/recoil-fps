@@ -1,3 +1,33 @@
+## 2026-09-14 — Armory iteration 5: M416 restyle, SCAR detailing, short names, bare spawns
+
+M4 rebuilt as an HK416-pattern gun (fat quad rail with round cooling holes, tall gas block with integral flip-up front post, diopter drum rear, slimline stock, ambi controls, heavy barrel) and renamed M416; SCAR-H gained its signature side charging handle, regulator dial, chambered brake, stock furniture and a mounted front sight. All manufacturer prefixes dropped from gun names — M416, AK-47, 1911, AWM, MP, Vector, SPAS, SCAR, Deagle, M249 (ids unchanged) — and mags/optics renamed to basic industry terms (Red Dot Sight, Holographic Sight, ACOG Scope, Hybrid Sight, Sniper Scope, Pistol Red Dot, Drum Mag, Fast Mag, Extended Tube, Large Ammo Box, 10-Round Mag). Spawns are guaranteed bare: fresh profiles field iron sights and stock mags, and a one-time v1→v2 profile migration strips stale equipped kits while keeping cash, weapons and ownership. Settings key list updated to the loadout reality (1/2, Q tap-swap, hold-lean).
+
+Verification: full `node scripts/validate.mjs` (lint clean, typecheck, all Node tests incl. bare-spawn, migration and name pins, mutations killed) plus production build. Details, prices and measured limits: [docs/armory.md](docs/armory.md).
+
+## 2026-09-14 — Armory iteration 4: real-steel gun rebuilds, glass command UI
+
+Rebuilt all ten procedural guns around authentic silhouettes and signature details (M4 carry handle + vented KAC rail, AKM slant brake, 1911 checkered walnut, AWM thumbhole chassis + fluted barrel, MP7 wire stock, KRISS slab receiver, SPAS side saddle + ghost ring, SCAR-H FDE rail + PWS comp, Deagle triangular slide, M249 belt + carry handle) with full real-steel display names — Colt M4A1, Kalashnikov AK-47, Colt M1911, AI AWM .338, H&K MP7A1, KRISS Vector .45, Franchi SPAS-12, FN SCAR-H, Desert Eagle .50 AE, FN M249 SAW (ids/shorts unchanged). Sockets, muzzles, removable groups, ADS wiring and arm anchors preserved; Vector/SCAR/M249 gained removable barrel groups, AWM scope rings hide with the scope, drum mag rebuilt with ribbed shell. GunBuilder auto-flats small prims to fund the detail inside budget (draws 30–41, tris 3.0k–7.2k, all pinned). Armory UI redesigned as floating glass over the 3D stage: slim command bar (back/cash/deploy), compact weapon rows, refined chips — title slab, loadout strip and deploy slab gone; zero emoji (SVG lock, CSS dots), rail scroll glitch fixed.
+
+Verification: full `node scripts/validate.mjs` (lint clean, typecheck, all Node tests incl. name pins, mutations killed) plus production build. Details, prices and measured limits: [docs/armory.md](docs/armory.md).
+
+## 2026-09-14 — Armory iteration 3: full-color previews, finishes, beauty pass
+
+Locked guns preview in full color on the podium — the cyan wireframe hologram is gone, replaced by a lock note in the stage header. New finish system: per-weapon skins picked from a FINISH row in the stat panel, persisted in the profile, carried on loadout builds, and repainted onto the 3D gun both in the viewer and in-game via `applySkin` (Factory only for now; new finishes are data-only catalog entries). Beauty pass: brighter thumbnails on gradient backdrops, hover-only hotspot labels, BUY moved from the floating slab over the gun into the stage header, truncated card names, softer locked-card dimming.
+
+Verification: full `node scripts/validate.mjs` (lint clean, typecheck, all Node tests, mutations killed) plus production build. Details, prices and measured limits: [docs/armory.md](docs/armory.md).
+
+## 2026-09-13 — Armory iteration 2: see-through optics, viewer parity, economy retune
+
+See-through sight picture: LPVO, 12×, ACOG, red dot, holo and RMR rebuilt around open tubes/housings with front and rear lenses (raycast-verified down the optical axis); only the 3D aiming mark hides in ADS now, and LPVO low power shows its chevron through the glass. Viewer matches the in-game viewmodel light-for-light (same hemisphere/key rig, RoomEnvironment, ACES 1.05) on a podium stage with halo ring, and the gun sits lower in frame. Terminal decluttered: click-to-preview without auto-buy, hologram for locked guns, fielded-loadout strip, truncated chip names, brighter tabs/cards, styled scrollbars. Per-gun part fit: pistol stick mags and pure-tube barrels, compact stocks on SMG/PDW, Fast Mag off pistols. Economy retuned against streak farming — marks pay $50/$100/$150 once per chain under a $500/run cap, phases $200, extraction $750, grades S$600/A$400/B$200 — a competent run pays ≈$3,350 (~19–20 runs to full unlock).
+
+Verification: full `node scripts/validate.mjs` (lint clean, typecheck, all Node tests, mutations killed) plus production build. Details, prices and measured limits: [docs/armory.md](docs/armory.md).
+
+## 2026-09-13 — Armory loadout system: cash economy, 5 new guns, 32 attachments
+
+Added a full cash economy (per-kill/headshot/streak/phase/extraction/grade payouts with difficulty multiplier and itemised debrief), a post-mission 3D Armory (orbit viewer with socket hotspots, click-the-gun picking, hologram previews, stat lab with hover ghost-deltas, per-weapon part shop, odometer wallet), and a persistent profile (per-weapon ownership, builds, primary/secondary loadout). Five new procedural guns (SCAR-H, Vector, SPAS-12, Deagle, M249) join the rebuilt five; 32 attachments bolt onto live sockets and change stats, meshes, audio, ADS alignment, and handling. Engine gains loadout arming (1/2/Q), suppressor behaviour, Masterkey breacher (B), LPVO powers (V), rail laser/flashlight, bipod deploy, slide/pump/cover animation, and distinct reports for every gun. Q is now tap-swap / hold-lean; legends updated.
+
+Verification: full `node scripts/validate.mjs` (lint clean, typecheck, all Node tests, 34/34 mutations killed) plus production build. Details, prices and measured limits: [docs/armory.md](docs/armory.md).
+
 ## 2026-09-13 — Sandblast / Town polish and stability
 
 Renamed maps and expanded playable width/depth by approximately 20%, with new outer courtyard buildings/lanes and architectural/interior families. Separated bridge navigation/deck support from riverbed physics; stabilised downhill movement and continuous distance-driven bob. Moved opening objectives into rooms and added physical charge placement feedback. Rebalanced AWM body damage, clear scoped rendering, automatic scope-out/bolt cycle and reload timing; reworked MP7 detail/handling and tracer visibility. Polished non-scrolling main menus, graphics profiles, fullscreen placement and radio pacing. Throttled failed paths, repaired heap ordering, bounded audio tails, removed repeated static shadow/radar/resize work, and verified mission-preserving WebGL context recovery.

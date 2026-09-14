@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 process.chdir(root);
-const tests = ['tests/mission.test.js', 'tests/mission-defense.test.js', 'tests/reinforcements.test.js', 'tests/mission-integration.test.js'];
+const tests = ['tests/mission.test.js', 'tests/mission-defense.test.js', 'tests/reinforcements.test.js', 'tests/mission-integration.test.js', 'tests/armory-economy.test.js', 'tests/armory-models.test.js'];
 function run() {
   const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...tests], { cwd: root, encoding: 'utf8', timeout: 60000 });
   if (result.error) throw result.error;
@@ -51,6 +51,9 @@ const mutations = [
   { name: 'AI simulation timers double-count a tick', file: 'src/game/ai.ts', from: 'this.stateTime += dt; this.lastSeenT += dt; this.coverAge += dt;', to: 'this.stateTime += dt * 2; this.lastSeenT += dt; this.coverAge += dt;' },
   { name: 'recycled actors keep old objective credit IDs', file: 'src/game/ai.ts', from: 'this.id = enemyCounter++;', to: 'this.id = this.id;' },
   { name: 'mission marker geometry exceeds budget', file: 'src/game/systems/mission-markers.ts', from: 'new THREE.RingGeometry(0.98, 1, 48)', to: 'new THREE.RingGeometry(0.98, 1, 512)' },
+  { name: 'per-kill cash constant drifted', file: 'src/game/economy/rewards.ts', from: '{ kill: 100, headshot:', to: '{ kill: 101, headshot:' },
+  { name: 'magazine multiplier applied before flat addition', file: 'src/game/economy/stats.ts', from: 'const magGrown = base.magSize + add(m => m.magAdd);', to: 'const magGrown = base.magSize * mul(m => m.magMul) + add(m => m.magAdd);' },
+  { name: 'suppressor quiets 1% less', file: 'src/game/economy/catalog.ts', from: 'mods: { noiseRadiusMul: 0.3, damageMul: 0.92,', to: 'mods: { noiseRadiusMul: 0.31, damageMul: 0.92,' },
 ];
 
 for (const mutation of mutations) {

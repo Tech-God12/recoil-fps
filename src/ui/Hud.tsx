@@ -7,7 +7,7 @@ export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
   feed: { id: number; text: string; headshot: boolean }[];
   dmgArcs: { id: number; dir: number; opacity: number }[];
-  scorePops: { id: number; text: string; headshot: boolean }[];
+  scorePops: { id: number; text: string; headshot: boolean; cash?: boolean }[];
   banner: { id: number; label: string } | null;
   callout: { id: number; text: string } | null;
   flashPow: number;
@@ -87,13 +87,18 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         <div className="compass-bear cut-xs hud-chip">{Math.round(hud.bearing).toString().padStart(3, '0')}<span> DEG</span></div>
       </div>
 
+      {/* ============ CASH ============ */}
+      <div className="hud-cash mono" aria-label={`Cash ${hud.cash}`}>
+        <span>$</span>{hud.cash.toLocaleString('en-US')}
+      </div>
+
       {/* ============ KILL FEED + FPS ============ */}
       <div className="absolute top-14 right-5 flex flex-col items-end gap-1.5">
         {fx.feed.map(f => (
           <div key={f.id} className="feed-row text-right">
             <span className="text-[var(--acc)] font-black">YOU</span>
             <span className="mono text-[var(--cyber)] text-[9px] mx-1.5">{f.text.split('  ')[1]}</span>
-            {f.headshot && <span className="text-[var(--danger)] font-black mr-1">☠</span>}
+            {f.headshot && <span className="text-[var(--danger)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
             <span className="text-white/90">{f.text.split('  ')[2]}</span>
           </div>
         ))}
@@ -109,7 +114,7 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         </div>
       )}
       {/* Sniper scope tube mask — the world outside the optic circle goes dark. */}
-      {hud.ads >= 0.3 && hud.weapon.includes('SNIPER') && (
+      {hud.ads >= 0.3 && hud.reticle === 'sniper' && (
         <div className="scope-mask" style={{ opacity: Math.min(1, (hud.ads - 0.3) / 0.4) }} />
       )}
       {hud.ads >= 0.3 && (
@@ -117,7 +122,7 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center"
           style={{ opacity: Math.min(1, (hud.ads - 0.3) / 0.4) }}
         >
-          {hud.weapon.includes('SNIPER') ? (
+          {hud.reticle === 'sniper' ? (
             <div className="relative w-[320px] h-[320px] rounded-full shadow-[0_0_60px_rgba(0,0,0,0.85)] flex items-center justify-center">
               <div className="absolute rounded-full ring-1 ring-black/60" style={{ inset: 6 }} />
               <div className="absolute w-full h-px bg-black/75" />
@@ -130,9 +135,22 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
               ))}
               <div className="absolute w-1.5 h-1.5 rounded-full bg-[var(--danger)] shadow-[0_0_9px_var(--danger)]" />
             </div>
+          ) : hud.reticle === 'dot' ? (
+            <div className="absolute w-[2px] h-[2px] rounded-full bg-[var(--volt)] shadow-[0_0_4px_var(--volt)]" />
+          ) : hud.reticle === 'holo' ? (
+            <div className="relative w-16 h-16 flex items-center justify-center">
+              <div className="absolute w-14 h-14 rounded-full border border-[var(--acc)]/90" />
+              <div className="absolute w-[3px] h-[3px] rounded-full bg-[var(--acc)] shadow-[0_0_5px_var(--acc)]" />
+            </div>
+          ) : hud.reticle === 'acog' ? (
+            <div className="relative w-10 h-20 flex flex-col items-center justify-start pt-2">
+              <div className="acog-chev" />
+              <div className="acog-bdc" />
+              <div className="acog-bdc short" />
+              <div className="acog-bdc short" />
+            </div>
           ) : (
             <div className="relative w-9 h-9 flex items-center justify-center">
-
               <div className="absolute w-[3px] h-[3px] rounded-full bg-red-400 shadow-[0_0_3px_1px_#ff3333]" />
             </div>
           )}
@@ -203,7 +221,7 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
       )}
       <div className="absolute left-1/2 top-[57%] -translate-x-1/2 flex flex-col items-center gap-1">
         {fx.scorePops.map(p => (
-          <div key={p.id} className={`score-pop font-black tracking-[0.22em] ${p.headshot ? 'text-[var(--danger)] text-base glow-red' : 'text-[var(--acc)] text-sm glow-acc'}`}>{p.text}</div>
+          <div key={p.id} className={`score-pop font-black tracking-[0.22em] ${p.cash ? 'cash-pop' : p.headshot ? 'text-[var(--danger)] text-base glow-red' : 'text-[var(--acc)] text-sm glow-acc'}`}>{p.text}</div>
         ))}
       </div>
 
@@ -255,6 +273,12 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
       {/* ============ AMMO ============ */}
       <div className="absolute bottom-7 right-8 text-right">
         <div className="weapon-name">{hud.weapon}</div>
+        <div className="weapon-card mono" aria-label="Loadout">
+          <span className={hud.heldSlot === 'primary' ? 'held' : ''}>1 · {hud.heldSlot === 'primary' ? hud.weapon : hud.secondaryWeapon}</span>
+          {hud.secondaryWeapon && (
+            <span className={hud.heldSlot === 'secondary' ? 'held' : ''}>2 · {hud.heldSlot === 'secondary' ? hud.weapon : hud.secondaryWeapon}</span>
+          )}
+        </div>
         <div className="flex items-end justify-end gap-2.5">
           <span key={displayedMag} className={`ammo-num tabnum ${displayedMag === 0 ? 'ammo-empty' : displayedMag <= 5 ? 'ammo-warn' : ''}`}>
             {displayedMag}
@@ -270,6 +294,16 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
             }} />
           ))}
         </div>
+        {(hud.masterkey || hud.bipodDeployed) && (
+          <div className="hud-tags mono">
+            {hud.masterkey && (
+              <span className={hud.masterkey.shells > 0 ? '' : 'dry'}>
+                MK {hud.masterkey.reloading ? '···' : `${'●'.repeat(hud.masterkey.shells)}${'○'.repeat(Math.max(0, 3 - hud.masterkey.shells))}`} [B]
+              </span>
+            )}
+            {hud.bipodDeployed && <span className="bipod">BIPOD DEPLOYED</span>}
+          </div>
+        )}
         <div className="flex justify-end gap-3 mt-2.5 nade-row">
           <span className={hud.frags > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">G</span>FRAG ×{hud.frags}</span>
           <span className={hud.flashes > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">F</span>FLASH ×{hud.flashes}</span>
@@ -285,7 +319,9 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
             <span className="keycap">WASD</span> MOVE
             <i /><span className="keycap">RMB</span> SCOPE
             <i /><span className="keycap">G</span> HOLD FRAG
-            <i /><span className="keycap">Q/E</span> LEAN
+            <i /><span className="keycap">1/2</span> SWAP
+            <i /><span className="keycap">Q</span> LAST
+            <i /><span className="keycap">Q·E</span> HOLD LEAN
             <i /><span className="keycap">SPACE</span> VAULT
             <i /><span className="keycap">X</span> ATTACH / BLAST
           </span>

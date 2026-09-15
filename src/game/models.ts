@@ -387,36 +387,18 @@ export function buildM4(): WeaponModel {
   b.cyl(0.005, 0.005, 0.006, D, 0.030, 0.030, -0.300, Math.PI / 2); // emitter
   b.cyl(0.006, 0.006, 0.004, D, 0.030, 0.036, -0.345);              // dial
   b.box(0.010, 0.004, 0.016, D, 0.030, 0.041, -0.330);              // fire button
-  // ---- HK diopter drum (rear BUIS, hides with the optic) ----
+  // ---- HK diopter drum (rear BUIS, stock irons — bare spawn) ----
   opb.box(0.030, 0.006, 0.030, D, 0, 0.043, -0.045);                 // diopter base
   opb.cyl(0.009, 0.009, 0.020, D, 0, 0.050, -0.045, 0, 0, Math.PI / 2, 12); // rotating drum
   opb.cyl(0.003, 0.003, 0.022, D, 0, 0.050, -0.045, 0, 0, Math.PI / 2, 8); // aperture bore
-  // ---- EXPS holo (open frame, see-through) ----
-  opb.box(0.038, 0.010, 0.050, D, 0, 0.048, -0.11);                 // QD mount
-  opb.box(0.012, 0.014, 0.030, D, -0.024, 0.048, -0.11);            // QD lever
-  opb.box(0.040, 0.014, 0.052, D, 0, 0.058, -0.11);                 // battery housing
-  opb.box(0.005, 0.028, 0.042, D, -0.019, 0.072, -0.11);            // left wall
-  opb.box(0.005, 0.028, 0.042, D, 0.019, 0.072, -0.11);             // right wall
-  opb.box(0.043, 0.005, 0.042, D, 0, 0.088, -0.11);                 // top hood
-  opb.box(0.043, 0.008, 0.006, D, 0, 0.082, -0.132);                // front brow
+  // M416 now spawns bare — no EXPS holo. Player must buy optics in Armory.
   skb.build(skG); g.add(skG);
   brb.build(brG); g.add(brG);
   ubb.build(ubG); g.add(ubG);
   opb.build(opG); g.add(opG);
   b.build(g);
-  // glass panes + glowing reticle (center dot + 65MOA ring) — hidden in ADS, HUD draws the single clean sight
+  // No glass/reticle on bare irons — irons are physical mesh only.
   const adsHidden: THREE.Object3D[] = [];
-  const glassF = new THREE.Mesh(new THREE.PlaneGeometry(0.032, 0.024), WM.glass);
-  glassF.position.set(0, SIGHT_Y, -0.131); g.add(glassF);
-  const glassR = glassF.clone(); glassR.position.z = -0.090; g.add(glassR);
-  adsHidden.push(glassF, glassR);
-  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0015, 12), WM.reticle);
-  dot.position.set(0, SIGHT_Y, -0.0895); g.add(dot);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.0060, 0.0070, 24), WM.reticle.clone());
-  (ring.material as THREE.MeshBasicMaterial).transparent = true;
-  (ring.material as THREE.MeshBasicMaterial).opacity = 0.9;
-  ring.position.set(0, SIGHT_Y, -0.0895); g.add(ring);
-  adsHidden.push(dot, ring);
   // ---- STANAG (animated) ----
   const mag = new THREE.Group();
   const mb = new GunBuilder();

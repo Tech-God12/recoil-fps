@@ -53,8 +53,8 @@ interface ViewerApi {
   center: THREE.Vector3;
 }
 
-const FIT_RADIUS = 0.42;
-const BASE_DIST = FIT_RADIUS / Math.tan(THREE.MathUtils.degToRad(16));
+const FIT_RADIUS = 0.68;
+const BASE_DIST = FIT_RADIUS / Math.tan(THREE.MathUtils.degToRad(18));
 
 function hideArms(model: WeaponModel): void {
   model.group.traverse(o => {
@@ -159,7 +159,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     const api: ViewerApi = {
       renderer, scene, camera, fitGroup, model: null,
       yaw: 0.65, pitch: 0.18, targetYaw: 0.65, targetPitch: 0.18,
-      zoom: 1, targetZoom: 1, lastInput: performance.now() - 5000,
+      zoom: 0.78, targetZoom: 0.78, lastInput: performance.now() - 5000,
       transition: null, incoming: null, flashes: [], ownedMats: [],
       slots: [], hotspotEls: new Map(), activeSlot: null, raf: 0,
       disposed: false, center: new THREE.Vector3(),
@@ -404,6 +404,16 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     inner.add(model.group);
     model.group.position.copy(sphere.center).negate();
 
+    // Fix stuck skeleton graphic on rapid clicks: dispose any in-flight transition immediately.
+    if (api.transition) {
+      api.scene.remove(api.transition.group);
+      disposeGroup(api.transition.group);
+      api.transition = null;
+    }
+    if (api.incoming) {
+      api.fitGroup.position.x = 0;
+      api.incoming = null;
+    }
     const old = api.model;
     if (old) {
       const oldMats: THREE.MeshStandardMaterial[] = [];
@@ -422,7 +432,6 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
           }
         }
       });
-      // outgoing group must render in scene space, not inside the re-fitted group
       const parent = old.group.parent;
       const ws = new THREE.Vector3();
       const wp = new THREE.Vector3();

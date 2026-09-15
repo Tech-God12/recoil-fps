@@ -97,9 +97,9 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'sniper', boltAction: true, scoped: true,
   },
   {
-    id: 'mp7', name: 'MP', short: 'MP', cls: 'PDW', slot: 'primary',
+    id: 'mp7', name: 'MP', short: 'MP', cls: 'PDW', slot: 'secondary',
     price: 2400, starter: false,
-    blurb: 'Pocket firestorm. 900 RPM of 4.6mm for room-clearing on a budget — climbs if you hold the trigger.',
+    blurb: 'Pocket firestorm. 900 RPM of 4.6mm for room-clearing on a budget — climbs if you hold the trigger. Now fielded as a secondary.',
     base: base({ auto: true, rpm: 900, damage: 24, headMul: 2.2, limbMul: 0.8, magSize: 40, reserve: 200, hipSpread: 0.011, pattern: [[0.6, 0.15], [0.75, -0.2], [0.85, 0.25], [0.9, -0.1]], adsFov: 60, tacReload: 1.9, emptyReload: 2.3, adsTime: 0.18, noiseRadius: 55 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail'],
     audio: 'smg',
@@ -147,6 +147,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
 ];
 
 const RIFLES: WeaponId[] = ['m4a1', 'ak47', 'scar_h', 'vector', 'mp7', 'spas12', 'm249'];
+const ALL_WEAPONS: WeaponId[] = ['m4a1', 'ak47', 'm1911', 'awm', 'mp7', 'scar_h', 'vector', 'spas12', 'deagle', 'm249'];
 
 export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
   // ---------------- MUZZLE ----------------
@@ -258,6 +259,43 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     cons: ['Useless inside 20 m'],
     mods: { scopeReticle: 'sniper', adsFovDelta: -8, swayMulCrouched: 0.7 },
     visual: 'scope_hp',
+  },
+  // --- PUBG-style variable zoom optics — work on every weapon ---
+  {
+    id: 'opt_2x', slot: 'optic', name: '2× Scope', price: 600, tier: 1,
+    compat: ALL_WEAPONS,
+    desc: 'Compact 2× prism. PUBG-style fast acquisition with mild zoom — great on ARs and SMGs.',
+    pros: ['2× magnification', 'Fast ADS'],
+    cons: ['Mild zoom only'],
+    mods: { scopeReticle: 'acog', adsFovOverride: 32, adsTimeMul: 1.05, falloffStartAdd: 6 },
+    visual: 'scope_2x',
+  },
+  {
+    id: 'opt_3x', slot: 'optic', name: '3× Scope', price: 850, tier: 2,
+    compat: ALL_WEAPONS,
+    desc: 'Fixed 3× combat scope with rangefinder reticle. Sweet spot for mid-range AR work.',
+    pros: ['3× magnification', '+12 m effective range'],
+    cons: ['Slower ADS'],
+    mods: { scopeReticle: 'acog', adsFovOverride: 24, adsTimeMul: 1.12, falloffStartAdd: 12 },
+    visual: 'scope_3x',
+  },
+  {
+    id: 'opt_4x', slot: 'optic', name: '4× Scope', price: 1100, tier: 2,
+    compat: ALL_WEAPONS,
+    desc: 'Full-size 4× ACOG-style. Tight zoom for lane-holding and overwatch.',
+    pros: ['4× magnification', '+18 m effective range'],
+    cons: ['Slower ADS', 'Narrow FOV'],
+    mods: { scopeReticle: 'acog', adsFovOverride: 16, adsTimeMul: 1.18, falloffStartAdd: 18 },
+    visual: 'scope_4x',
+  },
+  {
+    id: 'opt_6x', slot: 'optic', name: '6× Scope', price: 1500, tier: 3,
+    compat: ALL_WEAPONS,
+    desc: 'Heavy 6× marksman scope. PUBG-style long-range glass — tap V to drop to 3× when enemies push.',
+    pros: ['6× / 3× toggle (V)', 'Long-range chevron'],
+    cons: ['Heavy', 'Slow ADS'],
+    mods: { scopeReticle: 'sniper', adsFovOverride: 10, adsTimeMul: 1.28, falloffStartAdd: 24, lpvo: true },
+    visual: 'scope_6x',
   },
   {
     id: 'opt_pistol_rmr', slot: 'optic', name: 'Pistol Red Dot', price: 500, tier: 2,

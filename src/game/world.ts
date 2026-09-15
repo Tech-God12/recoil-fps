@@ -72,6 +72,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   const cobble = M.cobbleLane ?? M.plaza, dryBed = M.wadiBed ?? M.sand;
 
   // ---- material cache for colored accents (shared instances so they merge) ----
+  const isKasbah = mapId === 'kasbah';
   const matCache = new Map<string, THREE.MeshStandardMaterial>();
   const col = (hex: number, rough = 0.85, metal = 0, emissive = 0, side: THREE.Side = THREE.FrontSide) => {
     const k = `${hex}-${rough}-${metal}-${emissive}-${side}`;
@@ -83,9 +84,16 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     }
     return m;
   };
-  const ACC_TURQ = col(0x2C7C8E, 0.7), ACC_TERRA = col(0x9A4A2E), METAL = col(0x2C2C2A, 0.5, 0.7);
-  const GLOW = col(0xFFE2A8, 0.4, 0, 2.4), FROND = col(0x4E6B34, 0.85, 0, 0, THREE.DoubleSide);
-  const FABRIC = [0xB0402E, 0x2E6BA0, 0x3E7B52, 0xC7A24B, 0x8C4E86].map(c => col(c, 0.9, 0, 0, THREE.DoubleSide));
+  // Distinct palettes per map: alrasul = desert turquoise + sand, kasbah = fortified stone + terracotta + olive
+  const ACC_TURQ = col(isKasbah ? 0x3A6A7A : 0x2C7C8E, 0.7);
+  const ACC_TERRA = col(isKasbah ? 0x8B3A1A : 0x9A4A2E, isKasbah ? 0.8 : 0.85);
+  const METAL = col(isKasbah ? 0x3A3A38 : 0x2C2C2A, 0.5, 0.7);
+  const GLOW = col(isKasbah ? 0xFFD4A0 : 0xFFE2A8, 0.4, 0, isKasbah ? 2.0 : 2.4);
+  const FROND = col(isKasbah ? 0x3D5A2E : 0x4E6B34, 0.85, 0, 0, THREE.DoubleSide);
+  const FABRIC = (isKasbah
+    ? [0x8B2E1E, 0x5A3A2A, 0x6B4A2A, 0x8C6A3A, 0x5A5A3A]
+    : [0xB0402E, 0x2E6BA0, 0x3E7B52, 0xC7A24B, 0x8C4E86]
+  ).map(c => col(c, 0.9, 0, 0, THREE.DoubleSide));
 
   const accent = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.83, side: THREE.DoubleSide });
   const emissiveAccent = new THREE.MeshStandardMaterial({ vertexColors: true, color: 0xffffff, emissive: 0xffa65b, emissiveIntensity: 1.6 });
@@ -370,7 +378,6 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   function terrain(size: number, inner: number) {
     const coordinates: number[] = [];
     if (mapId === 'kasbah') {
-      // Solid terrace decks carry elevation here; the sand needs no dense river-bank grid.
       for (let i = 0; i <= 48; i++) coordinates.push(i * size / 48 - size / 2);
     } else {
       for (let x = -size / 2; x <= size / 2; x += 2) if (Math.abs(x) <= 120 || x % 20 === 0) coordinates.push(x);
@@ -388,7 +395,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     }
     g.computeVertexNormals();
     g.rotateX(-Math.PI / 2);
-    push(g, M.sand);
+    // Distinct ground: alrasul = sand/wadi, kasbah = stone/rocky terrace
+    push(g, isKasbah ? (M.stoneBlock ?? M.sand) : M.sand);
   }
   function perimeter(half: number) {
     const pm = M.adobeBrick;

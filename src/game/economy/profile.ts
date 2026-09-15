@@ -28,24 +28,34 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 export const PROFILE_KEY = 'recoilfps.profile.v2';
 const LEGACY_PROFILE_KEY = 'recoilfps.profile.v1';
 
+export const INFINITE_CASH = 9999999;
+
 export const DEFAULT_PROFILE: PlayerProfile = {
   v: 1,
   cash: 0,
   lifetimeCash: 0,
   missions: 0,
   kills: 0,
-  ownedWeapons: ['m4a1', 'm1911'],
+  ownedWeapons: ['m4a1', 'mp7', 'm1911'],
   ownedAttachments: {},
   builds: {
     m4a1: { weapon: 'm4a1', attachments: {} },
+    mp7: { weapon: 'mp7', attachments: {} },
     m1911: { weapon: 'm1911', attachments: {} },
   },
   loadout: {
     primary: { weapon: 'm4a1', attachments: {} },
-    secondary: { weapon: 'm1911', attachments: {} },
+    secondary: { weapon: 'mp7', attachments: {} },
   },
   skins: {},
   seenArmoryTutorial: false,
+};
+
+/** Testing profile with infinite money so every gun can be tried. */
+export const TEST_PROFILE: PlayerProfile = {
+  ...DEFAULT_PROFILE,
+  cash: INFINITE_CASH,
+  lifetimeCash: INFINITE_CASH,
 };
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
@@ -72,6 +82,7 @@ export function migrateProfile(raw: unknown): PlayerProfile {
     const ownedWeapons = (Array.isArray(d.ownedWeapons) ? d.ownedWeapons : [])
       .filter((id): id is WeaponId => typeof id === 'string' && !!weaponById(id));
     if (!ownedWeapons.includes('m4a1')) ownedWeapons.unshift('m4a1');
+    if (!ownedWeapons.includes('mp7')) ownedWeapons.push('mp7');
     if (!ownedWeapons.includes('m1911')) ownedWeapons.push('m1911');
 
     const ownedAttachments: PlayerProfile['ownedAttachments'] = {};
@@ -139,17 +150,37 @@ export function migrateProfile(raw: unknown): PlayerProfile {
 }
 
 export function loadProfile(storage?: Store): PlayerProfile {
+  const isDefaultStore = !storage;
   const store = storage ?? defaultStore();
-  if (!store) return structuredClone(DEFAULT_PROFILE);
+  if (!store) {
+    // No storage (Node tests) — keep deterministic zero-cash default.
+    // In browser without storage (private mode) we still give infinite for testing.
+    if (typeof window !== 'undefined') {
+      return structuredClone(TEST_PROFILE);
+    }
+    return structuredClone(DEFAULT_PROFILE);
+  }
   try {
     const raw = store.getItem(PROFILE_KEY);
-    if (raw) return migrateProfile(raw);
+    if (raw) {
+      const p = migrateProfile(raw);
+      // Infinite money for testing — always top up to INFINITE_CASH in the browser.
+      if (isDefaultStore && p.cash < INFINITE_CASH) {
+        p.cash = INFINITE_CASH;
+        p.lifetimeCash = Math.max(p.lifetimeCash, INFINITE_CASH);
+      }
+      return p;
+    }
     // One-time v1 → v2 migration: stale saves kept long-equipped kits forever,
     // so spawns arrived with silencers and drum mags. Keep all progress and
     // ownership, but strip every equipped attachment — spawns are bare
     // iron-sight guns with stock mags until the armory equips something new.
     const legacy = store.getItem(LEGACY_PROFILE_KEY);
-    if (!legacy) return structuredClone(DEFAULT_PROFILE);
+    if (!legacy) {
+      // Fresh player in browser — start with infinite cash for testing.
+      if (isDefaultStore && typeof window !== 'undefined') return structuredClone(TEST_PROFILE);
+      return structuredClone(DEFAULT_PROFILE);
+    }
     const moved = migrateProfile(legacy);
     for (const [w, build] of Object.entries(moved.builds)) {
       if (build) moved.builds[w as WeaponId] = { weapon: build.weapon, attachments: {} };
@@ -159,6 +190,11 @@ export function loadProfile(storage?: Store): PlayerProfile {
       moved.loadout[s] = slot.skin
         ? { weapon: slot.weapon, attachments: {}, skin: slot.skin }
         : { weapon: slot.weapon, attachments: {} };
+    }
+    // Infinite money for testing even after v1 migration
+    if (isDefaultStore && moved.cash < INFINITE_CASH) {
+      moved.cash = INFINITE_CASH;
+      moved.lifetimeCash = Math.max(moved.lifetimeCash, INFINITE_CASH);
     }
     try { store.setItem(PROFILE_KEY, JSON.stringify(moved)); } catch { /* optional */ }
     try { (store as unknown as { removeItem?: (k: string) => void }).removeItem?.(LEGACY_PROFILE_KEY); } catch { /* optional */ }

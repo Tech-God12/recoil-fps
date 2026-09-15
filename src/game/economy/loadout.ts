@@ -19,7 +19,7 @@ export const emptyBuild = (weapon: WeaponId): WeaponBuild => ({ weapon, attachme
 
 export const DEFAULT_LOADOUT: Loadout = {
   primary: { weapon: 'm4a1', attachments: {} },
-  secondary: { weapon: 'm1911', attachments: {} },
+  secondary: { weapon: 'mp7', attachments: {} },
 };
 
 /** Class rule: pistols ride secondary only, everything else primary only. */
@@ -59,7 +59,7 @@ export function repairLoadout(loadout: unknown, owned: WeaponId[]): Loadout {
     return { weapon: ownedForSlot?.id ?? fallback, attachments: {} };
   };
   const primary = pick('primary', 'm4a1');
-  let secondary = pick('secondary', 'm1911');
-  if (secondary.weapon === primary.weapon) secondary = { weapon: 'm1911', attachments: {} };
+  let secondary = pick('secondary', 'mp7');
+  if (secondary.weapon === primary.weapon) secondary = { weapon: 'mp7', attachments: {} };
   return { primary, secondary };
 }

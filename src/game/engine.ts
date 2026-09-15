@@ -1471,7 +1471,7 @@ void main(){
           else { this.streak = 1; this.streakPaidMark = 0; }
           this.lastKillT = now;
           if (this.streak >= 2) {
-            const label = this.streak >= 5 ? 'UNSTOPPABLE' : this.streak === 4 ? 'MEGA KILL' : this.streak === 3 ? 'MULTI KILL' : 'DOUBLE KILL';
+            const label = this.streak >= 7 ? 'RAMPAGE' : this.streak >= 6 ? 'UNSTOPPABLE' : this.streak === 5 ? 'PENTA KILL' : this.streak === 4 ? 'QUAD KILL' : this.streak === 3 ? 'TRIPLE KILL' : 'DOUBLE KILL';
             voice.streak(label);
             this.onEvent({ type: 'streak', label });
             const sb = streakAward(this.streak, this.streakPaidMark, 500 - this.streakPaidRun);

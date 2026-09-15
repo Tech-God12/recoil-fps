@@ -245,6 +245,73 @@ function scope_hp(_ctx: AttachContext): THREE.Object3D {
   return p;
 }
 
+function scope_2x(_ctx: AttachContext): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  b.box(0.032, 0.008, 0.060, WM.dark, 0, 0.004, 0);
+  b.box(0.030, 0.012, 0.065, WM.dark, 0, 0.020, 0);
+  b.cyl(0.013, 0.013, 0.022, WM.dark, 0, 0.022, -0.038, Math.PI/2, 0,0,18,true);
+  b.cyl(0.012, 0.012, 0.022, WM.scopeInner, 0, 0.022, -0.038, Math.PI/2, 0,0,18,true);
+  b.build(p);
+  opticLens(p, 0.011, 0.022, -0.048);
+  opticLens(p, 0.009, 0.022, 0.028);
+  const chev = new THREE.Mesh(new THREE.ConeGeometry(0.002, 0.004, 4), WM.reticle);
+  chev.position.set(0,0.022,0.027); chev.userData.adsHide=true; p.add(chev);
+  p.userData.lensH = 0.022;
+  return p;
+}
+function scope_3x(_ctx: AttachContext): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  b.box(0.032, 0.008, 0.075, WM.dark, 0, 0.004, 0);
+  b.box(0.034, 0.014, 0.080, WM.dark, 0, 0.022, 0);
+  b.cyl(0.014, 0.014, 0.028, WM.dark, 0, 0.024, -0.050, Math.PI/2, 0,0,18,true);
+  b.cyl(0.013, 0.013, 0.028, WM.scopeInner, 0, 0.024, -0.050, Math.PI/2, 0,0,18,true);
+  b.box(0.010, 0.006, 0.050, WM.tritium, 0, 0.034, 0);
+  b.build(p);
+  opticLens(p, 0.012, 0.024, -0.062);
+  opticLens(p, 0.010, 0.024, 0.038);
+  const chev = new THREE.Mesh(new THREE.ConeGeometry(0.0022, 0.005, 4), WM.reticle);
+  chev.position.set(0,0.024,0.037); chev.userData.adsHide=true; p.add(chev);
+  p.userData.lensH = 0.024;
+  return p;
+}
+function scope_4x(_ctx: AttachContext): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  b.box(0.034, 0.010, 0.090, WM.dark, 0, 0.005, 0);
+  b.box(0.036, 0.012, 0.095, WM.dark, 0, 0.024, 0);
+  b.cyl(0.016, 0.016, 0.032, WM.dark, 0, 0.026, -0.060, Math.PI/2, 0,0,18,true);
+  b.cyl(0.0145, 0.0145, 0.032, WM.scopeInner, 0, 0.026, -0.060, Math.PI/2, 0,0,18,true);
+  b.box(0.010, 0.006, 0.060, WM.tritium, 0, 0.036, 0);
+  b.build(p);
+  opticLens(p, 0.014, 0.026, -0.074);
+  opticLens(p, 0.012, 0.026, 0.046);
+  const chev = new THREE.Mesh(new THREE.ConeGeometry(0.0024, 0.0055, 4), WM.reticle);
+  chev.position.set(0,0.026,0.045); chev.userData.adsHide=true; p.add(chev);
+  p.userData.lensH = 0.026;
+  return p;
+}
+function scope_6x(_ctx: AttachContext): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  b.box(0.030, 0.010, 0.160, WM.dark, 0, 0.005, 0);
+  b.cyl(0.016, 0.016, 0.160, WM.dark, 0, 0.028, 0, Math.PI/2, 0,0,22,true);
+  b.cyl(0.0148, 0.0148, 0.160, WM.scopeInner, 0, 0.028, 0, Math.PI/2, 0,0,22,true);
+  b.cyl(0.024, 0.017, 0.050, WM.dark, 0, 0.028, -0.100, Math.PI/2, 0,0,22,true);
+  b.cyl(0.0225, 0.0158, 0.050, WM.scopeInner, 0, 0.028, -0.100, Math.PI/2, 0,0,22,true);
+  b.cyl(0.019, 0.015, 0.040, WM.dark, 0, 0.028, 0.095, Math.PI/2, 0,0,22,true);
+  b.cyl(0.0175, 0.0138, 0.040, WM.scopeInner, 0, 0.028, 0.095, Math.PI/2, 0,0,22,true);
+  b.cyl(0.012, 0.012, 0.024, WM.darkSteel, 0, 0.048, 0, 0,0,0);
+  b.cyl(0.012, 0.012, 0.024, WM.darkSteel, 0.028, 0.028, 0, 0,0,Math.PI/2);
+  b.build(p);
+  opticLens(p, 0.022, 0.028, -0.123);
+  opticLens(p, 0.014, 0.028, 0.113);
+  opticDot(p, 0.028, 0.112, 0.0016);
+  p.userData.lensH = 0.028;
+  return p;
+}
+
 function pistol_rmr(_ctx: AttachContext): THREE.Object3D {
   const p = group();
   const b = new GunBuilder();
@@ -559,7 +626,7 @@ function ported_slide(_ctx: AttachContext): THREE.Object3D {
 
 export const ATTACHMENT_BUILDERS: Record<string, AttachmentBuilder> = {
   flash_hider, compensator, suppressor_long, suppressor_fat, brake_heavy, duckbill, choke,
-  reddot, holo, acog, lpvo, scope_hp, pistol_rmr,
+  reddot, holo, acog, lpvo, scope_hp, scope_2x, scope_3x, scope_4x, scope_6x, pistol_rmr,
   mag_ext, mag_drum, mag_coupled, shell_tube, belt_box_large, mag_box_sr,
   vgrip, agrip, bipod, masterkey,
   stock_none, stock_heavy, stock_folding,

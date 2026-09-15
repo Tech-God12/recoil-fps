@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import type { CashLogEntry, GameSettings } from '../game/engine';
 import { weaponById } from '../game/economy/catalog';
 import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
@@ -22,7 +22,7 @@ const Arrow = () => (
 );
 
 /* ================================================================
-   MAIN MENU — OPS BOARD (print-room, tactile)
+   MAIN MENU — NO SCROLL, SIDE-BY-SIDE MAP PREVIEWS CENTER, HOVER OVERHEAD
    ================================================================ */
 export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: {
   s: GameSettings; onDeploy: () => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
@@ -33,8 +33,12 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
   const secondaryName = weaponById(prof.loadout.secondary.weapon)?.short ?? '—';
   const selectedMap = MAPS.find(map => map.id === s.map) ?? MAPS[0];
+  const [hoverMap, setHoverMap] = useState<GameSettings['map'] | null>(null);
+  const [showRoute, setShowRoute] = useState(false);
+  const displayMission = hoverMap ? getMission(hoverMap) : mission;
+
   return (
-    <main className="menu-root">
+    <main className="menu-root no-scroll">
       <div className="menu-bg" aria-hidden="true" />
       <div className="paper-grain" aria-hidden="true" />
 
@@ -42,21 +46,24 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
         <a href="#" onClick={e => e.preventDefault()} className="wordmark" aria-label="Recoil home">
           RECOIL
         </a>
-        <button className="util-btn" onClick={onSettings}>Settings</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="util-btn" onClick={onArmory}>Armory</button>
+          <button className="util-btn" onClick={onSettings}>Settings</button>
+        </div>
       </header>
 
-      <div className="menu-layout">
-        <section>
+      <div className="menu-layout no-scroll-layout">
+        <section className="menu-left">
           <span className="menu-eyebrow seq" style={{ animationDelay: '.06s' }}>Operation brief</span>
           <h1 className="menu-title seq" style={{ animationDelay: '.12s' }}>
-            {mission.name}
-            <small>{mission.brief.split(' — ')[0] ?? 'Field operations'}</small>
+            {displayMission.name}
+            <small>{displayMission.brief.split(' — ')[0] ?? 'Field operations'}</small>
           </h1>
           <div className="op-chip seq" style={{ animationDelay: '.18s' }}>
             <span>Op</span>
-            <strong>{mission.name}</strong>
+            <strong>{displayMission.name}</strong>
           </div>
-          <p className="menu-brief seq" style={{ animationDelay: '.24s' }}>{mission.brief}</p>
+          <p className="menu-brief seq" style={{ animationDelay: '.24s' }}>{displayMission.brief}</p>
 
           <div className="seq" style={{ animationDelay: '.30s' }}>
             <button className="deploy-btn" onClick={onDeploy}>
@@ -69,14 +76,10 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
               Armory <span>Loadout · ${prof.cash.toLocaleString('en-US')}</span>
             </button>
 
-            <div className="menu-loadout" aria-label="Fielded loadout">
+            <div className="menu-loadout" aria-label="Equipped loadout">
               <span><b>1</b> {primaryName}</span>
               <span><b>2</b> {secondaryName}</span>
             </div>
-
-            <button className="menu-secondary-btn" onClick={onSettings}>
-              Settings <span>Controls · Audio · Graphics</span>
-            </button>
           </div>
 
           <div className="input-legend seq" style={{ animationDelay: '.36s' }}>
@@ -84,61 +87,87 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
             <span className="keycap">RMB</span><span>Aim</span>
             <span className="keycap">1/2</span><span>Swap</span>
             <span className="keycap">Q</span><span>Last</span>
-            <span className="keycap">Q·E</span><span>Lean</span>
             <span className="keycap">G</span><span>Frag</span>
-            <span className="keycap">X</span><span>Plant</span>
             <span className="keycap">Esc</span><span>Pause</span>
           </div>
         </section>
 
-        <section className="anim-slide" style={{ animationDelay: '.18s' }} aria-label="Choose a mission">
-          <div className="sec-label"><span>Area of operations</span><span>{s.map === 'kasbah' ? '02' : '01'} / 02</span></div>
-          {MAPS.map((map, index) => {
-            const opt = getMission(map.id);
-            const active = map.id === s.map;
-            return (
-              <button key={map.id} onClick={() => onMap(map.id)} aria-pressed={active} className={`map-card ${active ? 'selected' : ''}`}>
-                <span className="map-num">0{index + 1}</span>
-                <span className="min-w-0">
-                  <span className="map-name">{map.name}</span>
-                  <span className="map-type">{map.id === 'alrasul' ? 'Desert river valley' : 'Fortified market town'}</span>
-                </span>
-                <span className="map-tag">{opt.phases.length} phases</span>
-              </button>
-            );
-          })}
-
-          <div className="route">
-            <div className="sec-label"><span>Mission route</span><span>{mission.phases.length} objectives</span></div>
-            <ol>
-              {mission.phases.map((p, i) => (
-                <li key={p.id}>
-                  <span className="route-node">0{i + 1}</span>
-                  <div>
-                    <span className="route-title">{p.title}</span>
-                    <span className="route-loc">{p.location}</span>
+        <section className="menu-center anim-slide" style={{ animationDelay: '.18s' }} aria-label="Choose a mission">
+          <div className="sec-label"><span>Area of operations</span><span>{s.map === 'kasbah' ? '02' : '01'} / 02 — hover for overhead</span></div>
+          <div className="map-previews">
+            {MAPS.map((map, index) => {
+              const opt = getMission(map.id);
+              const active = map.id === s.map;
+              const isHovered = hoverMap === map.id;
+              return (
+                <button
+                  key={map.id}
+                  onClick={() => { onMap(map.id); setShowRoute(true); }}
+                  onMouseEnter={() => setHoverMap(map.id)}
+                  onMouseLeave={() => setHoverMap(null)}
+                  aria-pressed={active}
+                  className={`map-preview-card ${active ? 'selected' : ''} ${isHovered ? 'hovered' : ''}`}
+                >
+                  <div className="map-preview-top">
+                    <span className="map-num">0{index + 1}</span>
+                    <span className="map-tag">{opt.phases.length} phases</span>
                   </div>
-                  {(p.type === 'hold' || p.type === 'defend') && <span className="route-timing">{p.seconds}s · {p.type === 'defend' ? 'relay' : 'hold'}</span>}
-                  {p.type === 'destroy' && <span className="route-timing">{p.fuse}s fuse</span>}
-                </li>
-              ))}
-            </ol>
+                  <div className="map-preview-visual" data-map={map.id}>
+                    <div className="map-overhead" aria-hidden="true">
+                      <span className="overhead-grid" />
+                      {map.id === 'alrasul' && <span className="overhead-river" />}
+                      {map.id === 'kasbah' && <span className="overhead-kasbah" />}
+                      {opt.phases.map((p, pi) => (
+                        <span key={p.id} className="overhead-node" style={{ left: `${18 + pi * 16}%`, top: `${30 + (pi % 3) * 18}%` }}>{pi+1}</span>
+                      ))}
+                    </div>
+                    <div className="map-preview-overlay">
+                      <span className="map-name">{map.name}</span>
+                      <span className="map-type">{map.id === 'alrasul' ? 'Desert river valley' : 'Fortified market town'}</span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
-          <p className="menu-rules">Reach the pickup to extract. Clearing the map is not the objective.</p>
+          {showRoute ? (
+            <div className="route route-visible">
+              <div className="sec-label"><span>Mission route — {displayMission.name}</span><span>{displayMission.phases.length} objectives</span></div>
+              <ol>
+                {displayMission.phases.map((p, i) => (
+                  <li key={p.id}>
+                    <span className="route-node">0{i + 1}</span>
+                    <div>
+                      <span className="route-title">{p.title}</span>
+                      <span className="route-loc">{p.location}</span>
+                    </div>
+                    {(p.type === 'hold' || p.type === 'defend') && <span className="route-timing">{p.seconds}s · {p.type === 'defend' ? 'relay' : 'hold'}</span>}
+                    {p.type === 'destroy' && <span className="route-timing">{p.fuse}s fuse</span>}
+                  </li>
+                ))}
+              </ol>
+              <button className="util-btn" style={{ marginTop: 8 }} onClick={() => setShowRoute(false)}>Hide route</button>
+            </div>
+          ) : (
+            <div className="route-placeholder">
+              <p className="menu-rules">Select a sector to view its route. Hover for overhead recon.</p>
+              <button className="util-btn" onClick={() => setShowRoute(true)}>Show route: {mission.name}</button>
+            </div>
+          )}
         </section>
       </div>
 
       <footer className="menu-footer">
         <span>Active sector — <b>{selectedMap.name}</b></span>
-        <span>{s.difficulty} difficulty<i />Unlimited ammo<i />Render · WebGL</span>
+        <span>{s.difficulty} difficulty<i />Infinite funds<i />Render · WebGL</span>
       </footer>
     </main>
   );
 }
 
 /* ================================================================
-   DEPLOY SEQUENCE — STENCIL PLATE
+   DEPLOY SEQUENCE — WITH OBJECTIVES + VOICEOVER
    ================================================================ */
 const BOOT_LINES = [
   'Zeroing optics',
@@ -148,22 +177,72 @@ const BOOT_LINES = [
   'Arming weapons',
 ];
 
-export function BootScreen() {
+const BOOT_OBJECTIVES: Record<string, string[]> = {
+  alrasul: [
+    'Infiltrate river valley',
+    'Secure forward OP',
+    'Hold comms relay',
+    'Destroy enemy cache',
+    'Extract at river bend',
+  ],
+  kasbah: [
+    'Breach market perimeter',
+    'Clear fortified stalls',
+    'Defend intel pickup',
+    'Plant charges on gate',
+    'Exfil via kasbah alley',
+  ],
+};
+
+export function BootScreen({ map, difficulty }: { map?: GameSettings['map']; difficulty?: string } = {}) {
   const [line, setLine] = useState(0);
   const [pct, setPct] = useState(0);
+  const [voiced, setVoiced] = useState(false);
+  const mission = getMission(map ?? 'alrasul');
+  const objectives = BOOT_OBJECTIVES[map ?? 'alrasul'] ?? BOOT_OBJECTIVES.alrasul;
+
   useEffect(() => {
     const l = window.setInterval(() => setLine(i => (i + 1) % BOOT_LINES.length), 840);
-    const p = window.setInterval(() => setPct(v => Math.min(94, v + 2 + Math.floor(Math.random() * 5))), 125);
+    const p = window.setInterval(() => setPct(v => Math.min(96, v + 2 + Math.floor(Math.random() * 5))), 125);
     return () => { window.clearInterval(l); window.clearInterval(p); };
   }, []);
+
+  useEffect(() => {
+    if (voiced) return;
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    try {
+      const utter = new SpeechSynthesisUtterance(
+        `Operation ${mission.name}. ${mission.brief}. Objectives: ${objectives.join(', ')}. Difficulty ${difficulty ?? 'normal'}. Good luck.`
+      );
+      utter.rate = 0.95;
+      utter.volume = 0.7;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+      setVoiced(true);
+    } catch {
+      // Voiceover is optional
+    }
+  }, [mission, objectives, difficulty, voiced]);
+
   return (
     <div className="boot-root" role="status" aria-live="polite">
       <div className="boot-plate anim-rise">
-        <div className="boot-kicker">Deploying</div>
-        <div className="boot-title">Into operation</div>
+        <div className="boot-kicker">Deploying — {map?.toUpperCase() ?? 'ALRASUL'} · {difficulty?.toUpperCase() ?? 'NORMAL'}</div>
+        <div className="boot-title">{mission.name}</div>
         <div className="boot-status"><em>{BOOT_LINES[line]}</em><span className="boot-ellipsis" aria-hidden="true" /></div>
+
+        <div className="boot-objectives">
+          <div className="sec-label"><span>Objectives</span><span className="mono">{objectives.length} phases</span></div>
+          <ol>
+            {objectives.map((o, i) => (
+              <li key={i}><span className="route-node">0{i+1}</span><span>{o}</span></li>
+            ))}
+          </ol>
+          <p className="boot-brief">{mission.brief}</p>
+        </div>
+
         <div className="boot-bar" aria-hidden="true"><span className="boot-bar__fill" style={{ width: `${pct}%` }} /></div>
-        <div className="boot-pct tabular">{String(pct).padStart(3, '0')}%</div>
+        <div className="boot-pct tabular">{String(pct).padStart(3, '0')}% — voiceover active</div>
       </div>
     </div>
   );

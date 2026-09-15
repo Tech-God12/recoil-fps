@@ -10,11 +10,6 @@ import { gradeBonus, gradeFor } from './game/economy/rewards';
 type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
-/**
- * Resolves once the browser has painted. Two animation frames, because the first one
- * fires before paint — a single rAF is not enough to guarantee the loading screen is
- * actually visible before we start blocking the main thread.
- */
 const afterPaint = () => new Promise<void>(resolve => {
   requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
 });
@@ -68,14 +63,19 @@ export default function App() {
     saveProfile(next);
   }, []);
 
-  // Hidden balance-testing affordance: #cash=50000 on the menu grants it once per pageload.
+  // Infinite money for testing + hidden #cash affordance.
   useEffect(() => {
     const m = window.location.hash.match(/#cash=(\d+)/);
-    if (!m) return;
-    const amt = Math.min(999999, parseInt(m[1], 10));
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    if (amt > 0) {
-      updateProfile(grantCash(profileRef.current, amt, 'DEV'));
+    if (m) {
+      const amt = Math.min(9999999, parseInt(m[1], 10));
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      if (amt > 0) {
+        updateProfile(grantCash(profileRef.current, amt, 'DEV'));
+        return;
+      }
+    }
+    if (profileRef.current.cash < 9999999) {
+      updateProfile(grantCash(profileRef.current, 9999999 - profileRef.current.cash, 'TEST_INFINITE'));
     }
   }, [updateProfile]);
 
@@ -105,9 +105,11 @@ export default function App() {
       case 'graphics':
         setError(event.text); changePhase('paused');
         break;
-      case 'hit':
+      case 'hit': {
         setFx(f => ({ ...f, hitmark: { id, kill: event.kill } }));
+        later(() => setFx(f => (f.hitmark?.id === id ? { ...f, hitmark: null } : f)), event.kill ? 320 : 180);
         break;
+      }
       case 'kill':
         setFx(f => ({
           ...f,
@@ -146,8 +148,6 @@ export default function App() {
         break;
       case 'end': {
         engineRef.current?.setPaused(true);
-        // Debrief payout: run cash × difficulty, plus the grade bonus on a win.
-        // (Losses keep 100% of earned cash but forfeit extraction + grade.)
         const gb = event.win ? gradeBonus(gradeFor(event).grade) : 0;
         const earned = Math.round(event.cash * event.difficultyMul) + gb;
         const before = profileRef.current;
@@ -211,9 +211,6 @@ export default function App() {
     clearTimers();
     setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
     engineRef.current?.dispose(); engineRef.current = null;
-    // Let React commit and the browser actually paint the boot screen before any of the
-    // heavy mission build starts. Without this the deploy click blocked the main thread
-    // first, so the player stared at a frozen menu with no loading state at all.
     await afterPaint();
     if (session.current !== epoch) return;
     try {
@@ -223,7 +220,6 @@ export default function App() {
       changePhase('paused');
       engine.start();
       setHud(engine.hud());
-      // Keep mouse capture in the click's user activation; do not delay it behind a wipe.
       await engine.requestLock();
       if (session.current === epoch && document.pointerLockElement === canvasRef.current) {
         engine.setPaused(false); changePhase('playing');
@@ -283,7 +279,7 @@ export default function App() {
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>
       </div>}
       {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
-      {launching && <BootScreen />}
+      {launching && <BootScreen map={settings.map} difficulty={settings.difficulty} />}
     </div>
   );
 }

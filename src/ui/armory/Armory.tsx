@@ -31,8 +31,8 @@ const BARS: { key: StatBarKey; label: string }[] = [
 ];
 
 const TUTORIAL = [
-  { title: 'Pick a weapon', body: 'Select any gun to preview. Buying fields it instantly.', anchor: 'rail' },
-  { title: 'Hardpoints', body: 'Click a brass pin on the gun or a tag below to open parts.', anchor: 'stage' },
+  { title: 'Pick a weapon', body: 'Select any gun to preview. Buying equips it instantly.', anchor: 'rail' },
+  { title: 'Hardpoints', body: 'Click a brass pin on the gun or a slot below to open parts.', anchor: 'stage' },
   { title: 'Build it', body: 'Buy to auto-equip. Hover to preview stat changes.', anchor: 'panel' },
 ] as const;
 
@@ -74,7 +74,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
   const owned = profile.ownedWeapons.includes(selected);
   const skin = skinFor(profile, selected);
   const skinName = skinById(skin).name;
-  const fielded = profile.loadout[entry.slot].weapon === selected;
+  const equipped = profile.loadout[entry.slot].weapon === selected;
   const build = useMemo(() => buildForWeapon(profile, selected), [profile, selected]);
   const stats = useMemo(() => {
     const mods = Object.values(build.attachments).map(id => attachmentById(id)?.mods).filter(m => !!m);
@@ -116,7 +116,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
       const res = setLoadoutWeapon(profile, w.slot, id);
       if (res.ok) {
         onProfile(res.value);
-        say(`${w.name} fielded`);
+        say(`${w.name} equipped`);
       }
     }
   };
@@ -128,8 +128,8 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
       say(bought.error === 'INSUFFICIENT_FUNDS' ? `Need ${fmt(entry.price)} — ${fmt(profile.cash)} available` : 'Purchase failed', true);
       return;
     }
-    const fieldedRes = setLoadoutWeapon(bought.value, entry.slot, selected);
-    onProfile(fieldedRes.ok ? fieldedRes.value : bought.value);
+    const equippedRes = setLoadoutWeapon(bought.value, entry.slot, selected);
+    onProfile(equippedRes.ok ? equippedRes.value : bought.value);
     say(`${entry.name} added to ${entry.slot} slot`);
   };
 
@@ -234,7 +234,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
           <div className="armory-cards" tabIndex={0} onKeyDown={railKey} aria-label={`${tab} weapons`}>
             {rail.map(w => {
               const isOwned = profile.ownedWeapons.includes(w.id);
-              const isFielded = profile.loadout[w.slot].weapon === w.id;
+              const isEquipped = profile.loadout[w.slot].weapon === w.id;
               const isSel = w.id === selected;
               return (
                 <button key={w.id} className={`wcard ${isSel ? 'sel' : ''} ${isOwned ? '' : 'locked'}`} onClick={() => selectWeapon(w.id)} aria-pressed={isSel}>
@@ -244,7 +244,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
                     <span className="wcard-name">{w.name}</span>
                     <span className="wcard-sub">
                       <i className="wcard-cls">{w.cls}</i>
-                      {isFielded ? <b className="wcard-fielded">Fielded</b> : isOwned ? <b className="wcard-owned">Owned</b> : <b className="wcard-price">{fmt(w.price)}</b>}
+                      {isEquipped ? <b className="wcard-fielded">Equipped</b> : isOwned ? <b className="wcard-owned">Owned</b> : <b className="wcard-price">{fmt(w.price)}</b>}
                     </span>
                   </span>
                   {!isOwned && <LockIcon />}
@@ -257,15 +257,13 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
 
         {/* ============ STAGE — HERO WORKBENCH ============ */}
         <section className={`armory-stage ${tutStep === 1 ? 'tut-ring' : ''}`} aria-label="Weapon preview">
-          <div className="stage-watermark" aria-hidden="true">{entry.short}</div>
-
           <div className="armory-stage-head">
             <div>
               <h2>{entry.name}</h2>
               <p>{entry.cls} · {skinName} finish {!owned && <span className="locknote">Locked preview</span>}</p>
             </div>
             <div className="armory-stage-tags">
-              {fielded ? <span className="tag-fielded">Fielded</span> : owned ? <span className="tag-owned">In rack</span> : (
+              {equipped ? <span className="tag-fielded">Equipped</span> : owned ? <span className="tag-owned">In rack</span> : (
                 <span className="tag-stack">
                   <span className="tag-price">{fmt(entry.price)}</span>
                   <button className="stage-buy" onClick={buyGun}>Buy {entry.short}</button>
@@ -280,114 +278,118 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
           </div>
 
           <div className="stage-foot">
-            <span className="mono">{entry.cls} · {entry.short} · Factory finish</span>
-            <span className="mono">{fielded ? 'Fielded' : owned ? 'In rack' : 'Locked'}</span>
+            <span className="mono">{entry.cls} · {entry.short} · {skinName}</span>
+            <span className="mono">{equipped ? 'Equipped' : owned ? 'In rack' : 'Locked'}</span>
           </div>
         </section>
 
-        {/* ============ SPEC SHEET ============ */}
+        {/* ============ SPEC SHEET — NO FLOATING POPUPS ============ */}
         <aside className={`armory-panel ${tutStep === 2 ? 'tut-ring' : ''}`} aria-label="Spec sheet">
-          {menuSlot ? (
-            <div className="partmenu" key={menuSlot}>
-              <div className="partmenu-head">
-                <span>{SLOT_LABELS[menuSlot]} — {entry.short}</span>
-                <button className="util-btn" style={{ padding: '6px 10px', fontSize: 11 }} onClick={() => { setMenuSlot(null); setHoverPart(null); }}>Close</button>
-              </div>
-              {build.attachments[menuSlot] && (
-                <button className="part-strip" onClick={() => unequipSlot(menuSlot)}>
-                  <span>Strip {attachmentById(build.attachments[menuSlot]!)!.name}</span>
-                  <span className="mono">Back to stock</span>
+          <div className="statpanel">
+            <div className="sec-label"><span>Finish</span><span className="mono">{skinName}</span></div>
+            <div className="skin-row">
+              {SKIN_CATALOG.map(s => (
+                <button key={s.id} className={`skin-swatch ${s.id === skin ? 'on' : ''}`} onClick={() => pickSkin(s.id)} title={s.desc} aria-pressed={s.id === skin}>
+                  <i style={{ background: s.swatch }} />
+                  <b>{s.name}</b>
                 </button>
-              )}
-              <div className="partmenu-list">
-                {menuParts.map(part => {
-                  const isOwned = ownedParts.includes(part.id);
-                  const isEquipped = build.attachments[menuSlot] === part.id;
-                  return (
-                    <div key={part.id} className={`pcard ${isEquipped ? 'equipped' : ''}`} onMouseEnter={() => !isEquipped && setHoverPart(part.id)} onMouseLeave={() => setHoverPart(cur => (cur === part.id ? null : cur))}>
-                      <div className="pcard-head">
-                        <strong>{part.name}</strong>
-                        <span className="pcard-tier" aria-label={`tier ${part.tier}`}>
-                          {[1, 2, 3].map(i => <i key={i} className={i <= part.tier ? 'on' : ''} />)}
-                        </span>
-                      </div>
-                      <p className="pcard-desc">{part.desc}</p>
-                      <div className="pcard-mods">
-                        {part.pros.map(p => <span key={p} className="pro">+ {p}</span>)}
-                        {part.cons.map(c => <span key={c} className="con">− {c}</span>)}
-                      </div>
-                      {isEquipped ? (
-                        <button className="pcard-btn equipped" onClick={() => unequipSlot(menuSlot)}>Equipped — click to strip</button>
-                      ) : isOwned ? (
-                        <button className="pcard-btn" onClick={() => equipPart(part.id)}>Equip</button>
-                      ) : (
-                        <button className={`pcard-btn buy ${profile.cash < part.price ? 'cant' : ''}`} onClick={() => buyPart(part.id)}>
-                          Buy — {fmt(part.price)}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-                {menuParts.length === 0 && <p className="partmenu-empty mono">No compatible parts for this socket.</p>}
-              </div>
+              ))}
             </div>
-          ) : (
-            <div className="statpanel">
-              <div className="sec-label"><span>Finish</span><span className="mono">{skinName}</span></div>
-              <div className="skin-row">
-                {SKIN_CATALOG.map(s => (
-                  <button key={s.id} className={`skin-swatch ${s.id === skin ? 'on' : ''}`} onClick={() => pickSkin(s.id)} title={s.desc} aria-pressed={s.id === skin}>
-                    <i style={{ background: s.swatch }} />
-                    <b>{s.name}</b>
-                  </button>
-                ))}
-              </div>
 
-              <div className="sec-label"><span>Stat lab</span><span className="mono">{entry.short}</span></div>
-              {BARS.map(b => {
-                const frac = statBarFrac(b.key, stats);
-                const pfrac = previewStats ? statBarFrac(b.key, previewStats) : frac;
-                const delta = pfrac - frac;
+            {/* Equipped slots — integrated, not bottom chips */}
+            <div className="sec-label"><span>Equipped Parts</span><span className="mono">{entry.short}</span></div>
+            <div className="equipped-list">
+              {entry.slots.map(slot => {
+                const id = build.attachments[slot];
+                const part = id ? attachmentById(id) : undefined;
+                const isActive = menuSlot === slot;
                 return (
-                  <div className="sbar" key={b.key}>
-                    <div className="sbar-head">
-                      <span>{b.label}</span>
-                      {previewStats && Math.abs(delta) > 0.001 && <span className={`sbar-delta mono ${delta > 0 ? 'up' : 'down'}`}>{delta > 0 ? '▲' : '▼'}</span>}
-                    </div>
-                    <div className="sbar-track">
-                      <span className="sbar-fill" style={{ transform: `scaleX(${frac.toFixed(3)})` }} />
-                      {previewStats && Math.abs(delta) > 0.001 && (
-                        <span className={`sbar-ghost ${delta > 0 ? 'up' : 'down'}`} style={{ left: `${(Math.min(frac, pfrac) * 100).toFixed(1)}%`, width: `${(Math.abs(delta) * 100).toFixed(1)}%` }} />
-                      )}
-                    </div>
-                  </div>
+                  <button key={slot} className={`equipped-row ${isActive ? 'on' : ''} ${part ? '' : 'empty'}`} onClick={() => openSlot(slot)}>
+                    <span className="equipped-slot">{SLOT_LABELS[slot]}</span>
+                    <span className="equipped-name">{part ? part.name : '— Stock —'}</span>
+                    <span className="equipped-chev">{isActive ? '−' : '+'}</span>
+                  </button>
                 );
               })}
-
-              <div className="snum-grid mono">
-                <div><span>Mag</span><b>{stats.magSize}{previewStats && previewStats.magSize !== stats.magSize ? ` → ${previewStats.magSize}` : ''}</b></div>
-                <div><span>Reserve</span><b>{stats.reserve}{previewStats && previewStats.reserve !== stats.reserve ? ` → ${previewStats.reserve}` : ''}</b></div>
-                <div><span>Reload</span><b>{stats.tacReload.toFixed(2)}s{previewStats && Math.abs(previewStats.tacReload - stats.tacReload) > 0.001 ? ` → ${previewStats.tacReload.toFixed(2)}` : ''}</b></div>
-                <div><span>Zoom</span><b>{stats.adsFov.toFixed(0)}°{previewStats && Math.abs(previewStats.adsFov - stats.adsFov) > 0.01 ? ` → ${previewStats.adsFov.toFixed(0)}` : ''}</b></div>
-              </div>
-              <p className="statpanel-hint mono">Click a hardpoint to fit parts</p>
             </div>
-          )}
-        </aside>
 
-        <footer className="armory-chips" aria-label="Equipped">
-          <span className="mono armory-chips-label">Equipped</span>
-          {entry.slots.map(slot => {
-            const id = build.attachments[slot];
-            const part = id ? attachmentById(id) : undefined;
-            return (
-              <button key={slot} className={`chip ${menuSlot === slot ? 'on' : ''} ${part ? '' : 'empty'}`} onClick={() => openSlot(slot)} title={part ? part.name : SLOT_LABELS[slot]}>
-                <i>{SLOT_LABELS[slot]}</i>
-                <b>{part ? part.name : '—'}</b>
-              </button>
-            );
-          })}
-        </footer>
+            {/* Part menu — inline, not floating */}
+            {menuSlot && (
+              <div className="partmenu-inline" key={menuSlot}>
+                <div className="partmenu-head">
+                  <span>{SLOT_LABELS[menuSlot]} Options</span>
+                  <button className="util-btn" style={{ padding: '6px 10px', fontSize: 11 }} onClick={() => { setMenuSlot(null); setHoverPart(null); }}>Close</button>
+                </div>
+                {build.attachments[menuSlot] && (
+                  <button className="part-strip" onClick={() => unequipSlot(menuSlot)}>
+                    <span>Strip {attachmentById(build.attachments[menuSlot]!)!.name}</span>
+                    <span className="mono">Back to stock</span>
+                  </button>
+                )}
+                <div className="partmenu-list">
+                  {menuParts.map(part => {
+                    const isOwned = ownedParts.includes(part.id);
+                    const isEquipped = build.attachments[menuSlot] === part.id;
+                    return (
+                      <div key={part.id} className={`pcard ${isEquipped ? 'equipped' : ''}`} onMouseEnter={() => !isEquipped && setHoverPart(part.id)} onMouseLeave={() => setHoverPart(cur => (cur === part.id ? null : cur))}>
+                        <div className="pcard-head">
+                          <strong>{part.name}</strong>
+                          <span className="pcard-tier" aria-label={`tier ${part.tier}`}>
+                            {[1, 2, 3].map(i => <i key={i} className={i <= part.tier ? 'on' : ''} />)}
+                          </span>
+                        </div>
+                        <p className="pcard-desc">{part.desc}</p>
+                        <div className="pcard-mods">
+                          {part.pros.map(p => <span key={p} className="pro">+ {p}</span>)}
+                          {part.cons.map(c => <span key={c} className="con">− {c}</span>)}
+                        </div>
+                        {isEquipped ? (
+                          <button className="pcard-btn equipped" onClick={() => unequipSlot(menuSlot)}>Equipped — click to strip</button>
+                        ) : isOwned ? (
+                          <button className="pcard-btn" onClick={() => equipPart(part.id)}>Equip</button>
+                        ) : (
+                          <button className={`pcard-btn buy ${profile.cash < part.price ? 'cant' : ''}`} onClick={() => buyPart(part.id)}>
+                            Buy — {fmt(part.price)}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {menuParts.length === 0 && <p className="partmenu-empty mono">No compatible parts for this socket.</p>}
+                </div>
+              </div>
+            )}
+
+            <div className="sec-label" style={{ marginTop: 16 }}><span>Stat lab</span><span className="mono">{entry.short}</span></div>
+            {BARS.map(b => {
+              const frac = statBarFrac(b.key, stats);
+              const pfrac = previewStats ? statBarFrac(b.key, previewStats) : frac;
+              const delta = pfrac - frac;
+              return (
+                <div className="sbar" key={b.key}>
+                  <div className="sbar-head">
+                    <span>{b.label}</span>
+                    {previewStats && Math.abs(delta) > 0.001 && <span className={`sbar-delta mono ${delta > 0 ? 'up' : 'down'}`}>{delta > 0 ? '▲' : '▼'}</span>}
+                  </div>
+                  <div className="sbar-track">
+                    <span className="sbar-fill" style={{ transform: `scaleX(${frac.toFixed(3)})` }} />
+                    {previewStats && Math.abs(delta) > 0.001 && (
+                      <span className={`sbar-ghost ${delta > 0 ? 'up' : 'down'}`} style={{ left: `${(Math.min(frac, pfrac) * 100).toFixed(1)}%`, width: `${(Math.abs(delta) * 100).toFixed(1)}%` }} />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="snum-grid mono">
+              <div><span>Mag</span><b>{stats.magSize}{previewStats && previewStats.magSize !== stats.magSize ? ` → ${previewStats.magSize}` : ''}</b></div>
+              <div><span>Reserve</span><b>{stats.reserve}{previewStats && previewStats.reserve !== stats.reserve ? ` → ${previewStats.reserve}` : ''}</b></div>
+              <div><span>Reload</span><b>{stats.tacReload.toFixed(2)}s{previewStats && Math.abs(previewStats.tacReload - stats.tacReload) > 0.001 ? ` → ${previewStats.tacReload.toFixed(2)}` : ''}</b></div>
+              <div><span>Zoom</span><b>{stats.adsFov.toFixed(0)}°{previewStats && Math.abs(previewStats.adsFov - stats.adsFov) > 0.01 ? ` → ${previewStats.adsFov.toFixed(0)}` : ''}</b></div>
+            </div>
+            <p className="statpanel-hint mono">Click a hardpoint to fit parts</p>
+          </div>
+        </aside>
       </div>
 
       {tutStep >= 0 && (

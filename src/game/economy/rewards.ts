@@ -24,21 +24,23 @@ export function gradeBonus(grade: string): number {
   return 0;
 }
 
-/** Streak-mark award: each mark pays once per chain — $50 at 3, $100 at 4, $150 at 5. */
+/** Streak-mark award: each mark pays once per chain — $50 at 3, $100 at 4, $150 at 5, $200 at 6, $250 at 7 */
 export function streakBonus(streak: number): number {
   if (streak === 3) return 50;
   if (streak === 4) return 100;
   if (streak === 5) return 150;
+  if (streak === 6) return 200;
+  if (streak === 7) return 250;
   return 0;
 }
 
 /**
  * Gate a streak payout so chains cannot farm: the mark pays only if it is above
  * paidMark (highest mark already paid in this chain), and the run-wide streak
- * pot cannot exceed capLeft. A full 5-chain pays at most $50+$100+$150 = $300.
+ * pot cannot exceed capLeft. A full 7-chain pays at most $50+$100+$150+$200+$250 = $750.
  */
 export function streakAward(streak: number, paidMark: number, capLeft: number): number {
-  if (streak < 3 || streak > 5 || streak <= paidMark || capLeft <= 0) return 0;
+  if (streak < 3 || streak > 7 || streak <= paidMark || capLeft <= 0) return 0;
   return Math.min(streakBonus(streak), capLeft);
 }
 

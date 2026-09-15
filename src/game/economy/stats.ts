@@ -9,6 +9,7 @@ export interface StatMods {
   hipSpreadMul?: number; adsSpreadAdd?: number; adsSpreadMul?: number;
   recoilMul?: number; recoilYawMul?: number; adsTimeMul?: number;
   adsFovDelta?: number;
+  adsFovOverride?: number;
   tacReloadMul?: number; emptyReloadMul?: number;
   falloffStartAdd?: number; falloffMulAdd?: number;
   noiseRadiusMul?: number; moveSpeedMul?: number; swapTimeMul?: number; headMulAdd?: number;
@@ -60,6 +61,11 @@ export function resolveWeaponStats(base: BaseWeaponStats, mods: StatMods[]): Res
   const magGrown = base.magSize + add(m => m.magAdd);
   const mag = Math.max(1, Math.round(magGrown * mul(m => m.magMul)));
 
+  const rawFov = (() => {
+    const ov = last(m => m.adsFovOverride);
+    if (ov !== undefined) return ov;
+    return base.adsFov + add(m => m.adsFovDelta);
+  })();
   return {
     auto: last(m => m.autoOverride) ?? base.auto,
     rpm: Math.max(30, Math.round(base.rpm * mul(m => m.rpmMul))),
@@ -71,7 +77,7 @@ export function resolveWeaponStats(base: BaseWeaponStats, mods: StatMods[]): Res
     hipSpread: Math.max(0, base.hipSpread * mul(m => m.hipSpreadMul)),
     adsSpread: Math.max(0, (base.adsSpread + add(m => m.adsSpreadAdd)) * mul(m => m.adsSpreadMul)),
     pattern: base.pattern.map(p => [p[0], p[1]] as [number, number]),
-    adsFov: base.adsFov + add(m => m.adsFovDelta),
+    adsFov: clamp(rawFov, 8, 90),
     tacReload: Math.max(0.2, base.tacReload * mul(m => m.tacReloadMul)),
     emptyReload: Math.max(0.2, base.emptyReload * mul(m => m.emptyReloadMul)),
     adsTime: clamp(base.adsTime * mul(m => m.adsTimeMul), 0.08, 0.9),

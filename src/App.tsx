@@ -22,12 +22,19 @@ const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
-  bipodDeployed: false, reticle: 'none', lpvoHigh: false, pumping: false, pings: [],
+  bipodDeployed: false, reticle: 'none', zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
+
+/** Testing economy: bottomless wallet so every gun and attachment can be trialled. */
+const DEV_WALLET = 9_999_999;
+function loadRichProfile(): PlayerProfile {
+  const p = loadProfile();
+  return p.cash < DEV_WALLET ? grantCash(p, DEV_WALLET - p.cash, 'DEV') : p;
+}
 
 function loadSettings(): GameSettings {
   try {
@@ -52,7 +59,7 @@ export default function App() {
   const [results, setResults] = useState<Results | null>(null);
   const [wallet, setWallet] = useState<ResultsWallet | null>(null);
   const [fx, setFx] = useState<HudFx>(emptyFx);
-  const [profile, setProfile] = useState<PlayerProfile>(loadProfile);
+  const [profile, setProfile] = useState<PlayerProfile>(loadRichProfile);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
   const profileRef = useRef(profile);
   profileRef.current = profile;
@@ -107,6 +114,8 @@ export default function App() {
         break;
       case 'hit':
         setFx(f => ({ ...f, hitmark: { id, kill: event.kill } }));
+        // Hitmarkers must never linger: clear after the flash unless a newer one replaced it.
+        later(() => setFx(f => f.hitmark?.id === id ? { ...f, hitmark: null } : f), event.kill ? 450 : 260);
         break;
       case 'kill':
         setFx(f => ({
@@ -283,7 +292,7 @@ export default function App() {
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>
       </div>}
       {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
-      {launching && <BootScreen />}
+      {launching && <BootScreen map={settings.map} />}
     </div>
   );
 }

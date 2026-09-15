@@ -15,7 +15,7 @@ const { buildSoldier } = await import('../src/game/models.ts');
 const { Engine, DEFAULT_SETTINGS } = await import('../src/game/engine.ts');
 const { voice } = await import('../src/game/voice.ts');
 const { default: MissionObjective, missionClock } = await import('../src/ui/MissionObjective.tsx');
-const { MainMenu } = await import('../src/ui/Screens.tsx');
+const { MainMenu, BootScreen } = await import('../src/ui/Screens.tsx');
 
 function aiContext() {
   return {
@@ -142,8 +142,17 @@ test('SSR output exposes the mission verbs, actual objective progress, and a nor
   assert.match(html, /Sandblast/);
   assert.equal(missionClock(59.9), '01:00');
   assert.equal(missionClock(0), '00:00');
+  // The home menu is the sketch layout: title + Missions/Loadout/Settings only.
+  // Maps are deliberately NOT shown until the player enters Missions.
   const menu = renderToStaticMarkup(React.createElement(MainMenu, { s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {} }));
-  for (const phase of mission.definition.phases) assert.ok(menu.includes(phase.title));
-  assert.ok(menu.includes('Reach the pickup to extract'));
+  assert.ok(menu.includes('RECOIL'));
+  assert.ok(menu.includes('Missions'));
+  assert.ok(menu.includes('Loadout'));
+  assert.ok(menu.includes('Settings'));
+  assert.ok(!menu.includes('Sandblast'), 'map selection must not leak onto the home menu');
   assert.ok(!menu.includes('21 HOSTILES'));
+  // The cinematic boot screen names the operation and its first objective.
+  const boot = renderToStaticMarkup(React.createElement(BootScreen, { map: 'alrasul' }));
+  assert.ok(boot.includes(mission.definition.name), 'boot screen names the operation');
+  assert.ok(boot.includes(mission.definition.phases[0].title), 'boot screen shows the opening objective');
 });

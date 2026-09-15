@@ -9,6 +9,8 @@ export interface StatMods {
   hipSpreadMul?: number; adsSpreadAdd?: number; adsSpreadMul?: number;
   recoilMul?: number; recoilYawMul?: number; adsTimeMul?: number;
   adsFovDelta?: number;
+  /** Absolute ADS FOV override — magnified scopes give the SAME true zoom on every gun. */
+  adsFovSet?: number;
   tacReloadMul?: number; emptyReloadMul?: number;
   falloffStartAdd?: number; falloffMulAdd?: number;
   noiseRadiusMul?: number; moveSpeedMul?: number; swapTimeMul?: number; headMulAdd?: number;
@@ -71,7 +73,7 @@ export function resolveWeaponStats(base: BaseWeaponStats, mods: StatMods[]): Res
     hipSpread: Math.max(0, base.hipSpread * mul(m => m.hipSpreadMul)),
     adsSpread: Math.max(0, (base.adsSpread + add(m => m.adsSpreadAdd)) * mul(m => m.adsSpreadMul)),
     pattern: base.pattern.map(p => [p[0], p[1]] as [number, number]),
-    adsFov: base.adsFov + add(m => m.adsFovDelta),
+    adsFov: last(m => m.adsFovSet) ?? (base.adsFov + add(m => m.adsFovDelta)),
     tacReload: Math.max(0.2, base.tacReload * mul(m => m.tacReloadMul)),
     emptyReload: Math.max(0.2, base.emptyReload * mul(m => m.emptyReloadMul)),
     adsTime: clamp(base.adsTime * mul(m => m.adsTimeMul), 0.08, 0.9),

@@ -4,7 +4,7 @@ import {
   WEAPON_CATALOG, attachmentById, attachmentsFor, weaponById,
   type AttachSlot, type AttachmentId, type SlotId, type WeaponId,
 } from '../../game/economy/catalog';
-import { resolveWeaponStats, statBarFrac, type StatBarKey } from '../../game/economy/stats';
+import { resolveWeaponStats } from '../../game/economy/stats';
 import {
   buildForWeapon, buyAttachment, buyWeapon, equipAttachment, setLoadoutWeapon, setWeaponSkin, skinFor,
   type PlayerProfile,
@@ -19,16 +19,6 @@ interface ArmoryProps {
   onDeploy: () => void;
   onBack: () => void;
 }
-
-const BARS: { key: StatBarKey; label: string }[] = [
-  { key: 'damage', label: 'Damage' },
-  { key: 'rpm', label: 'Fire rate' },
-  { key: 'range', label: 'Range' },
-  { key: 'control', label: 'Control' },
-  { key: 'handling', label: 'Handling' },
-  { key: 'noise', label: 'Noise' },
-  { key: 'mobility', label: 'Mobility' },
-];
 
 const TUTORIAL = [
   { title: 'Pick a weapon', body: 'Select any gun to preview. Buying equips it instantly.', anchor: 'rail' },
@@ -49,7 +39,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
   const [tab, setTab] = useState<SlotId>('primary');
   const [selected, setSelected] = useState<WeaponId>(profile.loadout.primary.weapon);
   const [menuSlot, setMenuSlot] = useState<AttachSlot | null>(null);
-  const [hoverPart, setHoverPart] = useState<AttachmentId | null>(null);
   const [flash, setFlash] = useState<{ slot: AttachSlot; key: number } | null>(null);
   const [flashKey, setFlashKey] = useState(0);
   const [toast, setToast] = useState<{ text: string; key: number; bad?: boolean } | null>(null);
@@ -80,18 +69,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
     const mods = Object.values(build.attachments).map(id => attachmentById(id)?.mods).filter(m => !!m);
     return resolveWeaponStats(entry.base, mods);
   }, [build, entry]);
-  const previewStats = useMemo(() => {
-    if (!hoverPart) return null;
-    const part = attachmentById(hoverPart);
-    if (!part) return null;
-    const mods = Object.entries(build.attachments)
-      .filter(([slot]) => slot !== part.slot)
-      .map(([, id]) => attachmentById(id)?.mods)
-      .filter(m => !!m);
-    mods.push(part.mods);
-    return resolveWeaponStats(entry.base, mods);
-  }, [hoverPart, build, entry]);
-
   const rail = WEAPON_CATALOG.filter(w => w.slot === tab);
 
   const pulse = (slot: AttachSlot) => {
@@ -111,7 +88,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
     setTab(w.slot);
     setSelected(id);
     setMenuSlot(null);
-    setHoverPart(null);
     if (profile.ownedWeapons.includes(id) && profile.loadout[w.slot].weapon !== id) {
       const res = setLoadoutWeapon(profile, w.slot, id);
       if (res.ok) {
@@ -136,7 +112,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
   const openSlot = (slot: AttachSlot) => {
     // Browsing parts is always allowed, even on unowned guns — window shopping
     // shows exactly what a locked weapon can become before you commit.
-    setHoverPart(null);
     setMenuSlot(cur => (cur === slot ? null : slot));
   };
 
@@ -206,7 +181,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
 
   return (
     <div className="armory-root" onClick={tutStep >= 0 ? advanceTutorial : undefined}
-      onKeyDown={e => { if (e.key === 'Escape' && menuSlot) { setMenuSlot(null); setHoverPart(null); } }}>
+      onKeyDown={e => { if (e.key === 'Escape' && menuSlot) setMenuSlot(null); }}>
 
       <div className="armory-glow" aria-hidden="true" />
       <div className="armory-vignette" aria-hidden="true" />
@@ -295,7 +270,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
             <div className="partmenu" key={menuSlot}>
               <div className="partmenu-head">
                 <span>{SLOT_LABELS[menuSlot]} — {entry.short}</span>
-                <button className="util-btn" style={{ padding: '6px 10px', fontSize: 11 }} onClick={() => { setMenuSlot(null); setHoverPart(null); }}>Close</button>
+                <button className="util-btn" style={{ padding: '6px 10px', fontSize: 11 }} onClick={() => setMenuSlot(null)}>Close</button>
               </div>
               {build.attachments[menuSlot] && (
                 <button className="part-strip" onClick={() => unequipSlot(menuSlot)}>
@@ -308,7 +283,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
                   const isOwned = ownedParts.includes(part.id);
                   const isEquipped = build.attachments[menuSlot] === part.id;
                   return (
-                    <div key={part.id} className={`pcard ${isEquipped ? 'equipped' : ''}`} onMouseEnter={() => !isEquipped && setHoverPart(part.id)} onMouseLeave={() => setHoverPart(cur => (cur === part.id ? null : cur))}>
+                    <div key={part.id} className={`pcard ${isEquipped ? 'equipped' : ''}`}>
                       <div className="pcard-head">
                         <strong>{part.name}</strong>
                         <span className="pcard-tier" aria-label={`tier ${part.tier}`}>
@@ -362,33 +337,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
                 ))}
               </div>
 
-              <div className="sec-label"><span>Stat lab</span><span className="mono">{entry.short}</span></div>
-              {BARS.map(b => {
-                const frac = statBarFrac(b.key, stats);
-                const pfrac = previewStats ? statBarFrac(b.key, previewStats) : frac;
-                const delta = pfrac - frac;
-                return (
-                  <div className="sbar" key={b.key}>
-                    <div className="sbar-head">
-                      <span>{b.label}</span>
-                      {previewStats && Math.abs(delta) > 0.001 && <span className={`sbar-delta mono ${delta > 0 ? 'up' : 'down'}`}>{delta > 0 ? '▲' : '▼'}</span>}
-                    </div>
-                    <div className="sbar-track">
-                      <span className="sbar-fill" style={{ transform: `scaleX(${frac.toFixed(3)})` }} />
-                      {previewStats && Math.abs(delta) > 0.001 && (
-                        <span className={`sbar-ghost ${delta > 0 ? 'up' : 'down'}`} style={{ left: `${(Math.min(frac, pfrac) * 100).toFixed(1)}%`, width: `${(Math.abs(delta) * 100).toFixed(1)}%` }} />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div className="snum-grid mono">
-                <div><span>Mag</span><b>{stats.magSize}{previewStats && previewStats.magSize !== stats.magSize ? ` → ${previewStats.magSize}` : ''}</b></div>
-                <div><span>Reserve</span><b>{stats.reserve}{previewStats && previewStats.reserve !== stats.reserve ? ` → ${previewStats.reserve}` : ''}</b></div>
-                <div><span>Reload</span><b>{stats.tacReload.toFixed(2)}s{previewStats && Math.abs(previewStats.tacReload - stats.tacReload) > 0.001 ? ` → ${previewStats.tacReload.toFixed(2)}` : ''}</b></div>
-                <div><span>Zoom</span><b>{stats.adsFov.toFixed(0)}°{previewStats && Math.abs(previewStats.adsFov - stats.adsFov) > 0.01 ? ` → ${previewStats.adsFov.toFixed(0)}` : ''}</b></div>
-              </div>
               <p className="statpanel-hint mono">Click a hardpoint to fit parts</p>
             </div>
           )}

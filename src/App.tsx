@@ -5,6 +5,8 @@ import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
 import Armory from './ui/armory/Armory';
 import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
+import { getMission } from './game/systems/mission';
+import { voice } from './game/voice';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 
 type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory';
@@ -22,7 +24,7 @@ const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
-  bipodDeployed: false, reticle: 'none', lpvoHigh: false, pumping: false, pings: [],
+  bipodDeployed: false, reticle: 'none', scopeMag: null, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
@@ -52,7 +54,16 @@ export default function App() {
   const [results, setResults] = useState<Results | null>(null);
   const [wallet, setWallet] = useState<ResultsWallet | null>(null);
   const [fx, setFx] = useState<HudFx>(emptyFx);
-  const [profile, setProfile] = useState<PlayerProfile>(loadProfile);
+  // Unlimited test funds: every rack starts topped up so all guns and glass can be
+  // trialled freely. The economy ledger (prices, rewards, debrief math) is untouched
+  // — the wallet is simply never the bottleneck.
+  const [profile, setProfile] = useState<PlayerProfile>(() => {
+    const p = loadProfile();
+    if (p.cash >= 9999999) return p;
+    const topped = { ...p, cash: 9999999, lifetimeCash: Math.max(p.lifetimeCash, 9999999) };
+    saveProfile(topped);
+    return topped;
+  });
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
   const profileRef = useRef(profile);
   profileRef.current = profile;
@@ -107,6 +118,9 @@ export default function App() {
         break;
       case 'hit':
         setFx(f => ({ ...f, hitmark: { id, kill: event.kill } }));
+        // The hit X is a momentary flash — remove it from state once its pop
+        // animation ends so a headshot kill can never leave it parked on screen.
+        later(() => setFx(f => f.hitmark?.id === id ? { ...f, hitmark: null } : f), event.kill ? 600 : 300);
         break;
       case 'kill':
         setFx(f => ({
@@ -208,6 +222,9 @@ export default function App() {
   const deploy = async () => {
     if (!canvasRef.current || launching) return;
     const epoch = ++session.current;
+    // The loading brief narrates before the engine exists, so sync the voice
+    // toggle here — a muted announcer stays muted on the loading screen too.
+    voice.setEnabled(settings.voices);
     clearTimers();
     setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
     engineRef.current?.dispose(); engineRef.current = null;
@@ -283,7 +300,7 @@ export default function App() {
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>
       </div>}
       {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
-      {launching && <BootScreen />}
+      {launching && <BootScreen mission={getMission(settings.map)} />}
     </div>
   );
 }

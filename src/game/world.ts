@@ -388,7 +388,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     }
     g.computeVertexNormals();
     g.rotateX(-Math.PI / 2);
-    push(g, M.sand);
+    // Kasbah sits on packed highland earth + rock, Al-Rasul on open desert sand.
+    push(g, mapId === 'kasbah' ? (M.packedEarth ?? M.plaza) : M.sand);
   }
   function perimeter(half: number) {
     const pm = M.adobeBrick;

@@ -9,6 +9,10 @@ export interface StatMods {
   hipSpreadMul?: number; adsSpreadAdd?: number; adsSpreadMul?: number;
   recoilMul?: number; recoilYawMul?: number; adsTimeMul?: number;
   adsFovDelta?: number;
+  /** Absolute ADS FOV override (PUBG-style fixed-magnification scopes). Wins over adsFovDelta. */
+  adsFovOverride?: number;
+  /** Display magnification for the HUD (e.g. '2×', '4×'). Cosmetic only. */
+  scopeMag?: string;
   tacReloadMul?: number; emptyReloadMul?: number;
   falloffStartAdd?: number; falloffMulAdd?: number;
   noiseRadiusMul?: number; moveSpeedMul?: number; swapTimeMul?: number; headMulAdd?: number;
@@ -24,6 +28,8 @@ export interface StatMods {
 
 export interface ResolvedWeaponStats extends BaseWeaponStats {
   reticle: ScopeReticle;
+  /** Display magnification from the fitted optic ('2×', '4×', …), or null when bare/1×. */
+  scopeMag: string | null;
   laser: boolean; flashlight: boolean; suppressed: boolean;
   recoilYawMul: number; flashMul: number;
   spreadXMul: number; spreadYMul: number;
@@ -71,7 +77,7 @@ export function resolveWeaponStats(base: BaseWeaponStats, mods: StatMods[]): Res
     hipSpread: Math.max(0, base.hipSpread * mul(m => m.hipSpreadMul)),
     adsSpread: Math.max(0, (base.adsSpread + add(m => m.adsSpreadAdd)) * mul(m => m.adsSpreadMul)),
     pattern: base.pattern.map(p => [p[0], p[1]] as [number, number]),
-    adsFov: base.adsFov + add(m => m.adsFovDelta),
+    adsFov: last(m => m.adsFovOverride) ?? (base.adsFov + add(m => m.adsFovDelta)),
     tacReload: Math.max(0.2, base.tacReload * mul(m => m.tacReloadMul)),
     emptyReload: Math.max(0.2, base.emptyReload * mul(m => m.emptyReloadMul)),
     adsTime: clamp(base.adsTime * mul(m => m.adsTimeMul), 0.08, 0.9),
@@ -82,6 +88,7 @@ export function resolveWeaponStats(base: BaseWeaponStats, mods: StatMods[]): Res
     moveSpeedMul: clamp(base.moveSpeedMul * mul(m => m.moveSpeedMul), 0.5, 1.5),
     swapTime: clamp(base.swapTime * mul(m => m.swapTimeMul), 0.03, 1.2),
     reticle: last(m => m.scopeReticle) ?? 'none',
+    scopeMag: last(m => m.scopeMag) ?? null,
     laser: any(m => m.laser),
     flashlight: any(m => m.flashlight),
     suppressed: any(m => m.suppressed),

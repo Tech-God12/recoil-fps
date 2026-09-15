@@ -15,7 +15,7 @@ const { buildSoldier } = await import('../src/game/models.ts');
 const { Engine, DEFAULT_SETTINGS } = await import('../src/game/engine.ts');
 const { voice } = await import('../src/game/voice.ts');
 const { default: MissionObjective, missionClock } = await import('../src/ui/MissionObjective.tsx');
-const { MainMenu } = await import('../src/ui/Screens.tsx');
+const { MainMenu, BootScreen } = await import('../src/ui/Screens.tsx');
 
 function aiContext() {
   return {
@@ -143,7 +143,13 @@ test('SSR output exposes the mission verbs, actual objective progress, and a nor
   assert.equal(missionClock(59.9), '01:00');
   assert.equal(missionClock(0), '00:00');
   const menu = renderToStaticMarkup(React.createElement(MainMenu, { s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {} }));
-  for (const phase of mission.definition.phases) assert.ok(menu.includes(phase.title));
+  // The menu is sector select + brief; the route itself briefs on the loading screen.
+  assert.ok(menu.includes('SELECT SECTOR'));
+  assert.ok(menu.includes(mission.definition.name));
+  assert.ok(menu.includes(mission.definition.brief));
+  for (const phase of mission.definition.phases) assert.ok(!menu.includes(phase.title), 'route must not crowd the menu');
+  const boot = renderToStaticMarkup(React.createElement(BootScreen, { mission: mission.definition }));
+  for (const phase of mission.definition.phases) assert.ok(boot.includes(phase.title));
   assert.ok(menu.includes('Reach the pickup to extract'));
   assert.ok(!menu.includes('21 HOSTILES'));
 });

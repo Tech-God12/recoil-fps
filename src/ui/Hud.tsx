@@ -156,6 +156,12 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
           )}
         </div>
       )}
+      {/* Optic magnification readout while scoped — confirms which glass is fitted. */}
+      {hud.ads >= 0.6 && hud.scopeMag && hud.scopeMag !== '1×' && (
+        <div className="absolute left-1/2 top-[62%] -translate-x-1/2 scope-mag cut-xs hud-chip">
+          {hud.scopeMag}{hud.lpvoHigh ? ' · HIGH' : ''}
+        </div>
+      )}
       {hud.canVault && (
         <div className="absolute left-1/2 top-[58%] -translate-x-1/2 vault-chip cut-xs hud-chip">
           [SPACE] VAULT

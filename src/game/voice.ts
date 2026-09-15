@@ -85,6 +85,11 @@ class VoiceManager {
     this.speak(short, 'announcer', { key: `objective:${text}`, cooldownMs: 2500, rate: 1.0, volume: 0.6 });
   }
 
+  /** Full spoken mission brief for the loading screen — long-form by design. */
+  brief(text: string) {
+    this.speak(text, 'announcer', { key: `brief:${text.slice(0, 48)}`, cooldownMs: 1000, rate: 1.02, volume: 0.65 });
+  }
+
   firstBlood() {
     const lines = ['First blood.', 'Confirmed kill.', 'Target down.'];
     this.speak(lines[Math.floor(Math.random() * lines.length)], 'announcer', { key: 'firstblood', cooldownMs: 60000 });
@@ -92,8 +97,9 @@ class VoiceManager {
   streak(label: string) {
     const map: Record<string, string> = {
       'DOUBLE KILL': 'Double kill!',
-      'MULTI KILL': 'Multi kill!',
-      'MEGA KILL': 'Mega kill!',
+      'TRIPLE KILL': 'Triple kill!',
+      'QUAD KILL': 'Quad kill!',
+      RAMPAGE: 'Rampage! Five in a row!',
       UNSTOPPABLE: 'Unstoppable!',
     };
     this.speak(map[label] ?? label, 'announcer', { key: `streak:${label}`, cooldownMs: 1500, rate: 1.1 });

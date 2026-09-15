@@ -387,36 +387,20 @@ export function buildM4(): WeaponModel {
   b.cyl(0.005, 0.005, 0.006, D, 0.030, 0.030, -0.300, Math.PI / 2); // emitter
   b.cyl(0.006, 0.006, 0.004, D, 0.030, 0.036, -0.345);              // dial
   b.box(0.010, 0.004, 0.016, D, 0.030, 0.041, -0.330);              // fire button
-  // ---- HK diopter drum (rear BUIS, hides with the optic) ----
-  opb.box(0.030, 0.006, 0.030, D, 0, 0.043, -0.045);                 // diopter base
-  opb.cyl(0.009, 0.009, 0.020, D, 0, 0.050, -0.045, 0, 0, Math.PI / 2, 12); // rotating drum
-  opb.cyl(0.003, 0.003, 0.022, D, 0, 0.050, -0.045, 0, 0, Math.PI / 2, 8); // aperture bore
-  // ---- EXPS holo (open frame, see-through) ----
-  opb.box(0.038, 0.010, 0.050, D, 0, 0.048, -0.11);                 // QD mount
-  opb.box(0.012, 0.014, 0.030, D, -0.024, 0.048, -0.11);            // QD lever
-  opb.box(0.040, 0.014, 0.052, D, 0, 0.058, -0.11);                 // battery housing
-  opb.box(0.005, 0.028, 0.042, D, -0.019, 0.072, -0.11);            // left wall
-  opb.box(0.005, 0.028, 0.042, D, 0.019, 0.072, -0.11);             // right wall
-  opb.box(0.043, 0.005, 0.042, D, 0, 0.088, -0.11);                 // top hood
-  opb.box(0.043, 0.008, 0.006, D, 0, 0.082, -0.132);                // front brow
+  // ---- HK diopter drum rear iron sight (bare spawn: irons only, no electronic sight) ----
+  // Aperture sits exactly on the sight line so ADS aligns through it to the front post.
+  opb.box(0.030, 0.006, 0.030, D, 0, 0.063, -0.045);                 // diopter base (raised)
+  opb.cyl(0.009, 0.009, 0.020, D, 0, SIGHT_Y, -0.045, 0, 0, Math.PI / 2, 12); // rotating drum
+  opb.cyl(0.003, 0.003, 0.022, D, 0, SIGHT_Y, -0.045, 0, 0, Math.PI / 2, 8); // aperture bore
+  opb.box(0.004, 0.014, 0.024, D, -0.014, 0.064, -0.045);            // drum ear L
+  opb.box(0.004, 0.014, 0.024, D, 0.014, 0.064, -0.045);             // drum ear R
   skb.build(skG); g.add(skG);
   brb.build(brG); g.add(brG);
   ubb.build(ubG); g.add(ubG);
   opb.build(opG); g.add(opG);
   b.build(g);
-  // glass panes + glowing reticle (center dot + 65MOA ring) — hidden in ADS, HUD draws the single clean sight
+  // Bare irons — no glass or glowing reticle until an optic is fitted.
   const adsHidden: THREE.Object3D[] = [];
-  const glassF = new THREE.Mesh(new THREE.PlaneGeometry(0.032, 0.024), WM.glass);
-  glassF.position.set(0, SIGHT_Y, -0.131); g.add(glassF);
-  const glassR = glassF.clone(); glassR.position.z = -0.090; g.add(glassR);
-  adsHidden.push(glassF, glassR);
-  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0015, 12), WM.reticle);
-  dot.position.set(0, SIGHT_Y, -0.0895); g.add(dot);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.0060, 0.0070, 24), WM.reticle.clone());
-  (ring.material as THREE.MeshBasicMaterial).transparent = true;
-  (ring.material as THREE.MeshBasicMaterial).opacity = 0.9;
-  ring.position.set(0, SIGHT_Y, -0.0895); g.add(ring);
-  adsHidden.push(dot, ring);
   // ---- STANAG (animated) ----
   const mag = new THREE.Group();
   const mb = new GunBuilder();
@@ -511,21 +495,14 @@ export function buildAK47(): WeaponModel {
   b.box(0.006, 0.004, 0.030, S, 0, -0.038, -0.09);                  // trigger guard
   b.box(0.005, 0.018, 0.005, S, 0, -0.028, -0.09);                  // trigger
   b.box(0.008, 0.012, 0.014, S, 0, -0.036, -0.150);                 // mag release paddle
-  // ---- rear tangent sight ----
+  // ---- rear tangent iron sight (bare spawn: irons only, no Kobra) ----
   opb.box(0.024, 0.010, 0.040, S, 0, 0.046, -0.20);
-  opb.box(0.024, 0.014, 0.008, D, 0, 0.052, -0.205);                // slider
-  opb.box(0.026, 0.003, 0.006, S, 0, 0.058, -0.205);                // leaf notch
-  // ---- Kobra (open frame) ----
-  opb.box(0.034, 0.010, 0.046, D, 0, 0.044, -0.12);
-  opb.box(0.005, 0.026, 0.038, D, -0.016, 0.062, -0.12);
-  opb.box(0.005, 0.026, 0.038, D, 0.016, 0.062, -0.12);
-  opb.box(0.037, 0.005, 0.038, D, 0, 0.077, -0.12);
+  opb.box(0.024, 0.016, 0.008, D, 0, 0.056, -0.205);                // slider (raised to sight line)
+  opb.box(0.026, 0.003, 0.006, S, 0, SIGHT_Y, -0.205);              // leaf notch on the sight line
   skb.build(skG); g.add(skG);
   brb.build(brG); g.add(brG);
   opb.build(opG); g.add(opG);
   b.build(g);
-  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0016, 12), WM.reticle);
-  dot.position.set(0, SIGHT_Y, -0.125); g.add(dot);
   // ---- curved mag ----
   const mag = new THREE.Group();
   const mb = new GunBuilder();
@@ -550,8 +527,8 @@ export function buildAK47(): WeaponModel {
     barrel: makeSocket(0, 0.012, -0.39),
   };
   for (const s of Object.values(sockets)) g.add(s);
-  const removable = { optic: [opG, dot], magazine: [mag], stock: [skG], barrel: [brG] };
-  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden: [dot], sockets, removable, attached: {} };
+  const removable = { optic: [opG], magazine: [mag], stock: [skG], barrel: [brG] };
+  return { group: g, mag, chargingHandle: new THREE.Object3D(), muzzle, sightY: SIGHT_Y, optic, lArm, lArmKeys: keys, adsHidden: [], sockets, removable, attached: {} };
 }
 
 export function buildM1911(): WeaponModel {
@@ -793,10 +770,10 @@ export function buildMP7(): WeaponModel {
   b.box(0.028, 0.030, 0.030, G, 0, -0.100, -0.028, -0.32);           // grip backstrap
   b.cyl(0.016, 0.016, 0.06, P, 0, 0.012, -0.23, Math.PI / 2, 0, 0, 20); // barrel shroud
   for (let i = 0; i < 9; i++) b.box(0.030, 0.006, 0.013, D, 0, 0.048, -0.04 - i * 0.02);
-  // folded flip-up BUIS lying flat on the rail (never block the sight)
-  b.box(0.020, 0.005, 0.030, D, 0, 0.053, -0.205);                  // front flip folded
-  b.box(0.024, 0.005, 0.026, D, 0, 0.053, -0.025);                  // rear flip folded
-  for (const sx of [-1, 1]) b.box(0.006, 0.012, 0.034, D, sx * 0.014, 0.055, -0.205); // sight wings
+  // low sight bases on the rail — the flip-up irons themselves live in the
+  // removable optic group so they stand deployed on a bare gun and hide when glassed
+  b.box(0.020, 0.004, 0.030, D, 0, 0.052, -0.205);                  // front sight base
+  b.box(0.024, 0.004, 0.026, D, 0, 0.052, -0.025);                  // rear sight base
 
   // Ventilated heat shield, ambidextrous controls and receiver pins.
   for(const side of [-1,1]) {
@@ -848,22 +825,19 @@ export function buildMP7(): WeaponModel {
   for (let i = 0; i < 4; i++) { const ha = (i / 4) * Math.PI * 2 + 0.4; b.box(0.004, 0.004, 0.024, D, Math.cos(ha) * 0.0095, 0.012 + Math.sin(ha) * 0.0095, -0.28); }
   b.cyl(0.0035, 0.0035, 0.037, D, 0, 0.012, -0.28, Math.PI / 2);    // bore shadow
 
-  // Micro Red Dot Sight (Aimpoint T1 style on high riser)
-  opb.box(0.028, 0.016, 0.040, D, 0, 0.052, -0.12);                 // riser mount
-  opb.cyl(0.016, 0.016, 0.052, D, 0, SIGHT_Y+0.004, -0.12, Math.PI / 2,0,0,20,true);    // micro tube body
-  opb.cyl(0.006, 0.006, 0.008, D, 0.014, SIGHT_Y, -0.12, 0, 0, Math.PI / 2); // battery cap
+  // Deployed flip-up iron sights (bare spawn: irons only, no red dot)
+  opb.box(0.004, 0.016, 0.004, D, 0, SIGHT_Y - 0.008, -0.205);      // front post (tip on sight line)
+  opb.box(0.004, 0.012, 0.010, D, -0.008, SIGHT_Y - 0.010, -0.205); // front wing L
+  opb.box(0.004, 0.012, 0.010, D, 0.008, SIGHT_Y - 0.010, -0.205);  // front wing R
+  opb.box(0.026, 0.012, 0.006, D, 0, SIGHT_Y - 0.006, -0.025);      // rear aperture housing
+  opb.box(0.008, 0.008, 0.008, D, 0, SIGHT_Y - 0.002, -0.025);      // rear aperture block (sight line)
   skb.build(skG); g.add(skG);
   ubb.build(ubG); g.add(ubG);
   opb.build(opG); g.add(opG);
   b.build(g);
 
-  // Lens & bright micro dot (hidden in ADS — HUD draws the clean red dot)
+  // Bare irons — no lens or dot until an optic is fitted.
   const adsHidden: THREE.Object3D[] = [];
-  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.011, 14), WM.glass);
-  lens.position.set(0, SIGHT_Y, -0.09); g.add(lens);
-  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0014, 10), WM.reticle);
-  dot.position.set(0, SIGHT_Y, -0.089); g.add(dot);
-  adsHidden.push(lens, dot);
 
   // 40-round straight high-capacity magazine inside grip
   const mag = new THREE.Group();
@@ -1070,12 +1044,25 @@ export function buildVector(): WeaponModel {
   b.box(0.006, 0.040, 0.008, S, 0, -0.040, -0.275);                  // front sling loop
   b.box(0.046, 0.070, 0.020, D, 0, 0.005, -0.285);                    // front receiver cap
   b.box(0.028, 0.030, 0.020, P, 0, -0.115, -0.015, -0.30);           // grip plug
-  // flip-up polymer BUIS (deployed)
-  b.box(0.006, 0.018, 0.008, D, 0, SIGHT_Y - 0.009, -0.27);          // front post
-  b.box(0.022, 0.006, 0.010, D, 0, 0.060, -0.27);                    // front base
-  b.box(0.026, 0.006, 0.012, D, 0, 0.060, -0.015);                   // rear housing
-  b.box(0.005, 0.014, 0.010, D, -0.011, SIGHT_Y - 0.009, -0.015);    // ear L
-  b.box(0.005, 0.014, 0.010, D, 0.011, SIGHT_Y - 0.009, -0.015);     // ear R
+  // flip-up polymer BUIS (deployed) — in the removable optic group so bare
+  // spawns show irons only and fitted glass replaces them instead of stacking
+  opb.box(0.006, 0.018, 0.008, D, 0, SIGHT_Y - 0.009, -0.27);        // front post
+  opb.box(0.022, 0.006, 0.010, D, 0, 0.060, -0.27);                  // front base
+  opb.box(0.026, 0.006, 0.012, D, 0, 0.060, -0.015);                 // rear housing
+  opb.box(0.005, 0.014, 0.010, D, -0.011, SIGHT_Y - 0.009, -0.015);  // ear L
+  opb.box(0.005, 0.014, 0.010, D, 0.011, SIGHT_Y - 0.009, -0.015);   // ear R
+  // receiver furniture: full-length top rail, ejection port, ambi controls, QD cups
+  b.box(0.030, 0.006, 0.200, D, 0, 0.054, -0.140);                   // rail spine
+  for (let i = 0; i < 7; i++) b.box(0.032, 0.005, 0.012, D, 0, 0.059, -0.050 - i * 0.026); // rail ribs
+  b.box(0.002, 0.018, 0.060, DS, 0.0235, 0.020, -0.100);             // ejection port cut
+  b.box(0.004, 0.012, 0.040, S, 0.0230, 0.020, -0.100);              // bolt in port
+  b.box(0.005, 0.010, 0.020, S, -0.024, 0.002, -0.060);              // selector L
+  b.box(0.005, 0.010, 0.020, S, 0.024, 0.002, -0.060);               // selector R
+  b.box(0.006, 0.008, 0.014, S, -0.024, -0.012, -0.100);             // mag release
+  b.cyl(0.006, 0.006, 0.004, D, -0.024, 0.030, -0.040, 0, 0, Math.PI / 2); // QD cup L
+  b.cyl(0.006, 0.006, 0.004, D, 0.024, 0.030, -0.040, 0, 0, Math.PI / 2);  // QD cup R
+  for (const sx of [-1, 1]) for (let i = 0; i < 2; i++)
+    b.cyl(0.004, 0.004, 0.050, S, sx * 0.0225, 0.010 + i * 0.020, -0.020, 0, 0, Math.PI / 2); // takedown pins
   // folding vertical foregrip with finger grooves + hinge
   ubb.box(0.024, 0.075, 0.028, G, 0, -0.075, -0.21, 0.10);
   ubb.box(0.026, 0.014, 0.030, P, 0, -0.040, -0.21);                 // hinge block
@@ -1089,25 +1076,14 @@ export function buildVector(): WeaponModel {
   skb.box(0.040, 0.075, 0.020, P, 0, 0.008, 0.155);                  // buttpad
   skb.box(0.034, 0.060, 0.006, R, 0, 0.008, 0.146);                  // pad face
   skb.box(0.030, 0.018, 0.10, G, 0, 0.048, 0.10);                    // cheek weld
-  // EOTech-class holographic window (removable optic)
-  opb.box(0.030, 0.014, 0.050, D, 0, 0.062, -0.11);                  // riser
-  opb.box(0.034, 0.030, 0.008, D, 0, SIGHT_Y + 0.004, -0.135);       // window frame
-  opb.box(0.030, 0.020, 0.030, D, 0, SIGHT_Y - 0.002, -0.115);       // hood body
-  opb.box(0.026, 0.010, 0.006, D, 0, SIGHT_Y - 0.012, -0.095);       // battery box
   skb.build(skG); skG.userData.homeZ = 0; g.add(skG);
   ubb.build(ubG); g.add(ubG);
   opb.build(opG); g.add(opG);
   brb.build(brG); g.add(brG);
   b.build(g);
 
+  // Bare irons — no holographic window until an optic is fitted.
   const adsHidden: THREE.Object3D[] = [];
-  const glassF = new THREE.Mesh(new THREE.PlaneGeometry(0.028, 0.024), WM.glass);
-  glassF.position.set(0, SIGHT_Y + 0.004, -0.1305); g.add(glassF);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.0045, 0.0055, 24), WM.reticle);
-  ring.position.set(0, SIGHT_Y + 0.004, -0.130); g.add(ring);
-  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0011, 10), WM.reticle);
-  dot.position.set(0, SIGHT_Y + 0.004, -0.1295); g.add(dot);
-  adsHidden.push(glassF, ring, dot);
 
   // Extended .45 ACP stick magazine ahead of the trigger guard
   const mag = new THREE.Group();

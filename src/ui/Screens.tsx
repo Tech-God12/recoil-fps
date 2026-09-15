@@ -7,6 +7,7 @@ import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
+import { voice } from '../game/voice';
 import { CountUp, Key, Ticker } from './components';
 import CashCounter from './armory/CashCounter';
 import { gradeFor } from '../game/economy/rewards';
@@ -31,10 +32,14 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
   const secondaryName = weaponById(prof.loadout.secondary.weapon)?.short ?? '—';
   const selectedMap = MAPS.find(map => map.id === s.map) ?? MAPS[0];
+  // Hovering a sector flies the backdrop over that arena; the mission route itself
+  // is briefed on the loading screen instead of crowding the menu.
+  const [hoverMap, setHoverMap] = useState<GameSettings['map'] | null>(null);
+  const bgMap = hoverMap ?? s.map;
   return (
     <main className="menu-root">
       <div className="menu-bg" aria-hidden="true">
-        <div className="menu-bg-img" />
+        <div className="menu-bg-map" key={bgMap} style={{ backgroundImage: `url(/maps-${bgMap}.jpg)` }} />
         <div className="menu-grid-overlay hex-grid" />
         <div className="menu-scan scanlines noise-flicker" />
         <div className="menu-vignette" />
@@ -82,7 +87,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
             <button className="menu-secondary-btn armory-cta" onClick={onArmory}>
               ARMORY <span>LOADOUT · WALLET ${prof.cash.toLocaleString('en-US')}</span>
             </button>
-            <div className="menu-loadout seq" style={{ animationDelay: '.36s' }} aria-label="Fielded loadout">
+            <div className="menu-loadout seq" style={{ animationDelay: '.36s' }} aria-label="Equipped loadout">
               <span className="mono"><b>1</b> {primaryName}</span>
               <span className="mono"><b>2</b> {secondaryName}</span>
             </div>
@@ -95,42 +100,31 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
           </div>
         </section>
 
-        <section className="anim-slide-l" aria-label="Choose a mission" style={{ animationDelay: '.3s' }}>
-          <div className="sec-label"><span>AREA OF OPERATIONS</span><span>{s.map === 'kasbah' ? '02' : '01'} / 02</span></div>
-          {MAPS.map((map, index) => {
-            const option = getMission(map.id);
-            return (
-              <button key={map.id} title={map.desc} onClick={() => onMap(map.id)} aria-pressed={map.id === s.map}
-                className={`map-card ${map.id === s.map ? 'selected' : ''}`}>
-                <span className="map-num">0{index + 1}</span>
-                <span className="min-w-0">
-                  <span className="map-name">{map.name}</span>
-                  <span className="map-type">{map.id === 'alrasul' ? 'Desert river valley' : 'Fortified market town'}</span>
-                </span>
-                <span className="map-tag">{option.phases.length} PHASES</span>
-                <span className="map-sel" aria-hidden="true" />
-                <span className="map-scan" aria-hidden="true" />
-              </button>
-            );
-          })}
-
-          <div className="route" key={mission.id}>
-            <div className="sec-label"><span>MISSION ROUTE</span><span>{mission.phases.length} OBJECTIVES</span></div>
-            <ol>
-              {mission.phases.map((phase, index) => (
-                <li key={phase.id}>
-                  <span className="route-node">0{index + 1}</span>
-                  <div>
-                    <span className="route-title">{phase.title}</span>
-                    <span className="route-loc">{phase.location}</span>
-                  </div>
-                  {(phase.type === 'hold' || phase.type === 'defend') && <span className="route-timing">{phase.seconds} SEC{phase.type === 'defend' ? ' / RELAY' : ''}</span>}
-                  {phase.type === 'destroy' && <span className="route-timing">{phase.fuse} SEC FUSE</span>}
-                </li>
-              ))}
-            </ol>
+        <section className="anim-slide-l map-select" aria-label="Choose a sector" style={{ animationDelay: '.3s' }}>
+          <div className="sec-label"><span>SELECT SECTOR</span><span>{s.map === 'kasbah' ? '02' : '01'} / 02</span></div>
+          <div className="map-previews">
+            {MAPS.map(map => {
+              const option = getMission(map.id);
+              const active = map.id === s.map;
+              return (
+                <button key={map.id} onClick={() => onMap(map.id)} aria-pressed={active}
+                  onMouseEnter={() => setHoverMap(map.id)} onMouseLeave={() => setHoverMap(null)}
+                  onFocus={() => setHoverMap(map.id)} onBlur={() => setHoverMap(null)}
+                  className={`map-preview ${active ? 'selected' : ''}`}>
+                  <span className="map-preview-img" aria-hidden="true">
+                    <img src={`/maps-${map.id}.jpg`} alt="" draggable={false} />
+                  </span>
+                  <span className="map-preview-body">
+                    <span className="map-name">OP. {option.name.toUpperCase()}</span>
+                    <span className="map-type">{map.name} · {option.phases.length} PHASES</span>
+                    <span className="map-desc">{map.desc}</span>
+                  </span>
+                  <span className="map-sel" aria-hidden="true" />
+                </button>
+              );
+            })}
           </div>
-          <p className="menu-rules">Reach the pickup to extract. Clearing the map is not the objective.</p>
+          <p className="menu-rules">Objectives brief on the loading screen. Reach the pickup to extract — clearing the map is not the objective.</p>
         </section>
       </div>
 
@@ -153,13 +147,21 @@ const BOOT_LINES = [
   'SPOOLING WEAPON SYSTEMS',
 ];
 
-export function BootScreen() {
+export function BootScreen({ mission }: { mission?: { name: string; brief: string; phases: readonly { title: string; location: string; brief: string }[] } }) {
   const [line, setLine] = useState(0);
   const [pct, setPct] = useState(0);
   useEffect(() => {
     const l = window.setInterval(() => setLine(i => (i + 1) % BOOT_LINES.length), 900);
     const p = window.setInterval(() => setPct(v => Math.min(94, v + 2 + Math.floor(Math.random() * 6))), 120);
+    // Spoken mission brief while the map builds — the deploy click unlocked audio.
+    if (mission) {
+      voice.unlock();
+      const script = `Operation ${mission.name}. ${mission.brief} Objectives: ` +
+        mission.phases.map((ph, i) => `Objective ${i + 1}: ${ph.title}. ${ph.brief}`).join(' ');
+      voice.brief(script);
+    }
     return () => { window.clearInterval(l); window.clearInterval(p); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
     <div className="boot-root" role="status">
@@ -167,7 +169,20 @@ export function BootScreen() {
       <div className="boot-radar" aria-hidden="true">
         <span className="ring1" /><span className="ring2" /><span className="sweep" /><span className="core" />
       </div>
-      <div className="boot-title glitch">DEPLOYING</div>
+      <div className="boot-title glitch">DEPLOYING{mission ? ` — OP. ${mission.name.toUpperCase()}` : ''}</div>
+      {mission && (
+        <ol className="boot-objectives" aria-label="Mission objectives">
+          {mission.phases.map((ph, i) => (
+            <li key={i}>
+              <span className="boot-obj-num">{String(i + 1).padStart(2, '0')}</span>
+              <span className="boot-obj-body">
+                <b>{ph.title}</b>
+                <i>{ph.location} — {ph.brief}</i>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
       <div className="boot-status">{BOOT_LINES[line]}</div>
       <div className="boot-bar"><span className="load-bar hazard-fill" /></div>
       <div className="boot-pct">{String(pct).padStart(3, '0')}%</div>

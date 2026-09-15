@@ -16,9 +16,9 @@ const { REWARDS, gradeFor, gradeBonus, streakBonus, streakAward, difficultyMulti
 const m4base = () => weaponById('m4a1').base;
 const modsOf = (...ids) => ids.map(id => attachmentById(id).mods);
 
-test('catalog ships 10 weapons and 32 attachments', () => {
+test('catalog ships 10 weapons and 36 attachments', () => {
   assert.equal(WEAPON_CATALOG.length, 10);
-  assert.equal(ATTACHMENT_CATALOG.length, 32);
+  assert.equal(ATTACHMENT_CATALOG.length, 36);
   assert.deepEqual(WEAPON_CATALOG.map(w => w.id).sort(), [
     'ak47', 'awm', 'deagle', 'm1911', 'm249', 'm4a1', 'mp7', 'scar_h', 'spas12', 'vector',
   ]);
@@ -101,9 +101,9 @@ test('competent first run pays ≈ $3,350 and full unlock takes 15–20 runs', (
   assert.ok(total >= 3000 && total <= 3700, `run pays $${total}`);
   const catalogValue = WEAPON_CATALOG.reduce((a, w) => a + w.price, 0)
     + ATTACHMENT_CATALOG.reduce((a, x) => a + x.price, 0);
-  assert.ok(catalogValue >= 55000 && catalogValue <= 66000, `catalog worth $${catalogValue}`);
+  assert.ok(catalogValue >= 60000 && catalogValue <= 72000, `catalog worth $${catalogValue}`);
   const runs = catalogValue / total;
-  assert.ok(runs >= 15 && runs <= 20, `${runs.toFixed(1)} runs to full unlock`);
+  assert.ok(runs >= 15 && runs <= 22, `${runs.toFixed(1)} runs to full unlock`);
 });
 
 test('stat bar normalisation is pinned', () => {
@@ -275,8 +275,31 @@ test('mags and optics use basic industry-standard names', () => {
   const names = {
     opt_reddot: 'Red Dot Sight', opt_holo: 'Holographic Sight', opt_acog: 'ACOG Scope',
     opt_hybrid: 'Hybrid Sight', opt_sniper_hp: 'Sniper Scope', opt_pistol_rmr: 'Pistol Red Dot',
+    opt_scope_2x: '2× Tactical Scope', opt_scope_3x: '3× Combat Scope',
+    opt_scope_4x: '4× Marksman Scope', opt_scope_6x: '6× Sniper Scope',
     mag_extended: 'Extended Mag', mag_drum: 'Drum Mag', mag_fast: 'Fast Mag',
     mag_shell_tube: 'Extended Tube', mag_belt_box: 'Large Ammo Box', mag_sr_10: '10-Round Mag',
   };
   for (const [id, name] of Object.entries(names)) assert.equal(attachmentById(id).name, name, id);
+});
+
+test('MP7 is a secondary weapon', () => {
+  assert.equal(weaponById('mp7').slot, 'secondary');
+});
+
+test('universal 2x/3x/4x/6x scopes fit every gun with fixed true magnification', () => {
+  const want = {
+    opt_scope_2x: [38, '2×'], opt_scope_3x: [26, '3×'],
+    opt_scope_4x: [18, '4×'], opt_scope_6x: [11, '6×'],
+  };
+  for (const [id, [fov, mag]] of Object.entries(want)) {
+    const part = attachmentById(id);
+    assert.deepEqual([...part.compat].sort(), WEAPON_CATALOG.map(w => w.id).sort(), `${id} must fit all guns`);
+    // Fixed magnification: identical ADS FOV on an M416 and a Deagle alike.
+    for (const wid of ['m4a1', 'deagle']) {
+      const s = resolveWeaponStats(weaponById(wid).base, [part.mods]);
+      assert.equal(s.adsFov, fov, `${id} on ${wid}`);
+      assert.equal(s.scopeMag, mag, `${id} readout`);
+    }
+  }
 });

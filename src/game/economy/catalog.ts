@@ -97,7 +97,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'sniper', boltAction: true, scoped: true,
   },
   {
-    id: 'mp7', name: 'MP', short: 'MP', cls: 'PDW', slot: 'primary',
+    id: 'mp7', name: 'MP', short: 'MP', cls: 'PDW', slot: 'secondary',
     price: 2400, starter: false,
     blurb: 'Pocket firestorm. 900 RPM of 4.6mm for room-clearing on a budget — climbs if you hold the trigger.',
     base: base({ auto: true, rpm: 900, damage: 24, headMul: 2.2, limbMul: 0.8, magSize: 40, reserve: 200, hipSpread: 0.011, pattern: [[0.6, 0.15], [0.75, -0.2], [0.85, 0.25], [0.9, -0.1]], adsFov: 60, tacReload: 1.9, emptyReload: 2.3, adsTime: 0.18, noiseRadius: 55 }),
@@ -147,6 +147,8 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
 ];
 
 const RIFLES: WeaponId[] = ['m4a1', 'ak47', 'scar_h', 'vector', 'mp7', 'spas12', 'm249'];
+/** Every weapon in the rack — the universal 2×/3×/4×/6× scopes fit all of them. */
+const ALL_GUNS: WeaponId[] = ['m4a1', 'ak47', 'm1911', 'awm', 'mp7', 'scar_h', 'vector', 'spas12', 'deagle', 'm249'];
 
 export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
   // ---------------- MUZZLE ----------------
@@ -220,7 +222,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     desc: 'Single glowing dot, both eyes open. Snaps onto target faster than irons — no magnification, no excuses.',
     pros: ['Clean dot reticle', 'Faster ADS'],
     cons: ['No zoom'],
-    mods: { scopeReticle: 'dot', adsTimeMul: 0.95 },
+    mods: { scopeReticle: 'dot', adsTimeMul: 0.95, scopeMag: '1×' },
     visual: 'reddot',
   },
   {
@@ -229,7 +231,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     desc: '68-MOA ring with a 1-MOA dot. Built for snap shots on the move — the ring does the leading for you.',
     pros: ['Ring reticle, fast pickup', 'Tighter hip fire'],
     cons: ['Marginally slower than a dot'],
-    mods: { scopeReticle: 'holo', adsTimeMul: 0.97, hipSpreadMul: 0.95 },
+    mods: { scopeReticle: 'holo', adsTimeMul: 0.97, hipSpreadMul: 0.95, scopeMag: '1×' },
     visual: 'holo',
   },
   {
@@ -238,7 +240,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     desc: 'Fixed 4× chevron with bullet-drop ticks. Turns mid-range into your personal range day — tunnel vision included.',
     pros: ['4× magnification', '+10 m effective range'],
     cons: ['Slower ADS', 'Poor up close'],
-    mods: { scopeReticle: 'acog', adsFovDelta: -22, adsTimeMul: 1.2, falloffStartAdd: 10 },
+    mods: { scopeReticle: 'acog', adsFovDelta: -22, adsTimeMul: 1.2, falloffStartAdd: 10, scopeMag: '4×' },
     visual: 'acog',
   },
   {
@@ -247,7 +249,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     desc: 'Low-power variable with true 1×. Tap V while scoped to swing between chevron speed and 6× reach.',
     pros: ['1× / 6× on demand (T)', 'Chevron reticle'],
     cons: ['Slower ADS', 'Heavy glass'],
-    mods: { scopeReticle: 'acog', adsFovDelta: -14, adsTimeMul: 1.1, lpvo: true },
+    mods: { scopeReticle: 'acog', adsFovDelta: -14, adsTimeMul: 1.1, lpvo: true, scopeMag: '1–6×' },
     visual: 'lpvo',
   },
   {
@@ -256,7 +258,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     desc: 'Replaces the factory scope with a 12× precision tube. Steadier glass for prone-quality shots from a crouch.',
     pros: ['Stronger magnification', 'Steadier when crouched'],
     cons: ['Useless inside 20 m'],
-    mods: { scopeReticle: 'sniper', adsFovDelta: -8, swayMulCrouched: 0.7 },
+    mods: { scopeReticle: 'sniper', adsFovDelta: -8, swayMulCrouched: 0.7, scopeMag: '12×' },
     visual: 'scope_hp',
   },
   {
@@ -265,8 +267,44 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     desc: 'Milled micro dot riding the slide. Snappier pickup than notches — the dot does not lie about your wobble.',
     pros: ['Dot reticle on a pistol', 'Faster ADS'],
     cons: ['No zoom'],
-    mods: { scopeReticle: 'dot', adsTimeMul: 0.92 },
+    mods: { scopeReticle: 'dot', adsTimeMul: 0.92, scopeMag: '1×' },
     visual: 'pistol_rmr',
+  },
+  {
+    id: 'opt_scope_2x', slot: 'optic', name: '2× Tactical Scope', price: 800, tier: 2,
+    compat: ALL_GUNS,
+    desc: 'Fixed 2× combat optic with a clean chevron. Same true magnification on every gun — pistols included.',
+    pros: ['True 2× zoom on any gun', '+6 m effective range'],
+    cons: ['Slower ADS'],
+    mods: { scopeReticle: 'acog', adsFovOverride: 38, adsTimeMul: 1.08, falloffStartAdd: 6, scopeMag: '2×' },
+    visual: 'scope_2x',
+  },
+  {
+    id: 'opt_scope_3x', slot: 'optic', name: '3× Combat Scope', price: 1100, tier: 2,
+    compat: ALL_GUNS,
+    desc: 'Fixed 3× with BDC ticks. The mid-range sweet spot — identical zoom whether it rides an M416 or a Deagle.',
+    pros: ['True 3× zoom on any gun', '+10 m effective range'],
+    cons: ['Slower ADS', 'Tight up close'],
+    mods: { scopeReticle: 'acog', adsFovOverride: 26, adsTimeMul: 1.14, falloffStartAdd: 10, scopeMag: '3×' },
+    visual: 'scope_3x',
+  },
+  {
+    id: 'opt_scope_4x', slot: 'optic', name: '4× Marksman Scope', price: 1400, tier: 3,
+    compat: ALL_GUNS,
+    desc: 'Fixed 4× marksman tube with a fine chevron. Turns any weapon into a designated-marksman rifle.',
+    pros: ['True 4× zoom on any gun', '+14 m effective range'],
+    cons: ['Slow ADS', 'Tunnel vision'],
+    mods: { scopeReticle: 'acog', adsFovOverride: 18, adsTimeMul: 1.2, falloffStartAdd: 14, scopeMag: '4×' },
+    visual: 'scope_4x',
+  },
+  {
+    id: 'opt_scope_6x', slot: 'optic', name: '6× Sniper Scope', price: 1800, tier: 3,
+    compat: ALL_GUNS,
+    desc: 'Fixed 6× precision scope with mil crosshair. Maximum reach on any platform — hold your breath and pick a window.',
+    pros: ['True 6× zoom on any gun', '+18 m effective range'],
+    cons: ['Slow ADS', 'Useless up close'],
+    mods: { scopeReticle: 'sniper', adsFovOverride: 11, adsTimeMul: 1.3, falloffStartAdd: 18, scopeMag: '6×' },
+    visual: 'scope_6x',
   },
   // ---------------- MAGAZINE ----------------
   {

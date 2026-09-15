@@ -260,6 +260,94 @@ function pistol_rmr(_ctx: AttachContext): THREE.Object3D {
   return p;
 }
 
+/* ---- Universal fixed-magnification scopes (2×/3×/4×/6× fit every gun) ----
+ * Compact prismatic tubes: short for 2×, progressively longer with bigger
+ * objectives and turrets as magnification climbs. Scaled down on small frames
+ * so a 6× on a Deagle reads chunky but plausible instead of absurd. */
+
+function scopeTube(b: GunBuilder, len: number, tubeR: number, axisY: number, turrets: boolean): void {
+  b.box(0.030, 0.008, len + 0.02, WM.dark, 0, 0.004, 0);                    // mount rail
+  b.cyl(tubeR, tubeR, len, WM.dark, 0, axisY, 0, Math.PI / 2, 0, 0, 20, true); // tube (open)
+  b.cyl(tubeR * 0.92, tubeR * 0.92, len, WM.scopeInner, 0, axisY, 0, Math.PI / 2, 0, 0, 20, true); // dark bore
+  b.cyl(tubeR + 0.002, tubeR + 0.002, 0.010, WM.darkSteel, 0, axisY, -len / 2 + 0.012, Math.PI / 2, 0, 0, 20, true); // ring F
+  b.cyl(tubeR + 0.002, tubeR + 0.002, 0.010, WM.darkSteel, 0, axisY, len / 2 - 0.012, Math.PI / 2, 0, 0, 20, true);  // ring R
+  if (turrets) {
+    b.cyl(0.009, 0.009, 0.018, WM.darkSteel, 0, axisY + tubeR + 0.006, 0.005); // elevation
+    b.cyl(0.009, 0.009, 0.018, WM.darkSteel, tubeR + 0.006, axisY, 0.005, 0, 0, Math.PI / 2); // windage
+  }
+}
+
+function scopeChevron(p: THREE.Group, axisY: number, z: number, s: number): void {
+  const chev = new THREE.Mesh(new THREE.ConeGeometry(0.0022 * s, 0.005 * s, 4), WM.reticle);
+  chev.position.set(0, axisY, z);
+  chev.userData.adsHide = true;
+  p.add(chev);
+}
+
+function fitScope(p: THREE.Group, cls: WeaponClass): void {
+  // Small frames get a scaled-down tube so universal scopes stay proportional.
+  const k = cls === 'PISTOL' ? 0.68 : cls === 'SMG' || cls === 'PDW' ? 0.85 : 1;
+  p.scale.setScalar(k);
+}
+
+function scope_2x({ cls }: AttachContext): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  scopeTube(b, 0.070, 0.013, 0.024, false);
+  b.build(p);
+  opticLens(p, 0.0115, 0.024, -0.034);
+  opticLens(p, 0.0115, 0.024, 0.034);
+  scopeChevron(p, 0.024, 0.033, 0.9);
+  p.userData.lensH = 0.024;
+  fitScope(p, cls);
+  return p;
+}
+
+function scope_3x({ cls }: AttachContext): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  scopeTube(b, 0.095, 0.014, 0.025, true);
+  b.cyl(0.017, 0.014, 0.022, WM.dark, 0, 0.025, -0.056, Math.PI / 2, 0, 0, 20, true); // objective bell
+  b.build(p);
+  opticLens(p, 0.0155, 0.025, -0.066);
+  opticLens(p, 0.0125, 0.025, 0.046);
+  scopeChevron(p, 0.025, 0.045, 1.0);
+  p.userData.lensH = 0.025;
+  fitScope(p, cls);
+  return p;
+}
+
+function scope_4x({ cls }: AttachContext): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  scopeTube(b, 0.115, 0.015, 0.026, true);
+  b.cyl(0.020, 0.015, 0.030, WM.dark, 0, 0.026, -0.070, Math.PI / 2, 0, 0, 22, true); // objective bell
+  b.cyl(0.018, 0.0135, 0.020, WM.dark, 0, 0.026, 0.064, Math.PI / 2, 0, 0, 22, true); // ocular bell
+  b.build(p);
+  opticLens(p, 0.018, 0.026, -0.084);
+  opticLens(p, 0.0135, 0.026, 0.073);
+  scopeChevron(p, 0.026, 0.072, 1.1);
+  p.userData.lensH = 0.026;
+  fitScope(p, cls);
+  return p;
+}
+
+function scope_6x({ cls }: AttachContext): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  scopeTube(b, 0.145, 0.016, 0.027, true);
+  b.cyl(0.025, 0.016, 0.045, WM.dark, 0, 0.027, -0.092, Math.PI / 2, 0, 0, 22, true); // big objective
+  b.cyl(0.023, 0.0148, 0.045, WM.scopeInner, 0, 0.027, -0.092, Math.PI / 2, 0, 0, 22, true); // objective bore
+  b.cyl(0.019, 0.016, 0.035, WM.dark, 0, 0.027, 0.086, Math.PI / 2, 0, 0, 22, true);  // ocular
+  b.build(p);
+  opticLens(p, 0.0225, 0.027, -0.113);
+  opticLens(p, 0.0145, 0.027, 0.102);
+  opticDot(p, 0.027, 0.101, 0.0016);
+  p.userData.lensH = 0.027;
+  fitScope(p, cls);
+  return p;
+}
+
 /* ================= MAGAZINE ================= */
 
 function mag_ext(ctx: AttachContext): THREE.Object3D {
@@ -560,6 +648,7 @@ function ported_slide(_ctx: AttachContext): THREE.Object3D {
 export const ATTACHMENT_BUILDERS: Record<string, AttachmentBuilder> = {
   flash_hider, compensator, suppressor_long, suppressor_fat, brake_heavy, duckbill, choke,
   reddot, holo, acog, lpvo, scope_hp, pistol_rmr,
+  scope_2x, scope_3x, scope_4x, scope_6x,
   mag_ext, mag_drum, mag_coupled, shell_tube, belt_box_large, mag_box_sr,
   vgrip, agrip, bipod, masterkey,
   stock_none, stock_heavy, stock_folding,

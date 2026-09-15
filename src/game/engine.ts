@@ -103,6 +103,7 @@ export interface HudState {
   heldSlot: 'primary' | 'secondary';
   bipodDeployed: boolean;
   reticle: ScopeReticle;
+  scopeMag: string | null;
   lpvoHigh: boolean;
   pumping: boolean;
   pings: { dir: number; age: number }[];
@@ -168,6 +169,7 @@ interface WeaponDef {
   suppressed?: boolean;
   boltAction?: boolean;
   reticle?: ScopeReticle;
+  scopeMag?: string | null;
   lpvo?: boolean;
   lpvoHigh?: boolean;
   pumpShotgun?: boolean;
@@ -420,16 +422,17 @@ export class Engine {
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 5);
 
-    // Clear bright desert daylight — high visibility, light fog only at distance.
-    // Slightly desaturated so enemy silhouettes stay readable instead of washing out.
-    this.scene.background = new THREE.Color(0xB8CCDA);
-    this.scene.fog = new THREE.Fog(mapId === 'alrasul' ? 0xC6B89C : 0xB4C0C5, 130, 430);
+    // Per-map grade: Al-Rasul is bright desert noon, Kasbah is a hazy late-afternoon
+    // fortress with a low amber sun and cooler shadows — the two sectors read instantly.
+    const dusk = mapId === 'kasbah';
+    this.scene.background = new THREE.Color(dusk ? 0x9DB4C4 : 0xB8CCDA);
+    this.scene.fog = new THREE.Fog(dusk ? 0xC9A97E : 0xC6B89C, dusk ? 100 : 130, dusk ? 380 : 430);
     // strong sky fill so shadowed faces stay readable
-    const hemi = new THREE.HemisphereLight(0xCFE0EE, 0x8C765A, 0.65);
+    const hemi = new THREE.HemisphereLight(dusk ? 0xB9C6DE : 0xCFE0EE, dusk ? 0x6E5A44 : 0x8C765A, dusk ? 0.5 : 0.65);
     this.scene.add(hemi);
-    // key sun — high and bright, crisp shadows
-    const sun = new THREE.DirectionalLight(0xFFE4BE, 3.0);
-    sun.position.set(-65, 52, 40);
+    // key sun — high and bright at noon, low and amber at dusk with longer shadows
+    const sun = new THREE.DirectionalLight(dusk ? 0xFFB36B : 0xFFE4BE, dusk ? 2.6 : 3.0);
+    sun.position.set(dusk ? -95 : -65, dusk ? 26 : 52, dusk ? 60 : 40);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048); // 4x fewer shadow texels than 4096 — big FPS win
     sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
@@ -439,11 +442,11 @@ export class Engine {
     sun.shadow.normalBias = 0.04;
     this.scene.add(sun);
     this.sunLight = sun;
-    // gentle cool fill from the opposite side
-    const fill = new THREE.DirectionalLight(0xAFC6DC, 0.22);
+    // gentle cool fill from the opposite side (stronger at dusk to keep faces readable)
+    const fill = new THREE.DirectionalLight(dusk ? 0x8FA8CC : 0xAFC6DC, dusk ? 0.32 : 0.22);
     fill.position.set(55, 30, -45);
     this.scene.add(fill);
-    this.scene.add(new THREE.AmbientLight(0x8A7A60, 0.12));
+    this.scene.add(new THREE.AmbientLight(dusk ? 0x7A6A55 : 0x8A7A60, dusk ? 0.16 : 0.12));
 
     this.addSkyDome(mapId);
 
@@ -939,12 +942,12 @@ void main(){
     c.width = 4; c.height = 256;
     const ctx = c.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, '#4A78A6');   // zenith blue
-    grad.addColorStop(0.4, '#93B6C8');
-    grad.addColorStop(0.58, mapId === 'kasbah' ? '#C2CDD0' : '#D8C7A0'); // haze band
-    grad.addColorStop(0.72, mapId === 'kasbah' ? '#DDD8C2' : '#F0D6A2'); // warm horizon
-    grad.addColorStop(0.85, '#F6C888');
-    grad.addColorStop(1, '#EAB878');    // sun-warmed base
+    grad.addColorStop(0, mapId === 'kasbah' ? '#3E5E8C' : '#4A78A6');   // zenith blue
+    grad.addColorStop(0.4, mapId === 'kasbah' ? '#7E9AB8' : '#93B6C8');
+    grad.addColorStop(0.58, mapId === 'kasbah' ? '#C9A97A' : '#D8C7A0'); // haze band
+    grad.addColorStop(0.72, mapId === 'kasbah' ? '#F2A65E' : '#F0D6A2'); // warm horizon
+    grad.addColorStop(0.85, mapId === 'kasbah' ? '#E8823F' : '#F6C888');
+    grad.addColorStop(1, mapId === 'kasbah' ? '#C95F2B' : '#EAB878');    // sun-warmed base
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 4, 256);
     const tex = new THREE.CanvasTexture(c);
@@ -967,8 +970,8 @@ void main(){
     sctx.fillRect(0, 0, 128, 128);
     const sunTex = new THREE.CanvasTexture(sc);
     const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, fog: false, depthWrite: false, transparent: true }));
-    sunSpr.position.set(-220, 200, 150);
-    sunSpr.scale.setScalar(110);
+    sunSpr.position.set(mapId === 'kasbah' ? -290 : -220, mapId === 'kasbah' ? 90 : 200, 150);
+    sunSpr.scale.setScalar(mapId === 'kasbah' ? 150 : 110);
     this.scene.add(sunSpr);
     this.scene.add(this.clouds);
     // A few flat drifting clouds
@@ -1471,7 +1474,7 @@ void main(){
           else { this.streak = 1; this.streakPaidMark = 0; }
           this.lastKillT = now;
           if (this.streak >= 2) {
-            const label = this.streak >= 5 ? 'UNSTOPPABLE' : this.streak === 4 ? 'MEGA KILL' : this.streak === 3 ? 'MULTI KILL' : 'DOUBLE KILL';
+            const label = this.streak >= 6 ? 'UNSTOPPABLE' : this.streak === 5 ? 'RAMPAGE' : this.streak === 4 ? 'QUAD KILL' : this.streak === 3 ? 'TRIPLE KILL' : 'DOUBLE KILL';
             voice.streak(label);
             this.onEvent({ type: 'streak', label });
             const sb = streakAward(this.streak, this.streakPaidMark, 500 - this.streakPaidRun);
@@ -1586,7 +1589,7 @@ void main(){
       recoilYawMul: stats.recoilYawMul, moveSpeedMul: stats.moveSpeedMul,
       suppressed: stats.suppressed,
       boltAction: id === 'awm', audioTag: LOADOUT_AUDIO[id], masterkey: stats.masterkey,
-      reticle: stats.reticle, lpvo: stats.lpvo, pumpShotgun: id === 'spas12',
+      reticle: stats.reticle, scopeMag: stats.scopeMag, lpvo: stats.lpvo, pumpShotgun: id === 'spas12',
       laser: stats.laser, flashlight: stats.flashlight,
     };
   }
@@ -2659,6 +2662,7 @@ void main(){
       heldSlot: (this.weapons.length === 2 ? this.cur === 0 : this.cur !== 2) ? 'primary' : 'secondary',
       bipodDeployed: this.bipodDeployed(),
       reticle: this.def().lpvo ? (this.def().lpvoHigh ? 'sniper' : 'acog') : (this.def().reticle ?? (this.adsFovEff() < 30 ? 'sniper' : 'none')),
+      scopeMag: this.def().lpvo ? (this.def().lpvoHigh ? '6×' : '1×') : (this.def().scopeMag ?? null),
       lpvoHigh: this.def().lpvoHigh ?? false,
       pumping: this.pumpT > 0,
       reloading: this.reloadT >= 0,

@@ -113,7 +113,7 @@ export interface HudState {
   // Accurate tactical map (rendered from real world geometry)
   mapImage: string;
   playerMap: { nx: number; nz: number };
-  enemiesMap: { nx: number; nz: number }[];
+  enemiesMap: { nx: number; nz: number; yaw: number; hot: boolean }[];
   missionMap?: { nx: number; nz: number; ringPct: number; extract: boolean };
   fps: number;
   magSize: number;
@@ -2756,7 +2756,13 @@ void main(){
       playerMap: { nx: (this.pos.x + H) / (2 * H), nz: (this.pos.z + H) / (2 * H) },
       enemiesMap: this.ai.enemies
         .filter(e => !e.dead)
-        .map(e => ({ nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H) })),
+        .map(e => ({
+          nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H),
+          // Heading (deg) + engagement state let the radar draw directional
+          // wedges and burn hostiles red the moment they have eyes on you.
+          yaw: -e.yaw * 180 / Math.PI,
+          hot: e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE',
+        })),
       missionMap: (() => {
         const phase = this.missionRuntime.mission.current;
         if (!phase) return undefined;

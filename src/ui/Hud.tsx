@@ -285,14 +285,30 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
         const zoom = (hud.worldHalf * 2) / 170;
         const ox = (0.5 - hud.playerMap.nx) * 100 * zoom;
         const oz = (0.5 - hud.playerMap.nz) * 100 * zoom;
+        const hot = hud.enemiesMap.filter(e => e.hot).length;
+        // Objective bearing chevron on the dish rim + straight-line distance readout.
+        let objChip: { deg: number; dist: number; extract: boolean } | null = null;
+        if (hud.missionMap) {
+          const dx = (hud.missionMap.nx - hud.playerMap.nx) * hud.worldHalf * 2;
+          const dz = (hud.missionMap.nz - hud.playerMap.nz) * hud.worldHalf * 2;
+          objChip = {
+            deg: Math.atan2(dx, -dz) * 180 / Math.PI - hud.bearing,
+            dist: Math.hypot(dx, dz),
+            extract: hud.missionMap.extract,
+          };
+        }
         return (
           <div className="radar-pos">
-            <div className="radar" style={{ opacity: hud.ads > 0.6 ? 0.35 : 1, transition: 'opacity .2s' }}>
+            <div className={`radar ${hot > 0 ? 'contact' : ''}`} style={{ opacity: hud.ads > 0.6 ? 0.35 : 1, transition: 'opacity .2s' }}>
               <div className="radar-world" style={{ transform: `rotate(${-hud.bearing}deg)` }}>
                 <div className="radar-zoom" style={{ transform: `translate(${ox}%, ${oz}%) scale(${zoom})` }}>
                   <img src={hud.mapImage} alt="" draggable={false} className="radar-map" />
                   {hud.enemiesMap.map((e, i) => (
-                    <span key={i} className="radar-enemy" style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%` }} />
+                    <span
+                      key={i}
+                      className={`radar-enemy ${e.hot ? 'hot' : ''}`}
+                      style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%`, transform: `rotate(${e.yaw}deg)` }}
+                    />
                   ))}
                   {hud.missionMap && (
                     <>
@@ -302,17 +318,28 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
                   )}
                 </div>
               </div>
+              {/* Objective bearing chevron rides the rim even when the marker is off-dish */}
+              {objChip && objChip.dist > 12 && (
+                <span className={`radar-obj-chevron ${objChip.extract ? 'extract' : ''}`} style={{ transform: `rotate(${objChip.deg}deg)` }} aria-hidden="true" />
+              )}
               <div className="radar-spin" style={{ transform: `rotate(${-hud.bearing}deg)` }} aria-hidden="true">
-                <span className="radar-card" style={{ top: 2, left: '50%', marginLeft: -3 }}>N</span>
+                <span className="radar-card n" style={{ top: 2, left: '50%', marginLeft: -3 }}>N</span>
                 <span className="radar-card" style={{ bottom: 2, left: '50%', marginLeft: -3 }}>S</span>
                 <span className="radar-card" style={{ left: 4, top: '50%', marginTop: -4 }}>W</span>
                 <span className="radar-card" style={{ right: 4, top: '50%', marginTop: -4 }}>E</span>
               </div>
               <span className="radar-rings" /><span className="radar-rings r2" /><span className="radar-rings r3" />
+              <span className="radar-grid" aria-hidden="true" />
               <span className="radar-sweep" />
               <span className="radar-player" />
-              <span className="radar-label">60M</span>
               <span className="radar-frame" />
+              <span className="radar-tick t0" /><span className="radar-tick t45" /><span className="radar-tick t90" /><span className="radar-tick t135" />
+            </div>
+            {/* Instrument footer: live bearing, objective range, contact count */}
+            <div className="radar-meta mono" aria-hidden="true">
+              <span className="radar-meta-brg tabular">{String(Math.round(hud.bearing)).padStart(3, '0')}°</span>
+              {objChip && <span className={`radar-meta-obj ${objChip.extract ? 'extract' : ''}`}>{objChip.extract ? 'EXFIL' : 'OBJ'} {Math.round(objChip.dist)}m</span>}
+              <span className={`radar-meta-hostiles ${hot > 0 ? 'hot' : ''}`}>{hud.enemiesMap.length > 0 ? `${hud.enemiesMap.length} HOSTILE${hud.enemiesMap.length > 1 ? 'S' : ''}` : 'CLEAR'}</span>
             </div>
           </div>
         );

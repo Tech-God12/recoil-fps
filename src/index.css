@@ -819,7 +819,7 @@ img { display: block; max-width: 100%; }
 .mission-phase-banner span { color: var(--brass); margin-right: 10px; }
 
 /* radar — steel instrument */
-.radar-pos { position: absolute; left: 18px; bottom: 138px; }
+.radar-pos { position: absolute; left: 18px; bottom: 148px; }
 .radar {
   position: relative; width: 168px; height: 168px; border-radius: 50%;
   background: radial-gradient(circle at 30% 30%, #1F1C16, #12100C 68%);
@@ -829,7 +829,17 @@ img { display: block; max-width: 100%; }
 .radar-world { position: absolute; left: 50%; top: 50%; width: 260px; height: 260px; margin: -130px 0 0 -130px; }
 .radar-zoom { position: absolute; inset: 0; }
 .radar-map { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.55; filter: contrast(1.05) saturate(0.9); }
-.radar-enemy { position: absolute; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; background: var(--blood); border: 1px solid rgba(237,228,211,0.95); border-radius: 50%; box-shadow: 0 0 6px rgba(200,50,30,0.6); }
+/* Enemy blip = directional wedge: dot body + view-cone stub showing where the
+   hostile is LOOKING. Amber while unaware, burning red once they have contact. */
+.radar-enemy { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; background: var(--brass); border: 1px solid rgba(20,17,13,0.9); border-radius: 50%; box-shadow: 0 0 5px rgba(200,155,90,0.55); }
+.radar-enemy::before {
+  content: ''; position: absolute; left: 50%; bottom: 100%; width: 0; height: 0; margin-left: -4px;
+  border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid rgba(200,155,90,0.5);
+  transform: translateY(-1px);
+}
+.radar-enemy.hot { background: var(--blood); box-shadow: 0 0 8px rgba(200,50,30,0.9); animation: hotPing 0.9s ease-in-out infinite; }
+.radar-enemy.hot::before { border-bottom-color: rgba(200,50,30,0.65); }
+@keyframes hotPing { 0%, 100% { box-shadow: 0 0 4px rgba(200,50,30,0.6); } 50% { box-shadow: 0 0 11px rgba(200,50,30,1); } }
 .radar-obj-ring { position: absolute; border: 1.5px solid var(--olive); border-radius: 50%; transform: translate(-50%,-50%); opacity: 0.9; }
 .radar-obj-ring.extract { border-color: var(--bone); border-style: dashed; }
 .radar-obj-dot { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; background: var(--olive); border: 1px solid var(--bone); border-radius: 50%; }
@@ -856,6 +866,39 @@ img { display: block; max-width: 100%; }
 }
 .radar-label { position: absolute; right: 8px; bottom: 8px; font-family: var(--mono); font-size: 8px; letter-spacing: 0.08em; color: var(--bone-mute); background: rgba(0,0,0,0.35); padding: 2px 4px; border-radius: 2px; }
 .radar-frame { position: absolute; inset: -1px; border: 1px solid rgba(200,155,90,0.18); border-radius: 50%; pointer-events: none; }
+/* Contact state: the whole instrument rim smoulders red while any hostile is engaged */
+.radar.contact .radar-frame { border-color: rgba(200,50,30,0.55); box-shadow: 0 0 14px rgba(200,50,30,0.28), inset 0 0 18px rgba(200,50,30,0.12); transition: border-color 300ms, box-shadow 300ms; }
+/* Faint square grid over the dish so the terrain reads as a mapped instrument */
+.radar-grid {
+  position: absolute; inset: 0; border-radius: 50%; pointer-events: none; opacity: 0.5;
+  background-image: linear-gradient(rgba(237,228,211,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(237,228,211,0.05) 1px, transparent 1px);
+  background-size: 28px 28px; background-position: center;
+}
+/* Rim tick marks every 45° */
+.radar-tick { position: absolute; left: 50%; top: 0; width: 1px; height: 5px; margin-left: -0.5px; background: rgba(237,228,211,0.28); transform-origin: 50% 84px; pointer-events: none; }
+.radar-tick.t45 { transform: rotate(45deg); } .radar-tick.t90 { transform: rotate(90deg); } .radar-tick.t135 { transform: rotate(135deg); }
+.radar-tick::after { content: ''; position: absolute; left: 0; top: 163px; width: 1px; height: 5px; background: rgba(237,228,211,0.28); }
+/* North cardinal pops brass so orientation is instant */
+.radar-card.n { color: var(--brass); font-size: 9px; }
+/* Objective bearing chevron riding the dish rim */
+.radar-obj-chevron { position: absolute; left: 50%; top: 50%; width: 0; height: 0; margin: -84px 0 0 -5px; transform-origin: 5px 84px; pointer-events: none; }
+.radar-obj-chevron::before {
+  content: ''; position: absolute; left: 0; top: 4px; width: 0; height: 0;
+  border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid var(--olive);
+  filter: drop-shadow(0 0 3px rgba(155,168,79,0.7));
+}
+.radar-obj-chevron.extract::before { border-bottom-color: var(--bone); filter: drop-shadow(0 0 3px rgba(237,228,211,0.6)); }
+/* Instrument footer strip: bearing · objective range · contact count */
+.radar-meta {
+  display: flex; align-items: center; gap: 8px; margin-top: 6px; width: 168px;
+  padding: 4px 8px; background: rgba(18,16,12,0.72); border: 1px solid var(--line); border-radius: 3px;
+  font-size: 9px; letter-spacing: 0.08em; color: var(--bone-mute);
+}
+.radar-meta-brg { color: var(--bone); font-weight: 700; }
+.radar-meta-obj { color: var(--olive); }
+.radar-meta-obj.extract { color: var(--bone); }
+.radar-meta-hostiles { margin-left: auto; }
+.radar-meta-hostiles.hot { color: var(--blood); font-weight: 700; animation: hotPing 0.9s ease-in-out infinite; }
 
 /* ammo */
 .weapon-name { font-family: var(--display); font-weight: 800; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bone); }
@@ -1019,6 +1062,17 @@ img { display: block; max-width: 100%; }
 .tut-card strong { display: block; font-family: var(--display); font-size: 14px; letter-spacing: 0.06em; color: var(--bone); }
 .tut-card p { margin: 6px 0 0; font-family: var(--body); font-size: 13px; color: var(--bone-dim); }
 .tut-card em { display: block; margin-top: 8px; font-size: 10px; color: var(--bone-mute); font-style: normal; }
+/* Stage key-figures ribbon */
+.stage-ribbon {
+  display: flex; gap: 0; margin: 0 14px 12px; border: 1px solid var(--line); border-radius: 3px;
+  background: rgba(18,16,12,0.6); overflow: hidden;
+}
+.stage-ribbon > div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; }
+.stage-ribbon > div + div { border-left: 1px solid var(--line); }
+.stage-ribbon span { font-size: 8px; letter-spacing: 0.14em; color: var(--bone-mute); }
+.stage-ribbon b { font-size: 14px; font-weight: 700; color: var(--bone); font-variant-numeric: tabular-nums; }
+.stage-ribbon > div.on b { color: var(--olive); }
+
 .tut-ring { box-shadow: 0 0 0 2px var(--brass), 0 0 20px rgba(200,155,90,0.35) !important; }
 .armory-toast { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 10px 14px; background: var(--ink-2); border: 1px solid var(--line); border-radius: 3px; font-size: 12px; color: var(--bone); box-shadow: 0 8px 20px rgba(0,0,0,0.35); animation: rise 180ms ease-out; }
 .armory-toast.bad { border-color: rgba(200,50,30,0.35); color: var(--blood); }

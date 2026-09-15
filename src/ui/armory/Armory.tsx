@@ -277,6 +277,16 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
             <div className="stage-fallback mono" aria-hidden="true">Drag to orbit · Scroll to zoom · Click pins to fit parts</div>
           </div>
 
+          {/* Key figures ribbon under the gun — the numbers that matter at a glance */}
+          <div className="stage-ribbon mono" aria-label="Key weapon figures">
+            <div><span>DMG</span><b>{stats.damage.toFixed(0)}</b></div>
+            <div><span>RPM</span><b>{stats.rpm}</b></div>
+            <div><span>MAG</span><b>{stats.magSize}</b></div>
+            <div><span>ADS</span><b>{(stats.adsTime * 1000).toFixed(0)}ms</b></div>
+            <div><span>RELOAD</span><b>{stats.tacReload.toFixed(1)}s</b></div>
+            <div className={stats.suppressed ? 'on' : ''}><span>SUPPR</span><b>{stats.suppressed ? 'YES' : '—'}</b></div>
+          </div>
+
         </section>
 
         {/* ============ SPEC SHEET ============ */}

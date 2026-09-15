@@ -103,6 +103,8 @@ export interface HudState {
   heldSlot: 'primary' | 'secondary';
   bipodDeployed: boolean;
   reticle: ScopeReticle;
+  /** Live optic magnification while aiming (0 = not magnified/not aiming). */
+  zoomMag: number;
   lpvoHigh: boolean;
   pumping: boolean;
   pings: { dir: number; age: number }[];
@@ -149,6 +151,8 @@ interface WeaponDef {
   adsSpread: number;
   pattern: [number, number][];
   adsFov: number;      // FOV while ADS (lower = more zoom); sniper gets a real scope
+  /** Optic magnification. 0 = factory sight picture (use adsFov as-is). */
+  zoom?: number;
   tacReload: number;
   emptyReload: number;
   // Loadout-driven extras (optional so legacy stock defs keep compiling)
@@ -205,6 +209,38 @@ function nextFrame(): Promise<void> {
  * player shoots first — you do not get to fire into a crowd and still be "unseen".
  */
 const OPENING_GRACE = 8;
+
+/**
+ * Per-map atmosphere presets. The two arenas should never read as the same photo with
+ * different props: Sandblast is golden-hour desert, Town is cool overcast slate.
+ */
+const MAP_ATMOS: Record<MapId, {
+  background: number; fog: number; fogNear: number; fogFar: number;
+  hemiSky: number; hemiGround: number; hemiIntensity: number;
+  sunColor: number; sunIntensity: number; sunPosition: [number, number, number];
+  fillColor: number; fillIntensity: number; fillPosition: [number, number, number];
+  ambientColor: number; ambientIntensity: number;
+  sunGlow: string; haze: string; horizon: string; zenith: string; mid: string; base: string;
+}> = {
+  alrasul: {
+    background: 0xB8CCDA, fog: 0xC6B89C, fogNear: 130, fogFar: 430,
+    hemiSky: 0xCFE0EE, hemiGround: 0x8C765A, hemiIntensity: 0.65,
+    sunColor: 0xFFE4BE, sunIntensity: 3.0, sunPosition: [-65, 52, 40],
+    fillColor: 0xAFC6DC, fillIntensity: 0.22, fillPosition: [55, 30, -45],
+    ambientColor: 0x8A7A60, ambientIntensity: 0.12,
+    sunGlow: 'rgba(255,240,200,0.85)', zenith: '#4A78A6', mid: '#93B6C8', haze: '#D8C7A0', horizon: '#F0D6A2', base: '#EAB878',
+  },
+  kasbah: {
+    background: 0xA9BCC6, fog: 0xA7B8BE, fogNear: 110, fogFar: 400,
+    hemiSky: 0xC2D4DC, hemiGround: 0x5E6B66, hemiIntensity: 0.8,
+    sunColor: 0xE3EDF2, sunIntensity: 2.2, sunPosition: [46, 60, -36],
+    fillColor: 0xC9B8A0, fillIntensity: 0.34, fillPosition: [-55, 34, 44],
+    ambientColor: 0x74808A, ambientIntensity: 0.18,
+    sunGlow: 'rgba(238,244,248,0.7)', zenith: '#5E7D92', mid: '#8FA9B5', haze: '#BFCBCD', horizon: '#D5D9CE', base: '#C2C4B4',
+  },
+};
+/** Reference eye box for optic magnification (independent of the hip-FOV slider). */
+const REFERENCE_ADS_FOV = 75;
 /** Capsule heights used for AI movement. The crouch height is what lets a squad duck
  *  under a bridge deck instead of jamming on its underside. */
 const AI_STAND_HEIGHT = 1.7;
@@ -370,6 +406,9 @@ export class Engine {
   paused = true;
   private disposed = false;
   private lastT = 0;
+  /** Map-select flyover: camera orbits high above the arena while the player chooses. */
+  private previewing = false;
+  private previewAngle = Math.PI * 0.25;
 
   // Stats
   private kills = 0;
@@ -420,16 +459,17 @@ export class Engine {
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 5);
 
-    // Clear bright desert daylight — high visibility, light fog only at distance.
-    // Slightly desaturated so enemy silhouettes stay readable instead of washing out.
-    this.scene.background = new THREE.Color(0xB8CCDA);
-    this.scene.fog = new THREE.Fog(mapId === 'alrasul' ? 0xC6B89C : 0xB4C0C5, 130, 430);
+    // Per-map atmosphere: Sandblast bakes under a hot golden desert sun; Town sits
+    // under a cool overcast sky with flat slate light. Silhouettes stay readable on both.
+    const A = MAP_ATMOS[mapId];
+    this.scene.background = new THREE.Color(A.background);
+    this.scene.fog = new THREE.Fog(A.fog, A.fogNear, A.fogFar);
     // strong sky fill so shadowed faces stay readable
-    const hemi = new THREE.HemisphereLight(0xCFE0EE, 0x8C765A, 0.65);
+    const hemi = new THREE.HemisphereLight(A.hemiSky, A.hemiGround, A.hemiIntensity);
     this.scene.add(hemi);
     // key sun — high and bright, crisp shadows
-    const sun = new THREE.DirectionalLight(0xFFE4BE, 3.0);
-    sun.position.set(-65, 52, 40);
+    const sun = new THREE.DirectionalLight(A.sunColor, A.sunIntensity);
+    sun.position.set(...A.sunPosition);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048); // 4x fewer shadow texels than 4096 — big FPS win
     sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
@@ -826,7 +866,10 @@ void main(){
 
   private onMouseMove = (e: MouseEvent) => {
     if (document.pointerLockElement !== this.canvas || this.paused || this.dead) return;
-    const sens = this.mouseSens * (this.ads > 0.5 ? this.adsSensMul : 1);
+    // Zoom-adaptive aim speed: high magnification scales the sense down with the
+    // view, so a 6x tube tracks like a scope instead of a runaway turret.
+    const zoomFactor = THREE.MathUtils.clamp(this.adsFovEff() / this.fovSetting, 0.15, 1);
+    const sens = this.mouseSens * (this.ads > 0.5 ? this.adsSensMul * zoomFactor * 1.45 : 1);
     this.yaw -= e.movementX * sens;
     this.pitch -= (this.invertY ? -e.movementY : e.movementY) * sens;
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
@@ -935,16 +978,18 @@ void main(){
 
   /** Gradient sky dome + sun glow + drifting clouds (cheap, huge visual payoff) */
   private addSkyDome(mapId: MapId) {
+    const A = MAP_ATMOS[mapId];
     const c = document.createElement('canvas');
     c.width = 4; c.height = 256;
     const ctx = c.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
     grad.addColorStop(0, '#4A78A6');   // zenith blue
-    grad.addColorStop(0.4, '#93B6C8');
-    grad.addColorStop(0.58, mapId === 'kasbah' ? '#C2CDD0' : '#D8C7A0'); // haze band
-    grad.addColorStop(0.72, mapId === 'kasbah' ? '#DDD8C2' : '#F0D6A2'); // warm horizon
-    grad.addColorStop(0.85, '#F6C888');
-    grad.addColorStop(1, '#EAB878');    // sun-warmed base
+    grad.addColorStop(0, A.zenith);   // zenith
+    grad.addColorStop(0.4, A.mid);
+    grad.addColorStop(0.58, A.haze);  // haze band
+    grad.addColorStop(0.72, A.horizon); // horizon
+    grad.addColorStop(0.85, A.horizon);
+    grad.addColorStop(1, A.base);     // horizon base
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 4, 256);
     const tex = new THREE.CanvasTexture(c);
@@ -955,19 +1000,19 @@ void main(){
     );
     dome.renderOrder = -10;
     this.scene.add(dome);
-    // Sun glow billboard
+    // Sun glow billboard — bright gold in the desert, a pale white disc under overcast
     const sc = document.createElement('canvas');
     sc.width = 128; sc.height = 128;
     const sctx = sc.getContext('2d')!;
     const rg = sctx.createRadialGradient(64, 64, 4, 64, 64, 64);
     rg.addColorStop(0, 'rgba(255,250,230,1)');
-    rg.addColorStop(0.25, 'rgba(255,240,200,0.85)');
+    rg.addColorStop(0.25, A.sunGlow);
     rg.addColorStop(1, 'rgba(255,240,200,0)');
     sctx.fillStyle = rg;
     sctx.fillRect(0, 0, 128, 128);
     const sunTex = new THREE.CanvasTexture(sc);
     const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, fog: false, depthWrite: false, transparent: true }));
-    sunSpr.position.set(-220, 200, 150);
+    sunSpr.position.set(...(mapId === 'kasbah' ? [210, 230, -160] : [-220, 200, 150]) as [number, number, number]);
     sunSpr.scale.setScalar(110);
     this.scene.add(sunSpr);
     this.scene.add(this.clouds);
@@ -983,7 +1028,7 @@ void main(){
     }
     const cloudTexture = new THREE.CanvasTexture(cc);
     cloudTexture.colorSpace = THREE.SRGBColorSpace;
-    const cloudMat = new THREE.SpriteMaterial({ map:cloudTexture, color:0xffffff, transparent:true, opacity:0.7, fog:false, depthWrite:false });
+    const cloudMat = new THREE.SpriteMaterial({ map:cloudTexture, color: mapId === 'kasbah' ? 0xDCE4E8 : 0xffffff, transparent:true, opacity: mapId === 'kasbah' ? 0.85 : 0.7, fog:false, depthWrite:false });
     for (let i = 0; i < 7; i++) {
       const cl = new THREE.Sprite(cloudMat);
       const a = i * 2.39996;
@@ -1471,7 +1516,8 @@ void main(){
           else { this.streak = 1; this.streakPaidMark = 0; }
           this.lastKillT = now;
           if (this.streak >= 2) {
-            const label = this.streak >= 5 ? 'UNSTOPPABLE' : this.streak === 4 ? 'MEGA KILL' : this.streak === 3 ? 'MULTI KILL' : 'DOUBLE KILL';
+            // Call the streak by name: double → triple → quad → penta → unstoppable.
+            const label = this.streak >= 6 ? 'UNSTOPPABLE' : this.streak === 5 ? 'PENTA KILL' : this.streak === 4 ? 'QUAD KILL' : this.streak === 3 ? 'TRIPLE KILL' : 'DOUBLE KILL';
             voice.streak(label);
             this.onEvent({ type: 'streak', label });
             const sb = streakAward(this.streak, this.streakPaidMark, 500 - this.streakPaidRun);
@@ -1578,6 +1624,7 @@ void main(){
       hipSpread: stats.hipSpread, adsSpread: stats.adsSpread,
       pattern: stats.pattern.map(pat => [...pat] as [number, number]),
       adsFov: stats.adsFov, tacReload: stats.tacReload, emptyReload: stats.emptyReload,
+      zoom: stats.zoom,
       falloffStart: stats.falloffStart, falloffMul: stats.falloffMul,
       adsTime: stats.adsTime, recoilMul: stats.recoilMul,
       noiseRadius: stats.noiseRadius, swapTime: stats.swapTime,
@@ -1586,7 +1633,9 @@ void main(){
       recoilYawMul: stats.recoilYawMul, moveSpeedMul: stats.moveSpeedMul,
       suppressed: stats.suppressed,
       boltAction: id === 'awm', audioTag: LOADOUT_AUDIO[id], masterkey: stats.masterkey,
-      reticle: stats.reticle, lpvo: stats.lpvo, pumpShotgun: id === 'spas12',
+      // No optic mounted: the AWM's factory scope still owns its sight picture.
+      reticle: stats.reticle !== 'none' ? stats.reticle : (id === 'awm' ? 'sniper' : 'none'),
+      lpvo: stats.lpvo, pumpShotgun: id === 'spas12',
       laser: stats.laser, flashlight: stats.flashlight,
     };
   }
@@ -1598,10 +1647,27 @@ void main(){
     this.onEvent({ type: 'cash', amount, reason, total: this.cashEarned });
   }
 
+  /**
+   * Effective ADS magnification, PUBG-style: a magnified optic REPLACES the weapon's
+   * factory sight picture with its stated zoom (1.3x dots … 12x sniper glass), while
+   * bare irons keep the weapon's tuned adsFov. Magnification is measured against a
+   * 75° reference eye box so "4x" means 4x whatever the user's hip FOV slider does.
+   */
+  private zoomMag(): number {
+    const w = this.def();
+    const half = THREE.MathUtils.degToRad(REFERENCE_ADS_FOV / 2);
+    const factoryMag = w.adsFov > 0 && w.adsFov < this.fovSetting
+      ? Math.tan(half) / Math.tan(THREE.MathUtils.degToRad(Math.min(w.adsFov, this.fovSetting) / 2))
+      : 1;
+    const opticMag = (w.zoom ?? 0) > 0 ? (w.zoom as number) : 1;
+    const lpvoBoost = w.lpvo && w.lpvoHigh ? 4 : 1;
+    return (w.zoom ?? 0) > 0 ? opticMag * lpvoBoost : factoryMag;
+  }
+
   /** Effective ADS zoom: LPVO on high power nearly doubles magnification. */
   private adsFovEff(): number {
-    const w = this.def();
-    return w.lpvo && w.lpvoHigh ? w.adsFov * 0.55 : w.adsFov;
+    const mag = Math.max(0.75, this.zoomMag());
+    return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(REFERENCE_ADS_FOV / 2)) / mag));
   }
 
   /** Bipod counts as deployed when prone and still with legs fitted (hip or ADS). */
@@ -1980,6 +2046,18 @@ void main(){
     // A separate, hitch-immune sample drives resolution scaling only.
     this.recordFrameForScaling(frameSeconds);
     this.adaptResolution(t);
+    // Arena preview (map-select flyover): drift the camera over the world; nothing
+    // else simulates, and it works while the engine is still paused/unstarted.
+    if (this.previewing) {
+      this.previewAngle += dt * 0.055;
+      const R = this.world.half * 0.52;
+      this.camera.position.set(Math.sin(this.previewAngle) * R, this.world.half * 0.6, Math.cos(this.previewAngle) * R);
+      this.camera.lookAt(0, 2, 0);
+      this.camera.fov = 58;
+      this.camera.updateProjectionMatrix();
+      this.render();
+      return;
+    }
     if (this.paused) return;
     if (this.ended) {
       this.finishDelay -= dt;
@@ -2293,7 +2371,7 @@ void main(){
     const inAds = a > 0.4;
     for (const obj of d.model.adsHidden) obj.visible = !inAds;
     // Scope overlay owns the whole view; receiver rings/arms must not intrude.
-    const hideInAds = inAds && this.adsFovEff() < 30;
+    const hideInAds = inAds && this.adsFovEff() < 28;
     g.visible = !hideInAds;
     this.muzzleFlash.visible = !hideInAds;
     const hip = { x: 0.22, y: -0.19, z: -0.38, ry: 0.035 };
@@ -2496,6 +2574,7 @@ void main(){
       this.renderer.autoClear = true;
       this.renderer.render(this.scene, this.camera);
     }
+    if (this.previewing) return; // arena flyover shows the world, never a viewmodel
     // Overlay the viewmodel as a clean second pass (depth-relative, clip-safe)
     this.renderer.autoClear = false;
     this.renderer.clearDepth();
@@ -2504,11 +2583,54 @@ void main(){
 
   // ==================== EXTERNAL API ====================
   start() {
+    if (this.started) return;
     this.runStartT = performance.now();
     audio.ensure();
     voice.unlock();
     this.started = true;
     this.missionRuntime.start();
+  }
+
+  /** True once start() has kicked the mission off (briefing may still be showing). */
+  isStarted(): boolean {
+    return this.started;
+  }
+
+  /** True once the match has finished (its result screen was produced). */
+  isEnded(): boolean {
+    return this.ended;
+  }
+
+  /** The generated top-down arena scan (map-select card art). */
+  get arenaImage(): string {
+    return this.mapImage;
+  }
+
+  /** Map-select flyover: hover a slow orbit above the arena while the player chooses. */
+  enterArenaPreview(): void {
+    if (this.previewing) return;
+    this.previewing = true;
+    this.setPaused(true);
+    this.camera.fov = 58;
+    this.camera.updateProjectionMatrix();
+  }
+
+  /** Leave the flyover: back to the spawn viewmodel view, ready for the briefing. */
+  exitArenaPreview(): void {
+    if (!this.previewing) return;
+    this.previewing = false;
+    this.camera.fov = this.fovSetting;
+    this.camera.updateProjectionMatrix();
+    this.pos.copy(this.world.playerSpawn);
+    this.lastPos.copy(this.pos);
+    this.yaw = Math.PI / 2 + 0.6;
+    this.pitch = 0;
+    this.vel.set(0, 0, 0);
+    this.vx = 0; this.vz = 0;
+    this.composeCamera(1 / 60);
+    this.animateViewmodel(1 / 60);
+    this.camera.updateMatrixWorld(true);
+    this.render();
   }
 
   /** Live-apply graphics/gameplay settings (safe to call any time, including mid-match) */
@@ -2658,7 +2780,8 @@ void main(){
       secondaryWeapon: (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0] : this.weapons[this.cur === 2 ? 0 : 2])?.name ?? '',
       heldSlot: (this.weapons.length === 2 ? this.cur === 0 : this.cur !== 2) ? 'primary' : 'secondary',
       bipodDeployed: this.bipodDeployed(),
-      reticle: this.def().lpvo ? (this.def().lpvoHigh ? 'sniper' : 'acog') : (this.def().reticle ?? (this.adsFovEff() < 30 ? 'sniper' : 'none')),
+      reticle: this.def().lpvo ? (this.def().lpvoHigh ? 'sniper' : 'acog') : (this.def().reticle ?? (this.adsFovEff() < 28 ? 'sniper' : 'none')),
+      zoomMag: this.ads > 0.5 ? this.zoomMag() : 0,
       lpvoHigh: this.def().lpvoHigh ?? false,
       pumping: this.pumpT > 0,
       reloading: this.reloadT >= 0,

@@ -113,8 +113,8 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>
       )}
-      {/* Sniper scope tube mask — the world outside the optic circle goes dark. */}
-      {hud.ads >= 0.3 && hud.reticle === 'sniper' && (
+      {/* Magnified scope tube mask — the world outside the optic circle goes dark. */}
+      {hud.ads >= 0.3 && hud.zoomMag >= 3.5 && (
         <div className="scope-mask" style={{ opacity: Math.min(1, (hud.ads - 0.3) / 0.4) }} />
       )}
       {hud.ads >= 0.3 && (
@@ -135,12 +135,42 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
               ))}
               <div className="absolute w-1.5 h-1.5 rounded-full bg-[var(--danger)] shadow-[0_0_9px_var(--danger)]" />
             </div>
+          ) : hud.reticle === 'x6' ? (
+            <div className="relative w-[300px] h-[300px] rounded-full shadow-[0_0_60px_rgba(0,0,0,0.8)] flex items-center justify-center">
+              <div className="absolute rounded-full ring-1 ring-black/50" style={{ inset: 10 }} />
+              <div className="absolute w-full h-px bg-black/70" />
+              <div className="absolute h-full w-px bg-black/70" />
+              {/* mil-dot tree hanging under the centre */}
+              {[-24, -16, -8].map(offset => (
+                <div key={offset} className="absolute flex items-center" style={{ transform: `translateY(${-offset}px)` }}>
+                  <span className="block w-1.5 h-1.5 rounded-full bg-black/80" />
+                  <span className="block w-10 h-px bg-black/60" />
+                  <span className="block w-1.5 h-1.5 rounded-full bg-black/80" />
+                </div>
+              ))}
+              <div className="absolute w-[7px] h-[7px] rounded-full bg-[var(--acc)]/90 shadow-[0_0_8px_var(--acc)]" style={{ clipPath: 'polygon(0 50%, 50% 0, 100% 50%, 50% 100%)' }} />
+            </div>
           ) : hud.reticle === 'dot' ? (
             <div className="absolute w-[2px] h-[2px] rounded-full bg-[var(--volt)] shadow-[0_0_4px_var(--volt)]" />
           ) : hud.reticle === 'holo' ? (
             <div className="relative w-16 h-16 flex items-center justify-center">
               <div className="absolute w-14 h-14 rounded-full border border-[var(--acc)]/90" />
               <div className="absolute w-[3px] h-[3px] rounded-full bg-[var(--acc)] shadow-[0_0_5px_var(--acc)]" />
+            </div>
+          ) : hud.reticle === 'x2' ? (
+            <div className="relative w-14 h-14 flex items-center justify-center">
+              <div className="absolute w-12 h-12 rounded-full border border-[var(--volt)]/70" />
+              <div className="absolute w-[4px] h-[4px] rounded-full bg-[var(--volt)] shadow-[0_0_6px_var(--volt)]" />
+            </div>
+          ) : hud.reticle === 'x3' ? (
+            <div className="relative w-24 h-24 flex flex-col items-center justify-center">
+              <div className="absolute w-20 h-20 rounded-full border border-[var(--volt)]/75" />
+              <div className="absolute w-[4px] h-[4px] rounded-full bg-[var(--volt)] shadow-[0_0_6px_var(--volt)]" />
+              <div className="absolute top-full mt-1 flex flex-col items-center gap-[7px]">
+                <span className="block w-5 h-px bg-[var(--volt)]/80" />
+                <span className="block w-3.5 h-px bg-[var(--volt)]/70" />
+                <span className="block w-2.5 h-px bg-[var(--volt)]/60" />
+              </div>
             </div>
           ) : hud.reticle === 'acog' ? (
             <div className="relative w-10 h-20 flex flex-col items-center justify-start pt-2">
@@ -153,6 +183,12 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
             <div className="relative w-9 h-9 flex items-center justify-center">
               <div className="absolute w-[3px] h-[3px] rounded-full bg-red-400 shadow-[0_0_3px_1px_#ff3333]" />
             </div>
+          )}
+          {/* Optic magnification readout, PUBG-style */}
+          {hud.zoomMag >= 2 && (
+            <span className="absolute top-[calc(50%+180px)] left-1/2 -translate-x-1/2 mono text-[11px] font-bold tracking-[0.25em] text-white/70 hud-zoom-chip">
+              {hud.zoomMag.toFixed(hud.zoomMag % 1 ? 1 : 0)}×
+            </span>
           )}
         </div>
       )}
@@ -262,7 +298,12 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
               </div>
               <span className="radar-rings" /><span className="radar-rings r2" /><span className="radar-rings r3" />
               <span className="radar-sweep" />
-              <span className="radar-player" />
+              {/* Player marker: field-of-view wedge + solid facing arrow — instantly readable. */}
+              <svg className="radar-player" width="34" height="34" viewBox="-17 -17 34 34" aria-hidden="true">
+                <path d="M0 2 L-12 -12.5 A17.5 17.5 0 0 1 12 -12.5 Z" fill="rgba(63,214,142,.22)" />
+                <path d="M0 2 L-8 -11 L0 -7.5 L8 -11 Z" fill="rgba(63,214,142,.35)" />
+                <path d="M0 -10.5 L5.8 7.5 L0 3.6 L-5.8 7.5 Z" fill="var(--volt)" stroke="#03140B" strokeWidth="1.4" strokeLinejoin="round" />
+              </svg>
               <span className="radar-label">60M</span>
               <span className="radar-frame" />
             </div>

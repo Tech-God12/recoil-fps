@@ -21,17 +21,28 @@ export interface PlayerProfile {
   loadout: Loadout;
   skins: Partial<Record<WeaponId, SkinId>>;
   seenArmoryTutorial: boolean;
+  /** Dev wallet: the wallet silently refills, so every gun/part is testable for free. */
+  devFunds: boolean;
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
-export const PROFILE_KEY = 'recoilfps.profile.v2';
-const LEGACY_PROFILE_KEY = 'recoilfps.profile.v1';
+export const PROFILE_KEY = 'recoilfps.profile.v3';
+const LEGACY_PROFILE_KEYS = ['recoilfps.profile.v2', 'recoilfps.profile.v1'] as const;
+
+/** Wallet floor while dev funds are on: buys visibly "spend" but never run dry. */
+export const DEV_CASH_FLOOR = 9_999_999;
+
+/** Top the wallet back up to the dev floor (pure: returns the input when off). */
+export function applyDevFunds(p: PlayerProfile): PlayerProfile {
+  if (!p.devFunds || p.cash >= DEV_CASH_FLOOR) return p;
+  return { ...p, cash: DEV_CASH_FLOOR, lifetimeCash: Math.max(p.lifetimeCash, DEV_CASH_FLOOR) };
+}
 
 export const DEFAULT_PROFILE: PlayerProfile = {
   v: 1,
-  cash: 0,
-  lifetimeCash: 0,
+  cash: DEV_CASH_FLOOR,
+  lifetimeCash: DEV_CASH_FLOOR,
   missions: 0,
   kills: 0,
   ownedWeapons: ['m4a1', 'm1911'],
@@ -46,6 +57,7 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   },
   skins: {},
   seenArmoryTutorial: false,
+  devFunds: true,
 };
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
@@ -132,6 +144,8 @@ export function migrateProfile(raw: unknown): PlayerProfile {
       loadout,
       skins,
       seenArmoryTutorial: d.seenArmoryTutorial === true,
+      // Opt-out only: every pre-dev-funds save flips to an open wallet automatically.
+      devFunds: d.devFunds !== false,
     };
   } catch {
     return fresh();
@@ -143,26 +157,30 @@ export function loadProfile(storage?: Store): PlayerProfile {
   if (!store) return structuredClone(DEFAULT_PROFILE);
   try {
     const raw = store.getItem(PROFILE_KEY);
-    if (raw) return migrateProfile(raw);
-    // One-time v1 → v2 migration: stale saves kept long-equipped kits forever,
-    // so spawns arrived with silencers and drum mags. Keep all progress and
-    // ownership, but strip every equipped attachment — spawns are bare
-    // iron-sight guns with stock mags until the armory equips something new.
-    const legacy = store.getItem(LEGACY_PROFILE_KEY);
-    if (!legacy) return structuredClone(DEFAULT_PROFILE);
-    const moved = migrateProfile(legacy);
-    for (const [w, build] of Object.entries(moved.builds)) {
-      if (build) moved.builds[w as WeaponId] = { weapon: build.weapon, attachments: {} };
+    if (raw) return applyDevFunds(migrateProfile(raw));
+    // One-time v1/v2 → v3 migration. v2 already stripped stale kits once, but saves
+    // that equipped parts afterwards still spawn with them (the M416 red dot). Keep
+    // all progress, ownership and cash, but field bare iron-sight guns with stock
+    // mags — and hand the save an open dev wallet for unrestricted testing.
+    for (const legacyKey of LEGACY_PROFILE_KEYS) {
+      const legacy = store.getItem(legacyKey);
+      if (!legacy) continue;
+      const moved = migrateProfile(legacy);
+      for (const [w, build] of Object.entries(moved.builds)) {
+        if (build) moved.builds[w as WeaponId] = { weapon: build.weapon, attachments: {} };
+      }
+      for (const s of ['primary', 'secondary'] as SlotId[]) {
+        const slot = moved.loadout[s];
+        moved.loadout[s] = slot.skin
+          ? { weapon: slot.weapon, attachments: {}, skin: slot.skin }
+          : { weapon: slot.weapon, attachments: {} };
+      }
+      const funded = applyDevFunds(moved);
+      try { store.setItem(PROFILE_KEY, JSON.stringify(funded)); } catch { /* optional */ }
+      try { (store as unknown as { removeItem?: (k: string) => void }).removeItem?.(legacyKey); } catch { /* optional */ }
+      return funded;
     }
-    for (const s of ['primary', 'secondary'] as SlotId[]) {
-      const slot = moved.loadout[s];
-      moved.loadout[s] = slot.skin
-        ? { weapon: slot.weapon, attachments: {}, skin: slot.skin }
-        : { weapon: slot.weapon, attachments: {} };
-    }
-    try { store.setItem(PROFILE_KEY, JSON.stringify(moved)); } catch { /* optional */ }
-    try { (store as unknown as { removeItem?: (k: string) => void }).removeItem?.(LEGACY_PROFILE_KEY); } catch { /* optional */ }
-    return moved;
+    return structuredClone(DEFAULT_PROFILE);
   } catch {
     return structuredClone(DEFAULT_PROFILE);
   }

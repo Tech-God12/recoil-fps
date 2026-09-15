@@ -92,8 +92,9 @@ class VoiceManager {
   streak(label: string) {
     const map: Record<string, string> = {
       'DOUBLE KILL': 'Double kill!',
-      'MULTI KILL': 'Multi kill!',
-      'MEGA KILL': 'Mega kill!',
+      'TRIPLE KILL': 'Triple kill!',
+      'QUAD KILL': 'Quad kill!',
+      'PENTA KILL': 'Penta kill!',
       UNSTOPPABLE: 'Unstoppable!',
     };
     this.speak(map[label] ?? label, 'announcer', { key: `streak:${label}`, cooldownMs: 1500, rate: 1.1 });

@@ -245,6 +245,41 @@ function scope_hp(_ctx: AttachContext): THREE.Object3D {
   return p;
 }
 
+/** Shared magnified-tube builder: open bore, both lenses, magnification badge ring. */
+function magScope(len: number, lensH: number, objectiveR: number, ringZ: number): THREE.Object3D {
+  const p = group();
+  const b = new GunBuilder();
+  b.box(0.028, 0.009, len, WM.dark, 0, 0.004, 0);                                   // mount rail
+  b.cyl(0.014, 0.014, len, WM.dark, 0, lensH, 0, Math.PI / 2, 0, 0, 20, true);      // main tube (open)
+  b.cyl(0.0128, 0.0128, len, WM.scopeInner, 0, lensH, 0, Math.PI / 2, 0, 0, 20, true); // dark bore
+  b.cyl(0.016, 0.016, 0.010, WM.darkSteel, 0, lensH, -len * 0.3, Math.PI / 2, 0, 0, 20, true); // front ring
+  b.cyl(0.016, 0.016, 0.010, WM.darkSteel, 0, lensH, len * 0.3, Math.PI / 2, 0, 0, 20, true);  // rear ring
+  b.cyl(0.010, 0.010, 0.018, WM.dark, 0, lensH + 0.014, ringZ, 0, 0, 0);            // elevation turret
+  b.cyl(0.009, 0.009, 0.016, WM.dark, lensH + 0.013, lensH, 0, 0, 0, Math.PI / 2);  // windage
+  if (objectiveR > 0.014) {
+    b.cyl(objectiveR, 0.015, 0.030, WM.dark, 0, lensH, -len / 2 - 0.012, Math.PI / 2, 0, 0, 20, true); // objective bell
+    b.cyl(objectiveR - 0.0012, 0.0138, 0.030, WM.scopeInner, 0, lensH, -len / 2 - 0.012, Math.PI / 2, 0, 0, 20, true);
+  }
+  b.build(p);
+  opticLens(p, Math.min(0.0132, objectiveR - 0.001), lensH, -len / 2 - (objectiveR > 0.014 ? 0.027 : 0.002));
+  opticLens(p, 0.0118, lensH, len / 2 + 0.002);
+  opticDot(p, lensH + 0.001, len / 2 - 0.004, 0.0015);
+  p.userData.lensH = lensH;
+  return p;
+}
+
+function scope_2x(_ctx: AttachContext): THREE.Object3D {
+  return magScope(0.062, 0.020, 0.014, 0);
+}
+
+function scope_3x(_ctx: AttachContext): THREE.Object3D {
+  return magScope(0.086, 0.022, 0.015, 0.006);
+}
+
+function scope_6x(_ctx: AttachContext): THREE.Object3D {
+  return magScope(0.128, 0.025, 0.018, 0.01);
+}
+
 function pistol_rmr(_ctx: AttachContext): THREE.Object3D {
   const p = group();
   const b = new GunBuilder();
@@ -559,7 +594,7 @@ function ported_slide(_ctx: AttachContext): THREE.Object3D {
 
 export const ATTACHMENT_BUILDERS: Record<string, AttachmentBuilder> = {
   flash_hider, compensator, suppressor_long, suppressor_fat, brake_heavy, duckbill, choke,
-  reddot, holo, acog, lpvo, scope_hp, pistol_rmr,
+  reddot, holo, acog, lpvo, scope_hp, pistol_rmr, scope_2x, scope_3x, scope_6x,
   mag_ext, mag_drum, mag_coupled, shell_tube, belt_box_large, mag_box_sr,
   vgrip, agrip, bipod, masterkey,
   stock_none, stock_heavy, stock_folding,

@@ -45,6 +45,47 @@ const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3(1, 1, 1);
 
+/**
+ * Per-map material tints. Same textures, different color multiply, so the arenas read
+ * as different places: Sandblast keeps the warm desert set; Town gets cooler, stonier,
+ * grey-green plaster and dry steppe ground under its overcast sky.
+ */
+const MAP_TINTS: Record<MapId, Partial<Record<keyof TextureSet, number>>> = {
+  alrasul: {},
+  kasbah: {
+    sand: 0x9CA693,
+    adobeWall: 0xA9B4A8,
+    adobeWall2: 0x99A598,
+    plaster: 0xBAC3B6,
+    whitewash: 0xCCD5C9,
+    adobeBrick: 0x9C9686,
+    concrete: 0x90958E,
+    plaza: 0x8C928A,
+    tileFloor: 0x8E968C,
+    terracePavers: 0x8F968D,
+    cobbleLane: 0x87908A,
+    dirtPath: 0x8F987F,
+    sandbag: 0x9AA08A,
+    firedBrick: 0x8E6A55,
+    stoneBlock: 0x8C928E,
+  },
+};
+
+/** Clone + retint the cached set for a map (Al-Rasul uses the shared set untouched). */
+function mapMaterials(base: TextureSet, mapId: MapId): TextureSet {
+  const tints = MAP_TINTS[mapId];
+  if (!tints || !Object.keys(tints).length) return base;
+  const out = { ...base } as TextureSet;
+  for (const [key, hex] of Object.entries(tints) as [keyof TextureSet, number][]) {
+    const src = base[key];
+    if (!src) continue;
+    const clone = src.clone();
+    clone.color = new THREE.Color(hex);
+    out[key] = clone;
+  }
+  return out;
+}
+
 export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materials?: TextureSet): World {
   const group = new THREE.Group();
   const solids: AABB[] = [];
@@ -54,7 +95,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   const concrete: AABB[] = [];
   const wood: AABB[] = [];
   const lightSpots: THREE.Vector3[] = [];
-  const M: TextureSet = materials ?? getMaterials();
+  const M: TextureSet = mapMaterials(materials ?? getMaterials(), mapId);
   let geoByMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
   const glassMats: THREE.Matrix4[] = [];
   const glassCenters: THREE.Vector3[] = [];
@@ -83,7 +124,9 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     }
     return m;
   };
-  const ACC_TURQ = col(0x2C7C8E, 0.7), ACC_TERRA = col(0x9A4A2E), METAL = col(0x2C2C2A, 0.5, 0.7);
+  // District accent: Al-Rasul wears turquoise tile; the Kasbah trades under rust-red cloth.
+  const ACCENT = mapId === 'kasbah' ? 0x8E3B2C : 0x2C7C8E;
+  const ACC_TURQ = col(ACCENT, 0.7), ACC_TERRA = col(0x9A4A2E), METAL = col(0x2C2C2A, 0.5, 0.7);
   const GLOW = col(0xFFE2A8, 0.4, 0, 2.4), FROND = col(0x4E6B34, 0.85, 0, 0, THREE.DoubleSide);
   const FABRIC = [0xB0402E, 0x2E6BA0, 0x3E7B52, 0xC7A24B, 0x8C4E86].map(c => col(c, 0.9, 0, 0, THREE.DoubleSide));
 

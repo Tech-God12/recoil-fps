@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { CashLogEntry, GameSettings } from '../game/engine';
 import { weaponById } from '../game/economy/catalog';
 import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
@@ -20,10 +20,10 @@ export interface Results {
 const Arrow = () => <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 5l7 7-7 7" stroke="currentColor" strokeWidth="2" fill="none" /></svg>;
 
 /* ================================================================
-   MAIN MENU — COMMAND DECK
+   MAIN MENU — COMMAND DECK (fits one viewport, no scrolling)
    ================================================================ */
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: {
-  s: GameSettings; onDeploy: () => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
+export function MainMenu({ s, onStart, onSettings, onMap, onArmory, profile }: {
+  s: GameSettings; onStart: () => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
   onArmory?: () => void; profile?: PlayerProfile;
 }) {
   const mission = getMission(s.map);
@@ -48,7 +48,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
         <span className="ticker-item">SECTOR <i>Town</i></span>
         <span className="ticker-item">THREAT LEVEL <b>{s.difficulty.toUpperCase()}</b></span>
         <span className="ticker-item">SUPPLY <i>UNLIMITED AMMO</i></span>
-
         <span className="ticker-item">BUILD <b>3.0.0 // GROUND ZERO</b></span>
       </Ticker>
 
@@ -57,7 +56,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
           <span className="slash-mark" aria-hidden="true">///</span> RECOIL
         </a>
         <div className="flex items-center gap-2.5">
-
           <button className="util-btn" onClick={onSettings}>SETTINGS</button>
         </div>
       </header>
@@ -75,14 +73,14 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
           </div>
           <p className="menu-brief seq" style={{ animationDelay: '.26s' }}>{mission.brief}</p>
           <div className="seq" style={{ animationDelay: '.32s' }}>
-            <button className="deploy-btn" onClick={onDeploy}>
+            <button className="deploy-btn" onClick={onStart}>
               <span>START MISSION</span>
               <Arrow />
             </button>
             <button className="menu-secondary-btn armory-cta" onClick={onArmory}>
-              ARMORY <span>LOADOUT · WALLET ${prof.cash.toLocaleString('en-US')}</span>
+              ARMORY <span>LOADOUT · WALLET {prof.devFunds ? '∞' : `$${prof.cash.toLocaleString('en-US')}`}</span>
             </button>
-            <div className="menu-loadout seq" style={{ animationDelay: '.36s' }} aria-label="Fielded loadout">
+            <div className="menu-loadout seq" style={{ animationDelay: '.36s' }} aria-label="Equipped loadout">
               <span className="mono"><b>1</b> {primaryName}</span>
               <span className="mono"><b>2</b> {secondaryName}</span>
             </div>
@@ -91,7 +89,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
             </button>
           </div>
           <div className="input-legend seq" style={{ animationDelay: '.4s' }}>
-            <Key>WASD</Key><span>MOVE</span><Key>RMB</Key><span>SCOPE</span><Key>1/2</Key><span>SWAP</span><Key>Q</Key><span>LAST</span><Key>Q·E</Key><span>HOLD LEAN</span><Key>G</Key><span>FRAG</span><Key>X</Key><span>PLANT</span><Key>ESC</Key><span>PAUSE</span>
+            <Key>WASD</Key><span>MOVE</span><Key>RMB</Key><span>SCOPE</span><Key>1/2</Key><span>SWAP</span><Key>Q</Key><span>LAST</span><Key>Q·E</Key><span>LEAN</span><Key>G</Key><span>FRAG</span><Key>X</Key><span>PLANT</span><Key>ESC</Key><span>PAUSE</span>
           </div>
         </section>
 
@@ -113,24 +111,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
               </button>
             );
           })}
-
-          <div className="route" key={mission.id}>
-            <div className="sec-label"><span>MISSION ROUTE</span><span>{mission.phases.length} OBJECTIVES</span></div>
-            <ol>
-              {mission.phases.map((phase, index) => (
-                <li key={phase.id}>
-                  <span className="route-node">0{index + 1}</span>
-                  <div>
-                    <span className="route-title">{phase.title}</span>
-                    <span className="route-loc">{phase.location}</span>
-                  </div>
-                  {(phase.type === 'hold' || phase.type === 'defend') && <span className="route-timing">{phase.seconds} SEC{phase.type === 'defend' ? ' / RELAY' : ''}</span>}
-                  {phase.type === 'destroy' && <span className="route-timing">{phase.fuse} SEC FUSE</span>}
-                </li>
-              ))}
-            </ol>
-          </div>
-          <p className="menu-rules">Reach the pickup to extract. Clearing the map is not the objective.</p>
+          <p className="menu-rules">{selectedMap.desc} Pick your drop zone on the next screen — the camera takes you there.</p>
         </section>
       </div>
 
@@ -143,36 +124,124 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
 }
 
 /* ================================================================
-   DEPLOY SEQUENCE — LOADING
+   MAP SELECT — two arenas side by side, live camera flyover behind
    ================================================================ */
-const BOOT_LINES = [
-  'CALIBRATING OPTICS',
-  'ARMING REINFORCEMENTS',
-  'LINKING COMMAND SAT',
-  'SYNCING SECTOR GRID',
-  'SPOOLING WEAPON SYSTEMS',
-];
-
-export function BootScreen() {
-  const [line, setLine] = useState(0);
-  const [pct, setPct] = useState(0);
-  useEffect(() => {
-    const l = window.setInterval(() => setLine(i => (i + 1) % BOOT_LINES.length), 900);
-    const p = window.setInterval(() => setPct(v => Math.min(94, v + 2 + Math.floor(Math.random() * 6))), 120);
-    return () => { window.clearInterval(l); window.clearInterval(p); };
-  }, []);
+export function MapSelect({ selected, ready, loadingMap, previewImage, onHover, onSelect, onDeploy, onBack }: {
+  selected: GameSettings['map'];
+  /** True once the engine for `selected` is built and the flyover camera is live. */
+  ready: boolean;
+  /** The map currently being built (if any). */
+  loadingMap: GameSettings['map'] | null;
+  /** Top-down arena scan for the built map, straight from the engine. */
+  previewImage: string;
+  onHover: (map: GameSettings['map']) => void;
+  onSelect: (map: GameSettings['map']) => void;
+  onDeploy: () => void;
+  onBack: () => void;
+}) {
   return (
-    <div className="boot-root" role="status">
-      <div className="boot-hex hex-grid" aria-hidden="true" />
-      <div className="boot-radar" aria-hidden="true">
-        <span className="ring1" /><span className="ring2" /><span className="sweep" /><span className="core" />
+    <main className="mapselect-root" role="dialog" aria-label="Select deployment zone">
+      <div className="hex-grid" aria-hidden="true" />
+      <div className="scanlines" aria-hidden="true" />
+      <header className="mapselect-head">
+        <span className="menu-eyebrow">DEPLOYMENT ZONE<span className="cursor-blink" /></span>
+        <h2 className="mapselect-title">CHOOSE YOUR ARENA</h2>
+        <p className="mapselect-sub mono">HOVER A LOADED ARENA TO LOOK AT IT · CLICK TO BRING ITS CAMERA ONLINE</p>
+      </header>
+
+      <div className="mapselect-cards">
+        {MAPS.map((map, index) => {
+          const option = getMission(map.id);
+          const isSel = map.id === selected;
+          const isReady = isSel && ready;
+          const isLoading = loadingMap === map.id;
+          return (
+            <button
+              key={map.id}
+              className={`arena-card ${isSel ? 'selected' : ''} ${isReady ? 'live' : ''}`}
+              onMouseEnter={() => onHover(map.id)}
+              onFocus={() => onHover(map.id)}
+              onClick={() => onSelect(map.id)}
+              aria-pressed={isSel}
+            >
+              <span className="arena-view" aria-hidden="true">
+                {isReady && previewImage
+                  ? <img src={previewImage} alt="" draggable={false} />
+                  : <span className={`arena-placeholder ph-${map.id}`} />}
+                <span className="arena-view-vignette" />
+                <span className={`arena-status mono ${isLoading ? 'busy' : isReady ? 'ok' : ''}`}>
+                  {isLoading ? 'CAMERA LINK LOADING…' : isReady ? 'CAMERA LINK LIVE' : 'CAMERA OFFLINE — CLICK TO LOAD'}
+                </span>
+              </span>
+              <span className="arena-body">
+                <span className="arena-num mono">0{index + 1}</span>
+                <span className="arena-name">{map.name}</span>
+                <span className="arena-type mono">{map.id === 'alrasul' ? 'DESERT RIVER VALLEY' : 'FORTIFIED MARKET TOWN'}</span>
+                <span className="arena-desc">{map.desc}</span>
+                <span className="arena-meta mono">{option.phases.length} OBJECTIVES · {option.phases[0]?.location.toUpperCase()}</span>
+              </span>
+              {isSel && <span className="arena-sel" aria-hidden="true">SELECTED</span>}
+            </button>
+          );
+        })}
       </div>
-      <div className="boot-title glitch">DEPLOYING</div>
-      <div className="boot-status">{BOOT_LINES[line]}</div>
-      <div className="boot-bar"><span className="load-bar hazard-fill" /></div>
-      <div className="boot-pct">{String(pct).padStart(3, '0')}%</div>
-      <div className="boot-note">DO NOT POWER OFF TERMINAL</div>
-    </div>
+
+      <div className="mapselect-actions">
+        <button className="menu-secondary-btn" onClick={onBack}>‹ BACK</button>
+        <button className="deploy-btn" onClick={onDeploy} disabled={!ready} title={ready ? 'Begin the operation' : 'Arena camera still loading'}>
+          <span>PLAY{ready ? '' : ' — LOADING'}</span>
+          <Arrow />
+        </button>
+      </div>
+    </main>
+  );
+}
+
+/* ================================================================
+   MISSION BRIEFING — objectives on the loading screen, with narration
+   ================================================================ */
+export function MissionBriefing({ map, onDeploy, onBack }: { map: GameSettings['map']; onDeploy?: () => void; onBack?: () => void }) {
+  const mission = getMission(map);
+  const sector = MAPS.find(m => m.id === map)?.name.toUpperCase() ?? 'SECTOR';
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.code === 'Escape') onBack?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onBack]);
+  return (
+    <section className="briefing-root" role="status" aria-label="Mission briefing">
+      <div className="hex-grid" aria-hidden="true" />
+      <div className="scanlines" aria-hidden="true" />
+      <div className="briefing-wrap">
+        <span className="menu-eyebrow">INSERTION IN PROGRESS · {sector}</span>
+        <h2 className="briefing-title glitch" data-text={`OP. ${mission.name.toUpperCase()}`}>OP. {mission.name.toUpperCase()}</h2>
+        <p className="briefing-copy">{mission.brief}</p>
+        <ol className="briefing-objectives" aria-label="Mission objectives">
+          {mission.phases.map((phase, index) => (
+            <li key={phase.id} className="seq" style={{ animationDelay: `${0.25 + index * 0.14}s` }}>
+              <span className="bo-num mono">{String(index + 1).padStart(2, '0')}</span>
+              <span className="bo-body">
+                <b>{phase.title}</b>
+                <small className="mono">{phase.location.toUpperCase()}{phase.seconds ? ` · HOLD ${phase.seconds}S` : ''}{phase.fuse ? ` · FUSE ${phase.fuse}S` : ''}</small>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div className="briefing-actions">
+          {onDeploy && (
+            <button type="button" className="btn primary deploy-btn" autoFocus onClick={onDeploy}>DEPLOY ▸</button>
+          )}
+          {onBack && (
+            <button type="button" className="btn ghost menu-back-btn" onClick={onBack}>◂ BACK TO ARENAS</button>
+          )}
+        </div>
+        <div className="briefing-note mono">
+          <span className="briefing-wave" aria-hidden="true"><i /><i /><i /></span>
+          COMMAND VOICE — BRIEFING IN PROGRESS
+          <span className="briefing-bar"><span className="load-bar hazard-fill" /></span>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -227,7 +296,7 @@ export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: 
    ================================================================ */
 
 
-export type ResultsWallet = { before: number; after: number; gradeBonus: number; earned: number };
+export type ResultsWallet = { before: number; after: number; gradeBonus: number; earned: number; devFunds: boolean };
 
 const CASH_REASONS: Record<string, string> = {
   kill: 'ELIMINATIONS', headshot: 'HEADSHOTS', grenade: 'GRENADE KILLS',
@@ -307,7 +376,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
           )}
           <div className="cash-wallet mono seq" style={{ animationDelay: `${0.26 + cashRows.length * 0.08}s` }}>
             <span>WALLET</span>
-            <span>${wallet.before.toLocaleString('en-US')} → <CashCounter value={wallet.after} /></span>
+            <span>{wallet.devFunds ? '∞' : `$${wallet.before.toLocaleString('en-US')}`} → <CashCounter value={wallet.after} infinite={wallet.devFunds} /></span>
           </div>
         </section>
 

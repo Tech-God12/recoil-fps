@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine, DEFAULT_SETTINGS, type GameEvent, type GameSettings, type HudState } from './game/engine';
+import type { MapId } from './game/world';
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
-import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
+import { MainMenu, MapSelect, MissionBriefing, PauseMenu, ResultsScreen, type Results } from './ui/Screens';
 import Armory from './ui/armory/Armory';
-import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
+import { getMission } from './game/systems/mission';
+import { voice } from './game/voice';
+import { grantCash, loadProfile, saveProfile, applyDevFunds, type PlayerProfile } from './game/economy/profile';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory';
+type Phase = 'menu' | 'mapselect' | 'briefing' | 'playing' | 'paused' | 'results' | 'armory';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
 /**
@@ -22,12 +25,12 @@ const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
-  bipodDeployed: false, reticle: 'none', lpvoHigh: false, pumping: false, pings: [],
+  bipodDeployed: false, reticle: 'none', zoomMag: 0, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
 
-export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
+export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number; devFunds: boolean }
 
 function loadSettings(): GameSettings {
   try {
@@ -39,6 +42,8 @@ function loadSettings(): GameSettings {
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
+  /** Which arena the current engine has built (map-select flyover reuses it). */
+  const engineMapRef = useRef<MapId | null>(null);
   const phaseRef = useRef<Phase>('menu');
   const session = useRef(0);
   const ids = useRef(0);
@@ -46,7 +51,6 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('menu');
   const [settings, setSettings] = useState<GameSettings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
-  const [launching, setLaunching] = useState(false);
   const [error, setError] = useState('');
   const [hud, setHud] = useState(DEFAULT_HUD);
   const [results, setResults] = useState<Results | null>(null);
@@ -54,6 +58,12 @@ export default function App() {
   const [fx, setFx] = useState<HudFx>(emptyFx);
   const [profile, setProfile] = useState<PlayerProfile>(loadProfile);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
+  // Map-select state: flyover readiness + which arena is loading + its arena scan image.
+  const [previewReady, setPreviewReady] = useState(false);
+  const [loadingMap, setLoadingMap] = useState<MapId | null>(null);
+  const [previewImage, setPreviewImage] = useState('');
+  /** True while the briefing narration/finish timers are live (ESC must clear them). */
+  const briefingTimersRef = useRef(false);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -63,9 +73,11 @@ export default function App() {
   }, []);
 
   const updateProfile = useCallback((next: PlayerProfile) => {
-    profileRef.current = next;
-    setProfile(next);
-    saveProfile(next);
+    // Dev wallet: every save refills to the floor, so the armory is an open range.
+    const funded = applyDevFunds(next);
+    profileRef.current = funded;
+    setProfile(funded);
+    saveProfile(funded);
   }, []);
 
   // Hidden balance-testing affordance: #cash=50000 on the menu grants it once per pageload.
@@ -106,7 +118,10 @@ export default function App() {
         setError(event.text); changePhase('paused');
         break;
       case 'hit':
+        // Clear from state on a timer — the CSS fade alone leaves the element mounted,
+        // which is how the headshot-kill marker could stick around on screen.
         setFx(f => ({ ...f, hitmark: { id, kill: event.kill } }));
+        later(() => setFx(f => f.hitmark?.id === id ? { ...f, hitmark: null } : f), event.kill ? 460 : 210);
         break;
       case 'kill':
         setFx(f => ({
@@ -151,11 +166,11 @@ export default function App() {
         const gb = event.win ? gradeBonus(gradeFor(event).grade) : 0;
         const earned = Math.round(event.cash * event.difficultyMul) + gb;
         const before = profileRef.current;
-        const next = grantCash(before, earned, 'MISSION');
+        const next = applyDevFunds(grantCash(before, earned, 'MISSION'));
         next.missions += 1;
         next.kills += event.kills;
         updateProfile(next);
-        setWallet({ before: before.cash, after: next.cash, gradeBonus: gb, earned });
+        setWallet({ before: before.cash, after: next.cash, gradeBonus: gb, earned, devFunds: next.devFunds });
         changePhase('results');
         setResults({ ...event });
         if (document.pointerLockElement) document.exitPointerLock();
@@ -172,10 +187,32 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [phase]);
 
+  /** Ends the briefing and starts the fight. `fromClick` (the DEPLOY button) rides the
+   *  click's user activation to grab the mouse; the auto-finish falls back to click-to-lock. */
+  const finishBriefing = useCallback((fromClick: boolean) => {
+    clearTimers();
+    briefingTimersRef.current = false;
+    const engine = engineRef.current;
+    if (!engine || phaseRef.current !== 'briefing') return;
+    engine.start(); // clock starts when the player actually deploys — the briefing is frozen time
+    setHud(engine.hud());
+    engine.setPaused(false);
+    changePhase('playing');
+    if (fromClick) void engine.requestLock().catch(() => { /* click-to-lock fallback below */ });
+  }, [changePhase, clearTimers]);
+
+  /** Back out of a briefing: park narration, return to the flyover (engine is reused). */
+  const abortBriefing = useCallback(() => {
+    voice.cancel();
+    clearTimers();
+    briefingTimersRef.current = false;
+    changePhase('mapselect');
+  }, [changePhase, clearTimers]);
+
   useEffect(() => {
     const lockChanged = () => {
       const engine = engineRef.current;
-      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory') return;
+      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory' || phaseRef.current === 'mapselect' || phaseRef.current === 'briefing') return;
       if (document.pointerLockElement === canvasRef.current) {
         engine.setPaused(false);
         changePhase('playing');
@@ -205,52 +242,133 @@ export default function App() {
 
   useEffect(() => () => { session.current++; clearTimers(); engineRef.current?.dispose(); }, [clearTimers]);
 
-  const deploy = async () => {
-    if (!canvasRef.current || launching) return;
+  /* ================= MAP-SELECT FLYOVER ================= */
+
+  /** Build (or reuse) the engine for a map, then hover the flyover camera above it. */
+  const prepareEngine = useCallback(async (map: MapId) => {
+    if (!canvasRef.current) return;
+    const existing = engineRef.current;
+    if (existing && engineMapRef.current === map && !existing.isEnded()) {
+      existing.enterArenaPreview();
+      setPreviewImage(existing.arenaImage);
+      setPreviewReady(true);
+      setLoadingMap(null);
+      return;
+    }
     const epoch = ++session.current;
     clearTimers();
-    setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
-    engineRef.current?.dispose(); engineRef.current = null;
-    // Let React commit and the browser actually paint the boot screen before any of the
-    // heavy mission build starts. Without this the deploy click blocked the main thread
-    // first, so the player stared at a frozen menu with no loading state at all.
+    voice.cancel();
+    setError('');
+    setPreviewReady(false);
+    setLoadingMap(map);
+    existing?.dispose();
+    engineRef.current = null;
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, settings.map, profileRef.current.loadout);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout);
+      if (session.current !== epoch) { engine.dispose(); return; }
       engineRef.current = engine;
+      engineMapRef.current = map;
       engine.applySettings(settings);
-      changePhase('paused');
-      engine.start();
-      setHud(engine.hud());
-      // Keep mouse capture in the click's user activation; do not delay it behind a wipe.
-      await engine.requestLock();
-      if (session.current === epoch && document.pointerLockElement === canvasRef.current) {
-        engine.setPaused(false); changePhase('playing');
-      }
+      setPreviewImage(engine.arenaImage);
+      engine.enterArenaPreview();
+      setPreviewReady(true);
+      setLoadingMap(null);
     } catch (cause) {
       if (session.current !== epoch) return;
-      setError(cause instanceof Error ? cause.message : 'Mission could not start. Try again.');
-      if (engineRef.current) { engineRef.current.setPaused(true); changePhase('paused'); }
-      else changePhase('menu');
-    } finally {
-      if (session.current === epoch) setLaunching(false);
+      setLoadingMap(null);
+      setError(cause instanceof Error ? cause.message : 'Arena preview could not start. Try again.');
+      changePhase('menu');
     }
-  };
+  }, [changePhase, clearTimers, onEvent, settings]);
+
+  const openMapSelect = useCallback(() => {
+    setShowSettings(false);
+    setResults(null);
+    setWallet(null);
+    setFx(emptyFx());
+    changePhase('mapselect');
+  }, [changePhase]);
+
+  const backToMenu = useCallback(() => {
+    session.current++;
+    clearTimers();
+    voice.cancel();
+    engineRef.current?.dispose();
+    engineRef.current = null;
+    engineMapRef.current = null;
+    setPreviewReady(false);
+    setPreviewImage('');
+    changePhase('menu');
+    setShowSettings(false);
+    setError('');
+    setFx(emptyFx());
+    setHud(DEFAULT_HUD);
+  }, [changePhase, clearTimers]);
+
+  // Entering the arena picker brings the selected map's camera online automatically,
+  // so the flyover is live (or visibly loading) the moment the two cards appear.
+  const prepareRef = useRef(prepareEngine);
+  prepareRef.current = prepareEngine;
+  const mapRef = useRef(settings.map);
+  mapRef.current = settings.map;
+  useEffect(() => {
+    if (phase !== 'mapselect') return;
+    void prepareRef.current(mapRef.current);
+  }, [phase]);
+
+  /* ================= DEPLOY: briefing with objectives + narration ================= */
+
+
+  const beginMission = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    setError('');
+    setFx(emptyFx());
+    voice.unlock(); // inside the click's user activation
+    engine.exitArenaPreview(); // gameplay camera; the sim stays frozen behind the briefing
+    changePhase('briefing');
+    // Narrate the operation while the objectives are on screen; nothing simulates yet.
+    const mission = getMission(settings.map);
+    later(() => voice.objective(`Operation ${mission.name}. ${mission.brief}`), 350);
+    const route = mission.phases.map((p, i) => `${i + 1}: ${p.title}`).join('. ');
+    later(() => voice.objective(`Objectives. ${route}`), 6500);
+    later(() => finishBriefing(false), 10500);
+  }, [changePhase, finishBriefing, later, settings.map]);
+
+  /* ================= LEGACY DEPLOY PATHS ================= */
+
+  /** REDEPLOY / RESTART: fresh arena, straight back to the map-select flyover. */
+  const redeploy = useCallback(() => {
+    session.current++;
+    clearTimers();
+    voice.cancel();
+    engineRef.current?.dispose();
+    engineRef.current = null;
+    engineMapRef.current = null;
+    setPreviewReady(false);
+    setPreviewImage('');
+    setResults(null);
+    setWallet(null);
+    setFx(emptyFx());
+    changePhase('mapselect');
+    if (document.pointerLockElement) document.exitPointerLock();
+  }, [changePhase, clearTimers]);
 
   const resume = async () => {
     const epoch = session.current;
     try {
       const engine = engineRef.current;
       if (!engine) return;
+      engine.start(); // idempotent — completes a briefing interrupted by ESC
       await engine.requestLock();
       if (epoch === session.current && document.pointerLockElement === canvasRef.current) { engine.setPaused(false); changePhase('playing'); }
     } catch { if (epoch === session.current) setError('Mouse capture was blocked. Select Resume to try again.'); }
   };
 
   const quit = () => {
-    session.current++; clearTimers(); engineRef.current?.dispose(); engineRef.current = null;
-    changePhase('menu'); setShowSettings(false); setError(''); setFx(emptyFx()); setHud(DEFAULT_HUD);
+    backToMenu();
     if (document.pointerLockElement) document.exitPointerLock();
   };
 
@@ -270,20 +388,51 @@ export default function App() {
     } catch { setError('Fullscreen is unavailable. You can continue in this window.'); }
   };
 
+  /** Armory DEPLOY: reuse the flyover engine when it matches, else route via map select. */
+  const deployFromArmory = useCallback(async () => {
+    const engine = engineRef.current;
+    if (engine && engineMapRef.current === settings.map && !engine.isEnded()) {
+      await beginMission();
+    } else {
+      redeploy();
+    }
+  }, [beginMission, redeploy, settings.map]);
+
   return (
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
-      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full"
+        aria-label="Recoil FPS game world"
+        onPointerDown={() => {
+          if (phaseRef.current === 'playing' && document.pointerLockElement !== canvasRef.current) {
+            void engineRef.current?.requestLock().catch(() => {});
+          }
+        }}
+      />
       {(phase === 'playing' || phase === 'paused') && <Hud hud={hud} s={settings} fx={fx} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
-      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={deploy} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={deploy} onBack={armoryBack} />}
+      {phase === 'menu' && <MainMenu s={settings} onStart={openMapSelect} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
+      {phase === 'mapselect' && (
+        <MapSelect
+          selected={settings.map}
+          ready={previewReady}
+          loadingMap={loadingMap}
+          previewImage={previewImage}
+          onHover={map => { if (map === settings.map && previewReady) engineRef.current?.enterArenaPreview(); }}
+          onSelect={map => { if (map !== settings.map) set({ map }); void prepareEngine(map); }}
+          onDeploy={beginMission}
+          onBack={backToMenu}
+        />
+      )}
+      {phase === 'briefing' && <MissionBriefing map={settings.map} onDeploy={() => finishBriefing(true)} onBack={abortBriefing} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={redeploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={redeploy} onMenu={quit} onArmory={() => openArmory('results')} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={deployFromArmory} onBack={armoryBack} />}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>
       </div>}
       {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
-      {launching && <BootScreen />}
     </div>
   );
 }

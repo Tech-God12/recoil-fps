@@ -143,3 +143,9 @@ is unchanged: parts bought in the armory still mount immediately.
   lenses). Only the 3D aiming mark hides in ADS; the glass stays, and the HUD
   reticle (dot / holo ring / ACOG chevron / scope) is the single source of
   truth. LPVO low power shows the chevron through the tube (V toggles 6×).
+
+## 2026-09-15 addendum — PUBG-style optics and the open dev wallet
+
+- Optics carry an explicit `zoom` (magnification). The engine derives ADS FOV from a 75° reference eye box, so "4x" is 4x regardless of the hip-FOV slider; magnified optics replace the weapon's factory picture. Bare irons keep the tuned per-weapon adsFov.
+- Lineup: Red Dot 1.3x · Holo 1.3x · 2x Aimpoint · 3x Specter · 4x ACOG (+10 m range) · 6x Marksman · Hybrid 1.5x→6x (V) · Sniper 12x (AWM) · Pistol RMR 1.25x. Every primary mounts the full magnified lineup; aim speed scales with zoom; 4x+ gets the scope-tube mask and hidden viewmodel.
+- Profile v3: legacy saves migrate once more — equipped attachments stripped (bare spawns guaranteed) and the dev wallet enabled (cash floors at $9,999,999 on every save; the UI shows ∞). Set `devFunds: false` in the stored profile to play the real economy.

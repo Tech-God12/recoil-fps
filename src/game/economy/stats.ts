@@ -2,7 +2,7 @@
 // Pure functions only (no three.js / React) so Node tests exercise the real math.
 import type { BaseWeaponStats } from './catalog';
 
-export type ScopeReticle = 'none' | 'dot' | 'holo' | 'acog' | 'sniper';
+export type ScopeReticle = 'none' | 'dot' | 'holo' | 'acog' | 'sniper' | 'x2' | 'x3' | 'x6';
 
 export interface StatMods {
   damageMul?: number; rpmMul?: number; magAdd?: number; magMul?: number; reserveAdd?: number;
@@ -15,6 +15,8 @@ export interface StatMods {
   autoOverride?: boolean;
   laser?: boolean; flashlight?: boolean;
   scopeReticle?: ScopeReticle;
+  /** Optic magnification. 0/absent = the weapon's factory sight picture. */
+  zoom?: number;
   // Engine-resolved extras (default 1 / false when no attachment sets them).
   flashMul?: number; suppressed?: boolean;
   spreadXMul?: number; spreadYMul?: number;
@@ -24,6 +26,8 @@ export interface StatMods {
 
 export interface ResolvedWeaponStats extends BaseWeaponStats {
   reticle: ScopeReticle;
+  /** Optic magnification (0 = factory sight picture). */
+  zoom: number;
   laser: boolean; flashlight: boolean; suppressed: boolean;
   recoilYawMul: number; flashMul: number;
   spreadXMul: number; spreadYMul: number;
@@ -82,6 +86,7 @@ export function resolveWeaponStats(base: BaseWeaponStats, mods: StatMods[]): Res
     moveSpeedMul: clamp(base.moveSpeedMul * mul(m => m.moveSpeedMul), 0.5, 1.5),
     swapTime: clamp(base.swapTime * mul(m => m.swapTimeMul), 0.03, 1.2),
     reticle: last(m => m.scopeReticle) ?? 'none',
+    zoom: last(m => m.zoom) ?? 0,
     laser: any(m => m.laser),
     flashlight: any(m => m.flashlight),
     suppressed: any(m => m.suppressed),

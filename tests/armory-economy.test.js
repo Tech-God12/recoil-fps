@@ -16,9 +16,9 @@ const { REWARDS, gradeFor, gradeBonus, streakBonus, streakAward, difficultyMulti
 const m4base = () => weaponById('m4a1').base;
 const modsOf = (...ids) => ids.map(id => attachmentById(id).mods);
 
-test('catalog ships 10 weapons and 32 attachments', () => {
+test('catalog ships 10 weapons and 35 attachments', () => {
   assert.equal(WEAPON_CATALOG.length, 10);
-  assert.equal(ATTACHMENT_CATALOG.length, 32);
+  assert.equal(ATTACHMENT_CATALOG.length, 35);
   assert.deepEqual(WEAPON_CATALOG.map(w => w.id).sort(), [
     'ak47', 'awm', 'deagle', 'm1911', 'm249', 'm4a1', 'mp7', 'scar_h', 'spas12', 'vector',
   ]);
@@ -101,9 +101,9 @@ test('competent first run pays ≈ $3,350 and full unlock takes 15–20 runs', (
   assert.ok(total >= 3000 && total <= 3700, `run pays $${total}`);
   const catalogValue = WEAPON_CATALOG.reduce((a, w) => a + w.price, 0)
     + ATTACHMENT_CATALOG.reduce((a, x) => a + x.price, 0);
-  assert.ok(catalogValue >= 55000 && catalogValue <= 66000, `catalog worth $${catalogValue}`);
+  assert.ok(catalogValue >= 66000 && catalogValue <= 76000, `catalog worth $${catalogValue}`);
   const runs = catalogValue / total;
-  assert.ok(runs >= 15 && runs <= 20, `${runs.toFixed(1)} runs to full unlock`);
+  assert.ok(runs >= 15 && runs <= 23, `${runs.toFixed(1)} runs to full unlock`);
 });
 
 test('stat bar normalisation is pinned', () => {
@@ -126,7 +126,7 @@ test('buyWeapon rejects unknown, duplicate and unaffordable guns', () => {
   const rich = { ...profile.DEFAULT_PROFILE, cash: 99999 };
   assert.equal(profile.buyWeapon(rich, 'nope').ok, false);
   assert.equal(profile.buyWeapon(rich, 'm4a1').error, 'ALREADY_OWNED');
-  assert.equal(profile.buyWeapon(profile.DEFAULT_PROFILE, 'awm').error, 'INSUFFICIENT_FUNDS');
+  assert.equal(profile.buyWeapon({ ...profile.DEFAULT_PROFILE, cash: 0, devFunds: false }, 'awm').error, 'INSUFFICIENT_FUNDS');
   const bought = profile.buyWeapon(rich, 'awm');
   assert.equal(bought.ok, true);
   assert.equal(bought.value.cash, 99999 - weaponById('awm').price);
@@ -142,7 +142,7 @@ test('attachment ownership is per weapon and buying auto-equips', () => {
   assert.ok(!(next.ownedAttachments.ak47 ?? []).includes('mag_extended'));
   assert.equal(next.builds.m4a1.attachments.magazine, 'mag_extended');
   assert.equal(profile.buyAttachment(next, 'm4a1', 'mag_extended').error, 'ALREADY_OWNED');
-  assert.equal(profile.buyAttachment(profile.DEFAULT_PROFILE, 'm4a1', 'mag_extended').error, 'INSUFFICIENT_FUNDS');
+  assert.equal(profile.buyAttachment({ ...profile.DEFAULT_PROFILE, cash: 0, devFunds: false }, 'm4a1', 'mag_extended').error, 'INSUFFICIENT_FUNDS');
 });
 
 test('equipAttachment enforces ownership and compatibility', () => {
@@ -185,12 +185,13 @@ test('grantCash is immutable and never drops below zero', () => {
 test('profile survives a save/load round-trip and corrupt data migrates clean', () => {
   const store = new Map();
   const memory = { getItem: k => store.get(k) ?? null, setItem: (k, v) => { store.set(k, v); } };
-  const flush = { ...profile.DEFAULT_PROFILE, cash: 99999 };
+  const flush = { ...profile.DEFAULT_PROFILE, cash: 99999, devFunds: false };
   const p = profile.buyAttachment(flush, 'm4a1', 'opt_reddot').value;
   profile.saveProfile(p, memory);
   const back = profile.loadProfile(memory);
   assert.equal(back.builds.m4a1.attachments.optic, 'opt_reddot');
   assert.ok(back.cash < 99999);
+  assert.equal(back.devFunds, false, 'the opt-out survives the round-trip');
   assert.deepEqual(profile.migrateProfile('{{{nope').ownedWeapons, ['m4a1', 'm1911']);
   const dropped = profile.migrateProfile(JSON.stringify({ ownedWeapons: ['m4a1', 'm1911', 'nope'], cash: 5 }));
   assert.deepEqual(dropped.ownedWeapons, ['m4a1', 'm1911']);
@@ -254,11 +255,11 @@ test('fresh spawns are bare: no scope, stock mag, basic gear', () => {
   assert.deepEqual(fresh.loadout.secondary.attachments, {});
 });
 
-test('v1 profiles migrate to v2 stripped of equipped attachments but keep the rest', () => {
+test('legacy profiles migrate to v3 stripped of equipped attachments but keep the rest', () => {
   const store = new Map();
   const memory = { getItem: k => store.get(k) ?? null, setItem: (k, v) => { store.set(k, v); } };
   // a stale v1 save with suppressor + extended mag equipped long ago
-  let p = { ...profile.DEFAULT_PROFILE, cash: 5000 };
+  let p = { ...profile.DEFAULT_PROFILE, cash: 5000, devFunds: false };
   p = profile.buyAttachment(p, 'm4a1', 'muz_suppressor').value;
   p = profile.buyAttachment(p, 'm4a1', 'mag_extended').value;
   store.set('recoilfps.profile.v1', JSON.stringify(p));
@@ -267,16 +268,65 @@ test('v1 profiles migrate to v2 stripped of equipped attachments but keep the re
   assert.deepEqual(back.builds.m4a1.attachments, {}, 'saved build stripped on migrate');
   assert.ok(back.ownedAttachments.m4a1.includes('muz_suppressor'), 'ownership kept');
   assert.ok(back.ownedAttachments.m4a1.includes('mag_extended'), 'ownership kept');
-  assert.equal(back.cash, 5000 - 800 - 600);
-  assert.ok(store.get('recoilfps.profile.v2'), 'migrated save written as v2');
+  assert.equal(back.cash, 5000 - 800 - 600, 'wallet kept');
+  assert.ok(store.get('recoilfps.profile.v3'), 'migrated save written as v3');
+});
+
+test('dev funds: every profile ships an open wallet, opt-out respected', () => {
+  assert.equal(profile.DEFAULT_PROFILE.devFunds, true, 'fresh profiles get the dev wallet');
+  assert.equal(profile.DEFAULT_PROFILE.cash, profile.DEV_CASH_FLOOR);
+  const broke = { ...profile.DEFAULT_PROFILE, cash: 12 };
+  const funded = profile.applyDevFunds(broke);
+  assert.equal(funded.cash, profile.DEV_CASH_FLOOR, 'wallet refills to the floor');
+  assert.equal(broke.cash, 12, 'applyDevFunds never mutates');
+  const off = profile.applyDevFunds({ ...broke, devFunds: false });
+  assert.equal(off.cash, 12, 'opt-out keeps the wallet alone');
+  const stray = profile.migrateProfile(JSON.stringify({ ownedWeapons: ['m4a1', 'm1911'], cash: 40 }));
+  assert.equal(stray.devFunds, true, 'old saves flip to dev funds');
+  const opted = profile.migrateProfile(JSON.stringify({ ownedWeapons: ['m4a1', 'm1911'], cash: 40, devFunds: false }));
+  assert.equal(opted.devFunds, false, 'explicit opt-out survives migration');
 });
 
 test('mags and optics use basic industry-standard names', () => {
   const names = {
-    opt_reddot: 'Red Dot Sight', opt_holo: 'Holographic Sight', opt_acog: 'ACOG Scope',
+    opt_reddot: 'Red Dot Sight', opt_holo: 'Holographic Sight', opt_2x: '2x Aimpoint',
+    opt_3x: '3x Specter', opt_acog: '4x ACOG Scope', opt_6x: '6x Marksman Scope',
     opt_hybrid: 'Hybrid Sight', opt_sniper_hp: 'Sniper Scope', opt_pistol_rmr: 'Pistol Red Dot',
     mag_extended: 'Extended Mag', mag_drum: 'Drum Mag', mag_fast: 'Fast Mag',
     mag_shell_tube: 'Extended Tube', mag_belt_box: 'Large Ammo Box', mag_sr_10: '10-Round Mag',
   };
   for (const [id, name] of Object.entries(names)) assert.equal(attachmentById(id).name, name, id);
+});
+
+test('MP rides the secondary slot next to the pistols', () => {
+  const mp = weaponById('mp7');
+  assert.equal(mp.slot, 'secondary');
+  assert.equal(loadout.slotForWeapon('mp7'), 'secondary');
+  assert.equal(loadout.isValidLoadout({ primary: { weapon: 'mp7', attachments: {} }, secondary: { weapon: 'm1911', attachments: {} } }, ['m4a1', 'm1911', 'mp7']), false, 'MP cannot be primary');
+  assert.equal(loadout.isValidLoadout({ primary: { weapon: 'm4a1', attachments: {} }, secondary: { weapon: 'mp7', attachments: {} } }, ['m4a1', 'm1911', 'mp7']), true, 'MP is a legal sidearm');
+});
+
+test('PUBG-style optics: true magnification on every gun that mounts one', () => {
+  const zooms = {
+    opt_reddot: 1.3, opt_holo: 1.3, opt_2x: 2, opt_3x: 3, opt_acog: 4, opt_6x: 6,
+    opt_hybrid: 1.5, opt_sniper_hp: 12, opt_pistol_rmr: 1.25,
+  };
+  for (const [id, zoom] of Object.entries(zooms)) {
+    const part = attachmentById(id);
+    assert.equal(part.mods.zoom, zoom, `${id} magnification`);
+    assert.notEqual(part.mods.scopeReticle, undefined, `${id} ships a reticle`);
+  }
+  // Every primary weapon can mount the whole magnified lineup, and it resolves.
+  const lineup = ['opt_2x', 'opt_3x', 'opt_acog', 'opt_6x'];
+  for (const w of WEAPON_CATALOG) {
+    if (w.slot !== 'primary') continue;
+    for (const id of lineup) {
+      const part = attachmentById(id);
+      assert.ok(part.compat.includes(w.id), `${w.id} cannot mount ${id}`);
+      assert.equal(part.mods.zoom >= 2, true);
+    }
+  }
+  const m4 = weaponById('m4a1');
+  assert.equal(resolveWeaponStats(m4.base, []).zoom, 0, 'bare gun keeps the factory sight picture');
+  assert.equal(resolveWeaponStats(m4.base, [{ zoom: 6 }]).zoom, 6, 'optic zoom resolves');
 });

@@ -1,5 +1,7 @@
-// Recoil FPS — Armory 3D gun viewer: orbit showcase, socket hotspots, live attach flash.
+// Recoil FPS — Armory 3D gun viewer: oversized orbit showcase, click-to-socket picking.
 // Own renderer/scene; materials are cloned per viewer so fade/flash never leak into the game's WM.
+// Sockets do NOT float on the model — the right-hand panel owns them; clicking the gun
+// just opens the matching socket row there.
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
@@ -46,15 +48,14 @@ interface ViewerApi {
   flashes: { mats: THREE.MeshStandardMaterial[]; t: number; part: THREE.Object3D; homeY: number }[];
   ownedMats: THREE.Material[];
   slots: AttachSlot[];
-  hotspotEls: Map<AttachSlot, HTMLButtonElement>;
-  activeSlot: AttachSlot | null;
   raf: number;
   disposed: boolean;
   center: THREE.Vector3;
 }
 
 const FIT_RADIUS = 0.42;
-const BASE_DIST = FIT_RADIUS / Math.tan(THREE.MathUtils.degToRad(16));
+/** Tighter framing than the old podium shot: the gun fills the stage. */
+const BASE_DIST = FIT_RADIUS / Math.tan(THREE.MathUtils.degToRad(22));
 
 function hideArms(model: WeaponModel): void {
   model.group.traverse(o => {
@@ -87,7 +88,6 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
   const apiRef = useRef<ViewerApi | null>(null);
   const onHotspotRef = useRef(onHotspot);
   onHotspotRef.current = onHotspot;
-  const slots = weaponById(weapon)?.slots ?? [];
 
   // ---- one-time scene setup ----
   useEffect(() => {
@@ -111,7 +111,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     scene.environmentIntensity = 0.65;
     pmrem.dispose();
 
-    const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
+    const camera = new THREE.PerspectiveCamera(34, 1, 0.05, 50);
 
     scene.add(new THREE.HemisphereLight(0xF0F4FA, 0x8A7450, 1.2));
     const key = new THREE.DirectionalLight(0xFFF2D6, 1.7);
@@ -156,9 +156,9 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     const api: ViewerApi = {
       renderer, scene, camera, fitGroup, model: null,
       yaw: 0.65, pitch: 0.18, targetYaw: 0.65, targetPitch: 0.18,
-      zoom: 1, targetZoom: 1, lastInput: performance.now() - 5000,
+      zoom: 0.82, targetZoom: 0.82, lastInput: performance.now() - 5000,
       transition: null, incoming: null, flashes: [], ownedMats: [],
-      slots: [], hotspotEls: new Map(), activeSlot: null, raf: 0,
+      slots: [], raf: 0,
       disposed: false, center: new THREE.Vector3(),
     };
     apiRef.current = api;
@@ -224,7 +224,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      api.targetZoom = THREE.MathUtils.clamp(api.targetZoom * Math.exp(e.deltaY * 0.0011), 0.7, 1.6);
+      api.targetZoom = THREE.MathUtils.clamp(api.targetZoom * Math.exp(e.deltaY * 0.0011), 0.55, 1.6);
       api.lastInput = performance.now();
     };
     el.addEventListener('pointerdown', down);
@@ -233,10 +233,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     el.addEventListener('pointercancel', up);
     el.addEventListener('wheel', wheel, { passive: false });
 
-    const proj = new THREE.Vector3();
     const projV = new THREE.Vector3();
-    const toSocket = new THREE.Vector3();
-    const toCam = new THREE.Vector3();
     let last = performance.now();
     const loop = (now: number) => {
       if (api.disposed) return;
@@ -300,30 +297,6 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
         }
       }
 
-      // project hotspots from live sockets
-      if (api.model) {
-        api.fitGroup.updateMatrixWorld(true);
-        const w = mount.clientWidth || 2;
-        const h = mount.clientHeight || 2;
-        toCam.copy(camera.position).sub(api.center).normalize();
-        for (const s of api.slots) {
-          const btn = api.hotspotEls.get(s);
-          const socket = api.model.sockets[s];
-          if (!btn || !socket) continue;
-          socket.getWorldPosition(proj);
-          toSocket.copy(proj).sub(api.center);
-          const facing = toSocket.lengthSq() > 1e-8 ? toSocket.normalize().dot(toCam) : 1;
-          proj.project(camera);
-          const behind = proj.z > 1;
-          const x = (proj.x * 0.5 + 0.5) * w;
-          const y = (-proj.y * 0.5 + 0.5) * h;
-          const op = behind ? 0 : THREE.MathUtils.clamp((facing + 0.45) / 0.55, 0.14, 1);
-          btn.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
-          btn.style.opacity = op.toFixed(2);
-          btn.style.pointerEvents = !behind && facing > -0.3 ? 'auto' : 'none';
-        }
-      }
-
       renderer.render(scene, camera);
     };
     api.raf = requestAnimationFrame(loop);
@@ -338,6 +311,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       el.removeEventListener('pointercancel', up);
       el.removeEventListener('wheel', wheel);
       if (api.model) disposeGroup(api.model.group);
+      if (api.transition) disposeGroup(api.transition.group);
       for (const m of api.ownedMats) m.dispose();
       grid.geometry.dispose();
       (grid.material as THREE.Material).dispose();
@@ -403,6 +377,15 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
 
     const old = api.model;
     if (old) {
+      // Rapid-switch guard: finish any in-flight swap NOW or its half-faded group
+      // would linger in the scene forever as a ghost "skeleton" of the old gun.
+      if (api.transition) {
+        api.scene.remove(api.transition.group);
+        disposeGroup(api.transition.group);
+        api.transition = null;
+      }
+      api.incoming = null;
+      api.fitGroup.position.x = 0;
       const oldMats: THREE.MeshStandardMaterial[] = [];
       const seen = new Set<THREE.Material>();
       old.group.traverse(o => {
@@ -434,7 +417,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     }
     api.fitGroup.clear();
     api.fitGroup.scale.setScalar(scale);
-    api.fitGroup.position.set(0, -0.08, 0);
+    api.fitGroup.position.set(0, -0.06, 0);
     api.fitGroup.add(inner);
     api.model = model;
     api.slots = weaponById(weapon)?.slots ?? [];
@@ -488,38 +471,8 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     if (mats.length) api.flashes.push({ mats, t: 0, part, homeY: part.position.y });
   }, [flashSlot?.key]);
 
-  // ---- active hotspot ring ----
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    api.activeSlot = activeSlot;
-    for (const [s, btn] of api.hotspotEls) btn.dataset.active = String(s === activeSlot);
-  }, [activeSlot]);
-
   return (
-    <div ref={mountRef} className="gv-root">
-      {slots.map(s => (
-        <button
-          key={s}
-          ref={node => {
-            const api = apiRef.current;
-            if (!api) return;
-            if (node) api.hotspotEls.set(s, node);
-            else api.hotspotEls.delete(s);
-          }}
-          data-active={s === activeSlot}
-          className="gv-hotspot"
-          onClick={e => {
-            e.stopPropagation();
-            onHotspotRef.current(s);
-          }}
-          aria-label={`${SLOT_LABELS[s]} slot`}
-        >
-          <i />
-          <span>{SLOT_LABELS[s]}</span>
-        </button>
-      ))}
-    </div>
+    <div ref={mountRef} className="gv-root" data-active-slot={activeSlot ?? ''} />
   );
 }
 

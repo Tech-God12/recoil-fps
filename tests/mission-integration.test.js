@@ -15,7 +15,7 @@ const { buildSoldier } = await import('../src/game/models.ts');
 const { Engine, DEFAULT_SETTINGS } = await import('../src/game/engine.ts');
 const { voice } = await import('../src/game/voice.ts');
 const { default: MissionObjective, missionClock } = await import('../src/ui/MissionObjective.tsx');
-const { MainMenu } = await import('../src/ui/Screens.tsx');
+const { MainMenu, MissionBriefing } = await import('../src/ui/Screens.tsx');
 
 function aiContext() {
   return {
@@ -142,8 +142,14 @@ test('SSR output exposes the mission verbs, actual objective progress, and a nor
   assert.match(html, /Sandblast/);
   assert.equal(missionClock(59.9), '01:00');
   assert.equal(missionClock(0), '00:00');
-  const menu = renderToStaticMarkup(React.createElement(MainMenu, { s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {} }));
-  for (const phase of mission.definition.phases) assert.ok(menu.includes(phase.title));
-  assert.ok(menu.includes('Reach the pickup to extract'));
+  // The menu stays compact — the route lives in the map-select/briefing flow now.
+  const menu = renderToStaticMarkup(React.createElement(MainMenu, { s: DEFAULT_SETTINGS, onStart() {}, onSettings() {}, onMap() {} }));
+  assert.ok(menu.includes('START MISSION'));
+  assert.ok(!menu.includes(mission.definition.phases[0].title), 'route list is no longer on the menu');
+  assert.ok(menu.includes('Pick your drop zone'), 'menu points at the arena picker');
   assert.ok(!menu.includes('21 HOSTILES'));
+  // The briefing (loading) screen carries the full objective list instead.
+  const briefing = renderToStaticMarkup(React.createElement(MissionBriefing, { map: 'alrasul' }));
+  for (const phase of mission.definition.phases) assert.ok(briefing.includes(phase.title));
+  assert.match(briefing, /MISSION OBJECTIVES|Mission objectives|MISSION OBJECTIVES/i);
 });

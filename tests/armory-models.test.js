@@ -91,7 +91,7 @@ test('applyBuild with a full build then an empty build restores the group', () =
   applyBuild(model, {
     weapon: 'm4a1',
     attachments: {
-      muzzle: 'muz_suppressor', optic: 'opt_acog', magazine: 'mag_extended',
+      muzzle: 'muz_suppressor', optic: 'opt_3x', magazine: 'mag_extended',
       underbarrel: 'ub_vert_grip', stock: 'stk_heavy', rail: 'rail_laser', barrel: 'brl_long',
     },
   });
@@ -123,7 +123,7 @@ test('a can fitted over a long barrel seats on the new bore end', () => {
 test('optics hide only their aiming mark in ADS — the glass stays see-through', () => {
   const model = WEAPON_BUILDERS.m4a1();
   const hidden = model.adsHidden.length;
-  attach(model, attachmentById('opt_acog'), 'm4a1');
+  attach(model, attachmentById('opt_3x'), 'm4a1');
   assert.ok(Number.isFinite(model.attached.optic.userData.sightYOffset));
   assert.ok(model.adsHidden.length > hidden, 'optic mark must join adsHidden');
   assert.ok(model.removable.optic.every(o => o.visible === false), 'ACOG hides the irons');
@@ -141,7 +141,7 @@ test('optics hide only their aiming mark in ADS — the glass stays see-through'
 });
 
 test('magnified optics are genuinely see-through down the optical axis', () => {
-  for (const [id, wid] of [['opt_hybrid', 'm4a1'], ['opt_sniper_hp', 'awm'], ['opt_acog', 'm4a1']]) {
+  for (const [id, wid] of [['opt_4x', 'm4a1'], ['opt_6x', 'awm'], ['opt_3x', 'm4a1']]) {
     const part = attachmentById(id);
     const model = WEAPON_BUILDERS[wid]();
     const obj = ATTACHMENT_BUILDERS[part.visual]({ weapon: wid, model, cls: weaponById(wid).cls });

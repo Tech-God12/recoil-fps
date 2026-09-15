@@ -54,7 +54,8 @@ interface ViewerApi {
 }
 
 const FIT_RADIUS = 0.42;
-const BASE_DIST = FIT_RADIUS / Math.tan(THREE.MathUtils.degToRad(16));
+// 19° half-fit (was 16°): the gun fills noticeably more of the enlarged stage.
+const BASE_DIST = FIT_RADIUS / Math.tan(THREE.MathUtils.degToRad(19));
 
 function hideArms(model: WeaponModel): void {
   model.group.traverse(o => {
@@ -404,6 +405,13 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     inner.add(model.group);
     model.group.position.copy(sphere.center).negate();
 
+    // Rapid re-clicks: a previous outgoing gun may still be mid-fade. Drop it
+    // immediately or it leaks into the scene as a stuck ghost skeleton.
+    if (api.transition) {
+      api.scene.remove(api.transition.group);
+      disposeGroup(api.transition.group);
+      api.transition = null;
+    }
     const old = api.model;
     if (old) {
       const oldMats: THREE.MeshStandardMaterial[] = [];

@@ -32,6 +32,10 @@ export async function load(url, context, nextLoad) {
     }));
     return { format: 'module', source: result.outputText, shortCircuit: true };
   }
+  if (url.startsWith('file:') && /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url)) {
+    // Static assets resolve to their URL string, mirroring Vite's default import behaviour.
+    return { format: 'module', source: `export default ${JSON.stringify(url)};`, shortCircuit: true };
+  }
   if (url.startsWith('file:') && url.endsWith('.json') && !url.includes('/node_modules/')) {
     const value = JSON.parse(await readFile(new URL(url), 'utf8'));
     return { format: 'module', source: `export default ${JSON.stringify(value)};`, shortCircuit: true };

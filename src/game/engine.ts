@@ -103,6 +103,8 @@ export interface HudState {
   heldSlot: 'primary' | 'secondary';
   bipodDeployed: boolean;
   reticle: ScopeReticle;
+  /** Effective ADS FOV in degrees — the HUD derives scope tier/magnification from this. */
+  zoomFov: number;
   lpvoHigh: boolean;
   pumping: boolean;
   pings: { dir: number; age: number }[];
@@ -420,16 +422,20 @@ export class Engine {
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 5);
 
-    // Clear bright desert daylight — high visibility, light fog only at distance.
-    // Slightly desaturated so enemy silhouettes stay readable instead of washing out.
-    this.scene.background = new THREE.Color(0xB8CCDA);
-    this.scene.fog = new THREE.Fog(mapId === 'alrasul' ? 0xC6B89C : 0xB4C0C5, 130, 430);
+    // Per-map colour grading so the two arenas read instantly different:
+    // Sandblast = hot amber desert noon; Town = cooler hazy hill morning.
+    const desert = mapId === 'alrasul';
+    this.scene.background = new THREE.Color(desert ? 0xC3CBD2 : 0xAAB9C4);
+    this.scene.fog = desert
+      ? new THREE.Fog(0xC6B89C, 130, 430)
+      : new THREE.Fog(0xA9B8BE, 95, 340); // closer, bluer haze on the hill town
     // strong sky fill so shadowed faces stay readable
-    const hemi = new THREE.HemisphereLight(0xCFE0EE, 0x8C765A, 0.65);
+    const hemi = new THREE.HemisphereLight(desert ? 0xCFE0EE : 0xC2D4E2, desert ? 0x8C765A : 0x6E7568, desert ? 0.65 : 0.75);
     this.scene.add(hemi);
-    // key sun — high and bright, crisp shadows
-    const sun = new THREE.DirectionalLight(0xFFE4BE, 3.0);
-    sun.position.set(-65, 52, 40);
+    // key sun — desert gets a hard warm noon sun, the town a lower cooler morning key
+    const sun = new THREE.DirectionalLight(desert ? 0xFFE4BE : 0xF2E9D8, desert ? 3.0 : 2.5);
+    if (desert) sun.position.set(-65, 52, 40);
+    else sun.position.set(55, 38, -50);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048); // 4x fewer shadow texels than 4096 — big FPS win
     sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
@@ -440,10 +446,10 @@ export class Engine {
     this.scene.add(sun);
     this.sunLight = sun;
     // gentle cool fill from the opposite side
-    const fill = new THREE.DirectionalLight(0xAFC6DC, 0.22);
-    fill.position.set(55, 30, -45);
+    const fill = new THREE.DirectionalLight(0xAFC6DC, desert ? 0.22 : 0.3);
+    fill.position.set(desert ? 55 : -55, 30, desert ? -45 : 45);
     this.scene.add(fill);
-    this.scene.add(new THREE.AmbientLight(0x8A7A60, 0.12));
+    this.scene.add(new THREE.AmbientLight(desert ? 0x8A7A60 : 0x707A78, 0.12));
 
     this.addSkyDome(mapId);
 
@@ -939,12 +945,23 @@ void main(){
     c.width = 4; c.height = 256;
     const ctx = c.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, '#4A78A6');   // zenith blue
-    grad.addColorStop(0.4, '#93B6C8');
-    grad.addColorStop(0.58, mapId === 'kasbah' ? '#C2CDD0' : '#D8C7A0'); // haze band
-    grad.addColorStop(0.72, mapId === 'kasbah' ? '#DDD8C2' : '#F0D6A2'); // warm horizon
-    grad.addColorStop(0.85, '#F6C888');
-    grad.addColorStop(1, '#EAB878');    // sun-warmed base
+    if (mapId === 'kasbah') {
+      // Cool hazy hill-town morning: blue-grey dome, pale horizon, no amber base.
+      grad.addColorStop(0, '#3E668F');
+      grad.addColorStop(0.4, '#87A6BC');
+      grad.addColorStop(0.58, '#B7C5CC');
+      grad.addColorStop(0.72, '#D3D6CE');
+      grad.addColorStop(0.85, '#DFD9C6');
+      grad.addColorStop(1, '#D8CCB4');
+    } else {
+      // Hot desert noon: deep zenith blue burning into an amber horizon.
+      grad.addColorStop(0, '#4A78A6');
+      grad.addColorStop(0.4, '#93B6C8');
+      grad.addColorStop(0.58, '#D8C7A0');
+      grad.addColorStop(0.72, '#F0D6A2');
+      grad.addColorStop(0.85, '#F6C888');
+      grad.addColorStop(1, '#EAB878');
+    }
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 4, 256);
     const tex = new THREE.CanvasTexture(c);
@@ -967,8 +984,8 @@ void main(){
     sctx.fillRect(0, 0, 128, 128);
     const sunTex = new THREE.CanvasTexture(sc);
     const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, fog: false, depthWrite: false, transparent: true }));
-    sunSpr.position.set(-220, 200, 150);
-    sunSpr.scale.setScalar(110);
+    if (mapId === 'kasbah') { sunSpr.position.set(200, 150, -180); sunSpr.scale.setScalar(84); } // lower, paler morning sun
+    else { sunSpr.position.set(-220, 200, 150); sunSpr.scale.setScalar(110); }
     this.scene.add(sunSpr);
     this.scene.add(this.clouds);
     // A few flat drifting clouds
@@ -1448,6 +1465,9 @@ void main(){
         this.hits++;
         this.effects.blood(h.point);
         audio.fleshImpact(0);
+        // Headshot "dink" rings on EVERY head hit — the reward cue lands even
+        // when the target survives (and stacks under the kill confirm when not).
+        if (part === 'head') audio.headshotDink();
         const killed = enemy.takeDamage(dmg, part === 'head');
         if (killed) {
           this.kills++;
@@ -1471,7 +1491,10 @@ void main(){
           else { this.streak = 1; this.streakPaidMark = 0; }
           this.lastKillT = now;
           if (this.streak >= 2) {
-            const label = this.streak >= 5 ? 'UNSTOPPABLE' : this.streak === 4 ? 'MEGA KILL' : this.streak === 3 ? 'MULTI KILL' : 'DOUBLE KILL';
+            const label = this.streak >= 6 ? 'UNSTOPPABLE'
+              : this.streak === 5 ? 'PENTA KILL'
+                : this.streak === 4 ? 'QUAD KILL'
+                  : this.streak === 3 ? 'TRIPLE KILL' : 'DOUBLE KILL';
             voice.streak(label);
             this.onEvent({ type: 'streak', label });
             const sb = streakAward(this.streak, this.streakPaidMark, 500 - this.streakPaidRun);
@@ -1497,18 +1520,28 @@ void main(){
       this.effects.tracer(muzzleWorld, origin.clone().addScaledVector(dir, 140));
     }
 
-    // 2. NOW APPLY SOFTENED RECOIL AFTER THE BULLET HAS BEEN FIRED
-    // (~40% gentler than before — present but never annoying)
+    // 2. NOW APPLY REALISTIC RECOIL AFTER THE BULLET HAS BEEN FIRED.
+    // The muzzle genuinely climbs: part of the kick is PERMANENT pitch the player
+    // must pull down against, part is a visual spring that recovers on its own.
+    // Scoped fire is deliberately NOT a laser — magnification amplifies how far
+    // the reticle appears to jump, so high-zoom glass punishes fast follow-ups.
     const pat = d.pattern[Math.min(this.shotIdx, d.pattern.length - 1)];
     this.shotIdx++;
-    const adsRecoilReduction = isAds ? 0.6 : 1.0;
-    const recoilMul = (d.recoilMul ?? 1) * (this.bipodDeployed() ? 0.4 : 1);
-    const kickP = pat[0] * 0.0052 * adsRecoilReduction * recoilMul;
-    const kickY = pat[1] * 0.0032 * adsRecoilReduction * recoilMul * (d.recoilYawMul ?? 1);
-    this.pitch += kickP * 0.32;
-    this.yaw += kickY * 0.32;
-    this.recoilP += kickP * 0.45;
-    this.recoilY += kickY * 0.45;
+    // ADS steadies the gun only slightly; a scope's tighter FOV makes the same
+    // angular kick LOOK bigger, which is exactly how real magnified recoil reads.
+    const adsRecoilReduction = isAds ? 0.88 : 1.0;
+    const zoomKick = isAds ? Math.max(1, Math.sqrt(70 / Math.max(12, this.adsFovEff())) ) : 1;
+    const recoilMul = (d.recoilMul ?? 1) * (this.bipodDeployed() ? 0.35 : 1) * (this.crouched ? 0.85 : 1);
+    const kickP = pat[0] * 0.0085 * adsRecoilReduction * recoilMul;
+    const kickY = pat[1] * 0.0055 * adsRecoilReduction * recoilMul * (d.recoilYawMul ?? 1);
+    // Horizontal jitter so long bursts wander instead of tracing a clean line.
+    const jitterY = (Math.random() - 0.5) * kickP * 0.35;
+    this.pitch += kickP * 0.55;
+    this.yaw += (kickY + jitterY) * 0.55;
+    this.recoilP += kickP * 0.75 * zoomKick;
+    this.recoilY += (kickY + jitterY) * 0.7 * zoomKick;
+    // Big-bore single shots (AWM, Deagle, SPAS) also shove the whole camera.
+    if (!d.auto && kickP > 0.02) this.shake = Math.min(1, this.shake + kickP * 9);
     this.vmKick = 1;
     this.vmKickRot = 1;
 
@@ -2173,8 +2206,9 @@ void main(){
     this.shotResetT -= dt;
     if (this.shotResetT <= 0) this.shotIdx = 0;
 
-    // Recoil recovery (80ms snappy return)
-    const rec = Math.min(1, dt / 0.08);
+    // Recoil recovery — a real spring, not an instant snap. The sight settles
+    // over ~140 ms so sustained fire visibly stacks climb before recovery wins.
+    const rec = Math.min(1, dt / 0.14);
     this.recoilP *= 1 - rec;
     this.recoilY *= 1 - rec;
 
@@ -2293,7 +2327,9 @@ void main(){
     const inAds = a > 0.4;
     for (const obj of d.model.adsHidden) obj.visible = !inAds;
     // Scope overlay owns the whole view; receiver rings/arms must not intrude.
-    const hideInAds = inAds && this.adsFovEff() < 30;
+    // Threshold 45° covers 3x/4x/6x glass — the old <30 cut left the 4x (30°)
+    // player staring into the BACK of the scope tube model while zoomed.
+    const hideInAds = inAds && this.adsFovEff() < 45;
     g.visible = !hideInAds;
     this.muzzleFlash.visible = !hideInAds;
     const hip = { x: 0.22, y: -0.19, z: -0.38, ry: 0.035 };
@@ -2336,26 +2372,60 @@ void main(){
       d.model.chargingHandle.position.z = Math.sin(Math.max(0,Math.min(1,(cycle-0.2)/0.6))*Math.PI)*0.055;
     }
 
-    // Reload animation — gun dips/tilts, mag drops, LEFT HAND works the reload
+    // Reload animation — every weapon family has its own tactical handling.
+    // The gun stays UP in the workspace (chest height, canted toward the eyes)
+    // instead of dropping out of frame; the mag physically leaves and returns.
     const magObj = d.model.mag;
     const magHomeY = (magObj.userData.homeY as number | undefined) ?? 0;
     const magHomeZ = (magObj.userData.homeZ as number | undefined) ?? 0;
     if (this.reloadT >= 0) {
       const rt = this.reloadT / this.reloadDur;
       const dip = Math.sin(Math.min(1, rt) * Math.PI);
-      py -= dip * 0.10 * S;
-      rx -= dip * 0.5;
-      rz += dip * 0.22;
-      if (d.audioTag === 'lmg') { py -= dip * 0.06 * S; rz += dip * 0.18; rx -= dip * 0.25; }
+      const tag = d.audioTag ?? 'm4';
+      if (tag === 'ak') {
+        // AK: rock-and-lock — the rifle rolls hard left and NOSES UP while the
+        // mag pivots out forward, then slams back with a visible counter-rock.
+        py -= dip * 0.06 * S; rx -= dip * 0.28; rz += dip * 0.45; ry -= dip * 0.10;
+        const rock = rt > 0.5 && rt < 0.62 ? Math.sin(((rt - 0.5) / 0.12) * Math.PI) : 0;
+        rz -= rock * 0.12; // the slap when the fresh mag seats
+      } else if (tag === 'sniper') {
+        // AWM: roll right into the workspace, feed the stubby mag from below,
+        // then a long bolt stroke re-cocks (chargingHandle slides back).
+        py -= dip * 0.08 * S; rx -= dip * 0.30; rz -= dip * 0.35; ry += dip * 0.08;
+        const boltP = rt > 0.72 ? Math.sin(Math.min(1, (rt - 0.72) / 0.24) * Math.PI) : 0;
+        d.model.chargingHandle.position.z = boltP * 0.06;
+      } else if (tag === 'pistol' || tag === 'deagle') {
+        // Pistols: muzzle tips up near the face, mag drops fast, slide runs.
+        py -= dip * 0.05 * S; rx += dip * 0.22; rz += dip * 0.18; pz -= dip * 0.02;
+        const slideP = rt > 0.78 ? Math.sin(Math.min(1, (rt - 0.78) / 0.2) * Math.PI) : 0;
+        d.model.chargingHandle.position.z = slideP * 0.04;
+      } else if (tag === 'lmg') {
+        // M249: heavy — gun sags, cover opens, belt gets laid in.
+        py -= dip * 0.15 * S; rz += dip * 0.38; rx -= dip * 0.65;
+        d.model.chargingHandle.position.y = dip * 0.05; // feed cover pops
+      } else if (tag === 'shotgun') {
+        // SPAS: cradled low and rolled, shells thumbed into the tube.
+        py -= dip * 0.07 * S; rx -= dip * 0.30; rz += dip * 0.30;
+      } else if (tag === 'smg' || tag === 'vector') {
+        // PDWs: fast, twitchy — sharp cant, quick mag punch, minimal dip.
+        py -= dip * 0.055 * S; rx -= dip * 0.30; rz += dip * 0.32; ry += dip * 0.06;
+      } else {
+        // AR family (M416/SCAR): controlled tactical reload at chest height.
+        py -= dip * 0.08 * S; rx -= dip * 0.40; rz += dip * 0.24;
+      }
       if (!d.pumpShotgun) {
+        // Mag travel: straight drop for STANAG guns, forward pivot for the AK rock.
         const out = rt > 0.14 && rt < 0.58 ? Math.sin(((rt - 0.14) / 0.44) * Math.PI) : 0;
         magObj.position.y = magHomeY - out * 0.17 * S;
+        if (tag === 'ak') {
+          magObj.position.z = magHomeZ - out * 0.05 * S;
+          magObj.rotation.x = out * 0.5;
+        }
       }
-      // Belt-fed cover pops during the reload window.
-      if (d.audioTag === 'lmg') d.model.chargingHandle.position.y = dip * 0.05;
       this.poseLArm(d, rt);
     } else {
       magObj.position.y = magHomeY;
+      if (d.audioTag === 'ak') { magObj.position.z = magHomeZ; magObj.rotation.x = 0; }
       if (d.audioTag === 'lmg') d.model.chargingHandle.position.y *= 1 - Math.min(1, dt * 10);
       if (d.model.lArm) {
         d.model.lArm.position.multiplyScalar(1 - Math.min(1, dt * 14));
@@ -2397,7 +2467,8 @@ void main(){
       magObj.position.z = magHomeZ;
     }
     // Reciprocating slide / bolt (pistols + SCAR): snap back, spring home.
-    if (d.audioTag === 'pistol' || d.audioTag === 'scar') {
+    // (Skipped mid-reload — the reload keyframes own the slide then.)
+    if ((d.audioTag === 'pistol' || d.audioTag === 'scar') && this.reloadT < 0) {
       this.slideKick = Math.max(0, this.slideKick - dt * 9);
       d.model.chargingHandle.position.z = this.slideKick * this.slideKick * 0.038;
     }
@@ -2658,7 +2729,11 @@ void main(){
       secondaryWeapon: (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0] : this.weapons[this.cur === 2 ? 0 : 2])?.name ?? '',
       heldSlot: (this.weapons.length === 2 ? this.cur === 0 : this.cur !== 2) ? 'primary' : 'secondary',
       bipodDeployed: this.bipodDeployed(),
-      reticle: this.def().lpvo ? (this.def().lpvoHigh ? 'sniper' : 'acog') : (this.def().reticle ?? (this.adsFovEff() < 30 ? 'sniper' : 'none')),
+      reticle: this.def().lpvo
+        ? (this.def().lpvoHigh ? 'sniper' : 'acog')
+        // Deep zoom always gets the full scope picture (the gun model hides below 30°).
+        : this.adsFovEff() < 30 ? 'sniper' : (this.def().reticle ?? 'none'),
+      zoomFov: this.adsFovEff(),
       lpvoHigh: this.def().lpvoHigh ?? false,
       pumping: this.pumpT > 0,
       reloading: this.reloadT >= 0,

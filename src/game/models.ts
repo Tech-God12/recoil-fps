@@ -453,7 +453,7 @@ export function buildM4(): WeaponModel {
 
 export function buildAK47(): WeaponModel {
   const g = new THREE.Group();
-  const SIGHT_Y = 0.064;
+  const SIGHT_Y = 0.066;
   const S = WM.steel, W = WM.wood, WD = WM.woodDark, D = WM.dark, MS = WM.midSteel;
   const b = new GunBuilder();
   const skb = new GunBuilder(); const skG = new THREE.Group();
@@ -466,7 +466,7 @@ export function buildAK47(): WeaponModel {
   for (let i = 0; i < 5; i++) b.box(0.041, 0.003, 0.004, D, 0, 0.043, -0.12 + (i - 2) * 0.028);
   b.box(0.004, 0.020, 0.060, D, 0.021, 0.016, -0.13);               // ejection port
   b.box(0.008, 0.028, 0.006, S, 0.024, 0.014, -0.07);               // charging knob
-  b.box(0.006, 0.030, 0.020, S, 0.021, -0.002, -0.06);              // selector
+  b.box(0.007, 0.032, 0.022, S, 0.021, -0.002, -0.06);              // selector - enhanced
   for (let i = 0; i < 3; i++) b.box(0.007, 0.004, 0.016, D, 0.021, -0.010 + i * 0.009, -0.06); // selector notches
   b.box(0.020, 0.012, 0.030, S, 0, -0.012, -0.235);                 // rear trunnion
   b.box(0.004, 0.016, 0.090, D, -0.0205, 0.018, -0.10);             // dovetail side rail
@@ -485,9 +485,9 @@ export function buildAK47(): WeaponModel {
   for (let i = 0; i < 3; i++) b.box(0.0465, 0.004, 0.012, WD, 0, -0.024, -0.28 - i * 0.025); // finger grooves
   b.box(0.046, 0.030, 0.014, S, 0, -0.002, -0.235);                 // HG ferrule R
   b.box(0.046, 0.030, 0.014, S, 0, -0.002, -0.385);                 // HG ferrule F
-  b.box(0.028, 0.085, 0.036, W, 0, -0.052, -0.04, -0.3);            // grip
+  b.box(0.030, 0.088, 0.038, W, 0, -0.054, -0.04, -0.32);            // grip - steeper
   b.box(0.030, 0.010, 0.038, WD, 0, -0.088, -0.052, -0.3);          // grip cap
-  skb.box(0.036, 0.055, 0.15, W, 0, -0.004, 0.09);                  // stock
+  skb.box(0.038, 0.058, 0.16, W, 0, -0.006, 0.095);                  // stock - accurate taper
   skb.box(0.040, 0.070, 0.014, D, 0, -0.008, 0.170);                // buttplate
   skb.box(0.020, 0.030, 0.016, WD, 0, -0.020, 0.170);               // trapdoor
   skb.box(0.006, 0.020, 0.060, WD, 0, -0.004, 0.09);                // stock lightening cut look
@@ -497,14 +497,18 @@ export function buildAK47(): WeaponModel {
   brb.cyl(0.006, 0.006, 0.20, S, 0, 0.032, -0.42, Math.PI / 2);     // gas tube
   brb.box(0.020, 0.030, 0.030, S, 0, 0.030, -0.41);                 // gas block
   brb.box(0.006, 0.016, 0.010, S, 0, 0.004, -0.41);                 // bayonet lug
-  brb.box(0.018, 0.006, 0.20, WD, 0, 0.030, -0.42);                 // wooden gas-tube heat guard
+  brb.box(0.020, 0.008, 0.20, WD, 0, 0.032, -0.42);                 // heat guard - thicker
   brb.cyl(0.0035, 0.0035, 0.19, D, 0, -0.012, -0.47, Math.PI / 2);  // cleaning rod
   brb.cyl(0.005, 0.005, 0.008, S, 0, -0.012, -0.378, Math.PI / 2);  // rod head
-  // classic AK front sight tower with two protective ears
-  brb.box(0.020, 0.034, 0.022, S, 0, 0.022, -0.585);
-  brb.box(0.006, 0.030, 0.006, D, 0, 0.052, -0.585);
-  brb.box(0.004, 0.028, 0.014, D, -0.011, 0.048, -0.585);
-  brb.box(0.004, 0.028, 0.014, D, 0.011, 0.048, -0.585);
+  // AKM front sight tower - accurate post with protective ears
+  brb.box(0.022, 0.038, 0.024, S, 0, 0.024, -0.585);
+  brb.cyl(0.003, 0.003, 0.022, D, 0, 0.054, -0.585);
+  brb.cyl(0.0015, 0.0015, 0.006, S, 0, 0.065, -0.585);
+  brb.box(0.005, 0.032, 0.016, D, -0.012, 0.050, -0.585);
+  brb.box(0.005, 0.032, 0.016, D, 0.012, 0.050, -0.585);
+  brb.box(0.006, 0.006, 0.024, D, 0, 0.042, -0.585);
+  brb.cyl(0.002, 0.002, 0.010, S, -0.009, 0.022, -0.585, 0, 0, 1.5708);
+  brb.cyl(0.002, 0.002, 0.010, S, 0.009, 0.022, -0.585, 0, 0, 1.5708);
   brb.cyl(0.011, 0.012, 0.032, S, 0, 0.012, -0.645, Math.PI / 2);   // slant brake
   brb.box(0.012, 0.006, 0.020, D, 0, 0.018, -0.648, 0.35);          // slant cut
   brb.cyl(0.004, 0.004, 0.034, D, 0, 0.012, -0.645, Math.PI / 2);   // bore shadow
@@ -529,10 +533,11 @@ export function buildAK47(): WeaponModel {
   // ---- curved mag ----
   const mag = new THREE.Group();
   const mb = new GunBuilder();
-  for (let i=0;i<12;i++) {
-    const t=i/11, angle=0.12+t*0.65;
-    mb.box(0.028,0.019,0.061,S,0,-0.012-t*0.157,t*t*0.065,angle);
-    for (const side of [-1,1]) mb.box(0.0018,0.019,0.003,D,side*0.0145,-0.012-t*0.157,t*t*0.065-0.018,angle);
+  for (let i=0;i<13;i++) {
+    const tt=i/12, angle=0.10+tt*0.68;
+    mb.box(0.029,0.019,0.062,S,0,-0.010-tt*0.162,tt*tt*0.068,angle);
+    for (const side of [-1,1]) mb.box(0.0019,0.019,0.003,D,side*0.015,-0.010-tt*0.162,tt*tt*0.068-0.019,angle);
+    if (i % 2 === 0) mb.box(0.004,0.020,0.008,D,0,-0.010-tt*0.162,tt*tt*0.068+0.028,angle);
   }
   mb.box(0.031,0.008,0.066,D,0,-0.177,0.068,0.77);
   mb.build(mag);

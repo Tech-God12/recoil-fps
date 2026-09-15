@@ -7,7 +7,7 @@ import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
-import { CountUp, Key, Ticker } from './components';
+import { CountUp } from './components';
 import CashCounter from './armory/CashCounter';
 import { gradeFor } from '../game/economy/rewards';
 
@@ -17,10 +17,12 @@ export interface Results {
   cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
 }
 
-const Arrow = () => <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 5l7 7-7 7" stroke="currentColor" strokeWidth="2" fill="none" /></svg>;
+const Arrow = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="square" /></svg>
+);
 
 /* ================================================================
-   MAIN MENU — COMMAND DECK
+   MAIN MENU — OPS BOARD (print-room, tactile)
    ================================================================ */
 export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: {
   s: GameSettings; onDeploy: () => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
@@ -33,151 +35,142 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
   const selectedMap = MAPS.find(map => map.id === s.map) ?? MAPS[0];
   return (
     <main className="menu-root">
-      <div className="menu-bg" aria-hidden="true">
-        <div className="menu-bg-img" />
-        <div className="menu-grid-overlay hex-grid" />
-        <div className="menu-scan scanlines noise-flicker" />
-        <div className="menu-vignette" />
-      </div>
-      <div className="shutter shutter-top shutter-open" />
-      <div className="shutter shutter-bot shutter-open" />
-
-      <Ticker aria-hidden="true">
-        <span className="ticker-item"><b>RECOIL FPS</b></span>
-        <span className="ticker-item">SECTOR <i>Sandblast</i></span>
-        <span className="ticker-item">SECTOR <i>Town</i></span>
-        <span className="ticker-item">THREAT LEVEL <b>{s.difficulty.toUpperCase()}</b></span>
-        <span className="ticker-item">SUPPLY <i>UNLIMITED AMMO</i></span>
-
-        <span className="ticker-item">BUILD <b>3.0.0 // GROUND ZERO</b></span>
-      </Ticker>
+      <div className="menu-bg" aria-hidden="true" />
+      <div className="paper-grain" aria-hidden="true" />
 
       <header className="menu-header">
-        <a href="#" onClick={event => event.preventDefault()} className="wordmark glitch" aria-label="Recoil FPS home">
-          <span className="slash-mark" aria-hidden="true">///</span> RECOIL
+        <a href="#" onClick={e => e.preventDefault()} className="wordmark" aria-label="Recoil home">
+          RECOIL
         </a>
-        <div className="flex items-center gap-2.5">
-
-          <button className="util-btn" onClick={onSettings}>SETTINGS</button>
-        </div>
+        <button className="util-btn" onClick={onSettings}>Settings</button>
       </header>
 
       <div className="menu-layout">
         <section>
-          <span className="menu-eyebrow seq" style={{ animationDelay: '.05s' }}>OPERATION BRIEF<span className="cursor-blink" /></span>
+          <span className="menu-eyebrow seq" style={{ animationDelay: '.06s' }}>Operation brief</span>
           <h1 className="menu-title seq" style={{ animationDelay: '.12s' }}>
-            RECOIL
-            <small>FIRST PERSON STRIKE</small>
+            {mission.name}
+            <small>{mission.brief.split(' — ')[0] ?? 'Field operations'}</small>
           </h1>
-          <div className="op-chip seq" style={{ animationDelay: '.2s' }}>
-            <span>OP.</span>
+          <div className="op-chip seq" style={{ animationDelay: '.18s' }}>
+            <span>Op</span>
             <strong>{mission.name}</strong>
           </div>
-          <p className="menu-brief seq" style={{ animationDelay: '.26s' }}>{mission.brief}</p>
-          <div className="seq" style={{ animationDelay: '.32s' }}>
+          <p className="menu-brief seq" style={{ animationDelay: '.24s' }}>{mission.brief}</p>
+
+          <div className="seq" style={{ animationDelay: '.30s' }}>
             <button className="deploy-btn" onClick={onDeploy}>
-              <span>START MISSION</span>
+              <span>Start mission</span>
+              <span className="hint">Deploy</span>
               <Arrow />
             </button>
-            <button className="menu-secondary-btn armory-cta" onClick={onArmory}>
-              ARMORY <span>LOADOUT · WALLET ${prof.cash.toLocaleString('en-US')}</span>
+
+            <button className="menu-secondary-btn" onClick={onArmory}>
+              Armory <span>Loadout · ${prof.cash.toLocaleString('en-US')}</span>
             </button>
-            <div className="menu-loadout seq" style={{ animationDelay: '.36s' }} aria-label="Fielded loadout">
-              <span className="mono"><b>1</b> {primaryName}</span>
-              <span className="mono"><b>2</b> {secondaryName}</span>
+
+            <div className="menu-loadout" aria-label="Fielded loadout">
+              <span><b>1</b> {primaryName}</span>
+              <span><b>2</b> {secondaryName}</span>
             </div>
+
             <button className="menu-secondary-btn" onClick={onSettings}>
-              SETTINGS <span>CONTROLS · AUDIO · GRAPHICS</span>
+              Settings <span>Controls · Audio · Graphics</span>
             </button>
           </div>
-          <div className="input-legend seq" style={{ animationDelay: '.4s' }}>
-            <Key>WASD</Key><span>MOVE</span><Key>RMB</Key><span>SCOPE</span><Key>1/2</Key><span>SWAP</span><Key>Q</Key><span>LAST</span><Key>Q·E</Key><span>HOLD LEAN</span><Key>G</Key><span>FRAG</span><Key>X</Key><span>PLANT</span><Key>ESC</Key><span>PAUSE</span>
+
+          <div className="input-legend seq" style={{ animationDelay: '.36s' }}>
+            <span className="keycap">WASD</span><span>Move</span>
+            <span className="keycap">RMB</span><span>Aim</span>
+            <span className="keycap">1/2</span><span>Swap</span>
+            <span className="keycap">Q</span><span>Last</span>
+            <span className="keycap">Q·E</span><span>Lean</span>
+            <span className="keycap">G</span><span>Frag</span>
+            <span className="keycap">X</span><span>Plant</span>
+            <span className="keycap">Esc</span><span>Pause</span>
           </div>
         </section>
 
-        <section className="anim-slide-l" aria-label="Choose a mission" style={{ animationDelay: '.3s' }}>
-          <div className="sec-label"><span>AREA OF OPERATIONS</span><span>{s.map === 'kasbah' ? '02' : '01'} / 02</span></div>
+        <section className="anim-slide" style={{ animationDelay: '.18s' }} aria-label="Choose a mission">
+          <div className="sec-label"><span>Area of operations</span><span>{s.map === 'kasbah' ? '02' : '01'} / 02</span></div>
           {MAPS.map((map, index) => {
-            const option = getMission(map.id);
+            const opt = getMission(map.id);
+            const active = map.id === s.map;
             return (
-              <button key={map.id} title={map.desc} onClick={() => onMap(map.id)} aria-pressed={map.id === s.map}
-                className={`map-card ${map.id === s.map ? 'selected' : ''}`}>
+              <button key={map.id} onClick={() => onMap(map.id)} aria-pressed={active} className={`map-card ${active ? 'selected' : ''}`}>
                 <span className="map-num">0{index + 1}</span>
                 <span className="min-w-0">
                   <span className="map-name">{map.name}</span>
                   <span className="map-type">{map.id === 'alrasul' ? 'Desert river valley' : 'Fortified market town'}</span>
                 </span>
-                <span className="map-tag">{option.phases.length} PHASES</span>
-                <span className="map-sel" aria-hidden="true" />
-                <span className="map-scan" aria-hidden="true" />
+                <span className="map-tag">{opt.phases.length} phases</span>
               </button>
             );
           })}
 
-          <div className="route" key={mission.id}>
-            <div className="sec-label"><span>MISSION ROUTE</span><span>{mission.phases.length} OBJECTIVES</span></div>
+          <div className="route">
+            <div className="sec-label"><span>Mission route</span><span>{mission.phases.length} objectives</span></div>
             <ol>
-              {mission.phases.map((phase, index) => (
-                <li key={phase.id}>
-                  <span className="route-node">0{index + 1}</span>
+              {mission.phases.map((p, i) => (
+                <li key={p.id}>
+                  <span className="route-node">0{i + 1}</span>
                   <div>
-                    <span className="route-title">{phase.title}</span>
-                    <span className="route-loc">{phase.location}</span>
+                    <span className="route-title">{p.title}</span>
+                    <span className="route-loc">{p.location}</span>
                   </div>
-                  {(phase.type === 'hold' || phase.type === 'defend') && <span className="route-timing">{phase.seconds} SEC{phase.type === 'defend' ? ' / RELAY' : ''}</span>}
-                  {phase.type === 'destroy' && <span className="route-timing">{phase.fuse} SEC FUSE</span>}
+                  {(p.type === 'hold' || p.type === 'defend') && <span className="route-timing">{p.seconds}s · {p.type === 'defend' ? 'relay' : 'hold'}</span>}
+                  {p.type === 'destroy' && <span className="route-timing">{p.fuse}s fuse</span>}
                 </li>
               ))}
             </ol>
           </div>
+
           <p className="menu-rules">Reach the pickup to extract. Clearing the map is not the objective.</p>
         </section>
       </div>
 
       <footer className="menu-footer">
-        <span>ACTIVE SECTOR — <b>{selectedMap.name}</b></span>
-        <span>{s.difficulty.toUpperCase()} DIFFICULTY<i />UNLIMITED AMMO<i />RENDER: WEBGL</span>
+        <span>Active sector — <b>{selectedMap.name}</b></span>
+        <span>{s.difficulty} difficulty<i />Unlimited ammo<i />Render · WebGL</span>
       </footer>
     </main>
   );
 }
 
 /* ================================================================
-   DEPLOY SEQUENCE — LOADING
+   DEPLOY SEQUENCE — STENCIL PLATE
    ================================================================ */
 const BOOT_LINES = [
-  'CALIBRATING OPTICS',
-  'ARMING REINFORCEMENTS',
-  'LINKING COMMAND SAT',
-  'SYNCING SECTOR GRID',
-  'SPOOLING WEAPON SYSTEMS',
+  'Zeroing optics',
+  'Mustering squad',
+  'Uplink handshake',
+  'Grid sync',
+  'Arming weapons',
 ];
 
 export function BootScreen() {
   const [line, setLine] = useState(0);
   const [pct, setPct] = useState(0);
   useEffect(() => {
-    const l = window.setInterval(() => setLine(i => (i + 1) % BOOT_LINES.length), 900);
-    const p = window.setInterval(() => setPct(v => Math.min(94, v + 2 + Math.floor(Math.random() * 6))), 120);
+    const l = window.setInterval(() => setLine(i => (i + 1) % BOOT_LINES.length), 840);
+    const p = window.setInterval(() => setPct(v => Math.min(94, v + 2 + Math.floor(Math.random() * 5))), 125);
     return () => { window.clearInterval(l); window.clearInterval(p); };
   }, []);
   return (
-    <div className="boot-root" role="status">
-      <div className="boot-hex hex-grid" aria-hidden="true" />
-      <div className="boot-radar" aria-hidden="true">
-        <span className="ring1" /><span className="ring2" /><span className="sweep" /><span className="core" />
+    <div className="boot-root" role="status" aria-live="polite">
+      <div className="boot-plate anim-rise">
+        <div className="boot-kicker">Deploying</div>
+        <div className="boot-title">Into operation</div>
+        <div className="boot-status"><em>{BOOT_LINES[line]}</em><span className="boot-ellipsis" aria-hidden="true" /></div>
+        <div className="boot-bar" aria-hidden="true"><span className="boot-bar__fill" style={{ width: `${pct}%` }} /></div>
+        <div className="boot-pct tabular">{String(pct).padStart(3, '0')}%</div>
       </div>
-      <div className="boot-title glitch">DEPLOYING</div>
-      <div className="boot-status">{BOOT_LINES[line]}</div>
-      <div className="boot-bar"><span className="load-bar hazard-fill" /></div>
-      <div className="boot-pct">{String(pct).padStart(3, '0')}%</div>
-      <div className="boot-note">DO NOT POWER OFF TERMINAL</div>
     </div>
   );
 }
 
 /* ================================================================
-   PAUSE — OPERATION SUSPENDED
+   PAUSE — SUSPENDED
    ================================================================ */
 export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: {
   mission?: MissionHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
@@ -185,37 +178,35 @@ export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: 
   const readout = mission ? objectiveReadout(mission) : undefined;
   return (
     <section className="pause-layer" role="dialog" aria-modal="true" aria-labelledby="pause-title">
-      <div className="hex-grid" aria-hidden="true" />
-      <div className="scanlines" aria-hidden="true" />
-      <div className="pause-wrap">
+      <div className="pause-wrap anim-rise">
         <div className="pause-left">
-          <span className="menu-eyebrow">SYSTEM PAUSE</span>
-          <h2 id="pause-title" className="pause-title glitch-loop" data-text="PAUSED">PAUSED</h2>
-          <button className="pause-action pause-resume cut-sm" onClick={onResume}><span>RESUME MISSION</span><span className="idx">01</span></button>
-          <button className="pause-action" onClick={onSettings}><span>SETTINGS</span><span className="idx">02</span></button>
-          <button className="pause-action" onClick={onRestart}><span>RESTART MISSION</span><span className="idx">03</span></button>
-          <button className="pause-action pause-quit" onClick={onQuit}><span>ABORT TO MENU</span><span className="idx">04</span></button>
-          <p className="pause-hint"><Key>ESC</Key>RESUME ANYTIME</p>
+          <span className="stencil">System pause</span>
+          <h2 id="pause-title" className="pause-title">Paused</h2>
+          <div className="pause-actions">
+            <button className="pause-action pause-action-primary" onClick={onResume}><span>Resume</span><span className="idx">01</span></button>
+            <button className="pause-action" onClick={onSettings}><span>Settings</span><span className="idx">02</span></button>
+            <button className="pause-action" onClick={onRestart}><span>Restart</span><span className="idx">03</span></button>
+            <button className="pause-action" onClick={onQuit}><span>Quit to menu</span><span className="idx">04</span></button>
+          </div>
+          <p className="pause-hint"><span className="keycap">Esc</span> Resume anytime</p>
         </div>
-        <div className="pause-card cut panel-bg">
-          <span className="brk brk-tl" /><span className="brk brk-tr" /><span className="brk brk-bl" /><span className="brk brk-br" />
+
+        <div className="pause-card">
           <div className="pause-card-head">
-            <span>OPERATION <b>{mission?.name ?? 'READY'}</b></span>
-            <span className="pause-clock">{mission ? missionClock(mission.elapsed) : '00:00'}</span>
+            <span>Operation <b>{mission?.name ?? 'Ready'}</b></span>
+            <span className="pause-clock tabular">{mission ? missionClock(mission.elapsed) : '00:00'}</span>
           </div>
-          <span className="pause-phase">{mission ? `PHASE 0${mission.index + 1} / 0${mission.phaseCount}` : 'PHASE --'}</span>
+          <span className="pause-phase">Phase {mission ? `0${mission.index + 1} / 0${mission.phaseCount}` : '—'}</span>
           <h3>{mission?.title ?? 'Ready to deploy'}</h3>
-          <p>{mission?.brief ?? 'Select Resume to enter the mission.'}</p>
-          <div className="pause-progress">
-            <span className="hazard-fill" style={{ width: `${Math.round((mission?.progress ?? 0) * 100)}%` }} />
-          </div>
+          <p>{mission?.brief ?? 'Select resume to continue.'}</p>
+          <div className="pause-progress"><span style={{ width: `${Math.round((mission?.progress ?? 0) * 100)}%` }} /></div>
           {readout && (
             <div className="pause-readout">
-              <strong>{readout.value}</strong>
+              <strong className="tabular">{readout.value}</strong>
               <span>{readout.label}</span>
             </div>
           )}
-          <p className="pause-note">ALL MISSION TIMERS FROZEN</p>
+          <p className="pause-note">All mission timers frozen</p>
         </div>
       </div>
     </section>
@@ -225,13 +216,11 @@ export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: 
 /* ================================================================
    RESULTS — AFTER-ACTION REPORT
    ================================================================ */
-
-
 export type ResultsWallet = { before: number; after: number; gradeBonus: number; earned: number };
 
 const CASH_REASONS: Record<string, string> = {
-  kill: 'ELIMINATIONS', headshot: 'HEADSHOTS', grenade: 'GRENADE KILLS',
-  streak: 'STREAK BONUSES', phase: 'PHASES SECURED', extraction: 'EXTRACTION',
+  kill: 'Eliminations', headshot: 'Headshots', grenade: 'Grenade kills',
+  streak: 'Streak bonuses', phase: 'Phases secured', extraction: 'Extraction',
 };
 
 export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
@@ -249,97 +238,99 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   }
   return (
     <main className={`results-root ${r.win ? '' : 'lose'}`}>
-      <div className="hex-grid" aria-hidden="true" />
       <div className="results-wrap">
-        <div className="stamp" style={{ transform: 'rotate(-6deg)' }}>
-          <span className="stamp-ring1" /><span className="stamp-ring2" />
-          <span className="stamp-grade" style={{ color: tint, textShadow: `0 0 26px ${tint}` }}>{grade}</span>
+        <div className="results-header">
+          <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
+          <div className="stamp-label">Grade {grade}</div>
+          <h2 className="results-title">{r.win ? 'Extraction complete' : 'Mission failed'}</h2>
+          <p className="results-sub">{r.mission.name} — {r.win
+            ? 'You completed the operation and reached the pickup.'
+            : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}</p>
         </div>
-        <p className="stamp-label">/// GRADE <b>{grade}</b> — PERFORMANCE RATING ///</p>
-        <h2 className={`results-title ${r.win ? 'glow-volt' : 'glow-red'} glitch`}
-          style={{ color: r.win ? 'var(--volt)' : 'var(--danger)' }}>
-          {r.win ? 'EXTRACTION COMPLETE' : 'MISSION FAILED'}
-        </h2>
-        <p className="results-sub">{r.mission.name} — {r.win
-          ? 'You completed the operation and reached the pickup.'
-          : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}</p>
 
         <div className="stats-grid">
           <div className="stat-cell">
-            <span className="stat-label">OBJECTIVES</span>
-            <div className="stat-value cyber"><CountUp to={completed} /><small> / {r.mission.phases.length}</small></div>
+            <span className="stat-label">Objectives</span>
+            <div className="stat-value tabular"><CountUp to={completed} /><small> / {r.mission.phases.length}</small></div>
           </div>
           <div className="stat-cell">
-            <span className="stat-label">MISSION TIME</span>
-            <div className="stat-value">{missionClock(r.timeSec)}</div>
+            <span className="stat-label">Mission time</span>
+            <div className="stat-value tabular">{missionClock(r.timeSec)}</div>
           </div>
           <div className="stat-cell">
-            <span className="stat-label">ACCURACY</span>
-            <div className={`stat-value ${accuracy >= 50 ? 'volt' : accuracy >= 25 ? '' : 'red'}`}><CountUp to={accuracy} /><small>%</small></div>
+            <span className="stat-label">Accuracy</span>
+            <div className={`stat-value tabular ${accuracy >= 50 ? 'volt' : accuracy >= 25 ? '' : 'red'}`}><CountUp to={accuracy} /><small>%</small></div>
           </div>
           <div className="stat-cell">
-            <span className="stat-label">ELIMINATIONS</span>
-            <div className="stat-value red"><CountUp to={r.kills} /></div>
+            <span className="stat-label">Eliminations</span>
+            <div className="stat-value tabular red"><CountUp to={r.kills} /></div>
           </div>
           <div className="stat-cell">
-            <span className="stat-label">SCORE</span>
-            <div className="stat-value volt"><CountUp to={r.score} format={v => v.toLocaleString('en-US')} /><small>{r.win ? ' +1000 BK' : ''}</small></div>
+            <span className="stat-label">Score</span>
+            <div className="stat-value tabular volt"><CountUp to={r.score} format={v => v.toLocaleString('en-US')} /></div>
           </div>
         </div>
 
         <section className="cash-card" aria-label="Cash earned">
-          <div className="sec-label"><span>CASH EARNED</span><CashCounter value={r.cash} /></div>
-          {cashRows.map((row, i) => (
-            <div className="cash-row seq" style={{ animationDelay: `${0.1 + i * 0.08}s` }} key={row.label}>
+          <div className="sec-label"><span>Cash earned</span><CashCounter value={r.cash} /></div>
+          {cashRows.map((row) => (
+            <div className="cash-row" key={row.label}>
               <span className="cash-row-label">{row.label} <small>{row.detail}</small></span>
               <span className="cash-row-val mono">+${row.total.toLocaleString('en-US')}</span>
             </div>
           ))}
-          <div className="cash-row seq" style={{ animationDelay: `${0.1 + cashRows.length * 0.08}s` }}>
-            <span className="cash-row-label">DIFFICULTY <small>×{r.difficultyMul}</small></span>
+          <div className="cash-row">
+            <span className="cash-row-label">Difficulty <small>×{r.difficultyMul}</small></span>
             <span className="cash-row-val mono">+${Math.round(r.cash * r.difficultyMul).toLocaleString('en-US')}</span>
           </div>
           {wallet.gradeBonus > 0 && (
-            <div className="cash-row seq" style={{ animationDelay: `${0.18 + cashRows.length * 0.08}s` }}>
-              <span className="cash-row-label">GRADE BONUS <small>{grade}</small></span>
+            <div className="cash-row">
+              <span className="cash-row-label">Grade bonus <small>{grade}</small></span>
               <span className="cash-row-val mono">+${wallet.gradeBonus.toLocaleString('en-US')}</span>
             </div>
           )}
-          <div className="cash-wallet mono seq" style={{ animationDelay: `${0.26 + cashRows.length * 0.08}s` }}>
-            <span>WALLET</span>
-            <span>${wallet.before.toLocaleString('en-US')} → <CashCounter value={wallet.after} /></span>
+          <div className="cash-wallet">
+            <span>Wallet</span>
+            <span className="tabular">${wallet.before.toLocaleString('en-US')} → <CashCounter value={wallet.after} /></span>
           </div>
         </section>
 
-        <section className="timeline" aria-label="Mission phase timings">
-          <div className="sec-label" style={{ paddingBottom: 10 }}><span>AFTER-ACTION TIMELINE</span><span>ELAPSED</span></div>
+        <section className="timeline" aria-label="Mission timeline">
+          <div className="sec-label" style={{ paddingBottom: 10 }}><span>Timeline</span><span className="mono">Elapsed</span></div>
           {r.mission.phases.map((phase, i) => {
-            const fill = phase.complete ? 100 : phase.seconds > 0 ? 45 : 0;
+            const isDone = phase.complete;
+            const isFail = !isDone && phase.seconds > 0;
             return (
-              <div className={`tl-row ${phase.complete ? 'done' : ''}`} key={phase.id}>
-                <span className="tl-idx">0{i + 1}</span>
+              <div className={`tl-row ${isDone ? 'done' : ''}`} key={phase.id}>
+                <span className="tl-idx tabular">0{i + 1}</span>
                 <div className="tl-body">
-                  <div className="tl-title"><strong>{phase.title}</strong><time>{missionClock(phase.seconds)}</time></div>
-                  <div className="tl-bar">
-                    <span className={phase.complete ? 'hazard-fill' : 'bg-[var(--warn)]/60'}
-                      style={{ width: `${fill}%`, animationDelay: `${0.15 + i * 0.1}s` }} />
-                  </div>
+                  <div className="tl-title"><strong>{phase.title}</strong><time className="tabular">{missionClock(phase.seconds)}</time></div>
+                  <div className="tl-bar"><span style={{ width: `${isDone ? 100 : isFail ? 45 : 0}%`, background: isDone ? 'var(--olive)' : isFail ? 'var(--blood)' : 'var(--steel)', opacity: 0.95 }} /></div>
                 </div>
-                <span className={`tl-status ${phase.complete ? 'done' : phase.seconds > 0 ? 'fail' : ''}`}>
-                  {phase.complete ? 'COMPLETE' : phase.seconds > 0 ? 'INTERRUPTED' : 'NOT REACHED'}
-                </span>
+                <span className={`tl-status ${isDone ? 'done' : isFail ? 'fail' : ''}`}>{isDone ? 'Complete' : isFail ? 'Interrupted' : 'Not reached'}</span>
               </div>
             );
           })}
         </section>
 
         <p className="results-note">
-          <b>{r.pressure.totalSpawned}</b> hostiles entered the operation · peak simultaneous pressure <b>{r.pressure.peakLive}</b> · <b>{r.headshots}</b> headshots confirmed.
+          <b>{r.pressure.totalSpawned}</b> hostiles entered the operation · peak pressure <b>{r.pressure.peakLive}</b> · <b>{r.headshots}</b> headshots confirmed.
         </p>
+
         <div className="results-actions">
-          <button className="deploy-btn" style={{ maxWidth: 300 }} onClick={onArmory}><span>OPEN ARMORY</span><Arrow /></button>
-          <button className="menu-secondary-btn" onClick={onRedeploy}>REDEPLOY</button>
-          <button className="menu-secondary-btn" onClick={onMenu}>RETURN TO BASE</button>
+          {r.win ? (
+            <>
+              <button className="btn btn-primary" style={{ padding: '12px 20px' }} onClick={onArmory}><span>Open armory</span><Arrow /></button>
+              <button className="btn btn-ghost" onClick={onRedeploy}>Redeploy</button>
+              <button className="btn btn-ghost" onClick={onMenu}>Return to base</button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-primary" style={{ padding: '12px 20px' }} onClick={onRedeploy}><span>Redeploy</span><Arrow /></button>
+              <button className="btn btn-ghost" onClick={onArmory}>Open armory</button>
+              <button className="btn btn-ghost" onClick={onMenu}>Return to base</button>
+            </>
+          )}
         </div>
       </div>
     </main>

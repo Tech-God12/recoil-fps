@@ -96,7 +96,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.35;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -104,17 +104,20 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x05070b, 3.2, 7.5);
+    scene.fog = new THREE.Fog(0x120F0A, 4.5, 9.0);
     // Lighting parity: identical rig to the in-game viewmodel (engine vmScene).
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environmentIntensity = 0.65;
+    scene.environmentIntensity = 0.85;
     pmrem.dispose();
 
     const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
 
     scene.add(new THREE.HemisphereLight(0xF0F4FA, 0x8A7450, 1.2));
-    const key = new THREE.DirectionalLight(0xFFF2D6, 1.7);
+    const key = new THREE.DirectionalLight(0xFFF2D6, 2.2);
+    const fill = new THREE.DirectionalLight(0xFFE8C8, 0.9);
+    fill.position.set(-1.2, 1.8, -0.9);
+    scene.add(fill);
     key.position.set(1.5, 2.5, 0.8);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
@@ -126,19 +129,19 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     // Showcase staging: brushed-steel podium, amber halo ring, grid skirt.
     const podium = new THREE.Mesh(
       new THREE.CylinderGeometry(0.52, 0.58, 0.06, 48),
-      new THREE.MeshStandardMaterial({ color: 0x1a1e24, roughness: 0.38, metalness: 0.65 }),
+      new THREE.MeshStandardMaterial({ color: 0x25211C, roughness: 0.42, metalness: 0.55 }),
     );
     podium.position.y = -0.49;
     podium.receiveShadow = true;
     scene.add(podium);
     const halo = new THREE.Mesh(
       new THREE.TorusGeometry(0.52, 0.006, 12, 72),
-      new THREE.MeshBasicMaterial({ color: 0xE8B93C }),
+      new THREE.MeshBasicMaterial({ color: 0xC89B5A }),
     );
     halo.rotation.x = Math.PI / 2;
     halo.position.y = -0.458;
     scene.add(halo);
-    const grid = new THREE.GridHelper(20, 20, 0x1a2632, 0x0d141b);
+    const grid = new THREE.GridHelper(20, 20, 0x2A241C, 0x1A1610);
     grid.position.y = -0.521;
     scene.add(grid);
     const floor = new THREE.Mesh(
@@ -545,9 +548,12 @@ export function gunThumbnail(weapon: WeaponId): string {
     }
     const scene = new THREE.Scene();
     scene.environment = thumbEnv;
-    scene.environmentIntensity = 0.65;
+    scene.environmentIntensity = 0.85;
     scene.add(new THREE.HemisphereLight(0xF0F4FA, 0x8A7450, 1.2));
-    const key = new THREE.DirectionalLight(0xFFF2D6, 1.7);
+    const key = new THREE.DirectionalLight(0xFFF2D6, 2.2);
+    const fill = new THREE.DirectionalLight(0xFFE8C8, 0.9);
+    fill.position.set(-1.2, 1.8, -0.9);
+    scene.add(fill);
     key.position.set(1.5, 2.5, 0.8);
     scene.add(key);
     const model = (WEAPON_BUILDERS[weapon] ?? WEAPON_BUILDERS.m4a1)();

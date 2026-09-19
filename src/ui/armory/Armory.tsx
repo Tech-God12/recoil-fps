@@ -4,7 +4,7 @@ import {
   WEAPON_CATALOG, attachmentById, attachmentsFor, weaponById,
   type AttachSlot, type AttachmentId, type SlotId, type WeaponId,
 } from '../../game/economy/catalog';
-import { resolveWeaponStats } from '../../game/economy/stats';
+import { resolveWeaponStats, statBarFrac } from '../../game/economy/stats';
 import {
   buildForWeapon, buyAttachment, buyWeapon, equipAttachment, setLoadoutWeapon, setWeaponSkin, skinFor,
   type PlayerProfile,
@@ -38,11 +38,16 @@ const LockIcon = () => (
 export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryProps) {
   const [tab, setTab] = useState<SlotId>('primary');
   const [selected, setSelected] = useState<WeaponId>(profile.loadout.primary.weapon);
+  const [filter, setFilter] = useState<'ALL' | 'AR' | 'SMG' | 'SR' | 'SG'>('ALL');
+  const [infoTab, setInfoTab] = useState<'stats' | 'details'>('stats');
   const [menuSlot, setMenuSlot] = useState<AttachSlot | null>(null);
   const [flash, setFlash] = useState<{ slot: AttachSlot; key: number } | null>(null);
   const [flashKey, setFlashKey] = useState(0);
   const [toast, setToast] = useState<{ text: string; key: number; bad?: boolean } | null>(null);
-  const [tutStep, setTutStep] = useState(profile.seenArmoryTutorial ? -1 : 0);
+  // The loadout screen is dense enough to be its own tutorial. Keep the first
+  // frame clean; the interaction hints live beside the controls instead of
+  // covering the weapon preview with a modal card.
+  const [tutStep, setTutStep] = useState(-1);
   const [thumbs, setThumbs] = useState<Partial<Record<WeaponId, string>>>({});
 
   useEffect(() => {
@@ -69,7 +74,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
     const mods = Object.values(build.attachments).map(id => attachmentById(id)?.mods).filter(m => !!m);
     return resolveWeaponStats(entry.base, mods);
   }, [build, entry]);
-  const rail = WEAPON_CATALOG.filter(w => w.slot === tab);
+  const rail = WEAPON_CATALOG.filter(w => w.slot === tab && (filter === 'ALL' || w.cls === filter));
 
   const pulse = (slot: AttachSlot) => {
     const key = flashKey + 1;
@@ -79,6 +84,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
 
   const pickTab = (t: SlotId) => {
     setTab(t);
+    setFilter('ALL');
     setSelected(profile.loadout[t].weapon);
     setMenuSlot(null);
   };
@@ -178,6 +184,15 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
 
   const menuParts = menuSlot ? attachmentsFor(selected, menuSlot) : [];
   const ownedParts = profile.ownedAttachments[selected] ?? [];
+  const infoRows = [
+    { label: 'DAMAGE', value: `${Math.round(stats.damage)}`, fill: statBarFrac('damage', stats) },
+    { label: 'RPM', value: `${stats.rpm}`, fill: statBarFrac('rpm', stats) },
+    { label: 'MAGAZINE', value: `${stats.magSize}`, fill: Math.min(1, stats.magSize / 100) },
+    { label: 'ACCURACY', value: `${Math.round(Math.max(0, 1 - stats.hipSpread * 20) * 100)}`, fill: Math.max(0, Math.min(1, 1 - stats.hipSpread * 20)) },
+    { label: 'RECOIL CONTROL', value: `${Math.round(statBarFrac('control', stats) * 100)}`, fill: statBarFrac('control', stats) },
+    { label: 'MOBILITY', value: `${Math.round(statBarFrac('mobility', stats) * 100)}`, fill: statBarFrac('mobility', stats) },
+    { label: 'HANDLING', value: `${Math.round(statBarFrac('handling', stats) * 100)}`, fill: statBarFrac('handling', stats) },
+  ];
 
   return (
     <div className="armory-root" onClick={tutStep >= 0 ? advanceTutorial : undefined}
@@ -187,23 +202,49 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
       <div className="armory-vignette" aria-hidden="true" />
 
       <header className="cmdbar">
-        <button className="cmd-back" onClick={onBack}><span aria-hidden="true">‹</span> Back</button>
-        <div className="cmd-cash"><span className="cmd-coin" aria-hidden="true" /><CashCounter value={profile.cash} /></div>
-        <button className="cmd-deploy" onClick={onDeploy}>Deploy <span aria-hidden="true">→</span></button>
+        <button className="armory-brand" onClick={onBack} aria-label="Return to operations">
+          <svg className="armory-brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="m3 5 13-2 13 2-13 24L3 5Z" /><path d="m10 9 6-1 6 1-6 11-6-11Z" /></svg>
+          <span><b>OPERATOR</b><em>LOADOUT SYSTEM</em></span>
+        </button>
+        <nav className="armory-global-nav" aria-label="Operator system">
+          <button className="armory-global-link is-active" type="button">LOADOUT</button>
+          <button className="armory-global-link" type="button" disabled>OPERATORS</button>
+          <button className="armory-global-link" type="button" disabled>BARRACKS</button>
+          <button className="armory-global-link" type="button" disabled>STORE</button>
+        </nav>
+        <div className="armory-top-actions">
+          <button className="armory-deploy-link" type="button" onClick={onDeploy}>DEPLOY <span aria-hidden="true">→</span></button>
+          <div className="cmd-cash"><span className="cmd-coin" aria-hidden="true" /><CashCounter value={profile.cash} /></div>
+          <button className="armory-top-icon" type="button" aria-label="System settings" title="System settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="m19.4 15 1.3 1.3-2.1 2.1-1.3-1.3a8 8 0 0 1-2.1.9v1.8h-3v-1.8a8 8 0 0 1-2.1-.9l-1.3 1.3-2.1-2.1L8 15a8 8 0 0 1-.9-2.1H5.3v-3h1.8A8 8 0 0 1 8 7.8L6.7 6.5l2.1-2.1 1.3 1.3a8 8 0 0 1 2.1-.9V3h3v1.8a8 8 0 0 1 2.1.9l1.3-1.3 2.1 2.1-1.3 1.3a8 8 0 0 1 .9 2.1h1.8v3h-1.8a8 8 0 0 1-.9 2.1Z" /></svg></button>
+          <span className="armory-motto">PREPARE<br />ADAPT<br />REPEAT</span>
+        </div>
       </header>
+
+      <nav className="armory-subbar" aria-label="Loadout slots">
+        <div className="armory-tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'primary'} className={`armory-tab ${tab === 'primary' ? 'on' : ''}`} onClick={() => pickTab('primary')}>
+            <span className="armory-tab-mark">▰</span> PRIMARY
+          </button>
+          <button role="tab" aria-selected={tab === 'secondary'} className={`armory-tab ${tab === 'secondary' ? 'on' : ''}`} onClick={() => pickTab('secondary')}>
+            <span className="armory-tab-mark">▰</span> SECONDARY
+          </button>
+          <button className="armory-tab armory-tab-muted" type="button" disabled><span className="armory-tab-mark">◉</span> TACTICAL</button>
+          <button className="armory-tab armory-tab-muted" type="button" disabled><span className="armory-tab-mark">◉</span> LETHAL</button>
+          <button className="armory-tab armory-tab-muted" type="button" disabled><span className="armory-tab-mark">◇</span> PERKS</button>
+        </div>
+        <span className="armory-custom-loadout">CUSTOM LOADOUT 1 <b>⌄</b></span>
+      </nav>
 
       <div className="armory-main">
         {/* ============ RACK ============ */}
         <aside className={`armory-rail ${tutStep === 0 ? 'tut-ring' : ''}`} aria-label="Weapon rack">
           <div className="rail-head">
-            <span className="stencil">Rack</span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--bone-mute)' }}>{rail.length} items</span>
+            <span className="armory-rail-title">{tab === 'primary' ? 'PRIMARY WEAPONS' : 'SECONDARY WEAPONS'}</span>
+            <span className="mono armory-item-count">{rail.length} ITEMS</span>
           </div>
-          <div className="armory-tabs" role="tablist">
-            {(['primary', 'secondary'] as SlotId[]).map(t => (
-              <button key={t} role="tab" aria-selected={tab === t} className={`armory-tab ${tab === t ? 'on' : ''}`} onClick={() => pickTab(t)}>
-                {t}
-              </button>
+          <div className="armory-filters" role="tablist" aria-label="Weapon filters">
+            {(['ALL', 'AR', 'SMG', 'SR', 'SG'] as const).map(f => (
+              <button key={f} type="button" role="tab" aria-selected={filter === f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f}</button>
             ))}
           </div>
           <div className="armory-cards" tabIndex={0} onKeyDown={railKey} aria-label={`${tab} weapons`}>
@@ -233,15 +274,17 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
         {/* ============ STAGE — HERO WORKBENCH ============ */}
         <section className={`armory-stage ${tutStep === 1 ? 'tut-ring' : ''}`} aria-label="Weapon preview">
           <div className="armory-stage-head">
-            <div>
+            <div className="armory-stage-copy">
+              <span className="armory-stage-kicker">{entry.cls === 'AR' ? 'ASSAULT RIFLE' : entry.cls === 'SMG' ? 'SUBMACHINE GUN' : entry.cls === 'SR' ? 'SNIPER RIFLE' : `${entry.cls} PLATFORM`}</span>
               <h2>{entry.name}</h2>
-              <p>{entry.cls} · {skinName} finish {!owned && <span className="locknote">Locked preview</span>}</p>
+              <p>{entry.cls} <i>·</i> {skinName.toUpperCase()} FINISH {!owned && <span className="locknote">LOCKED PREVIEW</span>}</p>
+              <p className="armory-stage-blurb">{entry.blurb}</p>
             </div>
             <div className="armory-stage-tags">
-              {fielded ? <span className="tag-fielded">Equipped</span> : owned ? <span className="tag-owned">In rack</span> : (
+              {fielded ? <span className="tag-fielded">EQUIPPED</span> : owned ? <span className="tag-owned">IN RACK</span> : (
                 <span className="tag-stack">
                   <span className="tag-price">{fmt(entry.price)}</span>
-                  <button className="stage-buy" onClick={buyGun}>Buy {entry.short}</button>
+                  <button className="stage-buy" onClick={buyGun}>BUY {entry.short}</button>
                 </span>
               )}
             </div>
@@ -252,7 +295,25 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
             <div className="stage-fallback mono" aria-hidden="true">Drag to orbit · Scroll to zoom · Click pins to fit parts</div>
           </div>
 
-          {/* Key figures ribbon under the gun — the numbers that matter at a glance */}
+          <div className="stage-attachments-head">
+            <span>ATTACHMENTS</span>
+            <span>{Object.keys(build.attachments).length}/{entry.slots.length} ATTACHMENTS EQUIPPED</span>
+          </div>
+          <div className="stage-attachments" aria-label="Weapon attachments">
+            {entry.slots.map(slot => {
+              const id = build.attachments[slot];
+              const part = id ? attachmentById(id) : undefined;
+              return (
+                <button key={slot} type="button" className={`attachment-card ${part ? 'filled' : ''} ${menuSlot === slot ? 'active' : ''}`} onClick={() => openSlot(slot)}>
+                  <span className="attachment-card-icon" aria-hidden="true">{part ? '◆' : '+'}</span>
+                  <span className="attachment-card-slot">{SLOT_LABELS[slot]}</span>
+                  <strong>{part ? part.name : 'Empty'}</strong>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Kept in the DOM for the existing stat animation and narrow-screen fallback. */}
           <div className="stage-ribbon mono" aria-label="Key weapon figures">
             <div><span>DMG</span><b>{stats.damage.toFixed(0)}</b></div>
             <div><span>RPM</span><b>{stats.rpm}</b></div>
@@ -312,37 +373,67 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
             </div>
           ) : (
             <div className="statpanel">
-              <div className="sec-label"><span>Equipped</span><span className="mono">{entry.short}</span></div>
-              <div className="hardpoint-list" aria-label="Equipped attachments">
-                {entry.slots.map(slot => {
-                  const id = build.attachments[slot];
-                  const part = id ? attachmentById(id) : undefined;
-                  return (
-                    <button key={slot} className={`hardpoint ${part ? 'filled' : ''}`} onClick={() => openSlot(slot)}>
-                      <i>{SLOT_LABELS[slot]}</i>
-                      <b>{part ? part.name : 'Stock'}</b>
-                      <span aria-hidden="true">›</span>
-                    </button>
-                  );
-                })}
+              <div className="armory-info-tabs" role="tablist" aria-label="Weapon information">
+                <button type="button" role="tab" aria-selected={infoTab === 'stats'} className={infoTab === 'stats' ? 'on' : ''} onClick={() => setInfoTab('stats')}>STATS</button>
+                <button type="button" role="tab" aria-selected={infoTab === 'details'} className={infoTab === 'details' ? 'on' : ''} onClick={() => setInfoTab('details')}>DETAILS</button>
               </div>
 
-              <div className="sec-label"><span>Finish</span><span className="mono">{skinName}</span></div>
-              <div className="skin-row">
-                {SKIN_CATALOG.map(s => (
-                  <button key={s.id} className={`skin-swatch ${s.id === skin ? 'on' : ''}`} onClick={() => pickSkin(s.id)} title={s.desc} aria-pressed={s.id === skin}>
-                    <i style={{ background: s.swatch }} />
-                    <b>{s.name}</b>
-                  </button>
-                ))}
-              </div>
+              {infoTab === 'stats' ? (
+                <div className="armory-stat-sheet">
+                  <div className="armory-stat-heading"><span>{entry.short} PERFORMANCE</span><b>LIVE BUILD</b></div>
+                  <div className="armory-stat-list">
+                    {infoRows.map(row => (
+                      <div className="armory-stat-row" key={row.label}>
+                        <div><span>{row.label}</span><b>{row.value}</b></div>
+                        <div className="armory-stat-track"><span style={{ transform: `scaleX(${row.fill})` }} /></div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="armory-stat-summary">
+                    <span><small>FIRE MODE</small><b>{stats.auto ? 'FULL AUTO' : 'SEMI AUTO'}</b></span>
+                    <span><small>CALIBER</small><b>{entry.cls === 'BR' ? '7.62 NATO' : entry.cls === 'SR' ? '.338 LAPUA' : '5.56 NATO'}</b></span>
+                  </div>
+                </div>
+              ) : (
+                <div className="armory-details-sheet">
+                  <div className="sec-label"><span>Equipped</span><span className="mono">{entry.short}</span></div>
+                  <div className="hardpoint-list" aria-label="Equipped attachments">
+                    {entry.slots.map(slot => {
+                      const id = build.attachments[slot];
+                      const part = id ? attachmentById(id) : undefined;
+                      return (
+                        <button key={slot} className={`hardpoint ${part ? 'filled' : ''}`} onClick={() => openSlot(slot)}>
+                          <i>{SLOT_LABELS[slot]}</i>
+                          <b>{part ? part.name : 'Stock'}</b>
+                          <span aria-hidden="true">›</span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-              <p className="statpanel-hint mono">Click a hardpoint to fit parts</p>
+                  <div className="sec-label"><span>Finish</span><span className="mono">{skinName}</span></div>
+                  <div className="skin-row">
+                    {SKIN_CATALOG.map(s => (
+                      <button key={s.id} className={`skin-swatch ${s.id === skin ? 'on' : ''}`} onClick={() => pickSkin(s.id)} title={s.desc} aria-pressed={s.id === skin}>
+                        <i style={{ background: s.swatch }} />
+                        <b>{s.name}</b>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="statpanel-hint mono">Click a hardpoint to fit parts</p>
+                </div>
+              )}
             </div>
           )}
         </aside>
 
       </div>
+
+      <footer className="armory-footer">
+        <span><kbd>ESC</kbd> BACK</span>
+        <span className="armory-footer-center"><kbd>DRAG</kbd> ROTATE <kbd>SCROLL</kbd> ZOOM <kbd>H</kbd> HIDE UI</span>
+        <span>VER. 1.0.0</span>
+      </footer>
 
       {tutStep >= 0 && (
         <div className="tut-card" data-anchor={TUTORIAL[tutStep].anchor}>

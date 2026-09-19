@@ -41,67 +41,130 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: {
+
+type OpsIconName = 'home' | 'mission' | 'rifle' | 'settings' | 'expand' | 'arrow' | 'chevron' | 'play';
+
+function OpsIcon({ name, size = 17 }: { name: OpsIconName; size?: number }) {
+  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'square' as const, strokeLinejoin: 'miter' as const, 'aria-hidden': true };
+  if (name === 'home') return <svg {...common}><path d="M3.5 10.7 12 3.8l8.5 6.9v8.8a1 1 0 0 1-1 1h-5v-5.6h-5v5.6h-5a1 1 0 0 1-1-1z" /><path d="M8.4 7.8h7.2" /></svg>;
+  if (name === 'mission') return <svg {...common}><circle cx="12" cy="12" r="7.7" /><circle cx="12" cy="12" r="2.1" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M17.5 6.5l2-2M4.5 19.5l2-2" /></svg>;
+  if (name === 'rifle') return <svg {...common}><path d="m3 8 8.4 1.4 5.7-2.8 2.4 1.4-3.8 3.2 3.1 2.3-1.5 2-4.5-3-5.2 1.1-2.2-1.8 3.6-2.1L3 8Z" /><path d="m5.5 13.6-1.9 4.1M10.8 13.3l-1.1 5.1M18.1 8l2-2.2" /></svg>;
+  if (name === 'settings') return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="m19.4 15 1.3 1.3-2.1 2.1-1.3-1.3a8 8 0 0 1-2.1.9v1.8h-3v-1.8a8 8 0 0 1-2.1-.9l-1.3 1.3-2.1-2.1L8 15a8 8 0 0 1-.9-2.1H5.3v-3h1.8A8 8 0 0 1 8 7.8L6.7 6.5l2.1-2.1 1.3 1.3a8 8 0 0 1 2.1-.9V3h3v1.8a8 8 0 0 1 2.1.9l1.3-1.3 2.1 2.1-1.3 1.3a8 8 0 0 1 .9 2.1h1.8v3h-1.8a8 8 0 0 1-.9 2.1Z" /></svg>;
+  if (name === 'expand') return <svg {...common}><path d="M9 3H3v6M15 3h6v6M3 15v6h6M21 15v6h-6" /></svg>;
+  if (name === 'arrow') return <svg {...common}><path d="M4 12h15M13 6l6 6-6 6" /></svg>;
+  if (name === 'chevron') return <svg {...common}><path d="m7 9 5 5 5-5" /></svg>;
+  return <svg {...common}><path d="m8 5 8 7-8 7V5Z" fill="currentColor" stroke="none" /></svg>;
+}
+
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onFullscreen: requestFullscreen, profile }: {
   s: GameSettings; onDeploy: () => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; profile?: PlayerProfile;
+  onArmory?: () => void; onFullscreen?: () => void; profile?: PlayerProfile;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
+  const onFullscreen = requestFullscreen ?? (() => undefined);
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
   const secondaryName = weaponById(prof.loadout.secondary.weapon)?.short ?? '—';
   const [view, setView] = useState<'home' | 'maps' | 'missions'>('home');
   const [hovered, setHovered] = useState<MapId | null>(null);
+  const homeMission = getMission(s.map);
   // The tile order follows the sketch: Town first, then Sandblast.
   const mapOrder = [...MAPS].sort(a => (a.id === 'kasbah' ? -1 : 1));
 
   /* ---------------- HOME ---------------- */
   if (view === 'home') {
+    const selectedMap = MAPS.find(map => map.id === s.map) ?? MAPS[0];
+    const alternateMap = s.map === 'alrasul' ? 'kasbah' : 'alrasul';
     return (
-      <main className="menu-root home-root">
-        <div className="menu-bg" aria-hidden="true" />
+      <main className="menu-root ops-home">
+        <div className="ops-home-backdrop" style={{ backgroundImage: `url(${MAP_ART[s.map]})` }} aria-hidden="true" />
+        <div className="ops-home-light" aria-hidden="true" />
+        <div className="ops-home-grid" aria-hidden="true" />
         <div className="paper-grain" aria-hidden="true" />
-        <img src={operatorArt} alt="" draggable={false} className="home-operator seq" style={{ animationDelay: '.1s' }} aria-hidden="true" />
-        <div className="home-operator-fade" aria-hidden="true" />
 
-        <div className="home-left">
-          <div className="home-title-block seq" style={{ animationDelay: '.04s' }}>
-            <span className="home-eyebrow">Desert operations · single operator</span>
-            <h1 className="home-title">RECOIL</h1>
-            <span className="home-rule" aria-hidden="true" />
+        <header className="ops-topbar">
+          <div className="ops-brand-lockup">
+            <span className="ops-wordmark">RECOIL</span>
+            <span className="ops-brand-rule" aria-hidden="true" />
+            <span className="ops-brand-copy">TACTICAL REALISM<br /><b>GLOBAL OPERATIONS</b></span>
           </div>
+          <div className="ops-network"><span className="ops-status-dot" /> FIELD NETWORK <b>ONLINE</b></div>
+          <div className="ops-top-actions">
+            <div className="ops-cash"><span className="ops-coin">◆</span><span>${prof.cash.toLocaleString('en-US')}</span></div>
+            <button className="ops-profile" type="button" aria-label="Open operator profile">
+              <span className="ops-avatar"><img src={operatorArt} alt="" draggable={false} /></span>
+              <span className="ops-profile-copy"><b>OPERATOR</b><em>LEVEL 12</em></span>
+              <OpsIcon name="chevron" size={13} />
+            </button>
+            <button className="ops-utility" type="button" onClick={onFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen"><OpsIcon name="expand" size={15} /></button>
+            <button className="ops-utility" type="button" onClick={onSettings} title="Open settings" aria-label="Open settings"><OpsIcon name="settings" size={15} /></button>
+          </div>
+        </header>
 
-          <nav className="home-nav" aria-label="Main menu">
-            <button className="home-item seq" style={{ animationDelay: '.12s' }} onClick={() => setView('maps')}>
-              <span className="home-item-idx mono">01</span>
-              <span className="home-item-body">
-                <b>Missions</b>
-                <em>Choose your battlefield and deploy</em>
-              </span>
-              <Arrow />
-            </button>
-            <button className="home-item seq" style={{ animationDelay: '.18s' }} onClick={onArmory}>
-              <span className="home-item-idx mono">02</span>
-              <span className="home-item-body">
-                <b>Loadout</b>
-                <em>{primaryName} + {secondaryName} · ${prof.cash.toLocaleString('en-US')}</em>
-              </span>
-              <Arrow />
-            </button>
-            <button className="home-item seq" style={{ animationDelay: '.24s' }} onClick={onSettings}>
-              <span className="home-item-idx mono">03</span>
-              <span className="home-item-body">
-                <b>Settings</b>
-                <em>Video, audio and controls</em>
-              </span>
-              <Arrow />
-            </button>
-          </nav>
+        <div className="ops-layout">
+          <aside className="ops-rail">
+            <nav className="ops-rail-nav" aria-label="Main menu">
+              <button type="button" className="ops-rail-item is-active" onClick={() => setView('home')} aria-current="page">
+                <OpsIcon name="home" /> <span>Home</span>
+              </button>
+              <button type="button" className="ops-rail-item" onClick={() => setView('maps')}>
+                <OpsIcon name="mission" /> <span>Missions</span>
+              </button>
+              <button type="button" className="ops-rail-item" onClick={onArmory}>
+                <OpsIcon name="rifle" /> <span>Loadout</span>
+              </button>
+              <button type="button" className="ops-rail-item" onClick={onSettings}>
+                <OpsIcon name="settings" /> <span>Settings</span>
+              </button>
+            </nav>
+            <div className="ops-rail-motto"><span>PLAY</span><b>PREPARE</b><b>ADAPT</b><b>REPEAT</b></div>
+          </aside>
+
+          <section className="ops-workspace">
+            <div className="ops-workspace-main">
+              <div className="ops-hero">
+                <div className="ops-eyebrow"><span /> SINGLE OPERATOR <i>·</i> {selectedMap.name.toUpperCase()} SECTOR</div>
+                <h1>PREPARE<br /><span>FOR WHAT'S NEXT</span></h1>
+                <div className="ops-hero-meta"><span>DEPLOY</span><i>•</i><span>CUSTOMIZE</span><i>•</i><span>STAY READY</span></div>
+              </div>
+
+              <div className="ops-console-head">
+                <span><b>01</b> OPERATIONS CONSOLE</span>
+                <span className="ops-console-status"><i /> LINK STABLE</span>
+              </div>
+
+              <div className="ops-card-grid">
+                <button type="button" className="ops-card ops-card-missions" style={{ backgroundImage: `url(${MAP_ART[s.map]})` }} onClick={() => setView('maps')}>
+                  <span className="ops-card-shade" aria-hidden="true" />
+                  <span className="ops-card-top"><span>01 <i>—</i></span><span className="ops-card-arrow"><OpsIcon name="arrow" size={15} /></span></span>
+                  <span className="ops-card-content"><b>MISSIONS</b><em>Choose your battlefield<br />and deploy</em><small><strong>{MAPS.length}</strong> AREAS OF OPERATIONS <i /> <strong>{homeMission.phases.length}</strong> OBJECTIVES</small></span>
+                </button>
+                <button type="button" className="ops-card ops-card-loadout" style={{ backgroundImage: `url(${operatorArt})` }} onClick={onArmory}>
+                  <span className="ops-card-shade" aria-hidden="true" />
+                  <span className="ops-card-top"><span>02 <i>—</i></span><span className="ops-card-arrow"><OpsIcon name="arrow" size={15} /></span></span>
+                  <span className="ops-card-content"><b>LOADOUT</b><em>{primaryName} + {secondaryName}<br />and gear</em><small><strong>7</strong> PRIMARY WEAPONS <i /> <strong>40+</strong> ATTACHMENTS</small></span>
+                </button>
+                <button type="button" className="ops-card ops-card-settings" style={{ backgroundImage: `url(${MAP_ART[alternateMap]})` }} onClick={onSettings}>
+                  <span className="ops-card-shade" aria-hidden="true" />
+                  <span className="ops-card-top"><span>03 <i>—</i></span><span className="ops-card-arrow"><OpsIcon name="arrow" size={15} /></span></span>
+                  <span className="ops-card-content"><b>SETTINGS</b><em>Video, audio and controls<br />for your operation</em><small><strong>READY</strong> OPTIMIZE YOUR EXPERIENCE</small></span>
+                </button>
+              </div>
+            </div>
+
+            <aside className="ops-operator-panel">
+              <div className="ops-operator-head"><span>OPERATOR</span><b><i /> ACTIVE</b></div>
+              <div className="ops-operator-copy">SAME PEOPLE<br />DIFFERENT<br />BATTLEGROUNDS</div>
+              <div className="ops-operator-art"><img src={operatorArt} alt="Operator equipped with rifle" draggable={false} /></div>
+              <div className="ops-operator-glass" aria-hidden="true" />
+              <div className="ops-operator-bottom"><span>OPERATOR 01<small>FIELD READY</small></span><span>VER. 1.0.0</span></div>
+            </aside>
+          </section>
         </div>
 
-        <footer className="menu-footer">
-          <span>{s.difficulty} difficulty<i />Unlimited ammo<i />Render · WebGL</span>
-          <span className="menu-keys">
-            <span className="keycap">WASD</span> Move <i /> <span className="keycap">RMB</span> Aim <i /> <span className="keycap">G</span> Frag <i /> <span className="keycap">Esc</span> Pause
-          </span>
+        <footer className="ops-footer">
+          <span><kbd>ESC</kbd> QUIT TO DESKTOP</span>
+          <span className="ops-footer-center"><b>{s.difficulty.toUpperCase()}</b> DIFFICULTY <i /> UNLIMITED AMMO <i /> {profile?.missions ?? 0} MISSIONS COMPLETE</span>
+          <span className="ops-controls"><kbd>WASD</kbd> NAVIGATE <kbd>ENTER</kbd> SELECT <kbd>TAB</kbd> OPTIONS</span>
         </footer>
       </main>
     );
@@ -128,9 +191,12 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
             <span className="menu-eyebrow">Missions</span>
             <b>Select area of operations</b>
           </span>
-          <span className="menu-loadout" aria-label="Equipped loadout">
-            <span><b>1</b> {primaryName}</span>
-            <span><b>2</b> {secondaryName}</span>
+          <span className="menu-header-actions">
+            <span className="menu-loadout" aria-label="Equipped loadout">
+              <span><b>1</b> {primaryName}</span>
+              <span><b>2</b> {secondaryName}</span>
+            </span>
+            <button className="ops-utility" type="button" onClick={onFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen"><OpsIcon name="expand" size={14} /></button>
           </span>
         </header>
 
@@ -178,9 +244,12 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
           <span className="menu-eyebrow">{mapName}</span>
           <b>Operation {mission.name}</b>
         </span>
-        <span className="menu-loadout" aria-label="Equipped loadout">
-          <span><b>1</b> {primaryName}</span>
-          <span><b>2</b> {secondaryName}</span>
+        <span className="menu-header-actions">
+          <span className="menu-loadout" aria-label="Equipped loadout">
+            <span><b>1</b> {primaryName}</span>
+            <span><b>2</b> {secondaryName}</span>
+          </span>
+          <button className="ops-utility" type="button" onClick={onFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen"><OpsIcon name="expand" size={14} /></button>
         </span>
       </header>
 

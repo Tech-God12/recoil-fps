@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine, DEFAULT_SETTINGS, type GameEvent, type GameSettings, type HudState } from './game/engine';
+import TDMSetup from './ui/TDMSetup';
+import type { ArmorLevel } from './game/tdm';
+import type { Loadout } from './game/economy/loadout';
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
@@ -7,7 +10,7 @@ import Armory from './ui/armory/Armory';
 import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
 /**
@@ -39,7 +42,8 @@ function loadRichProfile(): PlayerProfile {
 function loadSettings(): GameSettings {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    return { ...DEFAULT_SETTINGS, ...raw, map: raw.map === 'kasbah' ? 'kasbah' : 'alrasul' };
+    const map = raw.map === 'kasbah' ? 'kasbah' : raw.map === 'arena' ? 'arena' : 'alrasul';
+    return { ...DEFAULT_SETTINGS, ...raw, map };
   } catch { return { ...DEFAULT_SETTINGS }; }
 }
 
@@ -61,6 +65,8 @@ export default function App() {
   const [fx, setFx] = useState<HudFx>(emptyFx);
   const [profile, setProfile] = useState<PlayerProfile>(loadRichProfile);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
+  const [tdmArmor, setTdmArmor] = useState<ArmorLevel>(1);
+  const [tdmLoadoutOverride, setTdmLoadoutOverride] = useState<Loadout | null>(null);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -184,7 +190,7 @@ export default function App() {
   useEffect(() => {
     const lockChanged = () => {
       const engine = engineRef.current;
-      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory') return;
+      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory' || phaseRef.current === 'tdm-setup') return;
       if (document.pointerLockElement === canvasRef.current) {
         engine.setPaused(false);
         changePhase('playing');
@@ -220,7 +226,12 @@ export default function App() {
 
   useEffect(() => () => { session.current++; clearTimers(); engineRef.current?.dispose(); }, [clearTimers]);
 
-  const deploy = async () => {
+  const requestDeploy = () => {
+    if (settings.map === 'arena') { changePhase('tdm-setup'); return; }
+    void deploy();
+  };
+
+  const deploy = async (armorOverride?: ArmorLevel) => {
     if (!canvasRef.current || launching) return;
     const epoch = ++session.current;
     clearTimers();
@@ -289,10 +300,11 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
-      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={deploy} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={deploy} onBack={armoryBack} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={requestDeploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={() => void deploy()} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={requestDeploy} onMenu={quit} onArmory={() => openArmory('results')} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={requestDeploy} onBack={armoryBack} />}
+      {phase === 'tdm-setup' && <TDMSetup profile={profile} onProfile={updateProfile} onBack={() => changePhase('menu')} onDeploy={(a, l) => { setTdmArmor(a); setTdmLoadoutOverride(l); void deploy(a); }} />}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>

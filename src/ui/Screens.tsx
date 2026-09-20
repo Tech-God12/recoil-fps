@@ -16,7 +16,7 @@ import mapKasbah from '../assets/map-kasbah.jpg';
 import operatorArt from '../assets/operator.jpg';
 import MapFlyover from './MapFlyover';
 
-export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah };
+export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapKasbah };
 
 export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
@@ -150,7 +150,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
                 <span className="map-tile-info">
                   <span className="map-tile-num">0{index + 1}</span>
                   <span className="map-tile-name">{map.name}</span>
-                  <span className="map-tile-type">{map.id === 'alrasul' ? 'Desert river valley' : 'Fortified market town'}</span>
+                  <span className="map-tile-type">{map.id === 'alrasul' ? 'Desert river valley' : map.id === 'arena' ? '5v5 warehouse TDM' : 'Fortified market town'}</span>
                   <span className="map-tile-tag">{opt.phases.length} objectives · {opt.name}</span>
                 </span>
               </button>

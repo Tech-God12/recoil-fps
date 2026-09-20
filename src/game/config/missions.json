@@ -513,5 +513,40 @@
         ]
       }
     ]
+  },
+  "arena": {
+    "id": "warehouse-tdm",
+    "name": "Warehouse",
+    "map": "arena",
+    "deployment": [0, 0, 42],
+    "brief": "5v5 team deathmatch. Most kills at 2:30 wins.",
+    "extractionCallsign": "Overwatch",
+    "phases": [
+      {
+        "id": "tdm-fight",
+        "type": "destroy",
+        "title": "Team deathmatch",
+        "location": "Warehouse yard",
+        "at": [0, 0, 0],
+        "radius": 3,
+        "pressure": { "target": 0, "interval": 60 },
+        "brief": "Eliminate Bravo. Respawn in 10 seconds.",
+        "plantSeconds": 2,
+        "fuse": 10
+      },
+      {
+        "id": "tdm-extract",
+        "type": "extract",
+        "title": "Match complete",
+        "location": "South spawn",
+        "at": [0, 0, 42],
+        "radius": 2,
+        "pressure": { "target": 0, "interval": 60 },
+        "brief": "Match over."
+      }
+    ],
+    "insertions": [
+      { "id": "north", "from": "north", "at": [0, 0, -40] }
+    ]
   }
 }

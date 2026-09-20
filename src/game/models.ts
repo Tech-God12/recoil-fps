@@ -81,20 +81,32 @@ export interface SoldierModel {
   hitMeshes: THREE.Mesh[];
 }
 
-export function buildSoldier(): SoldierModel {
+export function buildSoldier(opts?: { armor?: 0 | 1 | 2; team?: 'alpha' | 'bravo' }): SoldierModel {
+  const armor = opts?.armor ?? 0;
+  const bulk = armor > 0 ? 0.52 : 0.40;
+  const plateD = armor === 2 ? 0.38 : armor === 1 ? 0.34 : 0.29;
+  const helmS = armor > 0 ? 1.25 : 1;
+  const limbS = armor > 0 ? 1.12 : 1;
   const m = getSoldierMat();
   const g = new THREE.Group();
   const hitMeshes: THREE.Mesh[] = [];
   // Enemies don't cast shadows (21 hostiles × 6 meshes was a shadow-pass disaster).
   // They still receive, so they sit grounded in the scene.
   const tag = (mesh: THREE.Mesh, part: string) => { mesh.userData.part = part; mesh.castShadow = false; hitMeshes.push(mesh); return mesh; };
+  if (opts?.team === 'alpha') g.traverse?.(() => undefined);
+  g.userData.team = opts?.team ?? 'bravo';
+  g.userData.armor = armor;
 
   // ---- torso (pivot at hips y=0.95) ----
   const torso = new THREE.Group(); torso.position.y = 0.95;
   const t = new Part();
-  t.box(0.40, 0.56, 0.24, SR.camo, 0, 0.30, 0);                 // shirt body
-  t.box(0.44, 0.42, 0.29, SR.vest, 0, 0.30, 0);                 // plate carrier
-  t.box(0.46, 0.08, 0.31, SR.vest, 0, 0.52, 0);                 // shoulder straps top
+  t.box(bulk, 0.56, 0.24, SR.camo, 0, 0.30, 0);                 // shirt body
+  t.box(bulk + 0.04, 0.42, plateD, SR.vest, 0, 0.30, 0);         // plate carrier
+  t.box(bulk + 0.06, 0.08, plateD + 0.02, SR.vest, 0, 0.52, 0); // shoulder straps top
+  if (armor === 2) {
+    t.box(0.16, 0.18, 0.14, SR.vest, -0.28, 0.48, 0); // shoulder plates
+    t.box(0.16, 0.18, 0.14, SR.vest, 0.28, 0.48, 0);
+  }
   for (const px of [-0.13, 0, 0.13]) t.box(0.10, 0.15, 0.07, SR.webbing, px, 0.22, -0.17);  // mag pouches
   t.box(0.12, 0.10, 0.06, SR.webbing, 0.16, 0.42, -0.16);       // radio pouch
   t.box(0.32, 0.30, 0.14, SR.olive, 0, 0.32, 0.20);             // backpack
@@ -113,7 +125,7 @@ export function buildSoldier(): SoldierModel {
   const h = new Part();
   h.sph(0.115, SR.skin, 0, 0.13, 0, 1, 1.12, 1);                 // head
   h.box(0.06, 0.05, 0.04, SR.skin, 0, 0.1, -0.11);               // nose/chin mass
-  h.sph(0.15, SR.helmet, 0, 0.19, 0, 1.0, 0.85, 1.1, Math.PI * 0.6); // helmet shell
+  h.sph(0.15 * helmS, SR.helmet, 0, 0.19, 0, 1.0, 0.85, 1.1, Math.PI * 0.6); // helmet shell
   h.box(0.28, 0.03, 0.06, SR.helmet, 0, 0.16, -0.14);            // brim
   h.box(0.05, 0.05, 0.05, SR.black, 0, 0.26, -0.14);             // NVG mount
   h.box(0.22, 0.07, 0.06, SR.visor, 0, 0.15, -0.1);              // goggles
@@ -142,7 +154,7 @@ export function buildSoldier(): SoldierModel {
   const mkLeg = (side: number) => {
     const leg = new THREE.Group(); leg.position.set(side*0.115,0.92,0);
     const thigh = new Part();
-    thigh.box(0.17,0.41,0.18,SR.camo,0,-0.205,0);
+    thigh.box(0.17 * limbS, 0.41, 0.18 * limbS, SR.camo, 0, -0.205, 0);
     thigh.box(0.12,0.14,0.06,SR.olive,side*0.035,-0.21,-0.10);
     leg.add(tag(thigh.mesh(m),'limb'));
     const shin = new THREE.Group(); shin.position.y=-0.43;

@@ -4,16 +4,18 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { getMaterials, type TextureSet } from './textures';
+import { buildArenaWorld } from './world-arena';
 
 // Install BVH acceleration globally (huge raycast speed-up for merged meshes)
 (THREE.BufferGeometry.prototype as unknown as { computeBoundsTree: typeof computeBoundsTree }).computeBoundsTree = computeBoundsTree;
 (THREE.BufferGeometry.prototype as unknown as { disposeBoundsTree: typeof disposeBoundsTree }).disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type MapId = 'alrasul' | 'kasbah';
+export type MapId = 'alrasul' | 'kasbah' | 'arena';
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
   { id: 'alrasul', name: 'Sandblast', desc: 'Two bridges. One dry river. A souk under siege in the shadow of the water tower.' },
   { id: 'kasbah', name: 'Town', desc: 'Six trades beneath a stone crown. Break the citadel, then disappear through the west gate.' },
+  { id: 'arena', name: 'Warehouse', desc: '5v5 TDM. Dual metal warehouses, U-barriers and stacked containers. 2:30, 10s respawn.' },
 ];
 
 export interface AABB { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
@@ -551,7 +553,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const [x,z,w,d] of [[-86,-88,12,12],[-63,-89,12,12],[-32,-68,10,9],[-7,-59,8,12],[22,-60,10,10],[45,-85,12,12],[88,-48,12,14],[62,-43,12,12],[72,-18,12,10],[-87,-8,12,12],[-60,-10,12,10],[-36,-17,10,8],[-57,37,12,13],[-54,67,11,12],[-87,43,12,12],[-87,77,11,13],[-36,26,10,11],[1,82,10,12]] as const) {
       house(x,z,w,d,{wallMat: x < -50 ? earth : M.whitewash, door: z < 0 ? 'south' : 'east'});
     }
-    // Infiltration grammar: checkpoint -> road bridge -> the old town's teal dome.
+    me.
     street(false, -12, 16, 102, 10);
     street(false, -12, -98, -14, 9);
     street(true, 72, -18, 93, 10);

@@ -40,6 +40,33 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
       {/* flashbang */}
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
       {hud.mission && <MissionObjective mission={hud.mission} />}
+      {hud.tdm && (
+        <div className="tdm-board">
+          <div className="tdm-score">
+            <span className="alpha">{hud.tdm.alpha}</span>
+            <span className="tdm-lab">WAREHOUSE TDM</span>
+            <span className={`tdm-clock ${hud.tdm.timeLeft < 30 ? 'low' : ''}`}>{Math.floor(hud.tdm.timeLeft / 60)}:{String(Math.floor(hud.tdm.timeLeft % 60)).padStart(2, '0')}</span>
+            <span className="bravo">{hud.tdm.bravo}</span>
+          </div>
+          <div className="tdm-roster">
+            {hud.tdm.roster.filter(r => r.team === 'alpha').map(r => (
+              <span key={r.name} className={r.dead ? 'dead' : ''}>{r.you ? 'YOU*' : r.name} {['○', '◍', '⬢'][r.armor]}</span>
+            ))}
+            <i />
+            {hud.tdm.roster.filter(r => r.team === 'bravo').map(r => (
+              <span key={r.name} className={r.dead ? 'dead' : ''}>{r.name} {['○', '◍', '⬢'][r.armor]}</span>
+            ))}
+          </div>
+        </div>
+      )}
+      {hud.tdm?.playerDead && (
+        <div className="tdm-respawn">
+          <b>ELIMINATED</b>
+          <p>Respawning in {Math.ceil(hud.tdm.respawn)}s</p>
+          <p className="mono">Score {hud.tdm.alpha} – {hud.tdm.bravo} · Your kills {hud.tdm.playerKills}</p>
+          <div className="tdm-bar"><span style={{ width: `${(1 - hud.tdm.respawn / 10) * 100}%` }} /></div>
+        </div>
+      )}
 
       {/* ============ THREAT READOUT (slim — no centre ring clutter) ============ */}
       {hud.ads < .3 && hud.nearest && hud.nearest.dist < 30 && (() => {

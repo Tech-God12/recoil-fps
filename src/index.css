@@ -1301,3 +1301,27 @@ img { display: block; max-width: 100%; }
 .scope-zoom-panel.editing { border-color:#d8b877b0; }
 @media (max-width:800px) { .scope-zoom-panel { top:auto; bottom:80px; right:12px; transform:none; width:185px; padding:10px; } .scope-zoom-heading{margin-bottom:10px;} .scope-zoom-panel small{margin-top:8px;} }
 .pcard-fit { margin:7px 0 3px; font-size:9px; line-height:1.6; letter-spacing:.035em; color:var(--brass); }
+
+/* Warehouse TDM */
+.tdm-setup { position:absolute; inset:0; z-index:20; background:#0d0c0a; color:#eee; display:flex; flex-direction:column; }
+.tdm-top { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid #3a3428; }
+.tdm-top b { letter-spacing:.2em; }
+.tdm-cols { flex:1; display:grid; grid-template-columns: 240px 1fr 280px; gap:12px; padding:12px; min-height:0; }
+.tdm-left, .tdm-right { overflow:auto; background:#16140f; padding:12px; border:1px solid #3a3428; }
+.tdm-armor { display:flex; gap:10px; width:100%; text-align:left; padding:10px; margin-bottom:8px; background:#1c1a14; border:1px solid #3a3428; color:#ddd; }
+.tdm-armor.on { border-color:#c89b5a; }
+.tdm-ico { font-size:22px; }
+.tdm-armor em { display:block; font-size:11px; opacity:.7; }
+.tdm-enemy-arm { list-style:none; padding:0; font-size:13px; }
+.tdm-center { min-height:0; display:flex; flex-direction:column; }
+.tdm-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; overflow:auto; max-height:180px; }
+.tdm-go { margin:10px auto 18px; }
+.tdm-board { position:absolute; top:8px; left:50%; transform:translateX(-50%); text-align:center; pointer-events:none; }
+.tdm-score { display:flex; gap:14px; align-items:center; font-weight:800; font-size:22px; }
+.tdm-score .alpha { color:#5ad; } .tdm-score .bravo { color:#e55; }
+.tdm-clock.low { color:#e44; }
+.tdm-roster { display:flex; gap:8px; font-size:10px; letter-spacing:.04em; margin-top:4px; }
+.tdm-roster .dead { text-decoration:line-through; opacity:.45; }
+.tdm-respawn { position:absolute; inset:0; display:grid; place-content:center; background:rgba(0,0,0,.55); text-align:center; gap:8px; }
+.tdm-bar { width:240px; height:6px; background:#333; margin:8px auto 0; }
+.tdm-bar span { display:block; height:100%; background:#c89b5a; }

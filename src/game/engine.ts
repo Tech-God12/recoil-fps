@@ -21,6 +21,7 @@ import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
 import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './ai';
+import { TDMManager, TDM_MATCH_SECONDS, TDM_RESPAWN, TDM_DMG_MUL, armorMaxHp, playerArmorMul, type ArmorLevel, type TDMRosterEntry, type TDMBot } from './tdm';
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
 import type { MissionReport, MissionPhase } from './systems/mission';
 import type { PressureStats } from './systems/reinforcements';
@@ -124,6 +125,10 @@ export interface HudState {
   worldHalf: number;
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
+  tdm?: {
+    alpha: number; bravo: number; timeLeft: number; playerKills: number;
+    respawn: number; playerDead: boolean; roster: TDMRosterEntry[];
+  };
 }
 
 export type GameEvent =
@@ -254,6 +259,13 @@ export class Engine {
   private effects!: Effects;
   private ai!: AIManager;
   private missionRuntime!: MissionRuntime;
+  private isTDM = false;
+  private tdmArmor: ArmorLevel = 1;
+  private tdmManager: TDMManager | null = null;
+  private tdmPlayerDead = false;
+  private tdmRespawnTimer = 0;
+  private tdmPlayerKills = 0;
+  private tdmMatchTimeLeft = TDM_MATCH_SECONDS;
   private rosterVersion = -1;
   private started = false;
   private finishDelay = -1;
@@ -408,14 +420,17 @@ export class Engine {
    * could even paint. create() stages it across frames and pre-compiles shaders off the
    * blocking path instead.
    */
-  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null): Promise<Engine> {
+  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, armor: ArmorLevel = 1): Promise<Engine> {
     const engine = new Engine(canvas);
-    await engine.init(difficulty, onEvent, mapId, loadout);
+    await engine.init(difficulty, onEvent, mapId, loadout, armor);
     return engine;
   }
 
-  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null) {
+  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, armor: ArmorLevel = 1) {
     this.onEvent = onEvent;
+    this.isTDM = mapId === 'arena';
+    this.tdmArmor = armor;
+    this.hp = this.isTDM ? armorMaxHp(armor) : 100;
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     // Cap pixel ratio at 1.25 — the single biggest FPS win on high-DPI screens
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
@@ -726,6 +741,51 @@ void main(){
     // Ten pooled soldier models plus the nav grid over the whole sector.
     await nextFrame();
     this.ai = new AIManager(ctx, []);
+    if (this.isTDM) {
+      this.frags = 3; this.flashes = 1;
+      this.tdmManager = new TDMManager({
+        scene: this.scene,
+        occluders: this.world.occluders,
+        coverNodes: this.world.coverNodes,
+        solids: this.world.solids,
+        half: this.world.half,
+        groundHeight: this.world.groundHeight,
+        effects: this.effects,
+        playerPos: () => this.eyePos(),
+        playerFeet: () => this.pos.clone(),
+        playerAlive: () => !this.tdmPlayerDead && !this.dead,
+        damagePlayerTDM: (a, f, head) => this.damagePlayerTDM(a, f, head),
+        moveCollide: (p, dx, dz, r, h) => {
+          this.moveAxis(p, dx, dz, r, h ?? 1.7);
+          p.y = this.supportHeight(p, r);
+        },
+        onCallout: (k, p) => {
+          if (p.distanceTo(this.pos) < 40) {
+            const labels: Record<string, string> = {
+              contact: 'Contact!', flank: 'Flanking!', grenade: 'Frag out!',
+              mandown: 'Down!', fallback: 'Falling back!', push: 'Pushing!',
+            };
+            this.onEvent({ type: 'callout', text: labels[k] || 'Contact!' });
+            voice.enemyCallout(k);
+          }
+        },
+        aiThrowGrenade: (from, target) => this.spawnGrenade(from, target, true),
+        onEnemyFire: (p) => { audio.enemyFireSpatial(p.x, p.y, p.z); this.addPing(p); },
+        onKill: (victim, killerTeam, headshot, byPlayer) => {
+          this.tdmManager?.handleKill(victim, killerTeam);
+          if (byPlayer) {
+            this.tdmPlayerKills++;
+            this.kills++;
+            this.score += headshot ? 150 : 100;
+            this.onEvent({ type: 'hit', kill: true });
+            this.onEvent({ type: 'kill', name: victim.name, weapon: this.def().name, headshot });
+          }
+          this.rebuildHittables();
+        },
+        getBots: () => this.tdmManager?.bots ?? [],
+      });
+      this.yaw = Math.PI;
+    }
     this.missionRuntime = new MissionRuntime({
       scene: this.scene, world: this.world, camera: this.camera, ai: this.ai, player: this.pos,
       isAlive: () => !this.dead,
@@ -755,7 +815,7 @@ void main(){
     this.ai.nav.blocked.set(new NavGrid(this.world.solids, this.world.half, this.world.navigationHeight ?? this.world.groundHeight).blocked);
         this.renderer.shadowMap.needsUpdate = true;
     const first = this.missionRuntime.mission.current.at;
-    this.yaw = Math.atan2(this.pos.x - first[0], this.pos.z - first[2]);
+    if (!this.isTDM) this.yaw = Math.atan2(this.pos.x - first[0], this.pos.z - first[2]);
     this.rebuildHittables();
 
     this.bindInput();
@@ -849,7 +909,7 @@ void main(){
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
+    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.tdmPlayerDead || this.scopeAdjusting) return;
     const zoomSensitivity = Math.tan(this.adsFovEff()*Math.PI/360)/Math.tan(this.fovSetting*Math.PI/360);
     const sens = this.mouseSens * (this.ads > 0.5 ? this.adsSensMul * Math.max(.12,zoomSensitivity) : 1);
     this.yaw -= e.movementX * sens;
@@ -858,7 +918,7 @@ void main(){
   };
 
   private onMouseDown = (e: MouseEvent) => {
-    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
+    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.tdmPlayerDead || this.scopeAdjusting) return;
     if (e.button === 0) {
       this.triggerHeld = true;
       this.tryFire();
@@ -1465,7 +1525,7 @@ void main(){
     // never eat your own bullet) — but never ignore an enemy, even point-blank.
     let h: THREE.Intersection | null = null;
     for (const cand of rawHits) {
-      const isEnemy = (cand.object.userData.enemy as Enemy | undefined) !== undefined;
+      const isEnemy = (cand.object.userData.enemy as Enemy | undefined) !== undefined || cand.object.userData.tdmBot;
       if (!isEnemy && cand.distance < skip) continue;
       h = cand;
       break;
@@ -1487,6 +1547,16 @@ void main(){
 
     if (h) {
       if (!d.suppressed) this.effects.tracer(muzzleWorld, h.point);
+      const tdmBot = h.object.userData.tdmBot as TDMBot | undefined;
+      if (tdmBot && !tdmBot.dead) {
+        const part = h.object.userData.part as string;
+        if (!shotHit) { this.hits++; shotHit = true; }
+        this.effects.blood(h.point);
+        audio.fleshImpact(0);
+        if (part === 'head') audio.headshotDink();
+        const killed = tdmBot.takeDamage(1, part === 'head', true, 'alpha');
+        if (!killed) { audio.hitMarker(); this.onEvent({ type: 'hit', kill: false }); }
+      } else {
       const enemy = (h.object.userData.enemy as Enemy | undefined);
       if (enemy && !enemy.dead) {
         const part = h.object.userData.part as string;
@@ -1500,6 +1570,7 @@ void main(){
         // Headshot "dink" rings on EVERY head hit — the reward cue lands even
         // when the target survives (and stacks under the kill confirm when not).
         if (part === 'head') audio.headshotDink();
+        if (this.isTDM) dmg *= TDM_DMG_MUL;
         const killed = enemy.takeDamage(dmg, part === 'head');
         if (killed) {
           this.kills++;
@@ -1547,6 +1618,7 @@ void main(){
         const n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : dir.clone().negate();
         this.effects.impact(h.point, n);
         audio.bulletImpact(0, h.distance);
+      }
       }
     } else {
       this.effects.tracer(muzzleWorld, origin.clone().addScaledVector(dir, 140));
@@ -1778,6 +1850,7 @@ void main(){
     for (const e of this.ai.enemies) {
       if (!e.dead) this.hittables.push(...e.model.hitMeshes);
     }
+    if (this.tdmManager) this.hittables.push(...this.tdmManager.getHittables());
   }
 
   // ==================== GRENADE SYSTEM ====================
@@ -1872,6 +1945,11 @@ void main(){
       if (distP < 6.5) {
         const dmg = distP < 3.2 ? 95 : THREE.MathUtils.lerp(95, 20, (distP - 3.2) / 3.3);
         this.damagePlayer(dmg, g.pos);
+      }
+      for (const bot of this.tdmManager?.bots ?? []) {
+        if (bot.dead) continue;
+        const d = bot.pos.distanceTo(g.pos);
+        if (d < 7) bot.takeDamage(26, false, !g.fromAI, g.fromAI ? 'bravo' : 'alpha');
       }
       for (const e of this.ai.enemies) {
         if (e.dead) continue;
@@ -2007,7 +2085,39 @@ void main(){
   private lastGrenadeDist?: number;
   private lastGrenadeAngle?: number;
 
+  private damagePlayerTDM(amount: number, from: THREE.Vector3, isHead: boolean) {
+    if (this.tdmPlayerDead || this.ended) return;
+    const mul = playerArmorMul(this.tdmArmor);
+    const dmg = amount * mul * (isHead ? 1 : 1);
+    this.hp -= dmg;
+    this.lastDamageT = 0;
+    this.shake = Math.max(this.shake, Math.min(0.7, dmg / 35));
+    audio.playerHurt();
+    this.onEvent({ type: 'damage', dir: this.dirToScreenDeg(from), amount: dmg });
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.tdmPlayerDead = true;
+      this.tdmRespawnTimer = TDM_RESPAWN;
+      this.tdmManager && this.tdmManager.bravoScore++;
+      this.tdmManager && this.tdmManager.rosterVersion++;
+      this.triggerHeld = false;
+    }
+  }
+
+  private respawnPlayerTDM() {
+    const spawn = this.tdmManager?.getSpawn('alpha') ?? new THREE.Vector3(0, 0, 42);
+    this.pos.copy(spawn);
+    this.hp = armorMaxHp(this.tdmArmor);
+    this.tdmPlayerDead = false;
+    this.dead = false;
+    this.frags = 3;
+    this.flashes = 1;
+    this.mags = this.weapons.map(w => w.magSize);
+    this.yaw = Math.PI;
+  }
+
   private damagePlayer(amount: number, from: THREE.Vector3) {
+    if (this.isTDM) { this.damagePlayerTDM(amount, from, false); return; }
     if (this.dead) return;
     this.hp -= amount;
     this.lastDamageT = 0;
@@ -2022,8 +2132,25 @@ void main(){
     }
   }
 
+  private endTDMMatch() {
+    if (this.ended) return;
+    const win = (this.tdmManager?.alphaScore ?? 0) >= (this.tdmManager?.bravoScore ?? 0);
+    this.ended = true;
+    this.pendingResult = {
+      type: 'end', win, kills: this.tdmPlayerKills, score: this.score, shots: this.shots, hits: this.hits,
+      headshots: this.headshots, timeSec: TDM_MATCH_SECONDS - (this.tdmManager?.timeLeft ?? 0),
+      cash: this.cashEarned, cashLog: [...this.cashLog], difficultyMul: difficultyMultiplier(this.difficultyId),
+      mission: this.missionRuntime.mission.report(), pressure: this.missionRuntime.pressure.stats(),
+    };
+    this.finishDelay = 0.6;
+    this.triggerHeld = false; this.rmb = false; this.keys.clear();
+    if (win) voice.objective('Alpha takes the warehouse.');
+    else voice.defeat();
+  }
+
   private endMatch(win: boolean) {
     if (this.ended) return;
+    if (this.isTDM) { this.endTDMMatch(); return; }
     if (win && this.missionRuntime.mission.status !== 'complete') return;
     this.ended = true;
     if (!win) this.missionRuntime.mission.fail();
@@ -2301,13 +2428,27 @@ void main(){
     this.pings = this.pings.filter(p => p.age < 3.2);
 
     this.updateGrenades(dt);
-    this.ai.update(dt);
+    if (this.isTDM && this.tdmManager) {
+      this.tdmManager.update(dt);
+      this.tdmMatchTimeLeft = this.tdmManager.timeLeft;
+      if (this.tdmPlayerDead) {
+        this.tdmRespawnTimer -= dt;
+        if (this.tdmRespawnTimer <= 0 && this.tdmManager.timeLeft > 0) this.respawnPlayerTDM();
+      }
+      if (this.tdmManager.timeLeft <= 0) this.endTDMMatch();
+      if (this.tdmManager.rosterVersion !== this.rosterVersion) {
+        this.rosterVersion = this.tdmManager.rosterVersion;
+        this.rebuildHittables();
+      }
+    } else {
+      this.ai.update(dt);
+    }
     this.effects.update(dt, this.pos);
     this.composeCamera(dt);
     this.animateViewmodel(dt);
     this.camera.updateMatrixWorld(true);
-    this.missionRuntime.update(dt, this.keys.has('KeyX') && this.reloadT < 0 && !this.cooking && !this.sprinting);
-    if (this.ai.rosterVersion !== this.rosterVersion) {
+    if (!this.isTDM) this.missionRuntime.update(dt, this.keys.has('KeyX') && this.reloadT < 0 && !this.cooking && !this.sprinting);
+    if (this.ai.rosterVersion !== this.rosterVersion && !this.isTDM) {
       this.rosterVersion = this.ai.rosterVersion;
       this.rebuildHittables();
     }
@@ -2636,7 +2777,8 @@ void main(){
     audio.ensure();
     voice.unlock();
     this.started = true;
-    this.missionRuntime.start();
+    if (!this.isTDM) this.missionRuntime.start();
+    else { this.frags = 3; this.flashes = 1; this.hp = armorMaxHp(this.tdmArmor); }
   }
 
   /** Live-apply graphics/gameplay settings (safe to call any time, including mid-match) */
@@ -2773,8 +2915,8 @@ void main(){
     // Proximity indicator: closest living hostile — screen-relative bearing + range
     let nearest: HudState['nearest'];
     let nd = Infinity;
-    for (const e of this.ai.enemies) {
-      if (e.dead) continue;
+    const hostiles = this.isTDM ? (this.tdmManager?.bots.filter(b => b.team === 'bravo' && !b.dead) ?? []) : this.ai.enemies.filter(e => !e.dead);
+    for (const e of hostiles) {
       const d = e.pos.distanceTo(this.pos);
       if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(e.pos), dist: d, above: e.pos.y - this.pos.y }; }
     }
@@ -2837,7 +2979,16 @@ void main(){
       magSize: this.def().magSize,
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
-      mission: this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
+      mission: this.isTDM ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
+      tdm: this.isTDM && this.tdmManager ? {
+        alpha: this.tdmManager.alphaScore,
+        bravo: this.tdmManager.bravoScore,
+        timeLeft: this.tdmManager.timeLeft,
+        playerKills: this.tdmPlayerKills,
+        respawn: this.tdmPlayerDead ? this.tdmRespawnTimer : 0,
+        playerDead: this.tdmPlayerDead,
+        roster: this.tdmManager.roster(this.tdmPlayerDead, this.tdmArmor),
+      } : undefined,
     };
   }
 
@@ -2870,6 +3021,7 @@ void main(){
       material.dispose();
     }
     for(const texture of textures) texture.dispose();
+    this.tdmManager?.dispose();
     this.missionRuntime.dispose();
     this.ai.dispose();
     this.composer.dispose();

@@ -1,8 +1,10 @@
 // Recoil FPS — stat resolution: base stats + attachment mods → resolved stats.
 // Pure functions only (no three.js / React) so Node tests exercise the real math.
+import { RECOIL_FLOORS } from '../recoil';
+import { magnificationFov, OPTIC_REFERENCE_FOV } from './optics';
 import type { BaseWeaponStats } from './catalog';
 
-export type ScopeReticle = 'none' | 'dot' | 'holo' | 'acog' | 'sniper';
+export type ScopeReticle = 'none' | 'dot' | 'holo' | 'acog' | 'sniper' | 'prism2' | 'prism3' | 'bdc4' | 'mil6' | 'mil8';
 
 export interface StatMods {
   damageMul?: number; rpmMul?: number; magAdd?: number; magMul?: number; reserveAdd?: number;
@@ -17,6 +19,8 @@ export interface StatMods {
   autoOverride?: boolean;
   laser?: boolean; flashlight?: boolean;
   scopeReticle?: ScopeReticle;
+  scopePower?: number;
+  scopeMinPower?: number;
   // Engine-resolved extras (default 1 / false when no attachment sets them).
   flashMul?: number; suppressed?: boolean;
   spreadXMul?: number; spreadYMul?: number;
@@ -26,6 +30,8 @@ export interface StatMods {
 
 export interface ResolvedWeaponStats extends BaseWeaponStats {
   reticle: ScopeReticle;
+  scopePower: number;
+  scopeMinPower: number;
   laser: boolean; flashlight: boolean; suppressed: boolean;
   recoilYawMul: number; flashMul: number;
   spreadXMul: number; spreadYMul: number;
@@ -73,11 +79,13 @@ export function resolveWeaponStats(base: BaseWeaponStats, mods: StatMods[]): Res
     hipSpread: Math.max(0, base.hipSpread * mul(m => m.hipSpreadMul)),
     adsSpread: Math.max(0, (base.adsSpread + add(m => m.adsSpreadAdd)) * mul(m => m.adsSpreadMul)),
     pattern: base.pattern.map(p => [p[0], p[1]] as [number, number]),
-    adsFov: last(m => m.adsFovSet) ?? (base.adsFov + add(m => m.adsFovDelta)),
+    adsFov: last(m => m.scopePower) !== undefined ? magnificationFov(OPTIC_REFERENCE_FOV, last(m => m.scopePower)!) : last(m => m.adsFovSet) ?? (base.adsFov + add(m => m.adsFovDelta)),
+    scopePower: last(m => m.scopePower) ?? 1,
+    scopeMinPower: last(m => m.scopeMinPower) ?? last(m => m.scopePower) ?? 1,
     tacReload: Math.max(0.2, base.tacReload * mul(m => m.tacReloadMul)),
     emptyReload: Math.max(0.2, base.emptyReload * mul(m => m.emptyReloadMul)),
     adsTime: clamp(base.adsTime * mul(m => m.adsTimeMul), 0.08, 0.9),
-    recoilMul: Math.max(0.05, base.recoilMul * mul(m => m.recoilMul)),
+    recoilMul: Math.max(base.recoilMul * RECOIL_FLOORS.attachment, base.recoilMul * mul(m => m.recoilMul)),
     falloffStart: Math.max(1, base.falloffStart + add(m => m.falloffStartAdd)),
     falloffMul: clamp(base.falloffMul + add(m => m.falloffMulAdd), 0.05, 1.2),
     noiseRadius: Math.max(4, base.noiseRadius * mul(m => m.noiseRadiusMul)),
@@ -87,7 +95,7 @@ export function resolveWeaponStats(base: BaseWeaponStats, mods: StatMods[]): Res
     laser: any(m => m.laser),
     flashlight: any(m => m.flashlight),
     suppressed: any(m => m.suppressed),
-    recoilYawMul: mul(m => m.recoilYawMul),
+    recoilYawMul: Math.max(RECOIL_FLOORS.horizontal, mul(m => m.recoilYawMul)),
     flashMul: mul(m => m.flashMul),
     spreadXMul: mul(m => m.spreadXMul),
     spreadYMul: mul(m => m.spreadYMul),
@@ -110,6 +118,9 @@ const DELTA_FIELDS: { key: keyof ResolvedWeaponStats; label: string; betterWhenH
   { key: 'magSize', label: 'MAG', betterWhenHigher: true },
   { key: 'reserve', label: 'RESERVE', betterWhenHigher: true },
   { key: 'hipSpread', label: 'HIP SPREAD', betterWhenHigher: false, digits: 4 },
+  { key: 'recoilYawMul', label: 'HORIZONTAL KICK', betterWhenHigher: false, digits: 3 },
+  { key: 'swayMul', label: 'AIM SWAY', betterWhenHigher: false, digits: 3 },
+  { key: 'emptyReload', label: 'EMPTY RELOAD', betterWhenHigher: false, digits: 2 },
   { key: 'recoilMul', label: 'RECOIL', betterWhenHigher: false, digits: 3 },
   { key: 'adsTime', label: 'ADS TIME', betterWhenHigher: false, digits: 3 },
   { key: 'adsFov', label: 'ZOOM', betterWhenHigher: false, digits: 1 },

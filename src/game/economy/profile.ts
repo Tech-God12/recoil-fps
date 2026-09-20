@@ -4,7 +4,7 @@ import {
   attachmentById, attachmentsFor, isCompatible, weaponById,
   type AttachSlot, type AttachmentId, type SlotId, type WeaponId,
 } from './catalog';
-import { emptyBuild, repairLoadout, type Loadout, type WeaponBuild } from './loadout';
+import { emptyBuild, repairLoadout, migrateAttachmentId, type Loadout, type WeaponBuild } from './loadout';
 import { DEFAULT_SKIN, isKnownSkin, type SkinId } from './skins';
 
 export type { Loadout, WeaponBuild } from './loadout';
@@ -77,11 +77,11 @@ export function migrateProfile(raw: unknown): PlayerProfile {
     const ownedAttachments: PlayerProfile['ownedAttachments'] = {};
     const rawAtts = (d.ownedAttachments && typeof d.ownedAttachments === 'object' ? d.ownedAttachments : {}) as Record<string, unknown>;
     for (const w of ownedWeapons) {
-      const list = Array.isArray(rawAtts[w]) ? rawAtts[w] as unknown[] : [];
+      const list = (Array.isArray(rawAtts[w]) ? rawAtts[w] as unknown[] : []).map(id=>typeof id === 'string' ? migrateAttachmentId(w,id) : id);
       const valid = [...new Set(list.filter((id): id is AttachmentId => {
         if (typeof id !== 'string') return false;
         const a = attachmentById(id);
-        return !!a && isCompatible(a, w);
+        return !!a; // Retain known purchases; incompatible items are unequipped, not erased.
       }))];
       if (valid.length) ownedAttachments[w] = valid;
     }
@@ -94,7 +94,8 @@ export function migrateProfile(raw: unknown): PlayerProfile {
       const atts = (raw?.attachments && typeof raw.attachments === 'object' ? raw.attachments : {}) as Record<string, unknown>;
       const clean: WeaponBuild['attachments'] = {};
       for (const slot of entry?.slots ?? []) {
-        const id = atts[slot];
+        const rawId = atts[slot];
+        const id = typeof rawId === 'string' ? migrateAttachmentId(w,rawId) : rawId;
         if (typeof id === 'string') {
           const a = attachmentById(id);
           if (a && a.slot === slot && isCompatible(a, w) && ownedAttachments[w]?.includes(id)) clean[slot] = id;

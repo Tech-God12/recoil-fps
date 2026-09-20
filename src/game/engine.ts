@@ -1,6 +1,6 @@
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 // Recoil FPS — Core Engine V2.0
-// Laser-accurate ballistics, full spatial audio listener, lean Q/E, slide, jump, sprint delays
+// Controllable recoil, full spatial audio listener, lean Q/E, slide, jump, sprint delays
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -14,7 +14,9 @@ import { attachmentById, weaponById, type WeaponId } from './economy/catalog';
 import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
 import { REWARDS, difficultyMultiplier, streakAward } from './economy/rewards';
 import { skinById } from './economy/skins';
-import type { Loadout, WeaponBuild } from './economy/loadout';
+import { sanitizeBuild, type Loadout, type WeaponBuild } from './economy/loadout';
+import { clampScopePower, magnificationFov } from './economy/optics';
+import { recoilImpulse, recoilRecovery } from './recoil';
 import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
@@ -103,8 +105,9 @@ export interface HudState {
   heldSlot: 'primary' | 'secondary';
   bipodDeployed: boolean;
   reticle: ScopeReticle;
-  /** Effective ADS FOV in degrees — the HUD derives scope tier/magnification from this. */
+  /** Effective FOV; optic identity is explicit and does not change with the zoom slider. */
   zoomFov: number;
+  scopePower: number; scopeMinPower: number; scopeMaxPower: number; scopeAdjusting: boolean; canted: boolean;
   lpvoHigh: boolean;
   pumping: boolean;
   pings: { dir: number; age: number }[];
@@ -158,6 +161,10 @@ interface WeaponDef {
   falloffMul?: number;
   adsTime?: number;
   recoilMul?: number;
+  recoilBase?: number;
+  scopePower?: number; scopeMinPower?: number; scopeMaxPower?: number;
+  canted?: boolean;
+  pellets?: number; bloomSpec?: { perShot: number; max: number; decay: number }; bloomNow?: number;
   noiseRadius?: number;
   swapTime?: number;
   spreadX?: number;
@@ -311,6 +318,7 @@ export class Engine {
   private readonly INFINITE_AMMO = true;
 
   // Camera Shake & Recoil
+  scopeAdjusting = false;
   private recoilP = 0;
   private recoilY = 0;
   private shake = 0;
@@ -556,7 +564,7 @@ void main(){
         reserve: 150,
         hipSpread: 0.008,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        pattern: weaponById('m4a1')!.base.pattern.map(p=>[...p] as [number,number]),
         adsFov: 56,
         tacReload: 2.1,
         emptyReload: 2.7,
@@ -573,7 +581,7 @@ void main(){
         reserve: 120,
         hipSpread: 0.010,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        pattern: weaponById('ak47')!.base.pattern.map(p=>[...p] as [number,number]),
         adsFov: 58,
         tacReload: 2.4,
         emptyReload: 3.0,
@@ -590,7 +598,7 @@ void main(){
         reserve: 48,
         hipSpread: 0.006,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        pattern: weaponById('m1911')!.base.pattern.map(p=>[...p] as [number,number]),
         adsFov: 64,
         tacReload: 1.5,
         emptyReload: 1.8,
@@ -607,7 +615,7 @@ void main(){
         reserve: 25,
         hipSpread: 0.045,
         adsSpread: 0.000,
-        pattern: [[0, 0]],
+        pattern: weaponById('awm')!.base.pattern.map(p=>[...p] as [number,number]),
         adsFov: 22,
         tacReload: 2.25,
         emptyReload: 2.7,
@@ -630,6 +638,13 @@ void main(){
         emptyReload: 2.3,
       },
     ];
+    this.weapons.forEach((weapon,index)=>{
+      const entry=weaponById((['m4a1','ak47','m1911','awm','mp7'] as WeaponId[])[index])!;
+      weapon.pattern=entry.base.pattern.map(p=>[...p] as [number,number]);
+      weapon.recoilBase=weapon.recoilMul=entry.base.recoilMul;
+      weapon.adsSpread=entry.base.adsSpread;
+      if(entry.scoped){weapon.reticle='sniper';weapon.scopePower=weapon.scopeMinPower=weapon.scopeMaxPower=6;}
+    });
     this.mags = [30, 30, 8, 5, 40];
     this.reserves = [Infinity, Infinity, Infinity, Infinity, Infinity];
     this.difficultyId = difficulty;
@@ -763,6 +778,7 @@ void main(){
   // ==================== INPUT HANDLING ====================
   private onKeyDown = (e: KeyboardEvent) => {
     if (e.repeat || this.paused || this.dead || this.ended || !this.started || document.pointerLockElement !== this.canvas) return;
+    if (this.scopeAdjusting) return;
     this.keys.add(e.code);
     if (e.code === 'Space' || e.code === 'KeyX') e.preventDefault();
 
@@ -774,7 +790,9 @@ void main(){
     if (e.code === 'Digit5') this.switchWeapon(4);
     if (e.code === 'KeyQ' && !e.repeat) this.qDownT = performance.now();
     if (e.code === 'KeyB') this.fireMasterkey();
+    if (e.code === 'KeyV' && this.variableScope() && this.ads > .65) { this.beginScopeAdjustment(); return; }
     if (e.code === 'KeyV' && this.def().lpvo) this.def().lpvoHigh = !this.def().lpvoHigh;
+    if (this.ads > .65 && (e.code === 'BracketLeft' || e.code === 'BracketRight')) this.setScopePower((this.def().scopePower ?? 6) + (e.code === 'BracketRight' ? .2 : -.2));
 
     // GRENADES
     if (e.code === 'KeyG' && this.frags > 0 && !this.cooking && this.reloadT < 0) {
@@ -831,15 +849,16 @@ void main(){
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    if (document.pointerLockElement !== this.canvas || this.paused || this.dead) return;
-    const sens = this.mouseSens * (this.ads > 0.5 ? this.adsSensMul : 1);
+    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
+    const zoomSensitivity = Math.tan(this.adsFovEff()*Math.PI/360)/Math.tan(this.fovSetting*Math.PI/360);
+    const sens = this.mouseSens * (this.ads > 0.5 ? this.adsSensMul * Math.max(.12,zoomSensitivity) : 1);
     this.yaw -= e.movementX * sens;
     this.pitch -= (this.invertY ? -e.movementY : e.movementY) * sens;
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
   };
 
   private onMouseDown = (e: MouseEvent) => {
-    if (document.pointerLockElement !== this.canvas || this.paused || this.dead) return;
+    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
     if (e.button === 0) {
       this.triggerHeld = true;
       this.tryFire();
@@ -851,7 +870,7 @@ void main(){
   };
 
   private onMouseDown2 = (e: MouseEvent) => {
-    if (e.button === 2 && !this.paused && !this.dead && !this.ended && document.pointerLockElement === this.canvas) {
+    if (e.button === 2 && !this.scopeAdjusting && !this.paused && !this.dead && !this.ended && document.pointerLockElement === this.canvas) {
       // ADS toggle mode: MMB click keeps the scope in until the next MMB click.
       const want = this.adsToggle ? !this.rmb : true;
       this.rmb = want;
@@ -864,7 +883,13 @@ void main(){
   };
 
   private onMouseUp2 = (e: MouseEvent) => {
-    if (e.button === 2 && !this.adsToggle) this.rmb = false;
+    if (e.button === 2 && !this.adsToggle && !this.scopeAdjusting) this.rmb = false;
+  };
+
+  private onScopeWheel = (e: WheelEvent) => {
+    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.ended || this.ads < .65 || !this.variableScope() || this.cantedActive()) return;
+    e.preventDefault();
+    this.setScopePower((this.def().scopePower ?? 6) - Math.sign(e.deltaY) * .2);
   };
 
   private onContext = (e: Event) => e.preventDefault();
@@ -878,6 +903,7 @@ void main(){
     window.addEventListener('mousedown', this.onMouseDown2);
     window.addEventListener('mouseup', this.onMouseUp2);
     window.addEventListener('contextmenu', this.onContext);
+    window.addEventListener('wheel', this.onScopeWheel, { passive:false });
   }
 
   async requestLock() {
@@ -1278,7 +1304,7 @@ void main(){
   private def() { return this.weapons[this.cur]; }
 
   private switchWeapon(i: number) {
-    if (i === this.cur || this.switchT >= 0 || this.reloadT >= 0 || i >= this.weapons.length || i < 0) return;
+    if (this.scopeAdjusting || i === this.cur || this.switchT >= 0 || this.reloadT >= 0 || i >= this.weapons.length || i < 0) return;
     this.switchT = 0;
     this.cooking = false;
     const from = this.cur;
@@ -1288,6 +1314,7 @@ void main(){
       this.weapons[from].model.group.visible = false;
       this.lastCur = from;
       this.cur = i;
+      this.shotIdx = 0; this.shotResetT = 0;
       this.weapons[i].model.group.visible = true;
     }, ms);
   }
@@ -1373,9 +1400,9 @@ void main(){
     audio.slideDrag(this.surfaceAt());
   }
 
-  // ==================== 100% ACCURATE LASER BALLISTICS ====================
+  // ==================== AIMED BALLISTICS / RECOIL ====================
   private tryFire() {
-    if (this.paused || this.dead || this.ended || !this.started) return;
+    if (this.paused || this.dead || this.ended || !this.started || this.scopeAdjusting) return;
     if (this.fireCD > 0 || this.reloadT >= 0 || this.switchT >= 0 || this.cooking) return;
     if (this.sprinting || this.sprintToFireDelay > 0) return; // Cannot fire during sprint
     if (this.sliding) return; // Cannot fire during slide
@@ -1398,34 +1425,39 @@ void main(){
       this.pumpT = 0.5;
       setTimeout(() => { if (!this.disposed && !this.ended) audio.pump(); }, 200);
     }
-    if (d.audioTag === 'pistol' || d.audioTag === 'scar') this.slideKick = 1;
+    if (d.audioTag === 'pistol' || d.audioTag === 'deagle' || d.audioTag === 'scar') this.slideKick = 1;
 
     // 1. CALCULATE EXACT BULLET TRAJECTORY FIRST BEFORE RECOIL
-    // In ADS: spread is 0.000 — 100% exact center of your sight picture
+    // Small calibrated dispersion in ADS; recoil moves the camera/aim between shots.
     const isAds = this.ads > 0.65;
-    let spread = isAds ? 0.0 : THREE.MathUtils.lerp(d.hipSpread, d.adsSpread, this.ads);
+    let spread = THREE.MathUtils.lerp(d.hipSpread, d.adsSpread, this.ads) + (d.bloomNow ?? 0) * (isAds ? .45 : 1);
+    if (this.bipodDeployed()) spread *= .72;
     if (!isAds) {
       if (this.inputMoving()) spread *= 1.2;
       if (this.crouched) spread *= 0.7;
     }
     this.spreadNow = spread;
 
+    const aimDirection = this.camera.getWorldDirection(new THREE.Vector3());
+    const cameraRight = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld,0);
+    const cameraUp = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld,1);
+    const origin = this._t2.copy(this.camera.position), dir = this._t1;
+    let shotHit = false;
+    for (let pellet=0;pellet<(d.pellets ?? 1);pellet++) {
     // Bullet = exact screen-center ray. Origin MUST be the real camera position
     // (includes lean offset, bob, shake) — using feet+eyeH here was offsetting
     // every shot sideways whenever leaning or moving.
-    const dir = this._t1;
-    this.camera.getWorldDirection(dir);
-    if (spread > 0.0001) {
-      dir.x += (Math.random() - 0.5) * spread * (d.spreadX ?? 1);
-      dir.y += (Math.random() - 0.5) * spread * (d.spreadY ?? 1);
-      dir.z += (Math.random() - 0.5) * spread;
+    dir.copy(aimDirection);
+    if (spread > 0) {
+      const angle = Math.random()*Math.PI*2, radius = Math.sqrt(Math.random()) * spread;
+      dir.addScaledVector(cameraRight, Math.cos(angle)*radius*(d.spreadX??1));
+      dir.addScaledVector(cameraUp, Math.sin(angle)*radius*(d.spreadY??1));
       dir.normalize();
     }
 
     // When leaning, skip nearby world geometry so peeking around a corner works.
     // Recomputed from the LIVE smoothed lean every shot — never stale.
     const skip = 0.55 + Math.abs(this.lean) * 0.95;
-    const origin = this._t2.copy(this.camera.position);
     this.raycaster.set(origin, dir);
     this.raycaster.far = 300;
     const rawHits = this.raycaster.intersectObjects(this.hittables, false);
@@ -1462,7 +1494,7 @@ void main(){
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
-        this.hits++;
+        if (!shotHit) { this.hits++; shotHit = true; }
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         // Headshot "dink" rings on EVERY head hit — the reward cue lands even
@@ -1520,28 +1552,17 @@ void main(){
       this.effects.tracer(muzzleWorld, origin.clone().addScaledVector(dir, 140));
     }
 
-    // 2. NOW APPLY REALISTIC RECOIL AFTER THE BULLET HAS BEEN FIRED.
-    // The muzzle genuinely climbs: part of the kick is PERMANENT pitch the player
-    // must pull down against, part is a visual spring that recovers on its own.
-    // Scoped fire is deliberately NOT a laser — magnification amplifies how far
-    // the reticle appears to jump, so high-zoom glass punishes fast follow-ups.
-    const pat = d.pattern[Math.min(this.shotIdx, d.pattern.length - 1)];
-    this.shotIdx++;
-    // ADS steadies the gun only slightly; a scope's tighter FOV makes the same
-    // angular kick LOOK bigger, which is exactly how real magnified recoil reads.
-    const adsRecoilReduction = isAds ? 0.88 : 1.0;
-    const zoomKick = isAds ? Math.max(1, Math.sqrt(70 / Math.max(12, this.adsFovEff())) ) : 1;
-    const recoilMul = (d.recoilMul ?? 1) * (this.bipodDeployed() ? 0.35 : 1) * (this.crouched ? 0.85 : 1);
-    const kickP = pat[0] * 0.0085 * adsRecoilReduction * recoilMul;
-    const kickY = pat[1] * 0.0055 * adsRecoilReduction * recoilMul * (d.recoilYawMul ?? 1);
-    // Horizontal jitter so long bursts wander instead of tracing a clean line.
-    const jitterY = (Math.random() - 0.5) * kickP * 0.35;
-    this.pitch += kickP * 0.55;
-    this.yaw += (kickY + jitterY) * 0.55;
-    this.recoilP += kickP * 0.75 * zoomKick;
-    this.recoilY += (kickY + jitterY) * 0.7 * zoomKick;
-    // Big-bore single shots (AWM, Deagle, SPAS) also shove the whole camera.
-    if (!d.auto && kickP > 0.02) this.shake = Math.min(1, this.shake + kickP * 9);
+    }
+    if (d.bloomSpec) d.bloomNow = Math.min(d.bloomSpec.max,(d.bloomNow??0)+d.bloomSpec.perShot);
+
+    const kick = recoilImpulse({ pattern:d.pattern, shot:this.shotIdx++, recoil:d.recoilMul??1,
+      baseRecoil:d.recoilBase??1, horizontal:d.recoilYawMul??1, aiming:isAds,
+      crouched:this.crouched, supported:this.bipodDeployed(), random:Math.random() });
+    this.pitch = THREE.MathUtils.clamp(this.pitch + kick.aimPitch,-1.45,1.45);
+    this.yaw += kick.aimYaw;
+    this.recoilP += kick.springPitch;
+    this.recoilY += kick.springYaw;
+    if (!d.auto && kick.rise > .025) this.shake = Math.min(1,this.shake + kick.rise * 3);
     this.vmKick = 1;
     this.vmKickRot = 1;
 
@@ -1584,6 +1605,7 @@ void main(){
   }
 
   private buildLoadoutWeapon(build: WeaponBuild): WeaponDef {
+    build = sanitizeBuild(build);
     const id: WeaponId = build.weapon;
     const entry = weaponById(id) ?? weaponById('m4a1')!;
     const mods = Object.values(build.attachments)
@@ -1612,14 +1634,19 @@ void main(){
       pattern: stats.pattern.map(pat => [...pat] as [number, number]),
       adsFov: stats.adsFov, tacReload: stats.tacReload, emptyReload: stats.emptyReload,
       falloffStart: stats.falloffStart, falloffMul: stats.falloffMul,
-      adsTime: stats.adsTime, recoilMul: stats.recoilMul,
+      adsTime: stats.adsTime, recoilMul: stats.recoilMul, recoilBase:entry.base.recoilMul,
       noiseRadius: stats.noiseRadius, swapTime: stats.swapTime,
       spreadX: stats.spreadXMul, spreadY: stats.spreadYMul, flashMul: stats.flashMul,
       swayMul: stats.swayMul, swayMulCrouched: stats.swayMulCrouched,
       recoilYawMul: stats.recoilYawMul, moveSpeedMul: stats.moveSpeedMul,
       suppressed: stats.suppressed,
       boltAction: id === 'awm', audioTag: LOADOUT_AUDIO[id], masterkey: stats.masterkey,
-      reticle: stats.reticle, lpvo: stats.lpvo, pumpShotgun: id === 'spas12',
+      reticle: stats.reticle === 'none' && entry.scoped ? 'sniper' : stats.reticle,
+      scopePower: stats.reticle === 'none' && entry.scoped ? 6 : stats.scopePower,
+      scopeMaxPower: stats.reticle === 'none' && entry.scoped ? 6 : stats.scopePower,
+      scopeMinPower: stats.reticle === 'none' && entry.scoped ? 6 : stats.scopeMinPower,
+      canted:stats.canted, pellets:entry.pellets, bloomSpec:entry.bloom, bloomNow:0,
+      lpvo: stats.lpvo, pumpShotgun: id === 'spas12',
       laser: stats.laser, flashlight: stats.flashlight,
     };
   }
@@ -1631,10 +1658,30 @@ void main(){
     this.onEvent({ type: 'cash', amount, reason, total: this.cashEarned });
   }
 
-  /** Effective ADS zoom: LPVO on high power nearly doubles magnification. */
+  private cantedActive(): boolean { return !!this.def().canted && this.keys.has('KeyT') && (this.def().scopeMaxPower??1)>1; }
+  private variableScope(): boolean { const w=this.def(); return (w.scopeMaxPower??1)>(w.scopeMinPower??1); }
+
+  /** The scope keeps its reticle/identity at every zoom setting. */
   private adsFovEff(): number {
-    const w = this.def();
-    return w.lpvo && w.lpvoHigh ? w.adsFov * 0.55 : w.adsFov;
+    const w=this.def();
+    if (this.cantedActive()) return this.fovSetting;
+    if (w.scopePower !== undefined && w.reticle !== 'none') return magnificationFov(this.fovSetting,w.scopePower);
+    return w.lpvo && w.lpvoHigh ? w.adsFov*.55 : w.adsFov;
+  }
+  setScopePower(power: number): void {
+    if (this.dead || this.ended || !this.variableScope()) return;
+    const w=this.def(); w.scopePower=clampScopePower(power,w.scopeMinPower!,w.scopeMaxPower!);
+  }
+  beginScopeAdjustment(): void {
+    if (!this.variableScope() || this.ads<.65 || this.paused || this.dead || this.ended || this.cantedActive()) return;
+    this.scopeAdjusting=true; this.keys.clear(); this.qDownT=-1; this.triggerHeld=false; this.rmb=true;
+    if (document.pointerLockElement===this.canvas) document.exitPointerLock();
+  }
+  cancelScopeAdjustment(): void { this.scopeAdjusting=false; this.triggerHeld=false; this.rmb=false; }
+  async finishScopeAdjustment(): Promise<void> {
+    if (this.dead || this.ended || this.paused) { this.cancelScopeAdjustment(); return; }
+    await this.requestLock();
+    if (document.pointerLockElement===this.canvas) { this.scopeAdjusting=false; this.rmb=true; }
   }
 
   /** Bipod counts as deployed when prone and still with legs fitted (hip or ADS). */
@@ -2208,9 +2255,9 @@ void main(){
 
     // Recoil recovery — a real spring, not an instant snap. The sight settles
     // over ~140 ms so sustained fire visibly stacks climb before recovery wins.
-    const rec = Math.min(1, dt / 0.14);
-    this.recoilP *= 1 - rec;
-    this.recoilY *= 1 - rec;
+    const rec = recoilRecovery(dt);
+    this.recoilP *= rec; this.recoilY *= rec;
+    for (const weapon of this.weapons) if (weapon.bloomSpec) weapon.bloomNow=Math.max(0,(weapon.bloomNow??0)-weapon.bloomSpec.decay*dt);
 
     // Staged reload
     if (this.reloadT >= 0) {
@@ -2292,10 +2339,13 @@ void main(){
       eye.y += (Math.random() - 0.5) * this.shake * 0.14 * k;
     }
 
+    const weapon=this.def(), time=performance.now()/1000;
+    const sway=(this.ads>.5 ? this.ads : 0) * (weapon.swayMul??1) * (this.crouched ? (weapon.swayMulCrouched??1)*.65 : 1) * (this.bipodDeployed() ? .55 : 1);
+    const swayPitch=Math.sin(time*1.53)*.00095*sway, swayYaw=Math.sin(time*1.17+.7)*.00065*sway;
     this.camera.position.copy(eye);
     this.camera.rotation.set(
-      this.pitch + this.recoilP + (this.sprinting ? -0.02 : 0) + (this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.05 * this.motionBlurAmount : 0),
-      this.yaw + this.recoilY,
+      this.pitch + this.recoilP + swayPitch + (this.sprinting ? -0.02 : 0) + (this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.05 * this.motionBlurAmount : 0),
+      this.yaw + this.recoilY + swayYaw,
       roll
     );
 
@@ -2329,18 +2379,27 @@ void main(){
     // Scope overlay owns the whole view; receiver rings/arms must not intrude.
     // Threshold 45° covers 3x/4x/6x glass — the old <30 cut left the 4x (30°)
     // player staring into the BACK of the scope tube model while zoomed.
-    const hideInAds = inAds && this.adsFovEff() < 45;
+    const canted = !!d.canted && !!this.keys?.has('KeyT') && (d.scopeMaxPower??1)>1;
+    const hideInAds = inAds && !canted && ((d.scopePower??1)>1 || (d.scopePower===undefined && this.adsFovEff()<45));
     g.visible = !hideInAds;
     this.muzzleFlash.visible = !hideInAds;
     const hip = { x: 0.22, y: -0.19, z: -0.38, ry: 0.035 };
     const opticPart = d.model.attached.optic;
-    const adsY = -(d.model.sightY + ((opticPart?.userData.sightYOffset as number | undefined) ?? 0)) * S;
-    let px = THREE.MathUtils.lerp(hip.x, 0, a);
+    let adsX = 0;
+    let adsY = -(d.model.sightY + ((opticPart?.userData.sightYOffset as number | undefined) ?? 0)) * S;
+    const cantRoll=canted ? Math.PI/4 : 0;
+    const cantAim=d.model.attached.rail?.userData.aim as THREE.Object3D | undefined;
+    if (canted && cantAim) {
+      g.updateWorldMatrix(true,true);
+      const aim=g.worldToLocal(cantAim.getWorldPosition(new THREE.Vector3())).applyAxisAngle(new THREE.Vector3(0,0,1),cantRoll);
+      adsX=-aim.x*S; adsY=-aim.y*S;
+    }
+    let px = THREE.MathUtils.lerp(hip.x, adsX, a);
     let py = THREE.MathUtils.lerp(hip.y, adsY, a);
     let pz = THREE.MathUtils.lerp(hip.z, -0.34, a);
     let rx = 0;
     let ry = THREE.MathUtils.lerp(hip.ry, 0, a);
-    let rz = 0;
+    let rz = cantRoll*a;
 
     // Idle sway
     const swayM = (1 - a * 0.95) * (d.swayMul ?? 1) * (this.crouched ? (d.swayMulCrouched ?? 1) : 1);
@@ -2400,9 +2459,9 @@ void main(){
         const slideP = rt > 0.78 ? Math.sin(Math.min(1, (rt - 0.78) / 0.2) * Math.PI) : 0;
         d.model.chargingHandle.position.z = slideP * 0.04;
       } else if (tag === 'lmg') {
-        // M249: heavy — gun sags, cover opens, belt gets laid in.
-        py -= dip * 0.15 * S; rz += dip * 0.38; rx -= dip * 0.65;
-        d.model.chargingHandle.position.y = dip * 0.05; // feed cover pops
+        // Cradle the SAW in frame so its hinged cover and feed tray stay readable.
+        py -= dip * 0.04 * S; rz += dip * 0.30; rx += dip * 0.18;
+        d.model.chargingHandle.rotation.x = -dip * 1.15; // cover stays on its front hinge
       } else if (tag === 'shotgun') {
         // SPAS: cradled low and rolled, shells thumbed into the tube.
         py -= dip * 0.07 * S; rx -= dip * 0.30; rz += dip * 0.30;
@@ -2426,7 +2485,8 @@ void main(){
     } else {
       magObj.position.y = magHomeY;
       if (d.audioTag === 'ak') { magObj.position.z = magHomeZ; magObj.rotation.x = 0; }
-      if (d.audioTag === 'lmg') d.model.chargingHandle.position.y *= 1 - Math.min(1, dt * 10);
+      if (d.audioTag === 'lmg') d.model.chargingHandle.rotation.x *= 1 - Math.min(1, dt * 10);
+      if ((d.boltAction ?? this.cur === 3) && this.boltCycle <= 0) d.model.chargingHandle.position.z = (d.model.chargingHandle.userData.homeZ as number | undefined) ?? 0;
       if (d.model.lArm) {
         d.model.lArm.position.multiplyScalar(1 - Math.min(1, dt * 14));
         d.model.lArm.rotation.x *= 1 - Math.min(1, dt * 14);
@@ -2449,11 +2509,8 @@ void main(){
     // Bipod legs swing down when prone-ADS (deployed), fold otherwise.
     const legs = d.model.attached.underbarrel?.userData.legs as THREE.Object3D[] | undefined;
     if (legs) {
-      const open = this.bipodDeployed() ? 0.12 : 1.25;
-      for (const [li, leg] of legs.entries()) {
-        const want = li === 0 ? -open : open;
-        leg.rotation.z += (want - leg.rotation.z) * Math.min(1, dt * 10);
-      }
+      const folded = this.bipodDeployed() ? 0 : Math.PI / 2;
+      for (const leg of legs) leg.rotation.x += (folded - leg.rotation.x) * Math.min(1, dt * 10);
     }
 
     // Pump stroke: the whole gun dips and rolls as the forend cycles.
@@ -2468,9 +2525,9 @@ void main(){
     }
     // Reciprocating slide / bolt (pistols + SCAR): snap back, spring home.
     // (Skipped mid-reload — the reload keyframes own the slide then.)
-    if ((d.audioTag === 'pistol' || d.audioTag === 'scar') && this.reloadT < 0) {
+    if ((d.audioTag === 'pistol' || d.audioTag === 'deagle' || d.audioTag === 'scar') && this.reloadT < 0) {
       this.slideKick = Math.max(0, this.slideKick - dt * 9);
-      d.model.chargingHandle.position.z = this.slideKick * this.slideKick * 0.038;
+      d.model.chargingHandle.position.z = ((d.model.chargingHandle.userData.homeZ as number | undefined) ?? 0) + this.slideKick * this.slideKick * 0.038;
     }
 
     g.position.set(px, py, pz);
@@ -2697,6 +2754,7 @@ void main(){
     if (!p && this.graphicsLost) return;
     this.paused = p;
     if (p) {
+      this.cancelScopeAdjustment();
       this.keys.clear();
       this.triggerHeld = false;
       this.rmb = false;
@@ -2729,11 +2787,13 @@ void main(){
       secondaryWeapon: (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0] : this.weapons[this.cur === 2 ? 0 : 2])?.name ?? '',
       heldSlot: (this.weapons.length === 2 ? this.cur === 0 : this.cur !== 2) ? 'primary' : 'secondary',
       bipodDeployed: this.bipodDeployed(),
-      reticle: this.def().lpvo
-        ? (this.def().lpvoHigh ? 'sniper' : 'acog')
-        // Deep zoom always gets the full scope picture (the gun model hides below 30°).
-        : this.adsFovEff() < 30 ? 'sniper' : (this.def().reticle ?? 'none'),
+      reticle: this.cantedActive() ? 'none' : this.def().reticle ?? (this.cur===3 ? 'sniper' : 'none'),
       zoomFov: this.adsFovEff(),
+      scopePower: this.cantedActive() ? 1 : this.def().scopePower ?? 1,
+      scopeMinPower: this.def().scopeMinPower ?? 1,
+      scopeMaxPower: this.def().scopeMaxPower ?? 1,
+      scopeAdjusting: this.scopeAdjusting,
+      canted: this.cantedActive(),
       lpvoHigh: this.def().lpvoHigh ?? false,
       pumping: this.pumpT > 0,
       reloading: this.reloadT >= 0,
@@ -2795,6 +2855,7 @@ void main(){
     window.removeEventListener('mousedown', this.onMouseDown2);
     window.removeEventListener('mouseup', this.onMouseUp2);
     window.removeEventListener('contextmenu', this.onContext);
+    window.removeEventListener('wheel', this.onScopeWheel);
     window.removeEventListener('resize', this.resize);
     this.canvas.removeEventListener('webglcontextlost',this.onGraphicsLost);
     this.canvas.removeEventListener('webglcontextrestored',this.onGraphicsRestored);

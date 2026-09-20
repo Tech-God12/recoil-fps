@@ -47,8 +47,10 @@ test('guns stay inside the measured render budgets', () => {
     const model = WEAPON_BUILDERS[entry.id]();
     const { draws, triangles } = geometryBudget(model.group);
     assert.ok(draws <= 44, `${entry.id}: ${draws} draws over budget`);
-    assert.ok(triangles <= 12000, `${entry.id}: ${Math.round(triangles)} tris over budget`);
-    const floor = entry.slot === 'primary' ? 5000 : 2500;
+    // Hero-detail budget: curved furniture, cut openings and multi-segment bevels.
+    // Draw calls stay at the original cap; tiny hardware is adaptively tessellated.
+    assert.ok(triangles <= 48000, `${entry.id}: ${Math.round(triangles)} tris over budget`);
+    const floor = entry.slot === 'primary' ? 20000 : 10000;
     assert.ok(triangles >= floor, `${entry.id}: ${Math.round(triangles)} tris under richness floor`);
   }
 });

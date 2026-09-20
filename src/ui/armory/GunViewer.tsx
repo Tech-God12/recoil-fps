@@ -4,6 +4,8 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { WEAPON_BUILDERS, applySkin, type WeaponModel } from '../../game/models';
+import { weaponBounds } from '../../game/weapons/geometry';
+import { areWeaponTexturesReady } from '../../game/weapons/finish';
 import { applyBuild } from '../../game/attachments';
 import { weaponById, type AttachSlot, type WeaponId } from '../../game/economy/catalog';
 import type { WeaponBuild } from '../../game/economy/loadout';
@@ -43,7 +45,7 @@ interface ViewerApi {
   lastInput: number;
   transition: { group: THREE.Group; mats: THREE.MeshStandardMaterial[]; t: number } | null;
   incoming: { group: THREE.Group; t: number } | null;
-  flashes: { mats: THREE.MeshStandardMaterial[]; t: number; part: THREE.Object3D; homeY: number }[];
+  flashes: { mats: THREE.MeshStandardMaterial[]; t: number }[];
   ownedMats: THREE.Material[];
   slots: AttachSlot[];
   hotspotEls: Map<AttachSlot, HTMLButtonElement>;
@@ -54,8 +56,11 @@ interface ViewerApi {
 }
 
 const FIT_RADIUS = 0.42;
-// 19° half-fit (was 16°): the gun fills noticeably more of the enlarged stage.
-const BASE_DIST = FIT_RADIUS / Math.tan(THREE.MathUtils.degToRad(19));
+// Keep a complete assembly in frame even when the stage is narrow or a long can is fitted.
+function showcaseDistance(aspect: number): number {
+  const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(16)) * Math.min(1.35, aspect));
+  return FIT_RADIUS / Math.sin(halfFov) * 1.08;
+}
 
 function hideArms(model: WeaponModel): void {
   model.group.traverse(o => {
@@ -83,6 +88,48 @@ function disposeGroup(root: THREE.Object3D): void {
   });
 }
 
+function releaseMaterials(materials: THREE.Material[], api: ViewerApi): void {
+  for (const mat of materials) {
+    const index = api.ownedMats.indexOf(mat);
+    if (index < 0) continue;
+    mat.dispose(); api.ownedMats.splice(index, 1);
+  }
+}
+
+function disposeOwnedGroup(root: THREE.Object3D, api: ViewerApi): void {
+  const materials: THREE.Material[] = [];
+  collectMats(root, materials);
+  releaseMaterials(materials, api);
+  disposeGroup(root);
+}
+
+function fitWeapon(api: ViewerApi, model: WeaponModel): void {
+  const sphere = weaponBounds(model.group).getBoundingSphere(new THREE.Sphere());
+  model.group.position.copy(sphere.center).negate();
+  api.fitGroup.scale.setScalar(sphere.radius > 1e-4 ? FIT_RADIUS / sphere.radius : 1);
+  api.lastInput = performance.now();
+  api.renderer.shadowMap.needsUpdate = true;
+}
+
+function ownMaterials(root: THREE.Object3D, api: ViewerApi): void {
+  const clones = new Map<THREE.Material, THREE.Material>();
+  const own = (mat: THREE.Material) => {
+    if (api.ownedMats.includes(mat)) return mat;
+    if (!clones.has(mat)) {
+      const clone = mat.clone(); clones.set(mat, clone); api.ownedMats.push(clone);
+    }
+    return clones.get(mat)!;
+  };
+  root.traverse(o => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(own) : own(mesh.material);
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mesh.castShadow = !materials.every(mat => mat.transparent);
+    mesh.receiveShadow = true;
+  });
+}
+
 export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, onHotspot }: GunViewerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<ViewerApi | null>(null);
@@ -97,53 +144,65 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.35;
+    renderer.toneMappingExposure = 1.12;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
+    // Orbit changes the camera, not the gun/light: keep the static self-shadow map.
+    renderer.shadowMap.autoUpdate = false;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.domElement.classList.add('gv-canvas');
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog(0x120F0A, 4.5, 9.0);
-    // Lighting parity: identical rig to the in-game viewmodel (engine vmScene).
+    // Use the gameplay environment with extra fill to reveal small machined details.
     const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const room = new RoomEnvironment();
+    const environment = pmrem.fromScene(room, 0.04);
+    scene.environment = environment.texture;
     scene.environmentIntensity = 0.85;
-    pmrem.dispose();
+    room.dispose(); pmrem.dispose();
 
     const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
 
     scene.add(new THREE.HemisphereLight(0xF0F4FA, 0x8A7450, 1.2));
     const key = new THREE.DirectionalLight(0xFFF2D6, 2.2);
-    const fill = new THREE.DirectionalLight(0xFFE8C8, 0.9);
-    fill.position.set(-1.2, 1.8, -0.9);
+    const fill = new THREE.DirectionalLight(0xC5D7F1, 1.0);
+    fill.position.set(1.4, 1.0, -1.4);
     scene.add(fill);
-    key.position.set(1.5, 2.5, 0.8);
+    key.position.set(-1.6, 2.4, 1.2);
     key.castShadow = true;
-    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.bias = -0.00012;
+    key.shadow.normalBias = 0.0012;
     key.shadow.camera.left = -1; key.shadow.camera.right = 1;
     key.shadow.camera.top = 1; key.shadow.camera.bottom = -1;
     key.shadow.camera.far = 8;
     scene.add(key);
+    const rim = new THREE.DirectionalLight(0xD8E7F5, 1.5);
+    rim.position.set(0.6, 1.0, -2.0); scene.add(rim);
 
     // Showcase staging: brushed-steel podium, amber halo ring, grid skirt.
     const podium = new THREE.Mesh(
       new THREE.CylinderGeometry(0.52, 0.58, 0.06, 48),
-      new THREE.MeshStandardMaterial({ color: 0x25211C, roughness: 0.42, metalness: 0.55 }),
+      new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.88, metalness: 0.08 }),
     );
     podium.position.y = -0.49;
     podium.receiveShadow = true;
+    podium.visible = false; // Reference-style inspection: keep the weapon, not a giant plinth, in focus.
     scene.add(podium);
     const halo = new THREE.Mesh(
       new THREE.TorusGeometry(0.52, 0.006, 12, 72),
-      new THREE.MeshBasicMaterial({ color: 0xC89B5A }),
+      new THREE.MeshBasicMaterial({ color: 0xC89B5A, transparent: true, opacity: 0.35 }),
     );
+    halo.visible = false;
     halo.rotation.x = Math.PI / 2;
     halo.position.y = -0.458;
     scene.add(halo);
     const grid = new THREE.GridHelper(20, 20, 0x2A241C, 0x1A1610);
     grid.position.y = -0.521;
+    // The floor grid remains hidden: it competes with fine weapon details.
+    grid.visible = false;
     scene.add(grid);
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(12, 12),
@@ -152,6 +211,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.459;
     floor.receiveShadow = true;
+    floor.visible = false;
     scene.add(floor);
 
     const fitGroup = new THREE.Group();
@@ -159,13 +219,14 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
 
     const api: ViewerApi = {
       renderer, scene, camera, fitGroup, model: null,
-      yaw: 0.65, pitch: 0.18, targetYaw: 0.65, targetPitch: 0.18,
-      zoom: 1, targetZoom: 1, lastInput: performance.now() - 5000,
+      yaw: -1.10, pitch: 0.23, targetYaw: -1.10, targetPitch: 0.23,
+      zoom: 0.96, targetZoom: 0.96, lastInput: performance.now(),
       transition: null, incoming: null, flashes: [], ownedMats: [],
       slots: [], hotspotEls: new Map(), activeSlot: null, raf: 0,
       disposed: false, center: new THREE.Vector3(),
     };
     apiRef.current = api;
+    mount.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach(btn => api.hotspotEls.set(btn.dataset.slot as AttachSlot, btn));
 
     const resize = () => {
       const w = mount.clientWidth || 2;
@@ -212,7 +273,10 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       const rect = el.getBoundingClientRect();
       pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
       raycaster.setFromCamera(pointer, api.camera);
-      const hits = raycaster.intersectObject(api.fitGroup, true);
+      const hits = raycaster.intersectObject(api.fitGroup, true).filter(hit => {
+        for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (!o.visible || o.userData.arm) return false;
+        return true;
+      });
       if (!hits.length) return;
       api.fitGroup.updateMatrixWorld(true);
       let best: AttachSlot | null = null;
@@ -228,7 +292,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      api.targetZoom = THREE.MathUtils.clamp(api.targetZoom * Math.exp(e.deltaY * 0.0011), 0.7, 1.6);
+      api.targetZoom = THREE.MathUtils.clamp(api.targetZoom * Math.exp(e.deltaY * 0.0011), 0.55, 1.6);
       api.lastInput = performance.now();
     };
     el.addEventListener('pointerdown', down);
@@ -248,18 +312,20 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
 
-      if (now - api.lastInput > 4000 && !REDUCED_MOTION) api.targetYaw += dt * 0.15;
+      if (now - api.lastInput > 4000 && !REDUCED_MOTION) api.targetYaw += dt * 0.10;
       const k = Math.min(1, dt * 9);
       api.yaw += (api.targetYaw - api.yaw) * k;
       api.pitch += (api.targetPitch - api.pitch) * k;
       api.zoom += (api.targetZoom - api.zoom) * k;
-      const dist = BASE_DIST * api.zoom;
+      const dist = showcaseDistance(camera.aspect) * api.zoom;
       camera.position.set(
         Math.sin(api.yaw) * Math.cos(api.pitch) * dist,
         Math.sin(api.pitch) * dist,
         Math.cos(api.yaw) * Math.cos(api.pitch) * dist,
       );
       camera.lookAt(0, 0, 0);
+
+      if (api.transition || api.incoming) renderer.shadowMap.needsUpdate = true;
 
       // weapon-swap transition: old slides −X and fades, new slides in
       if (api.transition) {
@@ -270,7 +336,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
         for (const m of tr.mats) m.opacity = 1 - e;
         if (e >= 1) {
           scene.remove(tr.group);
-          disposeGroup(tr.group);
+          disposeOwnedGroup(tr.group, api);
           api.transition = null;
         }
       }
@@ -285,21 +351,18 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
         }
       }
 
-      // attach flash: the part drops in from above with a hot-orange emissive decay
+      // Seated highlight only: a fitted component never leaves its socket during feedback.
       for (let i = api.flashes.length - 1; i >= 0; i--) {
         const f = api.flashes[i];
         f.t += dt / 0.45;
         const e = Math.min(1, f.t);
-        const glow = 2.4 * (1 - e) * (1 - e);
+        const glow = 0.8 * (1 - e) * (1 - e);
         for (const m of f.mats) {
           m.emissive.setHex(0xff5c1a);
           m.emissiveIntensity = glow;
         }
-        const drop = 1 - (1 - Math.pow(1 - Math.min(1, f.t * 1.6), 3));
-        f.part.position.y = f.homeY + 0.22 * drop;
         if (e >= 1) {
           for (const m of f.mats) m.emissiveIntensity = 0;
-          f.part.position.y = f.homeY;
           api.flashes.splice(i, 1);
         }
       }
@@ -321,7 +384,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
           const behind = proj.z > 1;
           const x = (proj.x * 0.5 + 0.5) * w;
           const y = (-proj.y * 0.5 + 0.5) * h;
-          const op = behind ? 0 : THREE.MathUtils.clamp((facing + 0.45) / 0.55, 0.14, 1);
+          const op = behind ? 0 : THREE.MathUtils.clamp((facing + 0.65) / 0.8, 0.40, 1);
           btn.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
           btn.style.opacity = op.toFixed(2);
           btn.style.pointerEvents = !behind && facing > -0.3 ? 'auto' : 'none';
@@ -342,6 +405,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       el.removeEventListener('pointercancel', up);
       el.removeEventListener('wheel', wheel);
       if (api.model) disposeGroup(api.model.group);
+      if (api.transition) disposeGroup(api.transition.group);
       for (const m of api.ownedMats) m.dispose();
       grid.geometry.dispose();
       (grid.material as THREE.Material).dispose();
@@ -351,7 +415,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       (halo.material as THREE.Material).dispose();
       floor.geometry.dispose();
       (floor.material as THREE.Material).dispose();
-      scene.environment?.dispose();
+      environment.dispose();
       renderer.dispose();
       mount.removeChild(renderer.domElement);
       apiRef.current = null;
@@ -366,50 +430,17 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     const model = builder();
     hideArms(model);
     applyBuild(model, build);
-    // Clone materials per viewer so transition fades never touch shared WM.
-    const mats: THREE.Material[] = [];
-    collectMats(model.group, mats);
-    const clones = new Map<THREE.Material, THREE.Material>();
-    model.group.traverse(o => {
-      const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      if (Array.isArray(mesh.material)) {
-        mesh.material = mesh.material.map(m => {
-          if (!clones.has(m)) {
-            const c = m.clone();
-            clones.set(m, c);
-            api.ownedMats.push(c);
-          }
-          return clones.get(m)!;
-        });
-      } else {
-        const m = mesh.material as THREE.Material;
-        if (!clones.has(m)) {
-          const c = m.clone();
-          clones.set(m, c);
-          api.ownedMats.push(c);
-        }
-        mesh.material = clones.get(m)!;
-      }
-    });
-    model.group.traverse(o => {
-      const mesh = o as THREE.Mesh;
-      if (mesh.isMesh) mesh.castShadow = true;
-    });
-
-    // fit bounding sphere to FIT_RADIUS, centred on bbox centre
-    const box = new THREE.Box3().setFromObject(model.group);
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const scale = sphere.radius > 1e-4 ? FIT_RADIUS / sphere.radius : 1;
+    ownMaterials(model.group, api);
     const inner = new THREE.Group();
     inner.add(model.group);
-    model.group.position.copy(sphere.center).negate();
+    // A flash from the old gun must not retain or animate detached components.
+    api.flashes = [];
 
     // Rapid re-clicks: a previous outgoing gun may still be mid-fade. Drop it
     // immediately or it leaks into the scene as a stuck ghost skeleton.
     if (api.transition) {
       api.scene.remove(api.transition.group);
-      disposeGroup(api.transition.group);
+      disposeOwnedGroup(api.transition.group, api);
       api.transition = null;
     }
     const old = api.model;
@@ -444,9 +475,9 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       api.incoming = { group: inner, t: 0 };
     }
     api.fitGroup.clear();
-    api.fitGroup.scale.setScalar(scale);
-    api.fitGroup.position.set(0, -0.08, 0);
+    api.fitGroup.position.set(0, 0, 0);
     api.fitGroup.add(inner);
+    fitWeapon(api, model);
     api.model = model;
     api.slots = weaponById(weapon)?.slots ?? [];
     api.center.set(0, 0, 0);
@@ -456,24 +487,17 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
   useEffect(() => {
     const api = apiRef.current;
     if (!api?.model) return;
+    const previousMaterials: THREE.Material[] = [];
+    for (const part of Object.values(api.model.attached)) if (part) collectMats(part, previousMaterials);
+    // Feedback cannot move parts or keep the previous attachment alive after a fast swap.
+    for (const flash of api.flashes) for (const mat of flash.mats) mat.emissiveIntensity = 0;
+    api.flashes = [];
     applyBuild(api.model, build);
-    // freshly mounted parts inherit shared WM — clone so flash owns them
-    for (const key of Object.keys(api.model.attached) as AttachSlot[]) {
-      const part = api.model.attached[key];
-      part?.traverse(o => {
-        const mesh = o as THREE.Mesh;
-        if (!mesh.isMesh || Array.isArray(mesh.material)) return;
-        if (!api.ownedMats.includes(mesh.material as THREE.Material)) {
-          const c = (mesh.material as THREE.Material).clone();
-          mesh.material = c;
-          api.ownedMats.push(c);
-        }
-      });
-      part?.traverse(o => {
-        const mesh = o as THREE.Mesh;
-        if (mesh.isMesh) mesh.castShadow = true;
-      });
-    }
+    const retained: THREE.Material[] = [];
+    collectMats(api.model.group, retained);
+    releaseMaterials(previousMaterials.filter(mat => !retained.includes(mat)), api);
+    for (const part of Object.values(api.model.attached)) if (part) ownMaterials(part, api);
+    fitWeapon(api, api.model);
   }, [build]);
 
   // ---- finish (repaint after every rebuild or pick; idempotent) ----
@@ -496,7 +520,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       const m = mesh.material as THREE.MeshStandardMaterial;
       if ('emissive' in m && !mats.includes(m)) mats.push(m);
     });
-    if (mats.length) api.flashes.push({ mats, t: 0, part, homeY: part.position.y });
+    if (mats.length) api.flashes.push({ mats, t: 0 });
   }, [flashSlot?.key]);
 
   // ---- active hotspot ring ----
@@ -518,6 +542,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
             if (node) api.hotspotEls.set(s, node);
             else api.hotspotEls.delete(s);
           }}
+          data-slot={s}
           data-active={s === activeSlot}
           className="gv-hotspot"
           onClick={e => {
@@ -541,6 +566,8 @@ let thumbRenderer: THREE.WebGLRenderer | null = null;
 let thumbEnv: THREE.Texture | null = null;
 
 export function gunThumbnail(weapon: WeaponId): string {
+  // Never permanently cache an untextured first render on a cold connection.
+  if (!areWeaponTexturesReady()) return '';
   const hit = thumbCache.get(weapon);
   if (hit !== undefined) return hit;
   try {
@@ -559,21 +586,23 @@ export function gunThumbnail(weapon: WeaponId): string {
     scene.environmentIntensity = 0.85;
     scene.add(new THREE.HemisphereLight(0xF0F4FA, 0x8A7450, 1.2));
     const key = new THREE.DirectionalLight(0xFFF2D6, 2.2);
-    const fill = new THREE.DirectionalLight(0xFFE8C8, 0.9);
-    fill.position.set(-1.2, 1.8, -0.9);
+    const fill = new THREE.DirectionalLight(0xC5D7F1, 1.0);
+    fill.position.set(1.4, 1.0, -1.4);
     scene.add(fill);
-    key.position.set(1.5, 2.5, 0.8);
+    key.position.set(-1.6, 2.4, 1.2);
     scene.add(key);
     const model = (WEAPON_BUILDERS[weapon] ?? WEAPON_BUILDERS.m4a1)();
     hideArms(model);
     scene.add(model.group);
     // side profile: gun forward is −Z, so park the camera on +X
-    const box = new THREE.Box3().setFromObject(model.group);
+    const box = weaponBounds(model.group);
     const sphere = box.getBoundingSphere(new THREE.Sphere());
     model.group.position.copy(sphere.center).negate();
     const camera = new THREE.PerspectiveCamera(24, 2, 0.05, 50);
-    const dist = sphere.radius > 1e-4 ? (sphere.radius / Math.tan(THREE.MathUtils.degToRad(12))) * 1.02 : 2;
-    camera.position.set(dist, sphere.radius * 0.28, dist * 0.22);
+    const size = box.getSize(new THREE.Vector3());
+    const tan = Math.tan(THREE.MathUtils.degToRad(12));
+    const dist = Math.max(size.z / (4 * tan), size.y / (2 * tan)) * 1.20;
+    camera.position.set(-dist, dist * 0.12, dist * 0.16);
     camera.lookAt(0, 0, 0);
     model.group.rotation.y = 0;
     thumbRenderer.render(scene, camera);

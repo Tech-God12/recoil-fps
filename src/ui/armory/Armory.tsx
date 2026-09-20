@@ -11,6 +11,7 @@ import {
 } from '../../game/economy/profile';
 import { SKIN_CATALOG, skinById, type SkinId } from '../../game/economy/skins';
 import CashCounter from './CashCounter';
+import { weaponTexturesReady } from '../../game/weapons/finish';
 import GunViewer, { SLOT_LABELS, gunThumbnail } from './GunViewer';
 
 interface ArmoryProps {
@@ -46,9 +47,17 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
   const [thumbs, setThumbs] = useState<Partial<Record<WeaponId, string>>>({});
 
   useEffect(() => {
-    const next: Partial<Record<WeaponId, string>> = {};
-    for (const w of WEAPON_CATALOG) next[w.id] = gunThumbnail(w.id);
-    setThumbs(next);
+    let active = true;
+    void weaponTexturesReady.then(async () => {
+      // Yield between thumbnails so the hero and controls stay responsive on first entry.
+      for (const w of WEAPON_CATALOG) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        if (!active) return;
+        const thumbnail = gunThumbnail(w.id);
+        setThumbs(previous => ({ ...previous, [w.id]: thumbnail }));
+      }
+    });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -290,6 +299,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
                           {[1, 2, 3].map(i => <i key={i} className={i <= part.tier ? 'on' : ''} />)}
                         </span>
                       </div>
+                      <div className="pcard-fit mono">{part.family ?? "Dedicated fit"} · {part.compat.map(id=>weaponById(id)?.name).join(" / ")}</div>
                       <p className="pcard-desc">{part.desc}</p>
                       <div className="pcard-mods">
                         {part.pros.map(p => <span key={p} className="pro">+ {p}</span>)}

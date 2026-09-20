@@ -22,7 +22,7 @@ const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
-  bipodDeployed: false, reticle: 'none', zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
+  bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
@@ -189,23 +189,29 @@ export default function App() {
         engine.setPaused(false);
         changePhase('playing');
         setError('');
-      } else if (phaseRef.current === 'playing') {
+      } else if (phaseRef.current === 'playing' && !engine.scopeAdjusting) {
         engine.setPaused(true);
         setHud(engine.hud());
         changePhase('paused');
       }
     };
-    const lockError = () => { engineRef.current?.setPaused(true); setError('Mouse capture was blocked. Select Resume to try again.'); };
+    const lockError = () => { engineRef.current?.setPaused(true); if(engineRef.current)setHud(engineRef.current.hud()); changePhase('paused'); setError('Mouse capture was blocked. Select Resume to try again.'); };
     const blur = () => {
       if (phaseRef.current !== 'playing') return;
       engineRef.current?.setPaused(true);
+      if(engineRef.current)setHud(engineRef.current.hud());
       changePhase('paused');
       if (document.pointerLockElement) document.exitPointerLock();
     };
+    const scopeEscape = (e: KeyboardEvent) => {
+      if(e.code==='Escape' && engineRef.current?.scopeAdjusting){ engineRef.current.setPaused(true); setHud(engineRef.current.hud()); changePhase('paused'); }
+    };
+    window.addEventListener('keydown',scopeEscape);
     document.addEventListener('pointerlockchange', lockChanged);
     document.addEventListener('pointerlockerror', lockError);
     window.addEventListener('blur', blur);
     return () => {
+      window.removeEventListener('keydown',scopeEscape);
       document.removeEventListener('pointerlockchange', lockChanged);
       document.removeEventListener('pointerlockerror', lockError);
       window.removeEventListener('blur', blur);
@@ -282,7 +288,7 @@ export default function App() {
   return (
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
-      {(phase === 'playing' || phase === 'paused') && <Hud hud={hud} s={settings} fx={fx} />}
+      {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
       {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={deploy} onMenu={quit} onArmory={() => openArmory('results')} />}

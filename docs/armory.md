@@ -47,9 +47,11 @@ key was taken. The menu legend and onboarding strip document both beats.
   `stats.ts` (resolution; flat mag adds apply before multipliers), `rewards.ts`
   (payouts, grades), `loadout.ts` (primary/secondary builds), `profile.ts`
   (wallet, per-weapon ownership, versioned persistence).
-- `src/game/models.ts` — 10 procedural builders. Each returns sockets (muzzle,
-  optic, magazine, underbarrel, stock, rail, barrel), removable stock-mesh groups,
-  and a clean `attached` map. Magazines carry `homeY/homeZ` for the reload dip.
+- `src/game/models.ts` — public facade for the 10 procedural builders in
+  `src/game/weapons/`. Each returns sockets (muzzle, optic, magazine, underbarrel,
+  stock, rail, barrel), removable factory assemblies, and a clean `attached` map.
+  Magazines carry `homeY/homeZ` for the reload dip. See [Weapon assemblies](weapon-models.md)
+  for geometry, mounting, animation and regression-check conventions.
 - `src/game/attachments.ts` — 32 part builders in socket space plus `attach` /
   `detach` / `applyBuild`. Muzzle parts reseat the muzzle anchor; barrel parts
   move the bore (cans follow); optics report `sightYOffset` for ADS alignment and
@@ -61,8 +63,8 @@ key was taken. The menu legend and onboarding strip document both beats.
 - `src/ui/armory/` — `Armory.tsx` (terminal: click-to-preview rail, explicit buy,
   fielded-loadout strip, finish picker), `GunViewer.tsx` (orbit viewer with
   socket hotspots, click-the-gun picking, full-color locked previews with a
-  lock note, attach fly-in, podium staging, and a light rig identical to the
-  in-game viewmodel), `CashCounter.tsx` (odometer).
+  lock note, seated attach pulse, podium staging, and the gameplay
+  environment with detail lighting and cached self-shadows), `CashCounter.tsx` (odometer).
 - `src/App.tsx`, `src/ui/Screens.tsx`, `src/ui/Hud.tsx` — armory phase, cash
   breakdown + OPEN ARMORY, cash counter/pops, weapon card, optic reticles.
 
@@ -91,7 +93,23 @@ choice applies on purchase. New finishes are data-only: one catalog entry with
 per-role coats for the metal/polymer/wood palette — arms, ammo, rubber, glass
 and emissive marks are never repainted.
 
-## Procedural gun models (iteration 4 rebuild)
+## Connected assembly rebuild
+
+The current models, mounting rules and geometry checks are documented in
+[Weapon assemblies](weapon-models.md). The iteration notes below describe earlier
+visual passes; current socket transforms are defined by the new builders.
+The reference-led detail pass adds sculpted furniture, rounded slides/guards,
+recessed mechanisms, textured blued metal, walnut and fine grip checkering.
+Textures are shared by clone-safe PBR materials; thumbnails wait for them to load.
+The SCAR has a tan magazine, the M249 a solid stock/olive ammo box, and the SPAS
+no longer carries the bright red factory shell saddle.
+The latest machining pass makes the M416 an independently modelled AR assembly,
+not a shorter/recoloured SCAR. Blind pockets, magazine channels and serrations are
+real removed geometry with cavity shading. The two rifles are also reviewed in a
+single neutral finish to check their structural distinction. The oversized plinth
+is hidden for unobstructed inspection.
+
+## Procedural gun models (iteration 4 — historical)
 
 All ten guns were rebuilt from reference silhouettes — M4 carry handle + KAC
 rail with vented handguard, AKM slant brake + ribbed dust cover, 1911 beavertail
@@ -129,15 +147,16 @@ is unchanged: parts bought in the armory still mount immediately.
 
 ## Measured deviations from the prompt draft
 
-- Draw calls run 30–41 per gun (merged bucket per material per subgroup), not ≤10;
-  triangles 3.0k–7.2k. Both are pinned by tests as regression budgets
-  (draws ≤ 44, tris 5k–12k primaries / 2.5k–12k secondaries).
+- Current factory models use 28–44 draws per gun (merged per material/assembly),
+  not ≤10; triangles 13.9k–47.2k including arms. The detail pass deliberately revises
+  the old 12k geometry cap to 48k, retaining the ≤44 draw cap. See the measured table
+  and quality-budget rationale in [Weapon assemblies](weapon-models.md).
 - Catalog totals $65,600 (prompt suggested $55–65k); the pacing intent holds at
   ~19–20 runs to full unlock.
 - Bipod "prone" is crouch + grounded + near-stationary; it works at hip and ADS.
 - Laser and flashlight are always on while fitted (no toggle key, no battery).
-- Slide animation covers pistols and the SCAR (reciprocating designs); the M249
-  cover pops vertically on reload rather than hinging; SPAS shell-loading is a
+- Slide animation covers both pistols and the SCAR (reciprocating designs). The
+  M249 cover now opens about its front hinge; SPAS shell-loading remains a
   forend pump plus timed shell clicks, not per-shell meshes.
 - Optic tubes and housings are genuinely see-through (open bores, front + rear
   lenses). Only the 3D aiming mark hides in ADS; the glass stays, and the HUD

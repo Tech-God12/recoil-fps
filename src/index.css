@@ -1275,3 +1275,29 @@ img { display: block; max-width: 100%; }
 /* ensure armory stage head is above watermark */
 .armory-stage-head { position: relative; z-index: 3; }
 
+
+/* Optics are identified by their hardware, not inferred from the current FOV. */
+.optic-overlay { position:absolute; inset:0; pointer-events:none; --optic-size:min(78vmin,640px); }
+.optic-aperture { position:absolute; left:50%; top:50%; width:var(--optic-size); height:var(--optic-size); transform:translate(-50%,-50%); border-radius:50%; box-shadow:0 0 0 150vmax rgba(5,7,7,.97),inset 0 0 0 10px #161d20,inset 0 0 0 13px #454f51,inset 0 0 24px 16px #080d10; }
+.optic-aperture-prism2 { box-shadow:0 0 0 150vmax rgba(8,10,10,.87),inset 0 0 0 7px #212a2d,inset 0 0 0 9px #60696b,inset 0 0 14px 9px #0b1115; }
+.optic-aperture-prism3 { box-shadow:0 0 0 150vmax rgba(7,9,10,.94),inset 0 0 0 9px #12191c,inset 0 0 0 12px #3f5056,inset 0 0 16px 13px #0c171b; }
+.optic-glass { position:absolute; left:50%; top:50%; width:var(--optic-size); height:var(--optic-size); transform:translate(-50%,-50%); border-radius:50%; overflow:hidden; }
+.optic-reticle { display:block; width:100%; height:100%; filter:drop-shadow(0 .4px .3px rgba(230,239,226,.55)); }
+.optic-power { position:absolute; left:50%; bottom:7%; transform:translateX(-50%); font-size:10px; letter-spacing:.18em; color:#c4d2cd; text-shadow:0 1px 3px #000; background:#0a12178c; padding:3px 9px; border-radius:2px; }
+.reflex-reticle { position:absolute; left:50%; top:50%; width:512px; height:512px; transform:translate(-50%,-50%); }
+.reflex-reticle .optic-reticle { filter:drop-shadow(0 0 2px #fc3b3459); }
+.canted-hint { position:absolute; left:50%; top:65%; transform:translateX(-50%); color:var(--bone); font-size:10px; letter-spacing:.12em; }
+.scope-zoom-panel { position:absolute; right:clamp(12px,4vw,60px); top:50%; transform:translateY(-50%); width:210px; padding:15px; border:1px solid #7388815e; border-radius:6px; background:linear-gradient(145deg,#161e20ee,#090f11f5); color:#e4ece7; font-family:var(--mono); pointer-events:auto; box-shadow:0 8px 36px #0007; }
+.scope-zoom-heading { display:flex; justify-content:space-between; align-items:center; font-size:10px; letter-spacing:.08em; margin-bottom:18px; }
+.scope-zoom-heading output { font-size:20px; color:#ebc28a; font-weight:700; }
+.scope-zoom-panel label { display:block; font-size:9px; letter-spacing:.15em; color:#96aca3; }
+.scope-zoom-panel input { display:block; width:100%; accent-color:#d7b37a; margin:14px 0 8px; cursor:ew-resize; }
+.scope-zoom-panel input:disabled { opacity:.8; cursor:default; }
+.scope-zoom-limits { display:flex; justify-content:space-between; font-size:8px; color:#a9b6b0; }
+.scope-zoom-panel small { display:block; font-size:9px; line-height:1.7; color:#9bacaa; margin-top:14px; }
+.scope-zoom-panel button { display:flex; align-items:center; justify-content:space-between; width:100%; margin-top:14px; border:1px solid #c5aa7770; border-radius:3px; background:#bc985923; color:#eedabd; font-size:10px; padding:9px 10px; cursor:pointer; }
+.scope-zoom-panel button:hover,.scope-zoom-panel button:focus-visible { background:#bc985948; outline:1px solid #e6c79a; }
+.scope-zoom-panel kbd { border:1px solid #9b927c77; padding:1px 5px; border-radius:2px; }
+.scope-zoom-panel.editing { border-color:#d8b877b0; }
+@media (max-width:800px) { .scope-zoom-panel { top:auto; bottom:80px; right:12px; transform:none; width:185px; padding:10px; } .scope-zoom-heading{margin-bottom:10px;} .scope-zoom-panel small{margin-top:8px;} }
+.pcard-fit { margin:7px 0 3px; font-size:9px; line-height:1.6; letter-spacing:.035em; color:var(--brass); }

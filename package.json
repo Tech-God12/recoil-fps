@@ -17,6 +17,7 @@
     "react-dom": "19.2.6",
     "tailwind-merge": "3.4.0",
     "three": "^0.185.1",
+    "three-bvh-csg": "^0.0.18",
     "three-mesh-bvh": "^0.9.14",
     "typescript-eslint": "^8.70.0"
   },

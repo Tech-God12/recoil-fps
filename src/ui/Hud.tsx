@@ -2,6 +2,7 @@
 import type { GameSettings, HudState } from '../game/engine';
 import { Reticle } from './Settings';
 import MissionObjective from './MissionObjective';
+import ScopeView, { type ScopeControls } from './ScopeView';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
@@ -14,7 +15,7 @@ export interface HudFx {
   missionBanner: { id: number; title: string; index: number } | null;
 }
 
-export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx: HudFx }) {
+export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx } & ScopeControls) {
   const lowHp = hud.hp < 35;
   const vig = hud.hp < 60 ? 1 - hud.hp / 60 : 0;
   const magPct = hud.magSize ? hud.mag / hud.magSize : 0;
@@ -41,7 +42,7 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
       {hud.mission && <MissionObjective mission={hud.mission} />}
 
       {/* ============ THREAT READOUT (slim — no centre ring clutter) ============ */}
-      {hud.nearest && hud.nearest.dist < 30 && (() => {
+      {hud.ads < .3 && hud.nearest && hud.nearest.dist < 30 && (() => {
         const n = hud.nearest;
         const hot = n.dist < 12;
         const color = hot ? 'var(--blood)' : 'var(--brass)';
@@ -113,110 +114,8 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>
       )}
-      {/* Magnified scope views — each zoom tier renders a DIFFERENT sight picture:
-          3x = compact prism w/ chevron, 4x = telescopic tube w/ BDC crosshair,
-          6x/AWM = full precision scope w/ fine mil-dot reticle + heavy tube mask. */}
-      {(() => {
-        if (hud.ads < 0.3) return null;
-        const fov = hud.zoomFov || 60;
-        const scoped = fov < 45; // 3x and tighter take over the screen
-        if (!scoped) return null;
-        const tier: '3x' | '4x' | '6x' = fov >= 34 ? '3x' : fov >= 25 ? '4x' : '6x';
-        const op = Math.min(1, (hud.ads - 0.3) / 0.4);
-        const r = tier === '3x' ? 230 : tier === '4x' ? 195 : 165; // visible circle radius px
-        return (
-          <>
-            <div className={`scope-mask scope-mask-${tier}`} style={{ opacity: op, ['--scope-r' as string]: `${r}px` }} />
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center" style={{ opacity: op }}>
-              {tier === '3x' ? (
-                /* 3x prism: thin ring, lit amber chevron + BDC ladder, open feel */
-                <div className="relative flex flex-col items-center justify-center" style={{ width: r * 2, height: r * 2 }}>
-                  <div className="absolute inset-0 rounded-full ring-2 ring-black/70" />
-                  <div className="acog-chev" style={{ marginTop: -6 }} />
-                  <div className="acog-bdc" />
-                  <div className="acog-bdc short" />
-                  <div className="acog-bdc short" />
-                  <span className="scope-tag mono">3.0×</span>
-                </div>
-              ) : tier === '4x' ? (
-                /* 4x telescopic: duplex crosshair, thick posts thinning to centre, BDC dots below */
-                <div className="relative flex items-center justify-center" style={{ width: r * 2, height: r * 2 }}>
-                  <div className="absolute inset-0 rounded-full ring-4 ring-black/80" />
-                  <div className="absolute h-[3px] bg-black/85" style={{ width: r * 0.62, left: 6 }} />
-                  <div className="absolute h-[3px] bg-black/85" style={{ width: r * 0.62, right: 6 }} />
-                  <div className="absolute w-[3px] bg-black/85" style={{ height: r * 0.62, top: 6 }} />
-                  <div className="absolute w-full h-px bg-black/80" />
-                  <div className="absolute h-full w-px bg-black/80" />
-                  {[10, 22, 36].map(offset => (
-                    <div key={offset} className="absolute rounded-full bg-black/80" style={{ width: 4, height: 4, transform: `translateY(${offset}px)` }} />
-                  ))}
-                  <div className="absolute w-1 h-1 rounded-full bg-[var(--blood)] shadow-[0_0_6px_var(--blood)]" />
-                  <span className="scope-tag mono">4.0×</span>
-                </div>
-              ) : (
-                /* 6x / AWM precision glass: fine mil-dot cross, stadia ticks, parallax shading */
-                <div className="relative flex items-center justify-center" style={{ width: r * 2, height: r * 2 }}>
-                  <div className="absolute inset-0 rounded-full shadow-[inset_0_0_50px_rgba(0,0,0,0.75)] ring-8 ring-black/90" />
-                  <div className="absolute rounded-full ring-1 ring-black/50" style={{ inset: 10 }} />
-                  <div className="absolute w-full h-px bg-black/85" />
-                  <div className="absolute h-full w-px bg-black/85" />
-                  {[-48, -32, -16, 16, 32, 48].map(offset => (
-                    <div key={`h${offset}`} className="absolute h-[5px] w-px bg-black/75" style={{ transform: `translateX(${offset}px)` }} />
-                  ))}
-                  {[-48, -32, -16, 16, 32, 48].map(offset => (
-                    <div key={`v${offset}`} className="absolute w-[5px] h-px bg-black/75" style={{ transform: `translateY(${offset}px)` }} />
-                  ))}
-                  {[16, 32, 48].map(offset => (
-                    <div key={`d${offset}`} className="absolute rounded-full bg-black/85" style={{ width: 3, height: 3, transform: `translateY(${offset}px)` }} />
-                  ))}
-                  <div className="absolute w-1.5 h-1.5 rounded-full bg-[var(--blood)] shadow-[0_0_9px_var(--blood)]" />
-                  <span className="scope-tag mono">6.0×</span>
-                </div>
-              )}
-            </div>
-          </>
-        );
-      })()}
-      {hud.ads >= 0.3 && !(hud.zoomFov && hud.zoomFov < 45) && (
-        <div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center"
-          style={{ opacity: Math.min(1, (hud.ads - 0.3) / 0.4) }}
-        >
-          {hud.reticle === 'dot' ? (
-            <div className="absolute w-[2px] h-[2px] rounded-full bg-[var(--olive)] shadow-[0_0_4px_var(--olive)]" />
-          ) : hud.reticle === 'holo' ? (
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <div className="absolute w-14 h-14 rounded-full border border-[var(--brass)]/90" />
-              <div className="absolute w-[3px] h-[3px] rounded-full bg-[var(--brass)] shadow-[0_0_5px_var(--brass)]" />
-            </div>
-          ) : hud.reticle === 'acog' ? (
-            <div className="relative w-10 h-20 flex flex-col items-center justify-start pt-2">
-              <div className="acog-chev" />
-              <div className="acog-bdc" />
-              <div className="acog-bdc short" />
-              <div className="acog-bdc short" />
-            </div>
-          ) : (
-            /* iron sights: a faint post-tip marker, NOT a red dot — optics are Armory parts */
-            <div className="relative w-9 h-9 flex items-center justify-center">
-              <div className="absolute w-[2px] h-[2px] rounded-full bg-white/70" />
-            </div>
-          )}
-        </div>
-      )}
-      {hud.canVault && (
-        <div className="absolute left-1/2 top-[58%] -translate-x-1/2 vault-chip hud-chip">
-          [SPACE] VAULT
-        </div>
-      )}
-      {hud.reloading && (
-        <svg className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" width="64" height="64">
-          <circle cx="32" cy="32" r="26" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="3" />
-          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--brass)" strokeWidth="3" strokeLinecap="round"
-            strokeDasharray={163} className="reload-ring" transform="rotate(-90 32 32)"
-            style={{ filter: 'drop-shadow(0 0 6px rgba(200,155,90,.8))' }} />
-        </svg>
-      )}
+      <ScopeView hud={hud} {...scopeControls} />
+
       {fx.hitmark && (
         <div key={fx.hitmark.id} className={`absolute left-1/2 top-1/2 ${fx.hitmark.kill ? 'hm-kill' : 'hm'}`}>
           {[45, -45, 135, -135].map(r => (

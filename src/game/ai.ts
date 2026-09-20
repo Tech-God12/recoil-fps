@@ -759,12 +759,13 @@ export class AIManager {
   nav: NavGrid;
   rosterVersion = 0;
   private pool: Enemy[] = [];
-  constructor(ctx: AIContext, spawns: { leader: THREE.Vector3; a: THREE.Vector3; b: THREE.Vector3; patrol: THREE.Vector3[] }[]) {
+  constructor(ctx: AIContext, spawns: { leader: THREE.Vector3; a: THREE.Vector3; b: THREE.Vector3; patrol: THREE.Vector3[] }[], poolSize: number = PRESSURE_BUDGET.liveCap) {
     this.ctx = ctx;
     this.nav = new NavGrid(ctx.solids, ctx.half, ctx.groundHeight);
     const reserve = new Squad([new THREE.Vector3()]);
     // Allocate once. Reinforcements reuse these models instead of growing the scene graph.
-    for (let i = 0; i < PRESSURE_BUDGET.liveCap; i++) {
+    // The TDM arena passes 0 — it runs its own bot roster instead of the mission pool.
+    for (let i = 0; i < poolSize; i++) {
       const enemy = new Enemy(ctx, this.nav, reserve, 'leader', new THREE.Vector3());
       enemy.dormant = true;
       enemy.model.group.visible = false;

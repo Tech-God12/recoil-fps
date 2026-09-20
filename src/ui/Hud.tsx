@@ -1,5 +1,6 @@
 // Recoil FPS — in-game HUD (VOLT PROTOCOL)
 import type { GameSettings, HudState } from '../game/engine';
+import { ARMOR_ICON } from '../game/tdm';
 import { Reticle } from './Settings';
 import MissionObjective from './MissionObjective';
 
@@ -12,6 +13,59 @@ export interface HudFx {
   callout: { id: number; text: string } | null;
   flashPow: number;
   missionBanner: { id: number; title: string; index: number } | null;
+}
+
+type TdmHud = NonNullable<HudState['tdm']>;
+
+const tdmClock = (s: number) => {
+  const t = Math.max(0, Math.ceil(s));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+};
+
+/** Top-centre scoreboard: ALPHA vs BRAVO, match clock, mini roster with armor icons. */
+function TdmScoreboard({ tdm }: { tdm: TdmHud }) {
+  const timeLow = tdm.timeLeft < 30;
+  const alpha = tdm.roster.filter(r => r.team === 'alpha');
+  const bravo = tdm.roster.filter(r => r.team === 'bravo');
+  const chip = (r: TdmHud['roster'][number]) => (
+    <span key={`${r.team}-${r.name}`} className={`tdm-roster-chip ${r.team} ${r.dead ? 'dead' : ''} ${r.you ? 'you' : ''}`}>
+      <i className="tdm-roster-armor" aria-hidden="true">{ARMOR_ICON[r.armor]}</i>
+      <b>{r.name}{r.you ? '*' : ''}</b>
+      <em className="tabular">{r.kills}</em>
+    </span>
+  );
+  return (
+    <div className="tdm-scoreboard" role="status" aria-label="Team deathmatch scoreboard">
+      <div className="tdm-scoreboard-label mono">WAREHOUSE TDM</div>
+      <div className="tdm-scoreboard-main">
+        <span className="tdm-score alpha tabular">{tdm.alpha}</span>
+        <span className="tdm-score-sep" aria-hidden="true">:</span>
+        <span className="tdm-score bravo tabular">{tdm.bravo}</span>
+      </div>
+      <div className={`tdm-clock mono tabular ${timeLow ? 'low' : ''}`}>{tdmClock(tdm.timeLeft)}</div>
+      <div className="tdm-roster">
+        <span className="tdm-roster-col">{alpha.map(chip)}</span>
+        <span className="tdm-roster-col">{bravo.map(chip)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Full-screen-ish centre overlay while waiting out the 10s respawn. */
+function TdmRespawn({ tdm, score }: { tdm: TdmHud; score: number }) {
+  const pct = (1 - tdm.respawnIn / 10) * 100;
+  return (
+    <div className="tdm-respawn" role="alert">
+      <span className="tdm-respawn-title">ELIMINATED</span>
+      <span className="tdm-respawn-sub mono">RESPAWNING IN {tdm.respawnIn.toFixed(1)}s</span>
+      <span className="tdm-respawn-bar"><i style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} /></span>
+      <span className="tdm-respawn-stats mono">
+        <span>SCORE <b className="tabular">{score.toLocaleString('en-US')}</b></span>
+        <span>FRAGS <b className="tabular">{tdm.playerKills}</b></span>
+        <span>ALPHA <b className="tabular">{tdm.alpha}</b> · BRAVO <b className="tabular">{tdm.bravo}</b></span>
+      </span>
+    </div>
+  );
 }
 
 export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx: HudFx }) {
@@ -39,6 +93,10 @@ export default function Hud({ hud, s, fx }: { hud: HudState; s: GameSettings; fx
       {/* flashbang */}
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
       {hud.mission && <MissionObjective mission={hud.mission} />}
+
+      {/* ============ WAREHOUSE TDM: scoreboard + respawn ============ */}
+      {hud.tdm && <TdmScoreboard tdm={hud.tdm} />}
+      {hud.tdm?.dead && <TdmRespawn tdm={hud.tdm} score={hud.score} />}
 
       {/* ============ THREAT READOUT (slim — no centre ring clutter) ============ */}
       {hud.nearest && hud.nearest.dist < 30 && (() => {

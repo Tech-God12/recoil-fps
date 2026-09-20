@@ -4,10 +4,13 @@ import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
 import Armory from './ui/armory/Armory';
+import TdmSetup from './ui/TdmSetup';
 import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
+import type { Loadout } from './game/economy/loadout';
+import type { TDMArmor } from './game/tdm';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
 /**
@@ -39,7 +42,8 @@ function loadRichProfile(): PlayerProfile {
 function loadSettings(): GameSettings {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    return { ...DEFAULT_SETTINGS, ...raw, map: raw.map === 'kasbah' ? 'kasbah' : 'alrasul' };
+    const map = raw.map === 'kasbah' || raw.map === 'arena' ? raw.map : 'alrasul';
+    return { ...DEFAULT_SETTINGS, ...raw, map };
   } catch { return { ...DEFAULT_SETTINGS }; }
 }
 
@@ -61,6 +65,10 @@ export default function App() {
   const [fx, setFx] = useState<HudFx>(emptyFx);
   const [profile, setProfile] = useState<PlayerProfile>(loadRichProfile);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
+  // Warehouse TDM pre-match state: armor choice + optional loadout override from the bench.
+  const [tdmArmor, setTdmArmor] = useState<TDMArmor>(1);
+  const [tdmLoadoutOverride, setTdmLoadoutOverride] = useState<Loadout | null>(null);
+  const tdmFrom = useRef<'menu' | 'results' | 'armory'>('menu');
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -157,11 +165,13 @@ export default function App() {
         engineRef.current?.setPaused(true);
         // Debrief payout: run cash × difficulty, plus the grade bonus on a win.
         // (Losses keep 100% of earned cash but forfeit extraction + grade.)
-        const gb = event.win ? gradeBonus(gradeFor(event).grade) : 0;
-        const earned = Math.round(event.cash * event.difficultyMul) + gb;
+        // Warehouse TDM is a no-cash ranked playlist: nothing pays out, no mission count.
+        const isTDM = event.mission.id === 'warehouse-tdm';
+        const gb = event.win && !isTDM ? gradeBonus(gradeFor(event).grade) : 0;
+        const earned = isTDM ? 0 : Math.round(event.cash * event.difficultyMul) + gb;
         const before = profileRef.current;
-        const next = grantCash(before, earned, 'MISSION');
-        next.missions += 1;
+        const next = isTDM ? before : grantCash(before, earned, 'MISSION');
+        if (!isTDM) next.missions += 1;
         next.kills += event.kills;
         updateProfile(next);
         setWallet({ before: before.cash, after: next.cash, gradeBonus: gb, earned });
@@ -184,7 +194,7 @@ export default function App() {
   useEffect(() => {
     const lockChanged = () => {
       const engine = engineRef.current;
-      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory') return;
+      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory' || phaseRef.current === 'tdm-setup') return;
       if (document.pointerLockElement === canvasRef.current) {
         engine.setPaused(false);
         changePhase('playing');
@@ -214,7 +224,24 @@ export default function App() {
 
   useEffect(() => () => { session.current++; clearTimers(); engineRef.current?.dispose(); }, [clearTimers]);
 
-  const deploy = async () => {
+  /**
+   * Deploy entry from every screen. The Warehouse arena never starts straight away:
+   * it opens the full-screen TDM setup (armor + loadout) first, and the match itself
+   * launches from there via deployTDM().
+   */
+  const deploy = () => {
+    if (settings.map === 'arena') {
+      changePhase('tdm-setup');
+      return;
+    }
+    void launchMatch();
+  };
+
+  const deployTDM = () => {
+    void launchMatch(tdmArmor, tdmLoadoutOverride ?? profileRef.current.loadout);
+  };
+
+  const launchMatch = async (armorOverride?: TDMArmor, loadoutOverride?: Loadout) => {
     if (!canvasRef.current || launching) return;
     const epoch = ++session.current;
     clearTimers();
@@ -226,7 +253,9 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, settings.map, profileRef.current.loadout);
+      const armor: TDMArmor = armorOverride ?? 1;
+      const loadout = loadoutOverride ?? profileRef.current.loadout;
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, settings.map, loadout, armor);
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -241,7 +270,7 @@ export default function App() {
       if (session.current !== epoch) return;
       setError(cause instanceof Error ? cause.message : 'Mission could not start. Try again.');
       if (engineRef.current) { engineRef.current.setPaused(true); changePhase('paused'); }
-      else changePhase('menu');
+      else changePhase(settings.map === 'arena' ? 'tdm-setup' : 'menu');
     } finally {
       if (session.current === epoch) setLaunching(false);
     }
@@ -283,10 +312,22 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud hud={hud} s={settings} fx={fx} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={() => { tdmFrom.current = 'menu'; deploy(); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
-      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={deploy} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={deploy} onBack={armoryBack} />}
+      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { tdmFrom.current = 'results'; deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { tdmFrom.current = 'armory'; deploy(); }} onBack={armoryBack} />}
+      {phase === 'tdm-setup' && (
+        <TdmSetup
+          profile={profile}
+          onProfile={updateProfile}
+          armor={tdmArmor}
+          onArmor={setTdmArmor}
+          loadout={tdmLoadoutOverride ?? profile.loadout}
+          onLoadout={setTdmLoadoutOverride}
+          onDeploy={deployTDM}
+          onBack={() => changePhase(tdmFrom.current === 'results' ? 'results' : tdmFrom.current === 'armory' ? 'armory' : 'menu')}
+        />
+      )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>

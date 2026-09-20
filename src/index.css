@@ -1275,3 +1275,210 @@ img { display: block; max-width: 100%; }
 /* ensure armory stage head is above watermark */
 .armory-stage-head { position: relative; z-index: 3; }
 
+
+/* ============================================================
+   WAREHOUSE TDM — arena scoreboard HUD + pre-match setup bench
+   ============================================================ */
+
+:root {
+  --tdm-alpha: #6FA3CC;
+  --tdm-alpha-dim: rgba(111, 163, 204, 0.16);
+  --tdm-bravo: #E0553A;
+  --tdm-bravo-dim: rgba(224, 85, 58, 0.14);
+}
+
+/* ---------------- in-match scoreboard (top centre) ---------------- */
+.tdm-scoreboard {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 18px 8px; min-width: 320px;
+  background: rgba(12, 11, 9, 0.66); border: 1px solid var(--line-strong);
+  border-radius: 4px; backdrop-filter: blur(3px);
+}
+.tdm-scoreboard-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.34em; color: var(--brass);
+}
+.tdm-scoreboard-main { display: flex; align-items: baseline; gap: 12px; line-height: 1; }
+.tdm-score { font-family: var(--display); font-size: 34px; font-weight: 800; }
+.tdm-score.alpha { color: var(--tdm-alpha); text-shadow: 0 0 14px rgba(111,163,204,0.35); }
+.tdm-score.bravo { color: var(--tdm-bravo); text-shadow: 0 0 14px rgba(224,85,58,0.3); }
+.tdm-score-sep { color: var(--bone-mute); font-size: 20px; }
+.tdm-clock { font-size: 14px; font-weight: 700; letter-spacing: 0.18em; color: var(--bone); }
+.tdm-clock.low { color: var(--blood); animation: tdmPulse 1s steps(2) infinite; }
+@keyframes tdmPulse { 50% { opacity: 0.45; } }
+
+.tdm-roster { display: flex; gap: 18px; margin-top: 5px; }
+.tdm-roster-col { display: flex; flex-direction: column; gap: 1px; min-width: 128px; }
+.tdm-roster-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; line-height: 1.5;
+  color: var(--bone-dim);
+}
+.tdm-roster-chip b { font-weight: 700; flex: 1; text-align: left; }
+.tdm-roster-chip em { font-style: normal; color: var(--bone-mute); }
+.tdm-roster-chip.alpha b { color: var(--tdm-alpha); }
+.tdm-roster-chip.bravo b { color: var(--tdm-bravo); }
+.tdm-roster-chip.you b { color: #FFD98A; }
+.tdm-roster-chip.dead { opacity: 0.42; }
+.tdm-roster-chip.dead b { text-decoration: line-through; }
+.tdm-roster-armor { font-style: normal; font-size: 10px; color: var(--bone); width: 14px; text-align: center; }
+
+/* ---------------- respawn overlay ---------------- */
+.tdm-respawn {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 26px 46px; min-width: 380px;
+  background: rgba(10, 8, 6, 0.78); border: 1px solid rgba(200, 50, 30, 0.4);
+  border-radius: 4px; backdrop-filter: blur(4px);
+}
+.tdm-respawn-title {
+  font-family: var(--display); font-size: 46px; font-weight: 800; letter-spacing: 0.14em;
+  color: var(--blood); text-shadow: 0 0 26px rgba(200, 50, 30, 0.5); line-height: 1;
+}
+.tdm-respawn-sub { font-size: 12px; letter-spacing: 0.24em; color: var(--bone); }
+.tdm-respawn-bar {
+  width: 100%; height: 5px; border-radius: 3px; overflow: hidden;
+  background: rgba(237, 228, 211, 0.1); display: block;
+}
+.tdm-respawn-bar i { display: block; height: 100%; background: var(--brass); transition: width 90ms linear; }
+.tdm-respawn-stats { display: flex; gap: 22px; font-size: 10px; letter-spacing: 0.12em; color: var(--bone-mute); }
+.tdm-respawn-stats b { color: var(--bone); margin-left: 4px; }
+
+/* ---------------- pre-match setup bench ---------------- */
+.tdm-root {
+  position: absolute; inset: 0; z-index: 30;
+  display: flex; flex-direction: column;
+  background:
+    radial-gradient(1100px 500px at 50% -10%, rgba(200, 155, 90, 0.09), transparent 60%),
+    linear-gradient(180deg, #14110C 0%, #0E0C09 100%);
+  color: var(--bone); overflow: hidden;
+}
+.tdm-glow { position: absolute; inset: 0; pointer-events: none; opacity: 0.05;
+  background-image: radial-gradient(rgba(237,228,211,0.5) 1px, transparent 1px); background-size: 26px 26px; }
+
+.tdm-topbar {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 20px; border-bottom: 1px solid var(--line);
+  background: rgba(18, 16, 12, 0.6);
+}
+.tdm-topbar-center { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.tdm-topbar-title {
+  font-family: var(--display); font-size: 19px; font-weight: 800; letter-spacing: 0.16em; color: var(--bone);
+}
+.tdm-topbar-sub { font-size: 10px; letter-spacing: 0.26em; color: var(--brass); }
+.tdm-econ {
+  font-size: 10px; letter-spacing: 0.2em; color: var(--bone); opacity: 0.75;
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 4px; padding: 5px 9px;
+  white-space: nowrap; background: rgba(0,0,0,0.3);
+}
+.tdm-gun-card.locked { filter: saturate(0.35) brightness(0.75); }
+.tdm-gun-card.locked .tdm-gun-state { color: #c8956c; }
+button.pcard-btn.buy:disabled { cursor: not-allowed; opacity: 0.55; filter: grayscale(0.5); }
+
+.tdm-columns {
+  position: relative; z-index: 2; flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 320px minmax(0, 1fr) 330px; gap: 12px;
+  padding: 12px 16px;
+}
+.tdm-panel {
+  min-height: 0; display: flex; flex-direction: column; gap: 8px;
+  background: rgba(24, 21, 16, 0.72); border: 1px solid var(--line); border-radius: 4px;
+  padding: 12px; overflow: hidden;
+}
+.tdm-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.tdm-panel-note { font-size: 8px; letter-spacing: 0.2em; color: var(--bone-mute); }
+
+/* armor picker */
+.tdm-armor-list { display: flex; flex-direction: column; gap: 8px; }
+.tdm-armor-card {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 10px 12px; border-radius: 3px; cursor: pointer;
+  background: rgba(237, 228, 211, 0.02); border: 1px solid var(--line); color: var(--bone);
+  transition: border-color 120ms, background 120ms, transform 120ms;
+}
+.tdm-armor-card:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.tdm-armor-card.on { border-color: var(--brass); background: rgba(200, 155, 90, 0.08); }
+.tdm-armor-card.a2.on { border-color: var(--tdm-bravo); background: var(--tdm-bravo-dim); }
+.tdm-armor-icon { font-size: 26px; line-height: 1; width: 34px; text-align: center; color: var(--bone-dim); }
+.tdm-armor-card.on .tdm-armor-icon { color: var(--brass); }
+.tdm-armor-icon.sm { font-size: 15px; width: 20px; }
+.tdm-armor-body { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.tdm-armor-body b { font-family: var(--display); font-size: 14px; font-weight: 800; letter-spacing: 0.08em; }
+.tdm-armor-body i { font-style: normal; font-size: 9.5px; letter-spacing: 0.1em; color: var(--brass-2); }
+.tdm-armor-body i.dim { color: var(--bone-mute); }
+.tdm-armor-body em { font-style: normal; font-size: 10.5px; color: var(--bone-dim); margin-top: 3px; line-height: 1.35; }
+.tdm-armor-pick { font-size: 9px; letter-spacing: 0.16em; color: var(--bone-mute); }
+.tdm-armor-pick.on { color: var(--brass); }
+
+/* enemy armor preview */
+.tdm-enemy-list { display: flex; flex-direction: column; gap: 4px; }
+.tdm-enemy-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; padding: 5px 8px; border-radius: 3px;
+  background: rgba(224, 85, 58, 0.05); border: 1px solid rgba(224, 85, 58, 0.14);
+}
+.tdm-enemy-row b { flex: 0 0 64px; font-family: var(--display); letter-spacing: 0.08em; color: var(--tdm-bravo); }
+.tdm-enemy-row em { font-style: normal; font-size: 9px; letter-spacing: 0.08em; color: var(--bone-dim); }
+
+/* centre stage */
+.tdm-stage-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.tdm-stage-head h2 { margin: 0; font-family: var(--display); font-size: 26px; font-weight: 800; letter-spacing: 0.06em; }
+.tdm-stage-head p { margin: 2px 0 0; font-size: 9px; letter-spacing: 0.2em; color: var(--bone-mute); }
+.tdm-stage-head .stage-ribbon { width: min(46%, 380px); background: rgba(18,16,12,0.5); border-radius: 3px; }
+.tdm-stage { position: relative; flex: 1; min-height: 160px; display: flex; }
+.tdm-stage .gv-root { flex: 1; }
+.tdm-stage .stage-fallback { z-index: 3; }
+
+.tdm-grids { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; }
+.tdm-grid-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.tdm-grid-head .dim { font-size: 9px; letter-spacing: 0.14em; color: var(--bone-mute); text-transform: uppercase; }
+.tdm-gun-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tdm-gun-card {
+  position: relative; display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 7px 10px; border-radius: 3px; cursor: pointer;
+  background: rgba(237, 228, 211, 0.02); border: 1px solid var(--line); color: var(--bone);
+  transition: border-color 120ms, background 120ms;
+}
+.tdm-gun-card:hover { border-color: var(--line-strong); background: rgba(237, 228, 211, 0.05); }
+.tdm-gun-card.sel { border-color: var(--brass); background: rgba(200, 155, 90, 0.09); }
+.tdm-gun-card img { width: 108px; height: 46px; object-fit: contain; flex-shrink: 0; }
+.tdm-gun-thumb-blank { width: 108px; height: 46px; flex-shrink: 0; background: rgba(237,228,211,0.05); border-radius: 2px; }
+.tdm-gun-meta { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.tdm-gun-meta b { font-family: var(--display); font-size: 13.5px; font-weight: 800; letter-spacing: 0.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tdm-gun-meta i { font-style: normal; font-size: 8.5px; letter-spacing: 0.16em; color: var(--bone-mute); }
+.tdm-gun-state { font-size: 8.5px; letter-spacing: 0.14em; color: var(--brass-2); white-space: nowrap; }
+.tdm-gun-card.locked .tdm-gun-state { color: var(--bone-mute); }
+.tdm-gun-card.fielded .tdm-gun-state { color: var(--olive); font-weight: 700; }
+
+/* right column rules + deploy summary */
+.tdm-rules { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
+.tdm-rules-list { margin: 0; padding: 10px 12px; list-style: none; display: flex; flex-direction: column; gap: 8px;
+  background: rgba(200, 155, 90, 0.05); border: 1px dashed rgba(200, 155, 90, 0.3); border-radius: 3px; }
+.tdm-rules-list li { position: relative; padding-left: 14px; font-size: 9.5px; letter-spacing: 0.1em; line-height: 1.5; color: var(--bone-dim); }
+.tdm-rules-list li::before { content: '›'; position: absolute; left: 0; color: var(--brass); }
+.tdm-deploy-summary { display: flex; flex-direction: column; gap: 4px; }
+.tdm-deploy-summary .tdm-enemy-row { background: rgba(111, 163, 204, 0.05); border-color: rgba(111, 163, 204, 0.16); }
+.tdm-deploy-summary .tdm-enemy-row b { color: var(--tdm-alpha); }
+.tdm-rules-hint { margin: auto 0 0; font-size: 9px; letter-spacing: 0.1em; color: var(--bone-mute); line-height: 1.5; }
+
+/* deploy bar */
+.tdm-deploybar {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 20px; border-top: 1px solid var(--line); background: rgba(18, 16, 12, 0.72);
+}
+.tdm-deploybar-note { font-size: 9px; letter-spacing: 0.22em; color: var(--bone-mute); }
+.tdm-deploy-btn {
+  flex: 0 0 auto; padding: 14px 44px;
+  font-family: var(--display); font-size: 17px; font-weight: 800; letter-spacing: 0.14em;
+  color: #1A0A00; background: var(--signal); border: none; border-radius: 3px; cursor: pointer;
+  box-shadow: 0 3px 0 var(--signal-hover), 0 10px 26px rgba(255, 77, 0, 0.24);
+  transition: transform 100ms, filter 100ms;
+}
+.tdm-deploy-btn:hover { filter: brightness(1.07); transform: translateY(-1px); }
+.tdm-deploy-btn:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--signal-hover); }
+
+@media (max-width: 1100px) {
+  .tdm-columns { grid-template-columns: 270px minmax(0, 1fr) 280px; }
+}

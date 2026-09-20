@@ -62,10 +62,11 @@ function place(g: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0,
 }
 class Part {
   geos: THREE.BufferGeometry[] = [];
-  box(w: number, h: number, d: number, r: Region, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.geos.push(place(uvTo(new THREE.BoxGeometry(w, h, d), r), x, y, z, rx, ry, rz)); return this; }
-  cyl(rt: number, rb: number, h: number, seg: number, r: Region, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.geos.push(place(uvTo(new THREE.CylinderGeometry(rt, rb, h, seg), r), x, y, z, rx, ry, rz)); return this; }
-  sph(rad: number, r: Region, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1, phi = Math.PI) { const g = new THREE.SphereGeometry(rad, 12, 10, 0, Math.PI * 2, 0, phi); g.scale(sx, sy, sz); this.geos.push(place(uvTo(g, r), x, y, z)); return this; }
-  tor(rad: number, tube: number, r: Region, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.geos.push(place(uvTo(new THREE.TorusGeometry(rad, tube, 6, 16), r), x, y, z, rx, ry, rz)); return this; }
+  /** Source is either an atlas Region (UV-mapped) or a plain material (geometry only). */
+  box(w: number, h: number, d: number, r: Region | THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.geos.push(place(Array.isArray(r) ? uvTo(new THREE.BoxGeometry(w, h, d), r) : new THREE.BoxGeometry(w, h, d), x, y, z, rx, ry, rz)); return this; }
+  cyl(rt: number, rb: number, h: number, seg: number, r: Region | THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.geos.push(place(Array.isArray(r) ? uvTo(new THREE.CylinderGeometry(rt, rb, h, seg), r) : new THREE.CylinderGeometry(rt, rb, h, seg), x, y, z, rx, ry, rz)); return this; }
+  sph(rad: number, r: Region | THREE.Material, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1, phi = Math.PI) { const g = new THREE.SphereGeometry(rad, 12, 10, 0, Math.PI * 2, 0, phi); g.scale(sx, sy, sz); this.geos.push(place(Array.isArray(r) ? uvTo(g, r) : g, x, y, z)); return this; }
+  tor(rad: number, tube: number, r: Region | THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) { this.geos.push(place(Array.isArray(r) ? uvTo(new THREE.TorusGeometry(rad, tube, 6, 16), r) : new THREE.TorusGeometry(rad, tube, 6, 16), x, y, z, rx, ry, rz)); return this; }
   mesh(m: THREE.Material, castShadow = true) {
     const g = mergeGeometries(this.geos, false)!;
     for (const x of this.geos) x.dispose();
@@ -1544,6 +1545,161 @@ export function buildSoldier(): SoldierModel {
   // headshots — especially with the AWM — should reward aim in the right area,
   // not pixel-perfect luck. The capsule also covers the neck seam so shots that
   // land between helmet and collar still count as head, never fall into torso.
+  const headHit = new THREE.Mesh(new THREE.SphereGeometry(0.31, 10, 8), ghost); headHit.position.y = 0.13; headHit.userData.part = 'head'; head.add(headHit); hitMeshes.push(headHit);
+  const neckHit = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.24, 8), ghost); neckHit.position.y = -0.06; neckHit.userData.part = 'head'; head.add(neckHit); hitMeshes.push(neckHit);
+  const legHit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.45), ghost); legHit.position.y = 0.45; legHit.userData.part = 'limb'; g.add(legHit); hitMeshes.push(legHit);
+
+  return { group: g, parts: { torso, head, lLeg, rLeg, lShin, rShin, muzzle, lArm, rArm, rifle }, hitMeshes };
+}
+
+/* ================= TDM OPERATOR — thicker body, visible armor tiers, team colors ================= */
+
+const TDM_TEAM_MAT: Record<string, THREE.MeshStandardMaterial> = {};
+function tdmTeamMat(team: 'alpha' | 'bravo'): THREE.MeshStandardMaterial {
+  if (!TDM_TEAM_MAT[team]) {
+    // ALPHA reads cool blue-steel, BRAVO reads hot signal red — readable at 60m.
+    TDM_TEAM_MAT[team] = new THREE.MeshStandardMaterial({
+      color: team === 'alpha' ? 0x3D6B8C : 0x9C3524,
+      roughness: 0.72, metalness: 0.12,
+    });
+  }
+  return TDM_TEAM_MAT[team];
+}
+
+const TDM_ARMOR_MAT: Record<string, THREE.MeshStandardMaterial> = {};
+function tdmArmorMat(level: 0 | 1 | 2): THREE.MeshStandardMaterial {
+  const key = `a${level}`;
+  if (!TDM_ARMOR_MAT[key]) {
+    const cfg = [
+      { color: 0x4A4A40, rough: 0.85, metal: 0.05 },   // 0 — plain fatigues
+      { color: 0x35362E, rough: 0.7, metal: 0.15 },    // 1 — light vest
+      { color: 0x23241F, rough: 0.55, metal: 0.35 },   // 2 — heavy composite
+    ][level];
+    TDM_ARMOR_MAT[key] = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: cfg.rough, metalness: cfg.metal });
+  }
+  return TDM_ARMOR_MAT[key];
+}
+
+/**
+ * Warehouse-TDM operator. Deliberately bulkier than the campaign soldier so armored
+ * targets *read* as armored: wider torso, slabbed plate carrier, scaled helmet, thick
+ * limbs, bolted shoulder plates at heavy. Same generous hit proxies as buildSoldier
+ * so hit registration stays identical across modes.
+ */
+export function buildSoldierTDM(armor: 0 | 1 | 2, team: 'alpha' | 'bravo'): SoldierModel {
+  const m = getSoldierMat();
+  const teamMat = tdmTeamMat(team);
+  const armorMat = tdmArmorMat(armor);
+  const g = new THREE.Group();
+  const hitMeshes: THREE.Mesh[] = [];
+  const tag = (mesh: THREE.Mesh, part: string) => { mesh.userData.part = part; mesh.castShadow = false; hitMeshes.push(mesh); return mesh; };
+
+  // ---- torso (pivot at hips y=0.95) — 0.52 wide vs the campaign 0.40 ----
+  const torso = new THREE.Group(); torso.position.y = 0.95;
+  const t = new Part();
+  t.box(0.52, 0.56, 0.30, SR.camo, 0, 0.30, 0);                     // thick shirt body
+  if (armor >= 1) {
+    // slabbed plate carrier — heavier every tier
+    const cw = armor === 2 ? 0.60 : 0.54, ch = armor === 2 ? 0.50 : 0.42, cd = armor === 2 ? 0.38 : 0.33;
+    t.box(cw, ch, cd, SR.vest, 0, 0.30, 0);
+    t.box(cw + 0.02, 0.09, cd + 0.02, teamMat, 0, 0.52, 0);
+    t.box(cw, 0.10, cd + 0.015, armorMat, 0, 0.51, 0);
+    for (const px of [-0.16, 0, 0.16]) t.box(0.11, 0.16, 0.08, SR.webbing, px, 0.20, -(cd / 2 + 0.03)); // mag pouches
+    if (armor === 2) {
+      t.box(0.20, 0.24, 0.06, armorMat, 0, 0.30, -(cd / 2 + 0.035)); // front plate
+      t.box(0.20, 0.24, 0.06, armorMat, 0, 0.30, cd / 2 + 0.03);     // back plate
+    }
+  } else {
+    t.box(0.44, 0.20, 0.30, SR.vest, 0, 0.26, 0);                   // slim chest rig
+    for (const px of [-0.13, 0.13]) t.box(0.10, 0.13, 0.07, SR.webbing, px, 0.20, -0.17);
+  }
+  t.box(0.34, 0.30, 0.16, SR.olive, 0, 0.32, 0.21 + (armor === 2 ? 0.03 : 0)); // pack
+  t.box(0.50, 0.06, 0.32, SR.black, 0, 0.06, 0);                    // belt
+  t.box(0.15, 0.11, 0.08, SR.black, 0.23, 0.0, 0.0);                // holster
+  t.box(0.16, 0.10, 0.16, SR.camo, 0, 0.62, 0);                     // collar
+  t.box(0.14, 0.10, 0.05, teamMat, 0.20, 0.44, -(0.16)); // team patch
+  const torsoMesh = tag(t.mesh(m), 'torso'); torso.add(torsoMesh);
+  g.add(torso);
+  const pv = new Part(); pv.box(0.46, 0.22, 0.28, SR.camo, 0, 0.86, 0);
+  g.add(tag(pv.mesh(m), 'torso'));
+
+  // ---- head — helmet scales with armor (heavy 1.25x), team band on the shell ----
+  const head = new THREE.Group(); head.position.y = 0.70;
+  const h = new Part();
+  const hs = armor === 2 ? 1.25 : armor === 1 ? 1.1 : 1.0;
+  h.sph(0.115, SR.skin, 0, 0.13, 0, 1, 1.12, 1);
+  h.box(0.06, 0.05, 0.04, SR.skin, 0, 0.1, -0.11);
+  if (armor > 0) {
+    h.sph(0.15 * hs, SR.helmet, 0, 0.19, 0, 1.0, 0.85 * hs, 1.1 * hs, Math.PI * 0.6);
+    h.box(0.28 * hs, 0.03 * hs, 0.06 * hs, SR.helmet, 0, 0.16, -0.14);
+    h.box(0.20 * hs, 0.035, 0.05, teamMat, 0, 0.185 + 0.045 * hs, -0.02); // team band
+  } else {
+    h.box(0.24, 0.07, 0.24, SR.olive, 0, 0.24, 0.01);               // soft cap
+    h.box(0.26, 0.02, 0.10, teamMat, 0, 0.20, -0.08);
+  }
+  h.box(0.22, 0.07, 0.06, SR.visor, 0, 0.15, -0.1);
+  h.box(0.05, 0.05, 0.05, SR.black, 0, 0.26, -0.14);
+  head.add(tag(h.mesh(m), 'head'));
+  torso.add(head);
+
+  // ---- arms — thickened sleeves, bigger pads, shoulder plates at heavy ----
+  const mkArm = (side: number) => {
+    const a = new THREE.Group(); a.position.set(side * 0.30, 0.48, -0.02);
+    const p = new Part();
+    p.box(0.16, 0.34, 0.16, SR.camo, 0, -0.15, 0);
+    p.box(0.18, 0.11, 0.18, SR.vest, 0, -0.03, 0);
+    if (armor === 2) {
+      p.box(0.20, 0.16, 0.22, armorMat, side * 0.02, 0.02, 0); // shoulder pauldron
+    }
+    p.box(0.13, 0.09, 0.13, SR.black, 0, -0.34, 0);
+    p.box(0.12, 0.28, 0.12, SR.camo, 0, -0.46, 0);
+    p.box(0.10, 0.09, 0.10, SR.black, 0, -0.62, 0);
+    a.add(tag(p.mesh(m), 'limb'));
+    torso.add(a); return a;
+  };
+  const lArm = mkArm(-1), rArm = mkArm(1);
+
+  // ---- legs — thicker thighs/shins, knee plates ----
+  const mkLeg = (side: number) => {
+    const leg = new THREE.Group(); leg.position.set(side * 0.135, 0.92, 0);
+    const thigh = new Part();
+    thigh.box(0.20, 0.41, 0.21, SR.camo, 0, -0.205, 0);
+    if (armor >= 1) thigh.box(0.17, 0.16, 0.08, armorMat, 0, -0.18, -0.115);
+    else thigh.box(0.12, 0.14, 0.06, SR.olive, side * 0.035, -0.21, -0.10);
+    leg.add(tag(thigh.mesh(m), 'limb'));
+    const shin = new THREE.Group(); shin.position.y = -0.43;
+    const lower = new Part();
+    lower.box(0.17, 0.12, 0.10, SR.black, 0, 0, -0.085);
+    lower.box(0.17, 0.35, 0.17, SR.camo, 0, -0.20, 0);
+    lower.box(0.16, 0.12, 0.28, SR.boot, 0, -0.41, -0.045);
+    lower.box(0.18, 0.04, 0.30, SR.black, 0, -0.47, -0.045);
+    shin.add(tag(lower.mesh(m), 'limb')); leg.add(shin); g.add(leg);
+    return { leg, shin };
+  };
+  const left = mkLeg(-1), right = mkLeg(1);
+  const lLeg = left.leg, rLeg = right.leg, lShin = left.shin, rShin = right.shin;
+
+  // ---- rifle (child of torso, shared geometry pattern with buildSoldier) ----
+  const rifle = new THREE.Group();
+  const rb = new GunBuilder();
+  rb.box(0.065, 0.085, 0.30, WM.darkSteel, 0, 0, 0);
+  rb.box(0.055, 0.09, 0.18, WM.poly, 0, -0.015, 0.24);
+  rb.box(0.06, 0.10, 0.014, WM.rubber, 0, -0.02, 0.34);
+  rb.box(0.06, 0.07, 0.18, WM.poly, 0, 0, -0.23);
+  rb.cyl(0.013, 0.013, 0.24, WM.steel, 0, 0.02, -0.43, Math.PI / 2);
+  rb.cyl(0.009, 0.009, 0.20, WM.darkSteel, 0, 0.05, -0.30, Math.PI / 2);
+  rb.box(0.03, 0.075, 0.023, WM.darkSteel, 0, 0.05, -0.50);
+  rb.box(0.038, 0.13, 0.06, WM.poly, 0, -0.085, 0.065, -0.25);
+  for (let i = 0; i < 8; i++) rb.box(0.038, 0.027, 0.08, WM.darkSteel, 0, -0.04 - i * 0.022, -0.065 + i * i * 0.001, 0.15 + i * 0.075);
+  rb.box(0.045, 0.028, 0.055, WM.dark, 0, 0.065, -0.03);
+  rb.build(rifle);
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.02, -0.56); rifle.add(muzzle);
+  rifle.position.set(0.09, 0.32, -0.42);
+  torso.add(rifle);
+
+  // ---- generous invisible hit proxies (identical volumes to buildSoldier) ----
+  const ghost = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const torsoHit = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.15, 0.6), ghost); torsoHit.position.y = 0.28; torsoHit.userData.part = 'torso'; torso.add(torsoHit); hitMeshes.push(torsoHit);
   const headHit = new THREE.Mesh(new THREE.SphereGeometry(0.31, 10, 8), ghost); headHit.position.y = 0.13; headHit.userData.part = 'head'; head.add(headHit); hitMeshes.push(headHit);
   const neckHit = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.24, 8), ghost); neckHit.position.y = -0.06; neckHit.userData.part = 'head'; head.add(neckHit); hitMeshes.push(neckHit);
   const legHit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.45), ghost); legHit.position.y = 0.45; legHit.userData.part = 'limb'; g.add(legHit); hitMeshes.push(legHit);

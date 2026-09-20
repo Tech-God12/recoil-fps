@@ -88,7 +88,7 @@ test('the engine rejects victory before extraction, irrespective of enemy count'
   assert.equal(engine.ended, false);
   const source = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /aliveCount\(\)\s*===\s*0\)\s*this\.endMatch/);
-  assert.match(source, /new AIManager\(ctx, \[\]\)/, 'the engine must not reintroduce its legacy fixed roster');
+  assert.match(source, /new AIManager\(ctx, \[\]/, 'the engine must not reintroduce its legacy fixed roster');
   assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 4, 'only the explicitly reworked MP changes its recoil pattern');
 });
 

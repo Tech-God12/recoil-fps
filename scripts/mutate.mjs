@@ -47,7 +47,7 @@ const mutations = [
   { name: 'spawn search budget removed', file: pressure, from: 'candidateChecks: 8', to: 'candidateChecks: 64' },
   { name: 'phase pressure policies ignored', file: pressure, from: 'target: Math.min(PRESSURE_BUDGET.liveCap, Math.max(0, policy.target))', to: 'target: 0' },
   { name: 'offscreen actors retired too early', file: pressure, from: 'retireAfter: 20', to: 'retireAfter: 0' },
-  { name: 'fixed frame-zero roster restored', file: 'src/game/engine.ts', from: 'this.ai = new AIManager(ctx, []);', to: 'this.ai = new AIManager(ctx, this.world.squadSpawns);' },
+  { name: 'fixed frame-zero roster restored', file: 'src/game/engine.ts', from: 'this.ai = new AIManager(ctx, [], this.isTDM ? 0 : PRESSURE_BUDGET.liveCap);', to: 'this.ai = new AIManager(ctx, this.world.squadSpawns, PRESSURE_BUDGET.liveCap);' },
   { name: 'AI simulation timers double-count a tick', file: 'src/game/ai.ts', from: 'this.stateTime += dt; this.lastSeenT += dt; this.coverAge += dt;', to: 'this.stateTime += dt * 2; this.lastSeenT += dt; this.coverAge += dt;' },
   { name: 'recycled actors keep old objective credit IDs', file: 'src/game/ai.ts', from: 'this.id = enemyCounter++;', to: 'this.id = this.id;' },
   { name: 'mission marker geometry exceeds budget', file: 'src/game/systems/mission-markers.ts', from: 'new THREE.RingGeometry(0.98, 1, 48)', to: 'new THREE.RingGeometry(0.98, 1, 512)' },

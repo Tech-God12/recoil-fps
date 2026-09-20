@@ -10,8 +10,9 @@ import { getMaterials, type TextureSet } from './textures';
 (THREE.BufferGeometry.prototype as unknown as { disposeBoundsTree: typeof disposeBoundsTree }).disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type MapId = 'alrasul' | 'kasbah';
+export type MapId = 'alrasul' | 'kasbah' | 'arena';
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
+  { id: 'arena', name: 'Warehouse', desc: '5v5 TDM. Twin steel warehouses, container yards, U-barriers. First squad to out-frag the other in 2:30.' },
   { id: 'alrasul', name: 'Sandblast', desc: 'Two bridges. One dry river. A souk under siege in the shadow of the water tower.' },
   { id: 'kasbah', name: 'Town', desc: 'Six trades beneath a stone crown. Break the citadel, then disappear through the west gate.' },
 ];
@@ -523,29 +524,251 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   }
 
   const playerSpawn = new THREE.Vector3();
-  const half = mapId === 'alrasul' ? 124 : 134;
-  terrain(520, half + 12);
-  perimeter(half);
-  for (const side of [-1,1]) {
-    const edge=side*(half-12);
-    for(const z of [-65,58]) {
-      house(edge,z,11,13,{floors:2,wallMat:side<0?M.whitewash:earth,door:side<0?'east':'west'});
-      paved(edge-side*9,z,7,19,cobble);
-      for(const dz of [-5,5]) { box(edge-side*8,0.32,z+dz,1.5,0.64,1.1,timber); cover(edge-side*10,z+dz); }
-      lamp(edge-side*10,z-8);
+  const half = mapId === 'arena' ? 58 : mapId === 'alrasul' ? 124 : 134;
+  if (mapId !== 'arena') {
+    terrain(520, half + 12);
+    perimeter(half);
+    for (const side of [-1,1]) {
+      const edge=side*(half-12);
+      for(const z of [-65,58]) {
+        house(edge,z,11,13,{floors:2,wallMat:side<0?M.whitewash:earth,door:side<0?'east':'west'});
+        paved(edge-side*9,z,7,19,cobble);
+        for(const dz of [-5,5]) { box(edge-side*8,0.32,z+dz,1.5,0.64,1.1,timber); cover(edge-side*10,z+dz); }
+        lamp(edge-side*10,z-8);
+      }
+      // New connecting lanes run outside the old built-up district.
+      const laneX=side*(half-23),end=half*0.8;
+      if(mapId==='alrasul') {
+        const centre=-0.22*laneX;
+        // End paving at the banks; never suspend a non-colliding road over the wadi.
+        paved(laneX,(-end+centre-14)/2,7,centre-14+end,cobble);
+        paved(laneX,(end+centre+14)/2,7,end-centre-14,cobble);
+      } else paved(laneX,0,7,half*1.6,cobble);
     }
-    // New connecting lanes run outside the old built-up district.
-    const laneX=side*(half-23),end=half*0.8;
-    if(mapId==='alrasul') {
-      const centre=-0.22*laneX;
-      // End paving at the banks; never suspend a non-colliding road over the wadi.
-      paved(laneX,(-end+centre-14)/2,7,centre-14+end,cobble);
-      paved(laneX,(end+centre+14)/2,7,end-centre-14,cobble);
-    } else paved(laneX,0,7,half*1.6,cobble);
   }
 
 
-  if (mapId === 'alrasul') {
+  // =====================================================================
+  // WAREHOUSE (arena) — competitive 5v5 TDM compound: twin steel warehouses,
+  // container yards, U-barrier rings, crate lanes. Symmetric north/south so
+  // neither spawn owns an advantage. Flat ground, half = 58 (116 × 116m).
+  // =====================================================================
+  if (mapId === 'arena') {
+    playerSpawn.set(0, 0, 42);
+    const wallMat = M.concrete;
+    const steel = iron;
+    const steelDark = M.rustedMetal;
+
+    // ---- floor: concrete slab, asphalt cross-lanes, paver spawn pads ----
+    ground(0, 0, 116, 116, M.concrete, 0.03);
+    ground(0, 0, 13, 116, M.asphalt, 0.032);           // north-south mid lane
+    ground(0, 0, 116, 13, M.asphalt, 0.032);           // east-west mid lane
+    ground(-10, 0, 16.4, 22.4, M.concrete, 0.045);     // warehouse interiors
+    ground(10, 0, 16.4, 22.4, M.concrete, 0.045);
+    paved(0, 0, 4.2, 4.2, M.concrete, 0.045);          // connector corridor
+    paved(0, 42, 46, 22, pavers, 0.035);               // ALPHA deploy pad
+    paved(0, -42, 46, 22, pavers, 0.035);              // BRAVO deploy pad
+    paved(-40, -30, 26, 26, cobble, 0.033);            // container yards
+    paved(40, 30, 26, 26, cobble, 0.033);
+    paved(-40, 30, 22, 20, cobble, 0.033);
+    paved(40, -30, 22, 20, cobble, 0.033);
+    for (const [px, pz] of [[-26, 12], [26, -12], [-34, -6], [34, 6]]) ground(px, pz, 7, 5, M.asphalt, 0.034); // wear patches
+
+    // ---- outer shell: 6m concrete walls with buttress rhythm ----
+    box(0, 3, -58.6, 119, 6, 1.2, wallMat);
+    box(0, 3, 58.6, 119, 6, 1.2, wallMat);
+    box(-58.6, 3, 0, 1.2, 6, 119, wallMat);
+    box(58.6, 3, 0, 1.2, 6, 119, wallMat);
+    for (let s = -54; s <= 54; s += 12) for (const w of [-58.2, 58.2]) {
+      box(w, 2.1, s, 0.5, 4.2, 0.9, wallMat, false);   // west/east pilasters
+      box(s, 2.1, w, 0.9, 4.2, 0.5, wallMat, false);   // north/south pilasters
+    }
+    for (const [cx, cz] of [[-58.6, -58.6], [58.6, -58.6], [-58.6, 58.6], [58.6, 58.6]]) box(cx, 3.4, cz, 2.6, 6.8, 2.6, wallMat);
+    // warning stripe along the base of the shell so the boundary reads at speed
+    for (let s = -52; s <= 52; s += 8) {
+      shape(new THREE.BoxGeometry(6, 0.5, 0.06), col(0xC8A23A, 0.8), s, 0.25, -57.9, 0, 0, 0);
+      shape(new THREE.BoxGeometry(6, 0.5, 0.06), col(0xC8A23A, 0.8), s, 0.25, 57.9, 0, 0, 0);
+      shape(new THREE.BoxGeometry(0.06, 0.5, 6), col(0xC8A23A, 0.8), -57.9, 0.25, s, 0, 0, 0);
+      shape(new THREE.BoxGeometry(0.06, 0.5, 6), col(0xC8A23A, 0.8), 57.9, 0.25, s, 0, 0, 0);
+    }
+
+    // ---- twin metal warehouses (16 × 22m, 5.5m) + connecting corridor ----
+    const warehouse = (cx: number) => {
+      const H = 5.5;
+      // short (north/south) walls
+      box(cx, H / 2, cz0 - 11, 16, H, 0.45, steel);
+      box(cx, H / 2, cz0 + 11, 16, H, 0.45, steel);
+      // long walls: centre opening (corridor door, 5.4m) + two 3.2m doors at ±7m.
+      // Segment edges sit on the nav grid's cell boundary so the doors stay pathable.
+      for (const sx of [-1, 1]) {
+        const wx = cx + sx * 8;
+        box(wx, H / 2, cz0 - 9.8, 0.45, H, 2.4, steel);
+        box(wx, H / 2, cz0 - 4.05, 0.45, H, 2.7, steel);
+        box(wx, H / 2, cz0 + 4.05, 0.45, H, 2.7, steel);
+        box(wx, H / 2, cz0 + 9.8, 0.45, H, 2.4, steel);
+        // door headers (3.9m clear height)
+        for (const dz of [-7, 0, 7]) box(wx, 4.7, cz0 + dz, 0.45, 1.6, dz === 0 ? 5.4 : 3.2, steel);
+        // door frame posts
+        for (const dz of [-8.6, -5.4, -2.7, 2.7, 5.4, 8.6]) box(wx, 1.9, cz0 + dz, 0.55, 3.8, 0.3, steelDark, false);
+      }
+      // roof slab + interior beams + corner columns
+      box(cx, 5.62, cz0, 17, 0.35, 23, steelDark);
+      box(cx, 5.28, cz0 - 5.5, 16, 0.32, 0.45, steel, false);
+      box(cx, 5.28, cz0 + 5.5, 16, 0.32, 0.45, steel, false);
+      box(cx, 5.3, cz0, 0.45, 0.32, 22, steel, false);
+      for (const [bx, bz] of [[-7.4, -10.2], [7.4, -10.2], [-7.4, 10.2], [7.4, 10.2]] as const) {
+        box(cx + bx, H / 2, cz0 + bz, 0.34, H, 0.34, steel);
+      }
+      // three crates each for interior cover (one doubled for head-height)
+      box(cx - 4, 0.8, cz0 - 3, 1.6, 1.6, 1.6, timber);
+      box(cx + 3.5, 0.8, cz0 + 2.5, 1.6, 1.6, 1.6, timber);
+      box(cx + 3.5, 2.4, cz0 + 2.5, 1.6, 1.6, 1.6, timber);
+      box(cx - 1, 0.8, cz0 + 6, 1.6, 1.6, 1.6, timber);
+      cover(cx - 4, cz0 - 1.2); cover(cx + 3.5, cz0 + 0.8); cover(cx - 1, cz0 + 4.2);
+      cover(cx - 4, cz0 - 4.8); cover(cx + 3.5, cz0 + 4.4);
+      // door cover (both long sides, all three doors)
+      for (const sx of [-1, 1]) for (const dz of [-7, 0, 7]) {
+        cover(cx + sx * 10.2, cz0 + dz); cover(cx + sx * 5.2, cz0 + dz);
+      }
+      lightSpots.push(new THREE.Vector3(cx, 4.9, cz0));
+    };
+    const cz0 = 0;
+    warehouse(-10);
+    warehouse(10);
+    landmarks.push(
+      { name: 'West Warehouse', at: new THREE.Vector3(-10, 0, 0) },
+      { name: 'East Warehouse', at: new THREE.Vector3(10, 0, 0) },
+      { name: 'The Corridor', at: new THREE.Vector3(0, 0, 0) },
+    );
+
+    // connector corridor between the facing centre doors — the map's hot centre
+    box(0, 2, -3.1, 4.9, 4, 0.5, steel);
+    box(0, 2, 3.1, 4.9, 4, 0.5, steel);
+    box(0, 4.15, 0, 4.9, 0.3, 6.7, steelDark);
+    box(0, 3.9, 0, 0.3, 0.2, 0.3, GLOW, false);
+    cover(0, -4.8); cover(0, 4.8);
+
+    // roof access: exterior stairs up each warehouse north face, topping out at the roof edge
+    stairs(-19.1, -12.4, 5.7, 3, 'x');
+    stairs(19.1, -12.4, 5.7, 3, 'x');
+    overlooks.push(
+      { name: 'West warehouse roof', at: new THREE.Vector3(-10, 5.8, 0), approach: new THREE.Vector3(-5, 0, -12.4), route: [new THREE.Vector3(-19.1, 5.7, -12.4), new THREE.Vector3(-10, 5.8, 0)] },
+      { name: 'East warehouse roof', at: new THREE.Vector3(10, 5.8, 0), approach: new THREE.Vector3(33, 0, -12.4), route: [new THREE.Vector3(19.1, 5.7, -12.4), new THREE.Vector3(10, 5.8, 0)] },
+    );
+
+    // ---- U-shaped concrete barriers (back 3.2 + sides 2.2, 1.8m) ----
+    const uBarrier = (x: number, z: number, facing: 'N' | 'S' | 'E' | 'W') => {
+      const H = 1.8, T = 0.5;
+      const horiz = facing === 'N' || facing === 'S';
+      const dir = facing === 'N' || facing === 'W' ? -1 : 1; // opening side sign
+      if (horiz) {
+        box(x, H / 2, z - dir * 1.35, 3.2, H, T, wallMat);
+        box(x - 1.35, H / 2, z + dir * 0.25, T, H, 2.2, wallMat);
+        box(x + 1.35, H / 2, z + dir * 0.25, T, H, 2.2, wallMat);
+        cover(x, z + dir * 1.9); cover(x, z - dir * 2.4);
+        cover(x - 2.1, z); cover(x + 2.1, z);
+      } else {
+        box(x - dir * 1.35, H / 2, z, T, H, 3.2, wallMat);
+        box(x + dir * 0.25, H / 2, z - 1.35, 2.2, H, T, wallMat);
+        box(x + dir * 0.25, H / 2, z + 1.35, 2.2, H, T, wallMat);
+        cover(x + dir * 1.9, z); cover(x - dir * 2.4, z);
+        cover(x, z - 2.1); cover(x, z + 2.1);
+      }
+    };
+    uBarrier(0, -16, 'S'); uBarrier(0, 16, 'N');         // mid ring
+    uBarrier(-22, 0, 'E'); uBarrier(22, 0, 'W');
+    uBarrier(-9, -30, 'S'); uBarrier(9, -30, 'S');       // spawn approach covers
+    uBarrier(-9, 30, 'N'); uBarrier(9, 30, 'N');
+    uBarrier(-30, -18, 'E'); uBarrier(30, 18, 'W');      // diagonal lanes
+    uBarrier(-18, 22, 'S'); uBarrier(18, -22, 'N');
+    landmarks.push({ name: 'North U-Line', at: new THREE.Vector3(0, 0, -16) }, { name: 'South U-Line', at: new THREE.Vector3(0, 0, 16) });
+
+    // ---- shipping containers (2.5 × 2.6 × 6.2), doubles for verticality ----
+    const CONTAINER_COLORS = [0x8A3324, 0x2E5E6E, 0x5E6E2E, 0x6E4A2E];
+    const container = (x: number, z: number, alongX: boolean, stack: number, ci: number) => {
+      const w = alongX ? 6.2 : 2.5, d = alongX ? 2.5 : 6.2;
+      const mat = col(CONTAINER_COLORS[ci % CONTAINER_COLORS.length], 0.62, 0.42);
+      for (let s = 0; s < stack; s++) {
+        box(x + (stack > 1 && s === 1 ? 0.18 : 0), 1.3 + s * 2.6, z, w, 2.6, d, s === 0 ? mat : steelDark);
+      }
+      // rib detail on the long faces
+      const ribs = 9;
+      for (let r = 0; r < ribs; r++) {
+        const o = (r - (ribs - 1) / 2) * (alongX ? 0.62 : 0.62);
+        if (alongX) box(x + o, 1.3, z + d / 2 + 0.02, 0.1, 2.5, 0.05, steelDark, false);
+        else box(x + d / 2 + 0.02, 1.3, z + o, 0.05, 2.5, 0.1, steelDark, false);
+      }
+      cover(x + (alongX ? 0 : 2.1), z + (alongX ? 2.1 : 0));
+      cover(x - (alongX ? 0 : 2.1), z - (alongX ? 2.1 : 0));
+      cover(x + (alongX ? 3.9 : 0), z + (alongX ? 0 : 3.9));
+      cover(x - (alongX ? 3.9 : 0), z - (alongX ? 0 : 3.9));
+      if (alongX) { cover(x, z - 2.1); cover(x, z + 2.1); } else { cover(x - 2.1, z); cover(x + 2.1, z); }
+      // double stacks are walkable overlooks: exterior stair run up the outboard flank
+      if (stack === 2) {
+        const sx = x + (x < 0 ? -2.1 : 2.1); // just off the long face
+        const zEnd = z + (z < 0 ? -2.5 : 2.5); // tall step at the container's far end
+        stairs(sx, zEnd, 5.2, 2.4, 'z');
+        cover(sx, zEnd + (z < 0 ? 4 : -4));
+      }
+    };
+    container(-32, -28, false, 2, 0);  // NW double stack
+    container(32, 28, false, 2, 1);    // SE double stack
+    container(-32, 28, true, 1, 2);    // SW
+    container(32, -28, true, 1, 3);    // NE
+    container(-45, 0, false, 1, 3);    // west edge
+    container(45, 0, false, 1, 0);     // east edge
+    container(-14, 26, true, 1, 1);    // spawn-lane guards
+    container(14, -26, true, 1, 2);
+    landmarks.push(
+      { name: 'Container Yard NW', at: new THREE.Vector3(-32, 0, -28) },
+      { name: 'Container Yard SE', at: new THREE.Vector3(32, 0, 28) },
+    );
+    overlooks.push(
+      { name: 'Container stack NW', at: new THREE.Vector3(-32, 5.2, -28), approach: new THREE.Vector3(-27, 0, -22), route: [new THREE.Vector3(-32, 2.6, -28), new THREE.Vector3(-32, 5.2, -28)] },
+      { name: 'Container stack SE', at: new THREE.Vector3(32, 5.2, 28), approach: new THREE.Vector3(27, 0, 22), route: [new THREE.Vector3(32, 2.6, 28), new THREE.Vector3(32, 5.2, 28)] },
+    );
+    // hop-up block stairs to the single containers at the map edges
+    const hopUp = (x: number, z: number, dx: number, dz: number) => {
+      for (let i = 0; i < 5; i++) box(x + dx * i * 1.1, (i + 1) * 0.26, z + dz * i * 1.1, 1.1, (i + 1) * 0.52, 1.1, wallMat);
+    };
+    hopUp(-45, 5.2, 1.35, 0);
+    hopUp(45, -5.2, -1.35, 0);
+
+    // ---- wooden crate clusters on the mid lanes (1.2m cubes) ----
+    const crate = (x: number, z: number, stack = false) => {
+      box(x, 0.6, z, 1.2, 1.2, 1.2, timber);
+      if (stack) box(x + 0.08, 1.8, z - 0.06, 1.2, 1.2, 1.2, timber);
+      cover(x + 1.1, z); cover(x - 1.1, z);
+    };
+    crate(-6, 10); crate(-7.4, 10.9, true); crate(6, -10); crate(7.4, -10.9, true);
+    crate(-12, -4); crate(-12, -2.6); crate(12, 4); crate(12, 2.6);
+    crate(-20, 18, true); crate(20, -18, true);
+    crate(-28, 8); crate(28, -8); crate(26, 10); crate(-26, -10);
+    crate(-4, -22, true); crate(4, 22, true);
+
+    // ---- wooden planks (2.0 × 1.2 × 0.4) along the flanks ----
+    const plank = (x: number, z: number, alongX: boolean) => {
+      box(x, 0.2, z, alongX ? 2.0 : 1.2, 0.4, alongX ? 1.2 : 2.0, timber);
+      cover(x + (alongX ? 0 : 1.5), z + (alongX ? 1.5 : 0));
+      cover(x - (alongX ? 0 : 1.5), z - (alongX ? 1.5 : 0));
+    };
+    plank(-38, 16, true); plank(38, -16, true); plank(-38, -16, false); plank(38, 16, false);
+    plank(-24, 36, true); plank(24, -36, true); plank(-24, -36, false); plank(24, 36, false);
+    plank(-46, 24, true); plank(46, -24, true);
+
+    // ---- sandbag fortifications covering each deploy pad ----
+    sandbags(0, 37.5); sandbags(-10, 36.5); sandbags(10, 36.5);
+    sandbags(0, -37.5); sandbags(-10, -36.5); sandbags(10, -36.5);
+    sandbags(-20, 42, false); sandbags(20, 42, false);
+    sandbags(-20, -42, false); sandbags(20, -42, false);
+    landmarks.push({ name: 'Alpha Deploy', at: new THREE.Vector3(0, 0, 42) }, { name: 'Bravo Deploy', at: new THREE.Vector3(0, 0, -42) });
+
+    // ---- five light spots for readability ----
+    lightSpots.push(new THREE.Vector3(0, 3.7, 0), new THREE.Vector3(0, 2.6, -30), new THREE.Vector3(0, 2.6, 30));
+    for (const [lx, lz] of [[-10, 0], [10, 0], [0, 0], [0, -30], [0, 30]]) {
+      box(lx, 0.06, lz, 0.5, 0.1, 0.5, GLOW, false);
+    }
+  } else if (mapId === 'alrasul') {
     playerSpawn.set(-12, 0, 94);
     // Inhabited edges, authored in small offset clusters rather than a repeating tile grid.
     for (const [x,z,w,d] of [[-86,-88,12,12],[-63,-89,12,12],[-32,-68,10,9],[-7,-59,8,12],[22,-60,10,10],[45,-85,12,12],[88,-48,12,14],[62,-43,12,12],[72,-18,12,10],[-87,-8,12,12],[-60,-10,12,10],[-36,-17,10,8],[-57,37,12,13],[-54,67,11,12],[-87,43,12,12],[-87,77,11,13],[-36,26,10,11],[1,82,10,12]] as const) {
@@ -866,7 +1089,9 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   const validCover = coverNodes.filter(p => p.y === 0 && !solids.some(b => b.minY < 1.7 && b.maxY > 0.34 && p.x + 0.5 > b.minX && p.x - 0.5 < b.maxX && p.z + 0.5 > b.minZ && p.z - 0.5 < b.maxZ));
   coverNodes.length = 0;
   // Evenly retain cover across the authored arenas rather than biasing the first district.
-  for (let i = 0; i < Math.min(40, validCover.length); i++) coverNodes.push(validCover[Math.floor(i * validCover.length / Math.min(40, validCover.length))]);
+  // The TDM compound is far denser by design — every barrier/container gets a node.
+  const coverCap = mapId === 'arena' ? 400 : 40;
+  for (let i = 0; i < Math.min(coverCap, validCover.length); i++) coverNodes.push(validCover[Math.floor(i * validCover.length / Math.min(coverCap, validCover.length))]);
   scene.add(group);
   group.updateMatrixWorld(true);
   return { groundHeight, navigationHeight, detonate, get changed() { return changed; }, landmarks, overlooks, group, solids, occluders, coverNodes, playerSpawn, interiors, concrete, wood, half, lightSpots, windows, glass, breakGlass };

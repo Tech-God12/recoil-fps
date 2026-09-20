@@ -13,15 +13,18 @@ import { gradeFor } from '../game/economy/rewards';
 import { voice } from '../game/voice';
 import mapAlrasul from '../assets/map-alrasul.jpg';
 import mapKasbah from '../assets/map-kasbah.jpg';
+import mapArena from '../assets/map-arena.jpg';
 import operatorArt from '../assets/operator.jpg';
 import MapFlyover from './MapFlyover';
 
-export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah };
+export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapArena };
 
 export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
   mission: MissionReport; pressure: PressureStats;
   cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
+  /** Warehouse TDM only: final team scores. Absent for campaign missions. */
+  tdm?: { alpha: number; bravo: number };
 }
 
 const Arrow = () => (
@@ -340,6 +343,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   const accuracy = r.shots ? Math.round(r.hits / r.shots * 100) : 0;
   const completed = r.mission.phases.filter(p => p.complete).length;
   const { grade, tint } = gradeFor(r);
+  const isTDM = r.mission.id === 'warehouse-tdm';
   const cashRows: { label: string; detail: string; total: number }[] = [];
   for (const reason of Object.keys(CASH_REASONS)) {
     const entries = r.cashLog.filter(e => e.reason === reason);
@@ -353,15 +357,23 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
         <div className="results-header">
           <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
           <div className="stamp-label">Grade {grade}</div>
-          <h2 className="results-title">{r.win ? 'Extraction complete' : 'Mission failed'}</h2>
-          <p className="results-sub">{r.mission.name} — {r.win
+          <h2 className="results-title">{isTDM ? (r.win ? 'Warehouse held' : 'Warehouse lost') : r.win ? 'Extraction complete' : 'Mission failed'}</h2>
+          <p className="results-sub">{r.mission.name} — {isTDM
+            ? (r.win ? 'ALPHA out-frags BRAVO. The yard is yours.' : 'BRAVO out-frags ALPHA. Regroup and run it back.')
+            : r.win
             ? 'You completed the operation and reached the pickup.'
             : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}</p>
         </div>
 
         <div className="stats-grid">
+          {isTDM && r.tdm && (
+            <div className="stat-cell">
+              <span className="stat-label">Final score</span>
+              <div className="stat-value tabular volt">{r.tdm.alpha}<small> : {r.tdm.bravo}</small></div>
+            </div>
+          )}
           <div className="stat-cell">
-            <span className="stat-label">Objectives</span>
+            <span className="stat-label">{isTDM ? 'Rounds' : 'Objectives'}</span>
             <div className="stat-value tabular"><CountUp to={completed} /><small> / {r.mission.phases.length}</small></div>
           </div>
           <div className="stat-cell">
@@ -383,8 +395,15 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
         </div>
 
         <section className="cash-card" aria-label="Cash earned">
-          <div className="sec-label"><span>Cash earned</span><CashCounter value={r.cash} /></div>
-          {cashRows.map((row) => (
+          {isTDM ? (
+            <div className="cash-wallet">
+              <span>Ranked TDM — no cash economy</span>
+              <span className="tabular mono">FRAGS {r.kills} · HS {r.headshots}</span>
+            </div>
+          ) : (
+            <>
+              <div className="sec-label"><span>Cash earned</span><CashCounter value={r.cash} /></div>
+              {cashRows.map((row) => (
             <div className="cash-row" key={row.label}>
               <span className="cash-row-label">{row.label} <small>{row.detail}</small></span>
               <span className="cash-row-val mono">+${row.total.toLocaleString('en-US')}</span>
@@ -404,6 +423,8 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
             <span>Wallet</span>
             <span className="tabular">${wallet.before.toLocaleString('en-US')} → <CashCounter value={wallet.after} /></span>
           </div>
+            </>
+          )}
         </section>
 
         <section className="timeline" aria-label="Mission timeline">

@@ -1385,6 +1385,33 @@ img { display: block; max-width: 100%; }
 .tdm-respawn-score { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; color: var(--bone-dim); }
 .tdm-respawn-bar { width: 240px; height: 3px; background: rgba(237,228,211,0.12); border-radius: 2px; overflow: hidden; }
 .tdm-respawn-bar span { display: block; height: 100%; background: var(--brass); transition: width 200ms linear; }
+.tdm-tag { font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 0.12em; padding: 1px 5px; border-radius: 3px; margin-left: 6px; white-space: nowrap; }
+.tdm-tag.exec { background: rgba(200,50,30,0.25); color: #FF8A7A; border: 1px solid rgba(200,50,30,0.5); }
+.tdm-tag.shutdown { background: rgba(255,140,30,0.2); color: #FFC46B; border: 1px solid rgba(255,140,30,0.5); }
+.tdm-roster .rname.downed { opacity: 0.75; }
+.tdm-roster .rname.downed::after { content: ' +'; color: var(--blood); font-weight: 900; }
+.tdm-board-row.downed .tdm-board-name { color: var(--blood); }
+.tdm-downed { position: absolute; left: 50%; bottom: 17%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.tdm-downed-title { font-family: var(--display); font-size: 26px; font-weight: 900; letter-spacing: 0.28em; color: var(--blood); text-shadow: 0 2px 14px rgba(200,50,30,0.6); animation: downedPulse 1s ease-in-out infinite; }
+.tdm-downed-count { font-family: var(--mono); font-size: 34px; font-weight: 700; color: var(--bone); line-height: 1; }
+.tdm-downed-bar { width: 220px; height: 4px; background: rgba(237,228,211,0.12); border-radius: 2px; overflow: hidden; }
+.tdm-downed-bar span { display: block; height: 100%; background: var(--blood); }
+.tdm-downed-sub { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; color: var(--bone-mute); }
+@keyframes downedPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+.tdm-channel { position: absolute; left: 50%; bottom: 31%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.tdm-channel-label { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.22em; color: var(--bone); }
+.tdm-channel.revive .tdm-channel-label { color: #7FC4D4; }
+.tdm-channel.execute .tdm-channel-label { color: #FF8A7A; }
+.tdm-channel-bar { width: 200px; height: 5px; background: rgba(237,228,211,0.14); border-radius: 3px; overflow: hidden; }
+.tdm-channel-bar span { display: block; height: 100%; background: var(--bone); }
+.tdm-channel.revive .tdm-channel-bar span { background: #4FB0C6; }
+.tdm-channel.execute .tdm-channel-bar span { background: var(--blood); }
+.tdm-interact { position: absolute; left: 50%; bottom: 26%; transform: translateX(-50%); font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; color: var(--bone); background: rgba(6,5,4,0.6); padding: 6px 14px; border-radius: 4px; border: 1px solid rgba(237,228,211,0.2); pointer-events: none; white-space: nowrap; }
+.tdm-interact b { color: var(--brass); }
+.tdm-onfire { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 55%, rgba(255,106,26,0.28) 100%); animation: onfireFlicker 0.5s ease-in-out infinite; }
+.tdm-onfire-label { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); font-family: var(--display); font-size: 15px; font-weight: 900; letter-spacing: 0.3em; color: #FF8A3D; text-shadow: 0 0 12px rgba(255,106,26,0.8); white-space: nowrap; }
+@keyframes onfireFlicker { 0%,100% { opacity: 1; } 50% { opacity: 0.72; } }
+.radar-landmark { position: absolute; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; background: rgba(237,228,211,0.75); border: 1px solid rgba(20,17,13,0.9); transform: rotate(45deg); }
 /* Inside the TDM grid the armory grid-area names don't exist — force auto flow
    so the three columns land where the tdm-main template puts them. */
 .tdm-main .armory-rail, .tdm-main .armory-stage, .tdm-main .armory-panel { grid-area: auto; }

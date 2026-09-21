@@ -9,12 +9,55 @@ import { NavGrid } from './ai';
 
 export type TDMTeam = 'alpha' | 'bravo';
 export type TDMArmor = 0 | 1 | 2;
-export type TDMBotState = 'PATROL' | 'ENGAGE' | 'FLANK' | 'PUSH' | 'COVER' | 'DEAD';
+export type TDMBotState = 'PATROL' | 'ENGAGE' | 'FLANK' | 'PUSH' | 'COVER' | 'REVIVE' | 'EXECUTE' | 'DOWNED' | 'DEAD';
 
 export const TDM_MATCH_SECONDS = 150;
 export const TDM_RESPAWN_SECONDS = 5;
 export const TDM_BASE_HP = 150;
 export const TDM_HP_PER_ARMOR = 20;
+/** Downed bleed-out window: crawl, be revived, be executed — or bleed out. */
+export const TDM_DOWNED_SECONDS = 4;
+export const TDM_REVIVE_SECONDS = 2.0;
+export const TDM_EXECUTE_SECONDS = 1.2;
+/** Crawl pace for downed bots and the downed player. */
+export const TDM_CRAWL_SPEED = 1.0;
+/** Post-bleedout redeploy for the player (bots keep the 5s TDM_RESPAWN_SECONDS). */
+export const TDM_PLAYER_RESPAWN_SECONDS = 10;
+/** Player hold-X fast gun-execute channel (bots use TDM_EXECUTE_SECONDS). */
+export const TDM_PLAYER_EXECUTE_SECONDS = 1.0;
+/** Fast gun-execute score bonus for the player. */
+export const TDM_EXECUTE_BONUS = 50;
+/** Cash bounty for shutting down a burning enemy. */
+export const TDM_SHUTDOWN_BOUNTY = 500;
+/** On-fire: 3 confirms inside 30s → 15s of buffs, then a 20s cooldown. */
+export const TDM_ONFIRE_KILLS = 3;
+export const TDM_ONFIRE_WINDOW = 30;
+export const TDM_ONFIRE_DURATION = 15;
+export const TDM_ONFIRE_COOLDOWN = 20;
+export const TDM_ONFIRE_DMG_MUL = 1.1;
+export const TDM_ONFIRE_SPEED_MUL = 1.05;
+/** Revive HP by armor: lights back at 50, heavies at 75, unarmored at 40. */
+export function tdmReviveHp(armor: TDMArmor): number {
+  return armor >= 2 ? 75 : armor === 1 ? 50 : 40;
+}
+
+/** Kill-feed callout zones, checked in order (rooms before open yards). */
+export interface TDMZone { name: string; minX: number; maxX: number; minZ: number; maxZ: number }
+export const TDM_ZONES: TDMZone[] = [
+  { name: 'CORRIDOR', minX: -4, maxX: 4, minZ: -4, maxZ: 4 },
+  { name: 'WAREHOUSE W', minX: -18, maxX: -3, minZ: -11, maxZ: 11 },
+  { name: 'WAREHOUSE E', minX: 3, maxX: 18, minZ: -11, maxZ: 11 },
+  { name: 'ALPHA BASE', minX: -46, maxX: 46, minZ: 28, maxZ: 46 },
+  { name: 'BRAVO BASE', minX: -46, maxX: 46, minZ: -46, maxZ: -28 },
+  { name: 'DOCK A', minX: -46, maxX: -18, minZ: -28, maxZ: 28 },
+  { name: 'DOCK B', minX: 18, maxX: 46, minZ: -28, maxZ: 28 },
+];
+export function tdmZoneAt(x: number, z: number): string {
+  for (const zn of TDM_ZONES) {
+    if (x >= zn.minX && x <= zn.maxX && z >= zn.minZ && z <= zn.maxZ) return zn.name;
+  }
+  return 'MID';
+}
 /** Player-weapon damage multiplier in TDM. Full damage — bullets must FEEL like
  * they hurt. The 3-headshot floor is enforced by the engine's per-round damage
  * cap (74), not by gutting every hit. */
@@ -43,8 +86,20 @@ export interface TDMContext {
   onCallout(kind: string, pos: THREE.Vector3, team: TDMTeam): void;
   throwGrenade(from: THREE.Vector3, target: THREE.Vector3, owner: TDMBot): void;
   onBotFire(pos: THREE.Vector3, team: TDMTeam): void;
-  onFeed(killer: string, weapon: string, victim: string, headshot: boolean, killerTeam: TDMTeam): void;
+  onFeed(killer: string, weapon: string, victim: string, headshot: boolean, killerTeam: TDMTeam, zone: string, executed: boolean, shutdown: boolean): void;
   onScore(): void; // roster / scoreboard changed
+  // --- downed / revive / execute / on-fire bridge (implemented by the engine) ---
+  playerDowned(): boolean;
+  playerOnFire(): boolean;
+  revivePlayer(): void;
+  executePlayer(killer: TDMBot): void;
+  /** Bots report channel progress on the player (HUD bar); null clears it. */
+  setPlayerChannel(kind: 'revive' | 'execute' | null, remaining: number, duration: number): void;
+  /** Fired for every player-attacker confirm, including delayed bleed-outs. */
+  onPlayerKill(victim: TDMBot, headshot: boolean, weapon: string, executed: boolean): void;
+  onRevive(medicName: string, revivedName: string, team: TDMTeam): void;
+  onShutdown(killerName: string, victimName: string, killerTeam: TDMTeam): void;
+  onIgnite(name: string, team: TDMTeam): void;
 }
 
 const ray = new THREE.Raycaster();
@@ -84,6 +139,27 @@ function getAllyMarkerTexture(): THREE.CanvasTexture {
   allyMarkerTex = new THREE.CanvasTexture(c);
   allyMarkerTex.colorSpace = THREE.SRGBColorSpace;
   return allyMarkerTex;
+}
+
+/** Shared red-cross sprite marking crawlers for medics AND opportunists. */
+let downedMarkerTex: THREE.CanvasTexture | null = null;
+function getDownedMarkerTexture(): THREE.CanvasTexture {
+  if (downedMarkerTex) return downedMarkerTex;
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = 'rgba(10,10,12,0.55)';
+  ctx.beginPath(); ctx.arc(32, 32, 29, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#FF4B3E';
+  ctx.fillRect(27, 14, 10, 36);
+  ctx.fillRect(14, 27, 36, 10);
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(27, 14, 10, 36);
+  ctx.strokeRect(14, 27, 36, 10);
+  downedMarkerTex = new THREE.CanvasTexture(c);
+  downedMarkerTex.colorSpace = THREE.SRGBColorSpace;
+  return downedMarkerTex;
 }
 
 interface TargetRef {
@@ -146,6 +222,26 @@ export class TDMBot {
   private hadLOS = false;
   /** Teal chevron floating above alpha teammates (null for bravo). */
   private allyMarker: THREE.Sprite | null = null;
+  /** Red cross floating above this bot while it crawls (both teams). */
+  private downedMarker: THREE.Sprite | null = null;
+  // downed / support-channel state
+  private downedBy: TDMBot | 'player' = 'player';
+  private downedWeapon = 'RIFLE';
+  private downedHeadshot = false;
+  private downedT = 0;
+  private crawlTarget: THREE.Vector3 | null = null;
+  private reviveTarget: TDMBot | 'player' | null = null;
+  private executeTarget: TDMBot | 'player' | null = null;
+  private channelT = 0;
+  private supportT = 0;
+  private huntBoost = false;
+  // on-fire streak (onFire is public: bounty hunters and the manager read it)
+  onFire = false;
+  private onFireT = 0;
+  private onFireCD = 0;
+  private killTimes: number[] = [];
+  private fireLight: THREE.PointLight | null = null;
+  private fireFxT = 0;
   // movement / pathing
   private path: THREE.Vector3[] | null = null;
   private pathGoal = new THREE.Vector3();
@@ -166,6 +262,7 @@ export class TDMBot {
   get pusher() { return this.personality > 0.58; }
   get flanker() { return this.personality > 0.35 && this.personality < 0.75; }
   get dead() { return this.state === 'DEAD'; }
+  get downed() { return this.state === 'DOWNED'; }
 
   constructor(ctx: TDMContext, mgr: TDMManager, nav: NavGrid, team: TDMTeam, name: string, armor: TDMArmor, spawn: THREE.Vector3) {
     this.ctx = ctx; this.mgr = mgr; this.nav = nav; this.team = team; this.name = name; this.armor = armor;
@@ -181,6 +278,13 @@ export class TDMBot {
       this.allyMarker.renderOrder = 5;
       ctx.scene.add(this.allyMarker);
     }
+    this.downedMarker = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: getDownedMarkerTexture(), transparent: true, depthWrite: false, depthTest: false,
+    }));
+    this.downedMarker.scale.set(0.7, 0.7, 1);
+    this.downedMarker.renderOrder = 6;
+    this.downedMarker.visible = false;
+    ctx.scene.add(this.downedMarker);
     this.pos = spawn.clone();
     this.model.group.position.copy(this.pos);
     ctx.scene.add(this.model.group);
@@ -204,6 +308,13 @@ export class TDMBot {
     this.reactionT = 0; this.hadLOS = false;
     this.stunTimer = 0; this.flinch = 0; this.grenadeCD = 5 + Math.random() * 7;
     this.crouched = false; this.walkPhase = 0; this.locomotion = 0;
+    this.downedT = 0; this.crawlTarget = null;
+    this.reviveTarget = null; this.executeTarget = null; this.channelT = 0; this.supportT = 0;
+    this.huntBoost = false;
+    this.onFire = false; this.onFireT = 0; this.killTimes.length = 0;
+    if (this.fireLight) this.fireLight.visible = false;
+    if (this.downedMarker) this.downedMarker.visible = false;
+    if (this.allyMarker) this.allyMarker.material.color.setHex(0xFFFFFF);
     this.lastX = at.x; this.lastZ = at.z;
     const g = this.model.group;
     g.visible = true; g.position.copy(this.pos); g.rotation.set(0, this.yaw, 0);
@@ -214,21 +325,31 @@ export class TDMBot {
   }
 
   applyStun(t: number) {
-    if (this.dead) return;
+    if (this.dead || this.downed) return;
     this.stunTimer = Math.max(this.stunTimer, t);
     this.flinch = 0.5;
   }
 
   disposeMarker() {
-    if (!this.allyMarker) return;
-    this.allyMarker.removeFromParent();
-    this.allyMarker.material.dispose();
-    this.allyMarker = null;
+    if (this.allyMarker) {
+      this.allyMarker.removeFromParent();
+      this.allyMarker.material.dispose();
+      this.allyMarker = null;
+    }
+    if (this.downedMarker) {
+      this.downedMarker.removeFromParent();
+      this.downedMarker.material.dispose();
+      this.downedMarker = null;
+    }
+    if (this.fireLight) {
+      this.fireLight.removeFromParent();
+      this.fireLight = null;
+    }
   }
 
   /** Heard gunfire: soft intel — hunt the noise if not already fighting. */
   hearShot(pos: THREE.Vector3) {
-    if (this.dead) return;
+    if (this.dead || this.downed) return;
     if (this.state === 'PATROL') {
       this.lastKnown = pos.clone();
       this.lastSeenT = Math.min(this.lastSeenT, 4);
@@ -237,28 +358,124 @@ export class TDMBot {
   }
 
   /** Damage already scaled by TDM rules; armor reduction applied here so it also
-   * protects against bot fire and grenades, not only the player's bullets. */
-  takeDamage(amount: number, isHead: boolean, attacker: TDMBot | 'player', applyArmor = true): boolean {
+   * protects against bot fire and grenades, not only the player's bullets.
+   * Returns true only when the hit CONFIRMS a kill (execution / damage-finish /
+   * bleed-out already scored inside confirmKill) — a fresh down returns false. */
+  takeDamage(amount: number, isHead: boolean, attacker: TDMBot | 'player', applyArmor = true, weapon = 'RIFLE'): boolean {
     if (this.dead) return false;
     let dmg = amount;
     if (applyArmor) dmg *= 1 - (isHead ? TDM_HEAD_REDUCTION[this.armor] : TDM_BODY_REDUCTION[this.armor]);
+    if (this.downed) {
+      // pounding a crawler shortens the bleed-out; heavy hits confirm outright
+      this.downedT -= dmg / 45;
+      this.flinch = 0.3;
+      if (this.downedT <= 0) { this.confirmKill(attacker, weapon, false); return true; }
+      return false;
+    }
     this.hp -= dmg;
     this.flinch = isHead ? 0.35 : 0.22;
     // being shot reveals the shooter's rough position
     const from = attacker === 'player' ? this.ctx.playerFeet() : attacker.pos;
     this.lastKnown = from.clone();
     this.lastSeenT = 0;
-    if (this.hp <= 0) { this.die(); return true; }
+    if (this.hp <= 0) { this.enterDowned(attacker, weapon, isHead); return false; }
     if (this.state === 'PATROL') this.state = 'ENGAGE';
-    // Badly hurt → break for cover
-    if (this.hp < this.maxHp * 0.35 && this.state !== 'COVER' && Math.random() < 0.65) this.enterCover();
+    // Badly hurt → break for cover (aborts any channel in progress)
+    if (this.hp < this.maxHp * 0.35 && this.state !== 'COVER' && Math.random() < 0.65) {
+      this.clearChannel();
+      this.enterCover();
+    }
     return false;
+  }
+
+  /** Drop any support channel (clears the player's HUD bar when aimed at them). */
+  private clearChannel() {
+    if (this.reviveTarget === 'player' || this.executeTarget === 'player') this.ctx.setPlayerChannel(null, 0, 0);
+    this.reviveTarget = null; this.executeTarget = null; this.channelT = 0;
+  }
+
+  /** 0 HP drops the bot crawling — scorable only via a later confirm. */
+  private enterDowned(attacker: TDMBot | 'player', weapon: string, headshot: boolean) {
+    this.hp = 0;
+    this.downedBy = attacker;
+    this.downedWeapon = weapon;
+    this.downedHeadshot = headshot;
+    this.downedT = TDM_DOWNED_SECONDS;
+    this.state = 'DOWNED'; this.stateTime = 0;
+    this.burstLeft = 0; this.path = null; this.huntBoost = false;
+    this.clearChannel();
+    this.crawlTarget = null;
+    this.crouched = true;
+    this.ctx.onCallout('mandown', this.pos, this.team);
+    let surfaceY = this.ctx.groundHeight(this.pos.x, this.pos.z);
+    for (const b of this.ctx.solids) {
+      if (b.maxY > this.pos.y + 0.4 || b.maxY <= surfaceY) continue;
+      if (this.pos.x > b.minX - 0.3 && this.pos.x < b.maxX + 0.3 && this.pos.z > b.minZ - 0.3 && this.pos.z < b.maxZ + 0.3) surfaceY = b.maxY;
+    }
+    this.ctx.effects.bloodDecal(this.pos, surfaceY);
+    if (this.allyMarker) this.allyMarker.material.color.setHex(0xFF5040);
+    if (this.downedMarker) this.downedMarker.visible = true;
+  }
+
+  /** The confirm: execution, damage-finish or bleed-out. Scores via the manager. */
+  confirmKill(attacker: TDMBot | 'player', weapon: string, executed: boolean) {
+    if (this.dead) return;
+    this.die();
+    this.mgr.handleKill(attacker, this, this.downedHeadshot, weapon, executed);
+  }
+
+  /** Back in the fight at partial HP. Called by medics (bots) and the player. */
+  revive() {
+    if (!this.downed) return;
+    this.hp = Math.min(this.maxHp, tdmReviveHp(this.armor));
+    this.state = this.lastSeenT < 4 ? 'ENGAGE' : 'PATROL';
+    this.stateTime = 0;
+    this.downedT = 0; this.crawlTarget = null;
+    this.reviveTarget = null; this.executeTarget = null; this.channelT = 0;
+    this.path = null; this.repathT = 0;
+    this.burstLeft = 0; this.pauseTimer = 0.4;
+    this.crouched = false;
+    const g = this.model.group;
+    g.visible = true; g.rotation.x = 0; g.position.y = this.pos.y;
+    this.model.parts.torso.position.y = 0.95;
+    if (this.allyMarker) this.allyMarker.material.color.setHex(0xFFFFFF);
+    if (this.downedMarker) this.downedMarker.visible = false;
+  }
+
+  /** Confirm-counted kill, feeding the on-fire streak window. */
+  recordKill() {
+    if (this.dead || this.downed) return;
+    const now = performance.now() / 1000;
+    this.killTimes.push(now);
+    while (this.killTimes.length && now - this.killTimes[0] > TDM_ONFIRE_WINDOW) this.killTimes.shift();
+    if (!this.onFire && this.onFireCD <= 0 && this.killTimes.length >= TDM_ONFIRE_KILLS) this.ignite();
+  }
+
+  private ignite() {
+    this.onFire = true;
+    this.onFireT = TDM_ONFIRE_DURATION;
+    this.ctx.onIgnite(this.name, this.team);
+    if (!this.fireLight) {
+      this.fireLight = new THREE.PointLight(0xFF6A1A, 6, 9, 1.8);
+      this.ctx.scene.add(this.fireLight);
+    }
+    this.fireLight.visible = true;
+  }
+
+  clearFire() {
+    if (!this.onFire) return;
+    this.onFire = false; this.onFireT = 0;
+    this.onFireCD = TDM_ONFIRE_COOLDOWN;
+    this.killTimes.length = 0;
+    if (this.fireLight) this.fireLight.visible = false;
   }
 
   private die() {
     this.state = 'DEAD';
     this.deathT = 0;
     this.respawnT = TDM_RESPAWN_SECONDS;
+    this.clearChannel();
+    if (this.downedMarker) this.downedMarker.visible = false;
     let surfaceY = this.ctx.groundHeight(this.pos.x, this.pos.z);
     for (const b of this.ctx.solids) {
       if (b.maxY > this.pos.y + 0.4 || b.maxY <= surfaceY) continue;
@@ -270,6 +487,7 @@ export class TDMBot {
   private setState(s: TDMBotState) {
     if (this.state === 'DEAD') return;
     if (this.state !== s) { this.state = s; this.stateTime = 0; this.path = null; }
+    if (s !== 'PUSH') this.huntBoost = false;
   }
 
   private enterCover() {
@@ -296,21 +514,46 @@ export class TDMBot {
     }
   }
 
-  /** Pick the nearest live enemy (bravo bots also hunt the player). */
+  /** Pick the nearest live STANDING enemy (bravo bots also hunt the player).
+   * Crawlers are finished via EXECUTE, never sprayed at range. */
   private acquireTarget(): TargetRef | null {
+    // bounty hunt: a burning enemy inside 50 m outranks every other target
+    const bounty = this.huntTarget();
+    if (bounty) return bounty;
     let best: TargetRef | null = null;
     let bestD = Infinity;
-    if (this.team === 'bravo' && this.ctx.playerAlive()) {
+    if (this.team === 'bravo' && this.ctx.playerAlive() && !this.ctx.playerDowned()) {
       const feet = this.ctx.playerFeet();
       const d = feet.distanceTo(this.pos);
       if (d < bestD) { bestD = d; best = { feet, eye: this.ctx.playerPos(), isPlayer: true, bot: null }; }
     }
     for (const bot of this.mgr.bots) {
-      if (bot.team === this.team || bot.dead) continue;
+      if (bot.team === this.team || bot.dead || bot.downed) continue;
       const d = bot.pos.distanceTo(this.pos);
       if (d < bestD) { bestD = d; best = { feet: bot.pos.clone(), eye: bot.eyePos(), isPlayer: false, bot }; }
     }
     return best;
+  }
+
+  /** Nearest burning enemy inside 50 m — the natural bounty-hunt priority. */
+  private huntTarget(): TargetRef | null {
+    let best: TargetRef | null = null;
+    let bestD = 50;
+    if (this.team === 'bravo' && this.ctx.playerAlive() && !this.ctx.playerDowned() && this.ctx.playerOnFire()) {
+      const feet = this.ctx.playerFeet();
+      const d = feet.distanceTo(this.pos);
+      if (d < bestD) { bestD = d; best = { feet, eye: this.ctx.playerPos(), isPlayer: true, bot: null }; }
+    }
+    for (const bot of this.mgr.bots) {
+      if (bot.team === this.team || bot.dead || bot.downed || !bot.onFire) continue;
+      const d = bot.pos.distanceTo(this.pos);
+      if (d < bestD) { bestD = d; best = { feet: bot.pos.clone(), eye: bot.eyePos(), isPlayer: false, bot }; }
+    }
+    return best;
+  }
+
+  private isBounty(t: TargetRef): boolean {
+    return t.isPlayer ? this.ctx.playerOnFire() : (t.bot?.onFire ?? false);
   }
 
   private checkLOS(target: TargetRef): boolean {
@@ -324,6 +567,7 @@ export class TDMBot {
 
   /** Navigate; returns true on arrival (or when the goal proves unreachable). */
   private goTo(target: THREE.Vector3, speed: number, dt: number): boolean {
+    if (this.onFire) speed *= TDM_ONFIRE_SPEED_MUL;
     const dist = Math.hypot(target.x - this.pos.x, target.z - this.pos.z);
     if (dist < 0.5) { this.path = null; return true; }
     this.repathT -= dt;
@@ -402,6 +646,8 @@ export class TDMBot {
   }
 
   private fireShot(target: TargetRef) {
+    // stale refs die here: crawlers are executed up close, never sprayed
+    if (target.isPlayer ? this.ctx.playerDowned() : target.bot?.downed) return;
     this.model.group.updateMatrixWorld(true);
     const muzzle = this.model.parts.muzzle.getWorldPosition(new THREE.Vector3());
     this.shotPose = 1;
@@ -423,13 +669,15 @@ export class TDMBot {
       const headshot = Math.random() < 0.10;
       // 44 head / 18-24 body — tuned against the lighter TDM armor curve so a
       // full-HP player survives roughly 7-9 hits (plus regen between fights)
-      const dmg = headshot ? 44 : 18 + Math.random() * 6;
+      let dmg = headshot ? 44 : 18 + Math.random() * 6;
+      if (this.onFire) dmg *= TDM_ONFIRE_DMG_MUL;
       if (target.isPlayer) {
         if (this.ctx.playerAlive()) this.ctx.damagePlayer(dmg, this.pos, this);
       } else if (target.bot && !target.bot.dead) {
         this.ctx.effects.blood(aimAt);
-        const killed = target.bot.takeDamage(dmg, headshot, this);
-        if (killed) this.mgr.handleKill(this, target.bot, headshot, 'RIFLE');
+        // fresh downs return false (scored later); damage-finishes already
+        // scored inside confirmKill — either way there is nothing left to do
+        target.bot.takeDamage(dmg, headshot, this, true, 'RIFLE');
       }
     } else {
       const miss = aimAt.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.6, (Math.random() - 0.3) * 1.8, (Math.random() - 0.5) * 2.6));
@@ -465,9 +713,43 @@ export class TDMBot {
     }
   }
 
+  /** Bleed-out: crawl toward the home half; expire unconfirmed → bleedout feed. */
+  private updateDowned(dt: number) {
+    this.stateTime += dt;
+    this.downedT -= dt;
+    if (this.downedT <= 0) {
+      this.confirmKill(this.downedBy, this.downedWeapon, false);
+      return;
+    }
+    if (!this.crawlTarget || this.repathT <= 0) {
+      // drag toward the home half — away from whoever dropped us
+      const homeZ = this.team === 'alpha' ? 40 : -40;
+      const dx = -this.pos.x, dz = homeZ - this.pos.z;
+      const l = Math.hypot(dx, dz) || 1;
+      this.crawlTarget = new THREE.Vector3(
+        THREE.MathUtils.clamp(this.pos.x + (dx / l) * 6, -42, 42), 0,
+        THREE.MathUtils.clamp(this.pos.z + (dz / l) * 6, -42, 42));
+      this.repathT = 2.5;
+    }
+    this.repathT -= dt;
+    this.goTo(this.crawlTarget, TDM_CRAWL_SPEED, dt);
+  }
+
   updateLogic(dt: number) {
-    if (this.dead || this.stunTimer > 0) return;
-    this.stateTime += dt; this.lastSeenT += dt;
+    if (this.dead) return;
+    // on-fire burn-down + streak-window decay (ticks even while channeling)
+    if (this.onFire) {
+      this.onFireT -= dt;
+      if (this.onFireT <= 0) this.clearFire();
+    } else if (this.killTimes.length) {
+      const now = performance.now() / 1000;
+      while (this.killTimes.length && now - this.killTimes[0] > TDM_ONFIRE_WINDOW) this.killTimes.shift();
+    }
+    this.onFireCD = Math.max(0, this.onFireCD - dt);
+    // bleed-out bypasses stun: crawlers keep crawling, flashes can't pause death
+    if (this.state === 'DOWNED') { this.updateDowned(dt); return; }
+    if (this.stunTimer > 0) return;
+    this.stateTime += dt; this.lastSeenT += dt; this.supportT += dt;
     this.grenadeCD = Math.max(0, this.grenadeCD - dt);
 
     this.losTimer -= dt;
@@ -492,6 +774,9 @@ export class TDMBot {
 
     const target = this.target;
     const dist = target ? Math.hypot(target.feet.x - this.pos.x, target.feet.z - this.pos.z) : Infinity;
+
+    // medic/opportunist brain: scan for crawlers before choosing a combat state
+    if (this.state === 'PATROL') this.considerSupport();
 
     switch (this.state) {
       case 'PATROL': {
@@ -579,7 +864,7 @@ export class TDMBot {
           this.shotTimer -= dt;
           if (this.shotTimer <= 0) { this.burstIdx = 1; this.fireShot(target); this.shotTimer = 0.22 + Math.random() * 0.08; }
         }
-        if (this.goTo(this.pushTarget, 4.6, dt) || this.stateTime > 7) { this.pushTarget = null; this.setState('ENGAGE'); }
+        if (this.goTo(this.pushTarget, this.huntBoost ? 9.2 : 4.6, dt) || this.stateTime > 7) { this.pushTarget = null; this.setState('ENGAGE'); }
         break;
       }
       case 'FLANK': {
@@ -587,6 +872,60 @@ export class TDMBot {
         if (!this.flankTarget) { this.setState('ENGAGE'); break; }
         if (this.goTo(this.flankTarget, 4.6, dt) || (this.hasLOS && this.stateTime > 2) || this.stateTime > 11) {
           this.flankTarget = null; this.setState('ENGAGE');
+        }
+        break;
+      }
+      case 'REVIVE': {
+        const t = this.reviveTarget;
+        if (!t) { this.setState('PATROL'); break; }
+        const tPos = t === 'player' ? this.ctx.playerFeet() : t.pos;
+        const valid = t === 'player' ? this.ctx.playerDowned() : t.downed;
+        if (!valid || !tPos) {
+          if (t === 'player') this.ctx.setPlayerChannel(null, 0, 0);
+          this.reviveTarget = null; this.setState('PATROL'); break;
+        }
+        const d = Math.hypot(tPos.x - this.pos.x, tPos.z - this.pos.z);
+        this.crouched = d <= 2.2;
+        if (d > 2.2) { this.channelT = 0; this.goTo(tPos, 4.4, dt); }
+        else {
+          this.faceTarget(tPos);
+          // shuffle with the patient — crawlers don't hold still for medics
+          if (d > 0.9) this.goTo(tPos, TDM_CRAWL_SPEED + 0.4, dt);
+          this.channelT += dt;
+          if (t === 'player') this.ctx.setPlayerChannel('revive', Math.max(0, TDM_REVIVE_SECONDS - this.channelT), TDM_REVIVE_SECONDS);
+          if (this.channelT >= TDM_REVIVE_SECONDS) {
+            if (t === 'player') { this.ctx.setPlayerChannel(null, 0, 0); this.ctx.revivePlayer(); }
+            else t.revive();
+            this.mgr.handleRevive(this, t);
+            this.reviveTarget = null;
+            this.setState('PATROL');
+          }
+        }
+        break;
+      }
+      case 'EXECUTE': {
+        const t = this.executeTarget;
+        if (!t) { this.setState('ENGAGE'); break; }
+        const tPos = t === 'player' ? this.ctx.playerFeet() : t.pos;
+        const valid = t === 'player' ? this.ctx.playerDowned() : t.downed;
+        if (!valid || !tPos) {
+          if (t === 'player') this.ctx.setPlayerChannel(null, 0, 0);
+          this.executeTarget = null; this.setState('ENGAGE'); break;
+        }
+        const d = Math.hypot(tPos.x - this.pos.x, tPos.z - this.pos.z);
+        if (d > 2.2) { this.channelT = 0; this.goTo(tPos, 4.6, dt); }
+        else {
+          this.faceTarget(tPos);
+          // stay glued — the Coup de grâce doesn't chase, it follows
+          if (d > 0.9) this.goTo(tPos, TDM_CRAWL_SPEED + 0.4, dt);
+          this.channelT += dt;
+          if (t === 'player') this.ctx.setPlayerChannel('execute', Math.max(0, TDM_EXECUTE_SECONDS - this.channelT), TDM_EXECUTE_SECONDS);
+          if (this.channelT >= TDM_EXECUTE_SECONDS) {
+            this.executeTarget = null;
+            if (t === 'player') { this.ctx.setPlayerChannel(null, 0, 0); this.ctx.executePlayer(this); }
+            else t.confirmKill(this, 'EXECUTE', true);
+            this.setState('ENGAGE');
+          }
         }
         break;
       }
@@ -611,6 +950,46 @@ export class TDMBot {
     }
   }
 
+  /** Medic/opportunist brain, scanned from PATROL every ~0.6s. */
+  private considerSupport() {
+    if (this.supportT < 0.6) return;
+    this.supportT = 0;
+    // downed teammate inside 12 m: revive when the ground is safe, else duck
+    const ally = this.mgr.nearestDownedAlly(this, 12);
+    if (ally) {
+      const danger = this.mgr.enemiesNear(this.team, ally.pos, 15);
+      if (danger === 0) { if (Math.random() < 0.7) { this.startRevive(ally); return; } }
+      else if (Math.random() < 0.3) { this.enterCover(); return; }
+    }
+    // downed enemy inside 18 m: free confirm, denies their revive
+    const foe = this.mgr.nearestDownedEnemy(this);
+    if (foe) { this.startExecute(foe); return; }
+    // the player, specifically
+    if (this.ctx.playerDowned()) {
+      const pPos = this.ctx.playerFeet();
+      const d = pPos.distanceTo(this.pos);
+      if (this.team === 'alpha' && d < 12 && this.mgr.enemiesNear('alpha', pPos, 15) === 0 && Math.random() < 0.7) {
+        this.startRevive('player'); return;
+      }
+      if (this.team === 'bravo' && d < 18) { this.startExecute('player'); return; }
+    }
+  }
+
+  private startRevive(t: TDMBot | 'player') {
+    this.reviveTarget = t;
+    this.executeTarget = null;
+    this.channelT = 0;
+    this.setState('REVIVE');
+    this.ctx.onCallout('revive', this.pos, this.team);
+  }
+
+  private startExecute(t: TDMBot | 'player') {
+    this.executeTarget = t;
+    this.reviveTarget = null;
+    this.channelT = 0;
+    this.setState('EXECUTE');
+  }
+
   private startPush(target: TargetRef) {
     // pushes prefer pack behaviour but never stall the match: an ally nearby
     // always green-lights it, and even alone the push goes through 80% of the time
@@ -621,6 +1000,8 @@ export class TDMBot {
     const h = this.ctx.half - 4;
     at.x = THREE.MathUtils.clamp(at.x, -h, h); at.z = THREE.MathUtils.clamp(at.z, -h, h);
     this.pushTarget = at;
+    // bounty pace: a burning target is worth the full sprint
+    this.huntBoost = this.isBounty(target);
     this.setState('PUSH');
     this.ctx.onCallout('push', this.pos, this.team);
   }
@@ -646,6 +1027,27 @@ export class TDMBot {
       this.allyMarker.visible = !this.dead;
       // gentle bob so the chevron reads as a marker, not level geometry
       this.allyMarker.position.set(this.pos.x, this.pos.y + 2.24 + Math.sin(performance.now() * 0.003 + this.id) * 0.05, this.pos.z);
+    }
+    if (this.downedMarker) {
+      this.downedMarker.visible = this.downed;
+      if (this.downed) {
+        this.downedMarker.position.set(this.pos.x, this.pos.y + 1.5 + Math.sin(this.stateTime * 3) * 0.08, this.pos.z);
+        const s = 0.7 + Math.sin(this.stateTime * 6) * 0.06;
+        this.downedMarker.scale.set(s, s, 1);
+      }
+    }
+    if (this.fireLight) {
+      const burning = this.onFire && !this.dead;
+      this.fireLight.visible = burning;
+      if (burning) {
+        this.fireLight.position.set(this.pos.x, this.pos.y + 1.2, this.pos.z);
+        this.fireLight.intensity = 5 + Math.sin(performance.now() * 0.02 + this.id * 2) * 2;
+        this.fireFxT -= dt;
+        if (this.fireFxT <= 0) {
+          this.fireFxT = 0.14;
+          this.ctx.effects.fireFlicker(tmpA.set(this.pos.x, this.pos.y + 1.0, this.pos.z));
+        }
+      }
     }
     if (this.dead) {
       this.deadAge += dt;
@@ -694,6 +1096,18 @@ export class TDMBot {
     p.lArm.rotation.z += ((aiming ? 0.3 : 0) - p.lArm.rotation.z) * Math.min(1, dt * 6);
     p.torso.rotation.x = -this.flinch * 0.8 + stride * 0.045 - this.shotPose * 0.035;
     p.head.rotation.x = -this.flinch * 1.2;
+    if (this.downed) {
+      // prone crawl: chest down, limbs paddling — unmistakable at any range
+      p.torso.position.y = 0.42;
+      p.torso.rotation.x = 1.05;
+      p.head.rotation.x = -0.9;
+      const pad = this.stateTime * 7;
+      p.lLeg.rotation.x = Math.sin(pad) * 0.5;
+      p.rLeg.rotation.x = -Math.sin(pad) * 0.5;
+      p.lArm.rotation.x = -Math.sin(pad) * 0.6;
+      p.rArm.rotation.x = Math.sin(pad) * 0.6;
+      p.rifle.rotation.x = 0.5;
+    }
   }
 }
 
@@ -748,16 +1162,70 @@ export class TDMManager {
     return best!;
   }
 
-  handleKill(killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string) {
+  /** Closest downed teammate within maxDist (bots only — the player via ctx). */
+  nearestDownedAlly(bot: TDMBot, maxDist: number): TDMBot | null {
+    let best: TDMBot | null = null, bestD = maxDist;
+    for (const b of this.bots) {
+      if (b === bot || b.team !== bot.team || !b.downed) continue;
+      const d = b.pos.distanceTo(bot.pos);
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    return best;
+  }
+
+  /** Closest downed enemy — a free confirm that also denies their revive. */
+  nearestDownedEnemy(bot: TDMBot, maxDist = 18): TDMBot | null {
+    let best: TDMBot | null = null, bestD = maxDist;
+    for (const b of this.bots) {
+      if (b.team === bot.team || !b.downed) continue;
+      const d = b.pos.distanceTo(bot.pos);
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    return best;
+  }
+
+  /** Standing enemies of `team` within `radius` of `at` (the player counts). */
+  enemiesNear(team: TDMTeam, at: THREE.Vector3, radius: number): number {
+    let n = 0;
+    for (const b of this.bots) {
+      if (b.team === team || b.dead || b.downed) continue;
+      if (b.pos.distanceTo(at) <= radius) n++;
+    }
+    if (team === 'bravo' && this.ctx.playerAlive() && !this.ctx.playerDowned() &&
+      this.ctx.playerFeet().distanceTo(at) <= radius) n++;
+    return n;
+  }
+
+  handleRevive(medic: TDMBot, revived: TDMBot | 'player') {
+    this.ctx.onRevive(medic.name, revived === 'player' ? 'YOU' : revived.name, medic.team);
+    this.ctx.onCallout('revive', medic.pos, medic.team);
+    this.rosterVersion++;
+  }
+
+  handleKill(killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string, executed = false) {
     const killerTeam: TDMTeam = killer === 'player' ? 'alpha' : killer.team;
     if (killerTeam === 'alpha') this.alphaScore++; else this.bravoScore++;
     // per-combatant stat lines (the player's own line lives in the engine)
-    if (killer !== 'player') { killer.kills++; if (headshot) killer.headshots++; }
+    if (killer !== 'player') { killer.kills++; if (headshot) killer.headshots++; killer.recordKill(); }
     if (victim !== 'player') victim.deaths++;
+    // shutdown: confirming a burning enemy pays a bounty + earns a feed tag
+    let shutdown = false;
+    if (victim !== 'player') {
+      if (victim.onFire && (killer === 'player' || killer.team !== victim.team)) {
+        shutdown = true;
+        this.ctx.onShutdown(killer === 'player' ? 'YOU' : killer.name, victim.name, killerTeam);
+      }
+      victim.clearFire();
+    } else if (killer !== 'player' && this.ctx.playerOnFire()) {
+      shutdown = true;
+      this.ctx.onShutdown(killer.name, 'YOU', killerTeam);
+    }
     this.rosterVersion++;
     const killerName = killer === 'player' ? 'YOU' : killer.name;
     const victimName = victim === 'player' ? 'YOU' : victim.name;
-    this.ctx.onFeed(killerName, weapon, victimName, headshot, killerTeam);
+    const at = victim === 'player' ? this.ctx.playerFeet() : victim.pos;
+    this.ctx.onFeed(killerName, weapon, victimName, headshot, killerTeam, tdmZoneAt(at.x, at.z), executed, shutdown);
+    if (killer === 'player' && victim !== 'player') this.ctx.onPlayerKill(victim, headshot, weapon, executed);
     this.ctx.onScore();
   }
 

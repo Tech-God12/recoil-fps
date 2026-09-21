@@ -25,7 +25,7 @@ const DEFAULT_HUD: HudState = {
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
-  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
+  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], landmarksMap: [], fps: 60, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
 
@@ -135,8 +135,8 @@ export default function App() {
       case 'tdmfeed':
         setFx(f => ({
           ...f,
-          feed: [...f.feed.slice(-3), { id, text: '', headshot: event.headshot, tdm: { killer: event.killer, weapon: event.weapon, victim: event.victim, killerTeam: event.killerTeam } }],
-          ...(event.killer === 'YOU' ? { scorePops: [...f.scorePops.slice(-2), { id, text: event.headshot ? '+150 HEADSHOT' : '+100', headshot: event.headshot }] } : {}),
+          feed: [...f.feed.slice(-3), { id, text: '', headshot: event.headshot, tdm: { killer: event.killer, weapon: event.weapon, victim: event.victim, killerTeam: event.killerTeam, zone: event.zone, executed: event.executed, shutdown: event.shutdown } }],
+          ...(event.killer === 'YOU' ? { scorePops: [...f.scorePops.slice(-2), { id, text: event.executed ? `+${(event.headshot ? 150 : 100) + 50} EXECUTE` : event.headshot ? '+150 HEADSHOT' : '+100', headshot: event.headshot }] } : {}),
         }));
         later(() => setFx(f => ({ ...f, feed: f.feed.filter(row => row.id !== id) })), 5200);
         if (event.killer === 'YOU') later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1300);

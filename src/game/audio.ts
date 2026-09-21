@@ -577,22 +577,120 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.12, gain: 0.45, freq: 350, q: 0.8 });
   }
 
-  footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false, volMul = 1) {
+  footstep(surface: 'sand' | 'concrete' | 'wood' | 'gravel' | 'glass' | 'grate', sprint: boolean, crouch = false, volMul = 1) {
     const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * volMul;
     if (surface === 'sand') {
       this.burstDirect({ dur: 0.07, gain: g, freq: 850, q: 0.6 });
     } else if (surface === 'concrete') {
       this.burstDirect({ dur: 0.05, gain: g, freq: 1750, q: 1.4 });
+    } else if (surface === 'gravel') {
+      // loose crunch: two staggered stone bursts, deliberately loud
+      this.burstDirect({ dur: 0.045, gain: g * 1.1, freq: 2600, q: 0.7 });
+      this.burstDirect({ dur: 0.06, gain: g * 0.9, freq: 900, q: 0.8, when: 0.03 });
+    } else if (surface === 'glass') {
+      // brittle tinkle over a crunch bed
+      this.burstDirect({ dur: 0.05, gain: g, freq: 1100, q: 0.8 });
+      this.burstDirect({ dur: 0.09, gain: g * 0.8, freq: 5200, q: 2.2, hp: 3000 });
+      this.burstDirect({ dur: 0.07, gain: g * 0.5, freq: 6800, q: 2.6, when: 0.04, hp: 3000 });
+    } else if (surface === 'grate') {
+      // hollow metallic clang with a short ring
+      this.burstDirect({ dur: 0.05, gain: g * 1.1, freq: 1200, q: 1.8 });
+      this.burstDirect({ dur: 0.22, gain: g * 0.45, freq: 2400, q: 6 });
     } else {
       this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
     }
   }
 
-  playAmbient() {
-    const r = Math.random();
-    if (r < 0.33) this.burstDirect({ dur: 1.2, gain: 0.15, freq: 280, q: 0.6, type: 'lowpass' });
-    else if (r < 0.66) this.burstDirect({ dur: 0.9, gain: 0.13, freq: 850, q: 0.5 });
-    else this.burstDirect({ dur: 0.6, gain: 0.15, freq: 2200, q: 1.2, hp: 800 });
+  /** Slow execution: wet knife stab + low struggle thump. */
+  stab() {
+    this.burstDirect({ dur: 0.09, gain: 0.5, freq: 480, q: 0.9, type: 'lowpass' });
+    this.burstDirect({ dur: 0.05, gain: 0.35, freq: 1900, q: 1.4, when: 0.02 });
+    this.subThump(120, 45, 0.4, 0.12);
+  }
+
+  /** Revive complete: soft two-tone medic chime. */
+  reviveChime() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    for (const [f, dt] of [[660, 0], [880, 0.12]] as const) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t + dt);
+      g.gain.linearRampToValueAtTime(0.14, t + dt + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.3);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + dt); o.stop(t + dt + 0.32);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    }
+  }
+
+  /** On-fire ignition: rising whoosh + ember crackle. */
+  ignite() {
+    this.burstDirect({ dur: 0.5, gain: 0.5, freq: 900, q: 0.6, attack: 0.06, toEcho: 0.2 });
+    for (let i = 0; i < 5; i++) {
+      this.burstDirect({ dur: 0.03, gain: 0.16, freq: 2800 + Math.random() * 2400, q: 3, when: 0.1 + i * 0.09 });
+    }
+    this.subThump(95, 40, 0.4, 0.2);
+  }
+
+  /** Shut-down sting: hot kill confirmed, bounty claimed. */
+  shutdownSting() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.setValueAtTime(820, t);
+    o.frequency.exponentialRampToValueAtTime(210, t + 0.28);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.16, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    o.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + 0.32);
+  }
+
+  // ==================== DISTANT AMBIENCE ====================
+  // Sparse 2D one-shots (dog bark, wind gust, metal creak) so the map feels
+  // alive beyond its walls. Called from the engine; never spams.
+  private ambientT = 9;
+  tickAmbient(dt: number) {
+    if (!this.ctx) return;
+    this.ambientT -= dt;
+    if (this.ambientT > 0) return;
+    this.ambientT = 12 + Math.random() * 8;
+    this.playAmbient();
+  }
+
+  private playAmbient() {
+    const roll = Math.random();
+    if (roll < 0.36) {
+      // far-off dog bark: 2-3 short throaty yaps
+      const n = 2 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < n; i++) {
+        this.burstDirect({ dur: 0.11, gain: 0.15, freq: 720 + Math.random() * 160, q: 3.2, when: i * 0.22 });
+      }
+    } else if (roll < 0.7) {
+      // wind gust rolling through the yard
+      this.burstDirect({ dur: 2.1, gain: 0.12, freq: 300, q: 0.5, type: 'lowpass', attack: 0.8 });
+    } else {
+      // distant metal creak: slow groaning sweep
+      const ctx = this.ensure();
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(170 + Math.random() * 40, t);
+      o.frequency.linearRampToValueAtTime(80, t + 1.3);
+      const f = ctx.createBiquadFilter();
+      f.type = 'bandpass'; f.frequency.value = 320; f.Q.value = 4;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.4);
+      g.gain.linearRampToValueAtTime(0, t + 1.4);
+      o.connect(f); f.connect(g); g.connect(this.master!);
+      o.start(t); o.stop(t + 1.5);
+      o.onended = () => { o.disconnect(); f.disconnect(); g.disconnect(); };
+    }
   }
 
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }

@@ -181,6 +181,12 @@ export class Effects {
     this.burst(pos, 3, 0xC8B080, 0.7, 0.35, 1.2, 0.05);
   }
 
+  /** On-fire ember tick: small orange flames licking upward off the body. */
+  fireFlicker(pos: THREE.Vector3) {
+    this.burst(pos, 3, 0xFF7A1A, 1.1, 0.4, -2.5, 0.09);
+    this.burst(pos, 2, 0xFFC46B, 0.7, 0.3, -2, 0.06);
+  }
+
   update(dt: number, playerPos: THREE.Vector3) {
     for (let i = 0; i < this.bursts.length; i++) {
       const b = this.bursts[i];

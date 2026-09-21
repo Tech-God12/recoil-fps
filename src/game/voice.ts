@@ -105,6 +105,9 @@ class VoiceManager {
     this.speak(map[label] ?? label, 'announcer', { key: `streak:${label}`, cooldownMs: 1500, rate: 1.1 });
   }
   headshot() { this.speak('Headshot.', 'announcer', { key: 'hs', cooldownMs: 5000, volume: 0.6 }); }
+  downed() { this.speak('Operator down. Need a revive.', 'announcer', { key: 'downed', cooldownMs: 8000, volume: 0.7 }); }
+  onFire() { this.speak('You are on fire. They are coming for you.', 'announcer', { key: 'onfire', cooldownMs: 20000, volume: 0.7 }); }
+  shutdown() { this.speak('Target shut down.', 'announcer', { key: 'shutdown', cooldownMs: 8000, volume: 0.7 }); }
   lowAmmo() { this.speak('Reloading.', 'announcer', { key: 'lowammo', cooldownMs: 15000, volume: 0.55 }); }
   defeat() { this.speak('Operator down. Mission failed.', 'announcer', { key: 'lose', cooldownMs: 60000 }); }
 
@@ -115,6 +118,8 @@ class VoiceManager {
       flank: ['Flanking!', 'Moving around!', 'Going wide!'],
       grenade: ['Frag out!', 'Grenade!'],
       mandown: ['Man down!', 'We lost one!'],
+      revive: ['Patching him up!', 'Reviving!', 'Got you, buddy!'],
+      hunt: ['Burning! Take him down!', 'He is lit up — get him!', 'Hunt the burning one!'],
       fallback: ['Fall back!', 'Pull back!'],
       push: ['Push up!', 'Move in!', 'Take them!'],
     };

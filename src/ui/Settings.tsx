@@ -70,7 +70,8 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                 <div className="mt-6">
                   <SectionTitle sub="Applies on next deployment">Area of operations</SectionTitle>
                   <div className="grid grid-cols-2 gap-2">
-                    {MAPS.map(m => (
+                    {/* Mission maps only — the arena is selected via Arena Mode on the main menu */}
+                    {MAPS.filter(m => m.id !== 'arena').map(m => (
                       <button key={m.id} onClick={() => set({ map: m.id })} aria-pressed={s.map === m.id} className={`preset text-left ${s.map === m.id ? 'preset-on' : ''}`}>
                         <div className="text-[13px] font-bold" style={{ fontFamily: 'var(--display)' }}>{m.name}</div>
                         <div className="text-[12px] leading-snug text-[var(--bone-dim)] mt-1">{m.desc}</div>

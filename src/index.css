@@ -1301,3 +1301,175 @@ img { display: block; max-width: 100%; }
 .scope-zoom-panel.editing { border-color:#d8b877b0; }
 @media (max-width:800px) { .scope-zoom-panel { top:auto; bottom:80px; right:12px; transform:none; width:185px; padding:10px; } .scope-zoom-heading{margin-bottom:10px;} .scope-zoom-panel small{margin-top:8px;} }
 .pcard-fit { margin:7px 0 3px; font-size:9px; line-height:1.6; letter-spacing:.035em; color:var(--brass); }
+
+/* ================================================================
+   WAREHOUSE TDM — pre-match setup + in-match scoreboard
+   ================================================================ */
+.tdm-root { display: flex; flex-direction: column; }
+.tdm-title-chip { justify-self: end; font-family: var(--display); font-weight: 800; font-size: 12px; letter-spacing: 0.14em; color: var(--brass); border: 1px solid rgba(200,155,90,0.35); padding: 6px 12px; border-radius: 3px; background: rgba(200,155,90,0.07); }
+.tdm-rules-chip { justify-self: center; font-size: 10px; letter-spacing: 0.12em; color: var(--bone-dim); border: 1px solid var(--line); padding: 6px 14px; border-radius: 999px; background: rgba(237,228,211,0.03); }
+.tdm-main { position: relative; z-index: 2; flex: 1; min-height: 0; display: grid; grid-template-columns: 278px minmax(0,1fr) 322px; gap: 12px; padding: 10px 14px 8px; }
+.tdm-left { overflow-y: auto; }
+.tdm-stage { display: flex; flex-direction: column; }
+.tdm-viewport { flex: 1; min-height: 180px; position: relative; }
+.tdm-right { overflow-y: auto; }
+
+/* armor picker */
+.tdm-armor-list { display: flex; flex-direction: column; gap: 8px; }
+.tdm-armor { display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 12px; background: rgba(237,228,211,0.02); border: 1px solid var(--line); border-radius: 3px; cursor: pointer; transition: border-color 140ms, background 140ms; }
+.tdm-armor:hover { border-color: var(--line-strong); background: rgba(237,228,211,0.05); }
+.tdm-armor.on { border-color: rgba(200,155,90,0.55); background: rgba(200,155,90,0.08); box-shadow: inset 3px 0 0 var(--brass); }
+.tdm-armor-icon { font-size: 22px; line-height: 1; color: var(--brass); width: 30px; text-align: center; flex: none; }
+.tdm-armor-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tdm-armor-body b { font-family: var(--display); font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bone); }
+.tdm-armor-body i { font-style: normal; font-size: 10px; color: var(--olive); font-weight: 700; }
+.tdm-armor-body em { font-style: normal; font-size: 9px; color: var(--bone-mute); }
+
+/* enemy kit preview */
+.tdm-enemy-list { display: flex; flex-direction: column; gap: 4px; }
+.tdm-enemy { display: flex; align-items: center; gap: 10px; padding: 6px 10px; font-size: 11px; border: 1px solid var(--line); border-radius: 3px; background: rgba(200,50,30,0.03); }
+.tdm-enemy-icon { color: var(--blood); width: 16px; text-align: center; }
+.tdm-enemy b { color: var(--bone); letter-spacing: 0.08em; flex: 1; }
+.tdm-enemy-armor { font-size: 9px; letter-spacing: 0.1em; padding: 1px 7px; border-radius: 2px; border: 1px solid var(--line-strong); color: var(--bone-mute); }
+.tdm-enemy-armor.a2 { color: var(--blood); border-color: rgba(200,50,30,0.5); }
+.tdm-enemy-armor.a1 { color: var(--brass); border-color: rgba(200,155,90,0.4); }
+
+/* weapon grids under the viewer */
+.tdm-grids { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: rgba(18,16,12,0.4); }
+.tdm-wgrid-block { min-width: 0; }
+.tdm-wgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 6px; }
+.tdm-wcell { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 4px 4px; background: rgba(237,228,211,0.02); border: 1px solid var(--line); border-radius: 3px; cursor: pointer; transition: border-color 120ms, background 120ms; }
+.tdm-wcell:hover { border-color: var(--line-strong); background: rgba(237,228,211,0.05); }
+.tdm-wcell.sel { border-color: rgba(200,155,90,0.55); background: rgba(200,155,90,0.08); }
+.tdm-wcell.locked { opacity: 0.45; }
+.tdm-wcell img, .tdm-wcell-ph { width: 84px; height: 34px; object-fit: contain; }
+.tdm-wcell-name { font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 0.1em; color: var(--bone-dim); }
+.tdm-wcell.sel .tdm-wcell-name { color: var(--brass); }
+.tdm-wcell-tag { position: absolute; top: 3px; right: 4px; font-family: var(--mono); font-size: 7px; letter-spacing: 0.08em; color: var(--olive); }
+.tdm-wcell-tag.lock { color: var(--steel); }
+
+/* rules box */
+.tdm-rulebox { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 3px; background: rgba(237,228,211,0.02); font-size: 10px; line-height: 1.5; color: var(--bone-mute); }
+.tdm-rulebox b { color: var(--brass); }
+
+/* footer deploy bar */
+.tdm-footer { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 16px 12px; border-top: 1px solid var(--line); background: rgba(18,16,12,0.55); }
+.tdm-footer-sum { font-size: 11px; letter-spacing: 0.1em; color: var(--bone-dim); }
+.tdm-deploy { min-width: 300px; }
+
+/* ---------- in-match scoreboard ---------- */
+.tdm-scoreboard { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none; }
+.tdm-score-row { display: flex; align-items: stretch; gap: 1px; border: 1px solid var(--line-strong); border-radius: 3px; overflow: hidden; background: rgba(10,9,7,0.72); backdrop-filter: blur(3px); }
+.tdm-score-team { display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-family: var(--display); }
+.tdm-score-team .lbl { font-size: 9px; font-weight: 800; letter-spacing: 0.18em; }
+.tdm-score-team .num { font-size: 22px; font-weight: 900; line-height: 1; min-width: 30px; text-align: center; }
+.tdm-score-team.alpha .lbl, .tdm-score-team.alpha .num { color: #4FB0C6; }
+.tdm-score-team.bravo .lbl, .tdm-score-team.bravo .num { color: #E05A48; }
+.tdm-score-clock { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3px 12px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); background: rgba(237,228,211,0.03); }
+.tdm-score-clock b { font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: 0.06em; color: var(--bone); line-height: 1.1; }
+.tdm-score-clock b.low { color: var(--blood); animation: blink 1s steps(2) infinite; }
+.tdm-score-clock i { font-style: normal; font-family: var(--mono); font-size: 7px; letter-spacing: 0.22em; color: var(--bone-mute); }
+.tdm-roster { display: flex; gap: 10px; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.05em; padding: 2px 10px; border-radius: 3px; background: rgba(10,9,7,0.55); }
+.tdm-roster .rteam { display: flex; gap: 6px; }
+.tdm-roster .rname { color: var(--bone-mute); }
+.tdm-roster .rname.a { color: #7FC4D4; }
+.tdm-roster .rname.b { color: #E08A7E; }
+.tdm-roster .rname.dead { text-decoration: line-through; opacity: 0.45; }
+.tdm-roster .rname.you { font-weight: 700; text-shadow: 0 0 6px rgba(79,176,198,0.7); }
+
+/* ---------- respawn overlay ---------- */
+.tdm-respawn { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: radial-gradient(ellipse 60% 50% at 50% 50%, rgba(120,20,10,0.25), rgba(6,5,4,0.78)); pointer-events: none; }
+.tdm-respawn-title { font-family: var(--display); font-size: 34px; font-weight: 900; letter-spacing: 0.3em; color: var(--blood); text-shadow: 0 2px 18px rgba(200,50,30,0.5); }
+.tdm-respawn-count { font-family: var(--mono); font-size: 52px; font-weight: 700; color: var(--bone); line-height: 1; }
+.tdm-respawn-sub { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--bone-mute); }
+.tdm-respawn-score { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; color: var(--bone-dim); }
+.tdm-respawn-bar { width: 240px; height: 3px; background: rgba(237,228,211,0.12); border-radius: 2px; overflow: hidden; }
+.tdm-respawn-bar span { display: block; height: 100%; background: var(--brass); transition: width 200ms linear; }
+/* Inside the TDM grid the armory grid-area names don't exist — force auto flow
+   so the three columns land where the tdm-main template puts them. */
+.tdm-main .armory-rail, .tdm-main .armory-stage, .tdm-main .armory-panel { grid-area: auto; }
+
+/* ============ ARENA MODE (main menu view) ============ */
+.arena-wrap { max-width: 660px; }
+.arena-map-card {
+  position: relative; display: flex; align-items: stretch; width: 100%;
+  border: 1px solid var(--line); border-radius: 3px; overflow: hidden; cursor: pointer;
+  background: var(--ink-2); padding: 0; text-align: left;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.5), 0 14px 34px rgba(0,0,0,0.4);
+  transition: border-color .15s ease, transform .15s ease;
+}
+.arena-map-card:hover { border-color: var(--brass); transform: translateY(-2px); }
+.arena-map-card img { width: 46%; min-height: 168px; object-fit: cover; display: block; }
+.arena-map-card-info { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 18px 20px; }
+.arena-map-card-info > span.mono { font-size: 10px; letter-spacing: 0.16em; color: var(--bone-mute); }
+.arena-map-card-info b { font-family: var(--display); font-size: 30px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; color: var(--bone); }
+.arena-map-card-info em { font-family: var(--mono); font-style: normal; font-size: 11px; letter-spacing: 0.08em; color: var(--bone-dim); }
+.arena-map-card-check {
+  position: absolute; top: 10px; right: 10px; padding: 4px 8px; font-size: 9px; letter-spacing: 0.14em;
+  color: #10130F; background: var(--brass); border-radius: 2px; font-weight: 700;
+}
+
+/* ============ TDM FULL SCOREBOARD (hold Tab) ============ */
+.tdm-board {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%);
+  width: min(860px, 92vw); z-index: 30; pointer-events: none;
+  background: rgba(14, 13, 10, 0.92); border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.6), 0 30px 80px rgba(0,0,0,0.65);
+  padding: 14px 16px 10px; backdrop-filter: blur(6px);
+  animation: boardIn .12s ease-out;
+}
+@keyframes boardIn { from { opacity: 0; transform: translate(-50%, -50%) scale(0.97); } to { opacity: 1; transform: translate(-50%, -52%) scale(1); } }
+.tdm-board-title {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+  padding: 0 4px 10px; border-bottom: 1px solid var(--line); margin-bottom: 10px;
+  font-family: var(--display); text-transform: uppercase; letter-spacing: 0.06em;
+}
+.tdm-board-title .alpha { color: #4FB0C6; font-size: 18px; font-weight: 800; }
+.tdm-board-title .bravo { color: #E05A48; font-size: 18px; font-weight: 800; }
+.tdm-board-title .alpha b, .tdm-board-title .bravo b { font-size: 26px; margin: 0 6px; color: var(--bone); }
+.tdm-board-title .mid { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; color: var(--bone-dim); }
+.tdm-board-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.tdm-board-team { display: flex; flex-direction: column; gap: 2px; }
+.tdm-board-row {
+  display: grid; grid-template-columns: 1fr 34px 34px 34px 44px; align-items: center; gap: 4px;
+  padding: 5px 8px; border-radius: 2px; font-family: var(--mono); font-size: 12px; color: var(--bone);
+  background: rgba(237,228,211,0.03);
+}
+.tdm-board-row > span { text-align: right; }
+.tdm-board-row .tdm-board-name { text-align: left; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; font-weight: 700; }
+.tdm-board-row .tdm-board-name em { font-style: normal; opacity: 0.6; }
+.tdm-board-row .tdm-board-name .mvp { color: var(--brass); font-style: normal; text-shadow: 0 0 8px rgba(200,155,90,0.7); }
+.tdm-board-row.head {
+  background: none; color: var(--bone-mute); font-size: 9px; letter-spacing: 0.14em; padding-bottom: 2px;
+}
+.tdm-board-row.you { background: rgba(79,176,198,0.14); outline: 1px solid rgba(79,176,198,0.35); }
+.tdm-board-row.dead:not(.head) { opacity: 0.45; }
+.tdm-board-row.dead:not(.head) .tdm-board-name { text-decoration: line-through; }
+.tdm-board-team.alpha .tdm-board-row:not(.head) .tdm-board-name { color: #9BD4E2; }
+.tdm-board-team.bravo .tdm-board-row:not(.head) .tdm-board-name { color: #EFA79C; }
+.tdm-board-row .kd { color: var(--brass); }
+.tdm-board-hint { display: block; text-align: center; margin-top: 10px; font-size: 9px; letter-spacing: 0.2em; color: var(--bone-mute); }
+
+/* ============ TDM FINAL STANDINGS (results screen) ============ */
+.tdm-standings {
+  margin-bottom: 12px; border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
+  background: rgba(237,228,211,0.02);
+}
+.tdm-standings .sec-label { margin: 0; padding: 9px 12px; border-bottom: 1px solid var(--line); background: rgba(237,228,211,0.03); }
+.tdm-standing-row {
+  display: grid; grid-template-columns: 26px 1fr 40px 40px 40px 52px; align-items: center; gap: 4px;
+  padding: 6px 12px; font-size: 12px; color: var(--bone);
+  border-bottom: 1px solid rgba(237,228,211,0.05);
+}
+.tdm-standing-row:last-child { border-bottom: none; }
+.tdm-standing-row > span { text-align: right; }
+.tdm-standing-row .rank { text-align: left; color: var(--bone-mute); font-size: 10px; }
+.tdm-standing-row .who { text-align: left; display: flex; align-items: center; gap: 7px; font-weight: 700; font-family: var(--mono); overflow: hidden; white-space: nowrap; }
+.tdm-standing-row .who em { font-style: normal; opacity: 0.55; }
+.tdm-standing-row .who .mvp { color: var(--brass); font-style: normal; text-shadow: 0 0 8px rgba(200,155,90,0.7); }
+.tdm-standing-row .who .side { font-size: 8px; letter-spacing: 0.12em; padding: 2px 5px; border-radius: 2px; font-weight: 800; }
+.tdm-standing-row .who .side.alpha { color: #9BD4E2; background: rgba(79,176,198,0.14); }
+.tdm-standing-row .who .side.bravo { color: #EFA79C; background: rgba(224,90,72,0.14); }
+.tdm-standing-row.you { background: rgba(79,176,198,0.10); }
+.tdm-standing-row .dim { color: var(--bone-dim); }
+.tdm-standing-row .kd { color: var(--brass); }

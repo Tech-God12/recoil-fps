@@ -1,12 +1,13 @@
 // Recoil FPS — in-game HUD (VOLT PROTOCOL)
-import type { GameSettings, HudState } from '../game/engine';
+import { useEffect, useState } from 'react';
+import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
-import MissionObjective from './MissionObjective';
+import MissionObjective, { missionClock } from './MissionObjective';
 import ScopeView, { type ScopeControls } from './ScopeView';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
-  feed: { id: number; text: string; headshot: boolean }[];
+  feed: { id: number; text: string; headshot: boolean; tdm?: { killer: string; weapon: string; victim: string; killerTeam: 'alpha' | 'bravo' } }[];
   dmgArcs: { id: number; dir: number; opacity: number }[];
   scorePops: { id: number; text: string; headshot: boolean; cash?: boolean }[];
   banner: { id: number; label: string } | null;
@@ -15,16 +16,84 @@ export interface HudFx {
   missionBanner: { id: number; title: string; index: number } | null;
 }
 
-export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx } & ScopeControls) {
-  const lowHp = hud.hp < 35;
-  const vig = hud.hp < 60 ? 1 - hud.hp / 60 : 0;
+/* ================================================================
+   TAB SCOREBOARD — full match table, held open with Tab.
+   Rows sorted by kills (headshots break ties); the match MVP gets a star.
+   ================================================================ */
+function TdmFullBoard({ tdm }: { tdm: NonNullable<HudState['tdm']> }) {
+  const sorted = (team: 'alpha' | 'bravo') =>
+    tdm.roster.filter(r => r.team === team)
+      .sort((a, b) => b.kills - a.kills || b.headshots - a.headshots || a.deaths - b.deaths);
+  const mvpKills = Math.max(...tdm.roster.map(r => r.kills));
+  const Row = ({ r }: { r: TdmRosterEntry }) => (
+    <div className={`tdm-board-row ${r.you ? 'you' : ''} ${r.dead ? 'dead' : ''}`}>
+      <span className="tdm-board-name">
+        {mvpKills > 0 && r.kills === mvpKills && <i className="mvp" title="Match leader">★</i>}
+        <em aria-hidden="true">{r.armorIcon}</em>{r.name}{r.you ? ' (YOU)' : ''}
+      </span>
+      <span className="tabular">{r.kills}</span>
+      <span className="tabular">{r.deaths}</span>
+      <span className="tabular">{r.headshots}</span>
+      <span className="tabular kd">{r.deaths ? (r.kills / r.deaths).toFixed(1) : r.kills.toFixed(1)}</span>
+    </div>
+  );
+  const Head = () => (
+    <div className="tdm-board-row head">
+      <span className="tdm-board-name">OPERATOR</span><span>K</span><span>D</span><span>HS</span><span>K/D</span>
+    </div>
+  );
+  return (
+    <div className="tdm-board" role="dialog" aria-label="Match scoreboard">
+      <div className="tdm-board-title">
+        <span className="alpha">ALPHA <b className="tabular">{tdm.alphaScore}</b></span>
+        <span className="mid">WAREHOUSE TDM · {missionClock(tdm.timeLeft)}</span>
+        <span className="bravo"><b className="tabular">{tdm.bravoScore}</b> BRAVO</span>
+      </div>
+      <div className="tdm-board-cols">
+        <div className="tdm-board-team alpha">
+          <Head />
+          {sorted('alpha').map(r => <Row key={r.name} r={r} />)}
+        </div>
+        <div className="tdm-board-team bravo">
+          <Head />
+          {sorted('bravo').map(r => <Row key={r.name} r={r} />)}
+        </div>
+      </div>
+      <span className="tdm-board-hint mono">HOLD TAB · ★ MATCH LEADER</span>
+    </div>
+  );
+}
+
+export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx; active?: boolean } & ScopeControls) {
+  // Hold-Tab scoreboard (TDM only). Listens on window so it works regardless
+  // of pointer lock; Tab's default focus-move is suppressed while playing.
+  const [showBoard, setShowBoard] = useState(false);
+  const isTdm = !!hud.tdm && active !== false;
+  useEffect(() => {
+    if (!isTdm) { setShowBoard(false); return; }
+    const down = (e: KeyboardEvent) => { if (e.code === 'Tab') { e.preventDefault(); setShowBoard(true); } };
+    const up = (e: KeyboardEvent) => { if (e.code === 'Tab') { e.preventDefault(); setShowBoard(false); } };
+    const blur = () => setShowBoard(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, [isTdm]);
+
+  const maxHp = hud.tdm?.maxHp ?? 100;
+  const lowHp = hud.hp < maxHp * 0.35;
+  const vig = hud.hp < maxHp * 0.6 ? 1 - hud.hp / (maxHp * 0.6) : 0;
   const magPct = hud.magSize ? hud.mag / hud.magSize : 0;
   const segs = Math.min(hud.magSize || 30, 30);
   const filled = Math.round(magPct * segs);
   const displayedMag = hud.reloading && hud.reloadStage === 'magOut' ? 0 : hud.mag;
   const fpsColor = hud.fps >= 55 ? 'var(--olive)' : hud.fps >= 35 ? 'var(--brass)' : 'var(--blood)';
   const hpSegs = 10;
-  const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / 100 * hpSegs)));
+  const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / maxHp * hpSegs)));
 
   return (
     <div className="hud-root pointer-events-none select-none">
@@ -40,6 +109,46 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
       {/* flashbang */}
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
       {hud.mission && <MissionObjective mission={hud.mission} />}
+
+      {/* ============ FULL SCOREBOARD (hold Tab) ============ */}
+      {hud.tdm && showBoard && <TdmFullBoard tdm={hud.tdm} />}
+
+      {/* ============ WAREHOUSE TDM SCOREBOARD ============ */}
+      {hud.tdm && (
+        <div className="tdm-scoreboard" aria-label="Match score">
+          <div className="tdm-score-row">
+            <div className="tdm-score-team alpha"><span className="lbl">ALPHA</span><span className="num">{hud.tdm.alphaScore}</span></div>
+            <div className="tdm-score-clock">
+              <b className={hud.tdm.timeLeft < 30 ? 'low' : ''}>{missionClock(hud.tdm.timeLeft)}</b>
+              <i>WAREHOUSE TDM</i>
+            </div>
+            <div className="tdm-score-team bravo"><span className="num">{hud.tdm.bravoScore}</span><span className="lbl">BRAVO</span></div>
+          </div>
+          <div className="tdm-roster" aria-hidden="true">
+            <span className="rteam">
+              {hud.tdm.roster.filter(r => r.team === 'alpha').map(r => (
+                <span key={r.name} className={`rname a ${r.dead ? 'dead' : ''} ${r.you ? 'you' : ''}`}>{r.armorIcon}{r.name}{r.you ? '*' : ''}</span>
+              ))}
+            </span>
+            <span className="rteam">
+              {hud.tdm.roster.filter(r => r.team === 'bravo').map(r => (
+                <span key={r.name} className={`rname b ${r.dead ? 'dead' : ''}`}>{r.armorIcon}{r.name}</span>
+              ))}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ============ TDM RESPAWN OVERLAY ============ */}
+      {hud.tdm?.playerDead && (
+        <div className="tdm-respawn" role="status">
+          <span className="tdm-respawn-title">ELIMINATED</span>
+          <span className="tdm-respawn-count">{Math.ceil(hud.tdm.respawnIn)}</span>
+          <div className="tdm-respawn-bar"><span style={{ width: `${(1 - hud.tdm.respawnIn / 5) * 100}%` }} /></div>
+          <span className="tdm-respawn-sub">REDEPLOYING TO ALPHA YARD</span>
+          <span className="tdm-respawn-score">ALPHA {hud.tdm.alphaScore} — {hud.tdm.bravoScore} BRAVO · YOUR KILLS {hud.tdm.playerKills}</span>
+        </div>
+      )}
 
       {/* ============ THREAT READOUT (slim — no centre ring clutter) ============ */}
       {hud.ads < .3 && hud.nearest && hud.nearest.dist < 30 && (() => {
@@ -95,7 +204,14 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
 
       {/* ============ KILL FEED + FPS ============ */}
       <div className="absolute top-14 right-5 flex flex-col items-end gap-1.5">
-        {fx.feed.map(f => (
+        {fx.feed.map(f => f.tdm ? (
+          <div key={f.id} className="feed-row text-right">
+            <span className={`font-black ${f.tdm.killer === 'YOU' ? 'text-[var(--brass)]' : f.tdm.killerTeam === 'alpha' ? 'text-[#7FC4D4]' : 'text-[#E08A7E]'}`}>{f.tdm.killer}</span>
+            <span className="mono text-[var(--steel)] text-[9px] mx-1.5">[{f.tdm.weapon}]</span>
+            {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
+            <span className={f.tdm.victim === 'YOU' ? 'text-[var(--blood)] font-black' : 'text-white/90'}>{f.tdm.victim}</span>
+          </div>
+        ) : (
           <div key={f.id} className="feed-row text-right">
             <span className="text-[var(--brass)] font-black">YOU</span>
             <span className="mono text-[var(--steel)] text-[9px] mx-1.5">{f.text.split('  ')[1]}</span>
@@ -114,7 +230,7 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>
       )}
-      <ScopeView hud={hud} {...scopeControls} />
+      <ScopeView hud={hud} active={active} {...scopeControls} />
 
       {fx.hitmark && (
         <div key={fx.hitmark.id} className={`absolute left-1/2 top-1/2 ${fx.hitmark.kill ? 'hm-kill' : 'hm'}`}>

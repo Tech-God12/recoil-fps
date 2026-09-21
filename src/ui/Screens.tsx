@@ -13,15 +13,20 @@ import { gradeFor } from '../game/economy/rewards';
 import { voice } from '../game/voice';
 import mapAlrasul from '../assets/map-alrasul.jpg';
 import mapKasbah from '../assets/map-kasbah.jpg';
+import mapArena from '../assets/map-arena.jpg';
 import operatorArt from '../assets/operator.jpg';
 import MapFlyover from './MapFlyover';
 
-export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah };
+export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapArena };
 
 export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
   mission: MissionReport; pressure: PressureStats;
   cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
+  tdm?: {
+    alphaScore: number; bravoScore: number; playerKills: number;
+    roster: { name: string; team: 'alpha' | 'bravo'; dead: boolean; armorIcon: string; you?: boolean; kills: number; deaths: number; headshots: number }[];
+  };
 }
 
 const Arrow = () => (
@@ -41,17 +46,17 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: {
-  s: GameSettings; onDeploy: () => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; profile?: PlayerProfile;
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile }: {
+  s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
+  onArmory?: () => void; onArenaSetup?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
   const secondaryName = weaponById(prof.loadout.secondary.weapon)?.short ?? '—';
-  const [view, setView] = useState<'home' | 'maps' | 'missions'>('home');
+  const [view, setView] = useState<'home' | 'maps' | 'missions' | 'arena'>(initialView ?? 'home');
   const [hovered, setHovered] = useState<MapId | null>(null);
-  // The tile order follows the sketch: Town first, then Sandblast.
-  const mapOrder = [...MAPS].sort(a => (a.id === 'kasbah' ? -1 : 1));
+  // Missions cover the story maps only — the arena lives under Arena Mode.
+  const mapOrder = MAPS.filter(m => m.id !== 'arena').sort(a => (a.id === 'kasbah' ? -1 : 1));
 
   /* ---------------- HOME ---------------- */
   if (view === 'home') {
@@ -78,8 +83,16 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
               </span>
               <Arrow />
             </button>
-            <button className="home-item seq" style={{ animationDelay: '.18s' }} onClick={onArmory}>
+            <button className="home-item seq" style={{ animationDelay: '.16s' }} onClick={() => setView('arena')}>
               <span className="home-item-idx mono">02</span>
+              <span className="home-item-body">
+                <b>Arena Mode</b>
+                <em>5v5 team deathmatch · Warehouse</em>
+              </span>
+              <Arrow />
+            </button>
+            <button className="home-item seq" style={{ animationDelay: '.20s' }} onClick={onArmory}>
+              <span className="home-item-idx mono">03</span>
               <span className="home-item-body">
                 <b>Loadout</b>
                 <em>{primaryName} + {secondaryName} · ${prof.cash.toLocaleString('en-US')}</em>
@@ -87,7 +100,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
               <Arrow />
             </button>
             <button className="home-item seq" style={{ animationDelay: '.24s' }} onClick={onSettings}>
-              <span className="home-item-idx mono">03</span>
+              <span className="home-item-idx mono">04</span>
               <span className="home-item-body">
                 <b>Settings</b>
                 <em>Video, audio and controls</em>
@@ -114,7 +127,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
         <div className="menu-bg" aria-hidden="true" />
         {/* Hovering a map takes over the ENTIRE screen with a live 3D orbit. */}
         <div className={`pick-flyover ${hovered ? 'live' : ''}`} aria-hidden="true">
-          {MAPS.map(map => (
+          {mapOrder.map(map => (
             <div key={map.id} className="pick-flyover-slot" style={{ opacity: hovered === map.id ? 1 : 0 }}>
               <MapFlyover mapId={map.id} active={hovered === map.id} />
             </div>
@@ -151,7 +164,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
                   <span className="map-tile-num">0{index + 1}</span>
                   <span className="map-tile-name">{map.name}</span>
                   <span className="map-tile-type">{map.id === 'alrasul' ? 'Desert river valley' : 'Fortified market town'}</span>
-                  <span className="map-tile-tag">{opt.phases.length} objectives · {opt.name}</span>
+                  <span className="map-tile-tag">{`${opt.phases.length} objectives · ${opt.name}`}</span>
                 </span>
               </button>
             );
@@ -162,9 +175,53 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
     );
   }
 
+  /* ---------------- ARENA MODE ---------------- */
+  if (view === 'arena') {
+    return (
+      <main className="menu-root msn-root">
+        <div className="menu-bg" aria-hidden="true" />
+        <div className="msn-art" aria-hidden="true" style={{ backgroundImage: `url(${MAP_ART.arena})` }} />
+        <div className="msn-art-fade" aria-hidden="true" />
+        <div className="paper-grain" aria-hidden="true" />
+        <header className="menu-header">
+          <button className="cmd-back" onClick={() => setView('home')}><span aria-hidden="true">‹</span> Back</button>
+          <span className="pick-heading">
+            <span className="menu-eyebrow">Arena Mode</span>
+            <b>5v5 Team Deathmatch</b>
+          </span>
+          <span className="menu-loadout" aria-label="Equipped loadout">
+            <span><b>1</b> {primaryName}</span>
+            <span><b>2</b> {secondaryName}</span>
+          </span>
+        </header>
+        <div className="msn-wrap arena-wrap">
+          <button className="arena-map-card seq" style={{ animationDelay: '.05s' }} onClick={() => { onMap('arena'); void 0; }} aria-pressed="true">
+            <img src={MAP_ART.arena} alt="" draggable={false} />
+            <span className="arena-map-card-info">
+              <span className="mono">MAP</span>
+              <b>Warehouse</b>
+              <em>5v5 · 2:30 · 5s respawn</em>
+            </span>
+            <span className="arena-map-card-check mono" aria-hidden="true">SELECTED</span>
+          </button>
+          <div className="msn-cta seq" style={{ animationDelay: '.12s' }}>
+            <button className="deploy-btn" onClick={() => { onMap('arena'); onDeploy('arena'); }}>
+              <span>Play</span>
+              <span className="hint">Warehouse · 5v5 TDM</span>
+              <Arrow />
+            </button>
+            <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
+              Set up loadout <span>armor + weapon</span>
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   /* ---------------- MISSIONS ---------------- */
-  const mission = getMission(s.map);
   const mapName = MAPS.find(m => m.id === s.map)?.name ?? '';
+  const mission = getMission(s.map === 'arena' ? 'alrasul' : s.map);
   return (
     <main className="menu-root msn-root">
       <div className="menu-bg" aria-hidden="true" />
@@ -202,7 +259,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, profile }: 
           ))}
         </ol>
         <div className="msn-cta seq" style={{ animationDelay: `${0.15 + mission.phases.length * 0.05}s` }}>
-          <button className="deploy-btn" onClick={onDeploy}>
+          <button className="deploy-btn" onClick={() => onDeploy()}>
             <span>Deploy</span>
             <span className="hint">{mapName} · {mission.phases.length} objectives</span>
             <Arrow />
@@ -234,7 +291,8 @@ const BOOT_LINES = [
 export function BootScreen({ map }: { map?: MapId }) {
   const [line, setLine] = useState(0);
   const [pct, setPct] = useState(0);
-  const mission = getMission(map ?? 'alrasul');
+  const isTdm = map === 'arena';
+  const mission = isTdm ? null : getMission(map ?? 'alrasul');
   const mapName = MAPS.find(m => m.id === (map ?? 'alrasul'))?.name ?? '';
   useEffect(() => {
     const l = window.setInterval(() => setLine(i => Math.min(BOOT_LINES.length - 1, i + 1)), 700);
@@ -245,6 +303,10 @@ export function BootScreen({ map }: { map?: MapId }) {
   // user gesture, so speech is already unlocked when this mounts.
   useEffect(() => {
     voice.unlock();
+    if (!mission) {
+      voice.briefing('Warehouse arena. Five on five, two minutes thirty on the clock. Most eliminations wins. Five second redeploy. Watch the container lanes and fight for the twin halls. Good luck, operator.');
+      return;
+    }
     const first = mission.phases[0];
     const narration = `Operation ${mission.name}. ${mission.brief} First objective: ${first.title.toLowerCase()}, at the ${first.location.toLowerCase()}. ${mission.phases.length} objectives stand between you and extraction. Good luck, operator.`;
     voice.briefing(narration);
@@ -259,7 +321,7 @@ export function BootScreen({ map }: { map?: MapId }) {
 
       <div className="boot-cine-top">
         <span className="boot-kicker">Insertion — {mapName}</span>
-        <h2 className="boot-cine-title">Operation {mission.name}</h2>
+        <h2 className="boot-cine-title">{mission ? `Operation ${mission.name}` : 'Warehouse TDM'}</h2>
       </div>
 
       <div className="boot-cine-bottom">
@@ -271,7 +333,7 @@ export function BootScreen({ map }: { map?: MapId }) {
         <div className="boot-cine-railwrap">
           <div className="boot-bar" aria-hidden="true"><span className="boot-bar__fill" style={{ width: `${pct}%` }} /></div>
           <div className="boot-cine-railmeta mono">
-            <span>{mission.phases[0].title} · {mission.phases[0].location}</span>
+            <span>{mission ? `${mission.phases[0].title} · ${mission.phases[0].location}` : '5v5 · 2:30 · most kills wins'}</span>
             <span className="tabular">{String(pct).padStart(3, '0')}%</span>
           </div>
         </div>
@@ -347,25 +409,57 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
     const total = entries.reduce((a, e) => a + e.amount, 0);
     cashRows.push({ label: CASH_REASONS[reason], detail: `×${entries.length}`, total });
   }
+  const tdm = r.tdm;
   return (
     <main className={`results-root ${r.win ? '' : 'lose'}`}>
       <div className="results-wrap">
         <div className="results-header">
           <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
           <div className="stamp-label">Grade {grade}</div>
-          <h2 className="results-title">{r.win ? 'Extraction complete' : 'Mission failed'}</h2>
-          <p className="results-sub">{r.mission.name} — {r.win
-            ? 'You completed the operation and reached the pickup.'
-            : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}</p>
+          <h2 className="results-title">{tdm
+            ? (r.win ? 'Victory — Alpha squad' : tdm.alphaScore === tdm.bravoScore ? 'Draw' : 'Defeat — Bravo squad')
+            : (r.win ? 'Extraction complete' : 'Mission failed')}</h2>
+          <p className="results-sub">{tdm
+            ? `Warehouse TDM — final score ALPHA ${tdm.alphaScore} : ${tdm.bravoScore} BRAVO. You dropped ${tdm.playerKills} of Alpha's ${tdm.alphaScore}.`
+            : `${r.mission.name} — ${r.win
+              ? 'You completed the operation and reached the pickup.'
+              : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}`}</p>
         </div>
+        {tdm && (() => {
+          const standings = [...tdm.roster].sort((a, b) =>
+            b.kills - a.kills || b.headshots - a.headshots || a.deaths - b.deaths);
+          const mvpKills = Math.max(...standings.map(x => x.kills));
+          return (
+            <section className="tdm-standings" aria-label="Final standings">
+              <div className="sec-label"><span>Final standings</span><span className="mono">K · D · HS · K/D</span></div>
+              {standings.map((p, i) => (
+                <div key={p.name} className={`tdm-standing-row ${p.you ? 'you' : ''} ${p.team}`}>
+                  <span className="rank mono">{i + 1}</span>
+                  <span className="who">
+                    {mvpKills > 0 && p.kills === mvpKills && <i className="mvp">★</i>}
+                    <em aria-hidden="true">{p.armorIcon}</em>
+                    {p.name}{p.you ? ' (YOU)' : ''}
+                    <b className={`side ${p.team}`}>{p.team === 'alpha' ? 'ALPHA' : 'BRAVO'}</b>
+                  </span>
+                  <span className="mono tabular">{p.kills}</span>
+                  <span className="mono tabular dim">{p.deaths}</span>
+                  <span className="mono tabular dim">{p.headshots}</span>
+                  <span className="mono tabular kd">{p.deaths ? (p.kills / p.deaths).toFixed(1) : p.kills.toFixed(1)}</span>
+                </div>
+              ))}
+            </section>
+          );
+        })()}
 
         <div className="stats-grid">
+          {!tdm && (
+            <div className="stat-cell">
+              <span className="stat-label">Objectives</span>
+              <div className="stat-value tabular"><CountUp to={completed} /><small> / {r.mission.phases.length}</small></div>
+            </div>
+          )}
           <div className="stat-cell">
-            <span className="stat-label">Objectives</span>
-            <div className="stat-value tabular"><CountUp to={completed} /><small> / {r.mission.phases.length}</small></div>
-          </div>
-          <div className="stat-cell">
-            <span className="stat-label">Mission time</span>
+            <span className="stat-label">{tdm ? 'Match time' : 'Mission time'}</span>
             <div className="stat-value tabular">{missionClock(r.timeSec)}</div>
           </div>
           <div className="stat-cell">
@@ -406,7 +500,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
           </div>
         </section>
 
-        <section className="timeline" aria-label="Mission timeline">
+        {!tdm && <section className="timeline" aria-label="Mission timeline">
           <div className="sec-label" style={{ paddingBottom: 10 }}><span>Timeline</span><span className="mono">Elapsed</span></div>
           {r.mission.phases.map((phase, i) => {
             const isDone = phase.complete;
@@ -422,10 +516,12 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
               </div>
             );
           })}
-        </section>
+        </section>}
 
         <p className="results-note">
-          <b>{r.pressure.totalSpawned}</b> hostiles entered the operation · peak pressure <b>{r.pressure.peakLive}</b> · <b>{r.headshots}</b> headshots confirmed.
+          {tdm
+            ? <><b>10</b> combatants in the yard · <b>{r.headshots}</b> headshots confirmed · armor absorbed the rest.</>
+            : <><b>{r.pressure.totalSpawned}</b> hostiles entered the operation · peak pressure <b>{r.pressure.peakLive}</b> · <b>{r.headshots}</b> headshots confirmed.</>}
         </p>
 
         <div className="results-actions">

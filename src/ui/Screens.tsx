@@ -318,13 +318,6 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
   onDeploy: (map?: GameSettings['map']) => void; onArenaSetup?: () => void;
 }) {
   const [live, setLive] = useState(false);
-  const [denied, setDenied] = useState('');
-  useEffect(() => {
-    if (!denied) return;
-    const t = window.setTimeout(() => setDenied(''), 2200);
-    return () => window.clearTimeout(t);
-  }, [denied]);
-  const lockNote = () => setDenied('SECOND ARENA OFFLINE — INTEL PENDING');
   return (
     <main className="tx-root arena2-root">
       <div className="map2-base" aria-hidden="true" />
@@ -339,8 +332,8 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
         <TxBack onClick={onBack} />
         <div className="map2-titleblock">
           <span className="map2-kicker">ARENA MODE<br />TEAM DEATHMATCH</span>
-          <h1 className="map2-title">5V5 — FIRST TO THE WHISTLE</h1>
-          <span className="map2-sub">MOST ELIMINATIONS WHEN THE CLOCK DIES WINS.</span>
+          <h1 className="map2-title">WAREHOUSE</h1>
+          <span className="map2-sub">5V5 · 2:30 MATCH · 5S RESPAWN</span>
           <i className="tx-rule" aria-hidden="true" />
         </div>
         <TxCoords lat="33.7731° N" lon="44.4208° E" />
@@ -374,26 +367,9 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
           </span>
           <span className="map2-go"><Arrow /></span>
         </button>
-        <button
-          type="button"
-          className={`map2-card seq locked ${denied ? 'denied' : ''}`}
-          style={{ animationDelay: '.14s' }}
-          onClick={lockNote}
-          aria-label="Second arena, locked"
-        >
-          <img src={ridgeArt} alt="" draggable={false} className="map2-art" />
-          <span className="map2-shade" aria-hidden="true" />
-          <span className="map2-num mono">02</span>
-          <span className="map2-classified mono"><TxLock size={13} /> OFFLINE</span>
-          <span className="map2-info">
-            <b>FOUNDRY</b>
-            <em>INTEL PENDING</em>
-            <span className="map2-obj mono">5V5 · CLASSIFIED</span>
-          </span>
-        </button>
       </div>
-      <p className={`map2-hint mono ${denied ? 'denied' : ''}`} role="status">
-        {denied || 'HOVER WAREHOUSE FOR A LIVE FLYOVER · CLICK TO DEPLOY'}
+      <p className="map2-hint mono" role="status">
+        HOVER WAREHOUSE FOR A LIVE FLYOVER · CLICK TO PLAY
       </p>
 
       <div className="arena2-cta seq" style={{ animationDelay: '.2s' }}>
@@ -803,15 +779,17 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
       <div className="results-wrap">
         <div className="results-header">
           <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
-          <div className="stamp-label">Grade {grade}</div>
-          <h2 className="results-title">{tdm
-            ? (r.win ? 'Victory — Alpha squad' : tdm.alphaScore === tdm.bravoScore ? 'Draw' : 'Defeat — Bravo squad')
-            : (r.win ? 'Extraction complete' : 'Mission failed')}</h2>
-          <p className="results-sub">{tdm
-            ? `Warehouse TDM — final score ALPHA ${tdm.alphaScore} : ${tdm.bravoScore} BRAVO. You dropped ${tdm.playerKills} of Alpha's ${tdm.alphaScore}.`
-            : `${r.mission.name} — ${r.win
-              ? 'You completed the operation and reached the pickup.'
-              : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}`}</p>
+          <div className="results-titleblock">
+            <div className="stamp-label">Grade {grade}</div>
+            <h2 className="results-title">{tdm
+              ? (r.win ? 'Victory — Alpha squad' : tdm.alphaScore === tdm.bravoScore ? 'Draw' : 'Defeat — Bravo squad')
+              : (r.win ? 'Extraction complete' : 'Mission failed')}</h2>
+            <p className="results-sub">{tdm
+              ? `Warehouse TDM — final score ALPHA ${tdm.alphaScore} : ${tdm.bravoScore} BRAVO. You dropped ${tdm.playerKills} of Alpha's ${tdm.alphaScore}.`
+              : `${r.mission.name} — ${r.win
+                ? 'You completed the operation and reached the pickup.'
+                : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}`}</p>
+          </div>
         </div>
         {tdm && (() => {
           const standings = [...tdm.roster].sort((a, b) =>

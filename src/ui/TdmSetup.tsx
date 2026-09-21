@@ -7,7 +7,7 @@ import {
 } from '../game/economy/catalog';
 import { resolveWeaponStats } from '../game/economy/stats';
 import {
-  buildForWeapon, buyAttachment, equipAttachment, setLoadoutWeapon, skinFor,
+  buildForWeapon, buyAttachment, equipAttachment, setLoadoutWeapon,
   type PlayerProfile,
 } from '../game/economy/profile';
 import { weaponTexturesReady } from '../game/weapons/finish';
@@ -60,7 +60,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
   const say = (text: string, bad = false) => setToast({ text, key: Date.now() + Math.random(), bad });
 
   const entry = weaponById(selected)!;
-  const skin = skinFor(profile, selected);
+  const skin = 'factory' as const;
   const build = useMemo(() => buildForWeapon(profile, selected), [profile, selected]);
   const stats = useMemo(() => {
     const mods = Object.values(build.attachments).map(id => attachmentById(id)?.mods).filter(m => !!m);
@@ -271,7 +271,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
           {TDM_ARMOR_NAMES[armor].toUpperCase()} ARMOR · {TDM_BASE_HP + armor * TDM_HP_PER_ARMOR} HP
           &nbsp;·&nbsp; 1 {weaponById(profile.loadout.primary.weapon)?.short} · 2 {weaponById(profile.loadout.secondary.weapon)?.short}
         </div>
-        <OrangeDeploy title="DEPLOY" hint="WAREHOUSE · 5V5 TDM" onClick={onDeploy} />
+        <OrangeDeploy title="PLAY" hint="WAREHOUSE · 5V5 TDM" onClick={onDeploy} />
       </footer>
 
       {toast && <div key={toast.key} className={`armory-toast mono ${toast.bad ? 'bad' : ''}`} role="status">{toast.text}</div>}

@@ -6,16 +6,15 @@ import {
 } from '../../game/economy/catalog';
 import { resolveWeaponStats } from '../../game/economy/stats';
 import {
-  buildForWeapon, buyAttachment, buyWeapon, equipAttachment, setLoadoutWeapon, setWeaponSkin, skinFor,
+  buildForWeapon, buyAttachment, buyWeapon, equipAttachment, setLoadoutWeapon,
   type PlayerProfile,
 } from '../../game/economy/profile';
-import { SKIN_CATALOG, skinById, type SkinId } from '../../game/economy/skins';
 import CashCounter from './CashCounter';
 import { weaponTexturesReady } from '../../game/weapons/finish';
 import GunViewer, { gunThumbnail } from './GunViewer';
 import {
   CALIBER, CLASS_LABEL, HardpointRows, OrangeDeploy, PartsPanel, StatBars,
-  TxBack, TxCheck, TxCoords, TxLock, txFmt, weaponTags,
+  TxBack, TxCoords, txFmt, weaponTags,
 } from '../tactical';
 
 interface ArmoryProps {
@@ -41,10 +40,7 @@ const CLASS_TABS: { id: string; label: string; classes: WeaponClass[] }[] = [
   { id: 'sidearm', label: 'SIDEARMS', classes: ['PISTOL'] },
 ];
 
-const tabFor = (id: WeaponId): string => {
-  const cls = weaponById(id)?.cls;
-  return CLASS_TABS.find(t => cls && t.classes.includes(cls))?.id ?? 'assault';
-};
+
 
 const RankGlyph = () => (
   <svg width="20" height="20" viewBox="0 0 22 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="miter">
@@ -53,7 +49,6 @@ const RankGlyph = () => (
 );
 
 export default function Armory({ profile, onProfile, onDeploy, onBack, deployHint }: ArmoryProps) {
-  const [group, setGroup] = useState<string>(tabFor(profile.loadout.primary.weapon));
   const [selected, setSelected] = useState<WeaponId>(profile.loadout.primary.weapon);
   const [menuSlot, setMenuSlot] = useState<AttachSlot | null>(null);
   const [flash, setFlash] = useState<{ slot: AttachSlot; key: number } | null>(null);
@@ -85,8 +80,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
 
   const entry = weaponById(selected)!;
   const owned = profile.ownedWeapons.includes(selected);
-  const skin = skinFor(profile, selected);
-  const skinDef = skinById(skin);
+  const skin = 'factory' as const;
   const fielded = profile.loadout[entry.slot].weapon === selected;
   const build = useMemo(() => buildForWeapon(profile, selected), [profile, selected]);
   const stats = useMemo(() => {
@@ -94,7 +88,11 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
     return resolveWeaponStats(entry.base, mods);
   }, [build, entry]);
   const tags = weaponTags(entry, stats);
-  const rail = WEAPON_CATALOG.filter(w => CLASS_TABS.find(t => t.id === group)?.classes.includes(w.cls));
+  // The whole rack, grouped by class — every weapon visible, no tabs, no scroll.
+  const rail = useMemo(
+    () => CLASS_TABS.flatMap(t => WEAPON_CATALOG.filter(w => t.classes.includes(w.cls))),
+    [],
+  );
   const level = 13 + profile.missions;
 
   const pulse = (slot: AttachSlot) => {
@@ -103,16 +101,8 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
     setFlash({ slot, key });
   };
 
-  const pickGroup = (id: string) => {
-    setGroup(id);
-    setMenuSlot(null);
-    const list = WEAPON_CATALOG.filter(w => CLASS_TABS.find(t => t.id === id)?.classes.includes(w.cls));
-    if (!list.some(w => w.id === selected) && list.length) setSelected(list[0].id);
-  };
-
   const selectWeapon = (id: WeaponId) => {
     const w = weaponById(id)!;
-    setGroup(tabFor(id));
     setSelected(id);
     setMenuSlot(null);
     if (profile.ownedWeapons.includes(id) && profile.loadout[w.slot].weapon !== id) {
@@ -169,14 +159,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
     if (res.ok) onProfile(res.value);
   };
 
-  const pickSkin = (id: SkinId) => {
-    const res = setWeaponSkin(profile, selected, id);
-    if (res.ok) {
-      onProfile(res.value);
-      say(`${skinById(id).name} finish`);
-    }
-  };
-
   const advanceTutorial = () => {
     if (tutStep < 0) return;
     if (tutStep >= TUTORIAL.length - 1) {
@@ -228,40 +210,39 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
       <div className="arm2-main">
         {/* ================= RACK ================= */}
         <aside className={`tx-col arm2-rail seq ${tutStep === 0 ? 'tut-ring' : ''}`} style={{ animationDelay: '.06s' }} aria-label="Weapon rack">
-          <div className="arm2-tabs" role="tablist" aria-label="Weapon class">
-            {CLASS_TABS.map(t => (
-              <button
-                key={t.id} type="button" role="tab" aria-selected={group === t.id}
-                className={`arm2-tab ${group === t.id ? 'on' : ''}`}
-                onClick={() => pickGroup(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <div className="arm2-cards" tabIndex={0} onKeyDown={railKey} aria-label={`${group} weapons`}>
-            {rail.map((w, i) => {
-              const isOwned = profile.ownedWeapons.includes(w.id);
-              const isFielded = profile.loadout[w.slot].weapon === w.id;
-              const isSel = w.id === selected;
+          <div className="arm2-rackhead"><span>WEAPON RACK</span><b className="mono">{rail.length} GUNS</b></div>
+          <div className="arm2-cards" tabIndex={0} onKeyDown={railKey} aria-label="All weapons">
+            {CLASS_TABS.map(t => {
+              const list = rail.filter(w => t.classes.includes(w.cls));
+              if (!list.length) return null;
               return (
-                <button
-                  key={w.id} type="button"
-                  className={`arm2-card ${isSel ? 'sel' : ''} ${isOwned ? '' : 'locked'}`}
-                  onClick={() => selectWeapon(w.id)}
-                  aria-pressed={isSel}
-                >
-                  <span className="arm2-num mono">0{i + 1}</span>
-                  {thumbs[w.id] ? <img src={thumbs[w.id]} alt="" draggable={false} className="arm2-thumb" /> : <span className="arm2-thumb" />}
-                  <span className="arm2-card-body">
-                    <span className="arm2-name">{w.name}</span>
-                    <span className="arm2-sub">
-                      <i className="arm2-cls">{w.cls}</i>
-                      {isFielded ? <b className="arm2-fielded">Equipped</b> : isOwned ? <b className="arm2-owned">Owned</b> : <b className="arm2-price">{txFmt(w.price)}</b>}
-                    </span>
-                  </span>
-                  {!isOwned && <span className="arm2-lock"><TxLock /></span>}
-                </button>
+                <div key={t.id} className="arm2-group">
+                  <span className="arm2-group-h mono" aria-hidden="true">{t.label}</span>
+                  {list.map(w => {
+                    const isOwned = profile.ownedWeapons.includes(w.id);
+                    const isFielded = profile.loadout[w.slot].weapon === w.id;
+                    const isSel = w.id === selected;
+                    const n = rail.indexOf(w) + 1;
+                    return (
+                      <button
+                        key={w.id} type="button"
+                        className={`arm2-row ${isSel ? 'sel' : ''} ${isOwned ? '' : 'locked'}`}
+                        onClick={() => selectWeapon(w.id)}
+                        aria-pressed={isSel}
+                      >
+                        <span className="arm2-num mono">{n < 10 ? `0${n}` : n}</span>
+                        {thumbs[w.id] ? <img src={thumbs[w.id]} alt="" draggable={false} className="arm2-thumb" /> : <span className="arm2-thumb" />}
+                        <span className="arm2-row-body">
+                          <span className="arm2-name">{w.name}</span>
+                          <span className="arm2-row-sub">
+                            <i className="arm2-cls">{w.cls}</i>
+                            {isFielded ? <b className="arm2-fielded">Equipped</b> : isOwned ? <b className="arm2-owned">Owned</b> : <b className="arm2-price">{txFmt(w.price)}</b>}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
@@ -324,28 +305,8 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
               <div className="tx-sec"><span>EQUIPPED PARTS</span><b className="mono">{entry.slots.length}/{entry.slots.length}</b></div>
               <HardpointRows entry={entry} build={build} onOpen={openSlot} />
 
-              <div className="tx-sec" style={{ marginTop: 16 }}><span>FINISH</span><b className="mono">{skinDef.name.toUpperCase()}</b></div>
-              <div className="arm2-skins" role="radiogroup" aria-label="Weapon finish">
-                {SKIN_CATALOG.map(s => (
-                  <button
-                    key={s.id} type="button" role="radio" aria-checked={s.id === skin}
-                    className={`arm2-skin ${s.id === skin ? 'on' : ''}`}
-                    onClick={() => pickSkin(s.id)}
-                    title={s.desc}
-                  >
-                    <i style={{ background: s.swatch }}>{s.id === skin && <TxCheck size={12} />}</i>
-                    <em>{s.name}</em>
-                  </button>
-                ))}
-              </div>
-              <p className="arm2-finish-note">{skinDef.desc}</p>
-
               <div className="arm2-cta">
-                <OrangeDeploy title="DEPLOY" hint={deployHint ?? 'READY'} onClick={onDeploy} wide />
-                <button type="button" className="arm2-custom" onClick={() => openSlot(entry.slots[0])}>
-                  <b>CUSTOMIZE</b>
-                  <span>MODS, PARTS, SKINS AND APPEARANCE</span>
-                </button>
+                <OrangeDeploy title="PLAY" hint={deployHint ?? 'READY'} onClick={onDeploy} wide />
               </div>
             </>
           )}

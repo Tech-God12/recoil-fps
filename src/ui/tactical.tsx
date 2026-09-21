@@ -247,33 +247,28 @@ export function PartsPanel({ entry, build, slot, parts, owned, cash, mode, onEqu
           const isOwned = owned.includes(part.id);
           const isEquipped = equippedId === part.id;
           const afford = cash >= part.price;
+          const tip = `${part.desc} — ${part.pros.map(p => `+${p}`).join(' ')}${part.cons.length ? ` ${part.cons.map(c => `−${c}`).join(' ')}` : ''}`;
           return (
-            <div key={part.id} className={`pcard ${isEquipped ? 'equipped' : ''}`}>
+            <div key={part.id} className={`pcard ${isEquipped ? 'equipped' : ''}`} title={tip}>
               <div className="pcard-head">
                 <strong>{part.name}</strong>
                 <span className="pcard-tier" aria-label={`tier ${part.tier}`}>
                   {[1, 2, 3].map(i => <i key={i} className={i <= part.tier ? 'on' : ''} />)}
                 </span>
+                {isEquipped ? (
+                  <button type="button" className="pcard-btn equipped" onClick={onStrip}>Strip</button>
+                ) : isOwned ? (
+                  <button type="button" className="pcard-btn" onClick={() => onEquip(part.id)}>Equip</button>
+                ) : (
+                  <button type="button" className={`pcard-btn buy ${afford || mode === 'tdm' ? '' : 'cant'}`} onClick={() => onBuy(part.id)} title={mode === 'tdm' ? 'Buy & equip' : 'Buy'}>
+                    {txFmt(part.price)}
+                  </button>
+                )}
               </div>
-              {mode === 'armory' && (
-                <div className="pcard-fit mono">{part.family ?? 'Dedicated fit'} · {part.compat.length} host{part.compat.length === 1 ? '' : 's'}</div>
-              )}
-              <p className="pcard-desc">{part.desc}</p>
-              <div className="pcard-mods">
-                {part.pros.map(p => <span key={p} className="pro">+ {p}</span>)}
-                {part.cons.map(c => <span key={c} className="con">− {c}</span>)}
+              <div className="pcard-mods" aria-hidden="true">
+                {part.pros.map(p => <span key={p} className="pro">+{p}</span>)}
+                {part.cons.map(c => <span key={c} className="con">−{c}</span>)}
               </div>
-              {isEquipped ? (
-                <button type="button" className="pcard-btn equipped" onClick={onStrip}>Equipped — click to strip</button>
-              ) : isOwned ? (
-                <button type="button" className="pcard-btn" onClick={() => onEquip(part.id)}>Equip</button>
-              ) : mode === 'tdm' ? (
-                <button type="button" className="pcard-btn buy" onClick={() => onBuy(part.id)}>Buy &amp; Equip — {txFmt(part.price)}</button>
-              ) : (
-                <button type="button" className={`pcard-btn buy ${afford ? '' : 'cant'}`} onClick={() => onBuy(part.id)}>
-                  Buy — {txFmt(part.price)}
-                </button>
-              )}
             </div>
           );
         })}

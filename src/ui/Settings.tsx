@@ -56,20 +56,22 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
 
           <div className="settings-pane tac-scroll" key={tab}>
             {tab === 'gameplay' && (
-              <div className="anim-fade">
-                <SectionTitle sub="Aim response and field of view">Aim and view</SectionTitle>
-                <Slider label="Mouse sensitivity" value={s.sensitivity} min={0.5} max={10} step={0.1} onChange={v => set({ sensitivity: v })} hint="Horizontal and vertical look speed" />
-                <Slider label="Aim sensitivity" value={s.adsSensitivity} min={0.2} max={1.5} step={0.05} onChange={v => set({ adsSensitivity: v })} hint="Relative speed while aiming" />
-                <Slider label="Field of view" value={s.fov} min={70} max={120} unit="°" onChange={v => set({ fov: v })} />
-                <Toggle label="Invert vertical look" value={s.invertY} onChange={v => set({ invertY: v })} />
-                <Toggle label="Hold to aim" value={!s.adsToggle} onChange={v => set({ adsToggle: !v })} hint={s.adsToggle ? 'Click to toggle scope' : 'Hold right mouse to aim'} />
-                <div className="mt-6">
-                  <SectionTitle sub="Enemy reaction and squad tactics">Difficulty</SectionTitle>
-                  <Segmented label="Threat level" value={s.difficulty} options={[{ v: 'Easy', l: 'Recruit' }, { v: 'Normal', l: 'Regular' }, { v: 'Hard', l: 'Veteran' }]} onChange={v => set({ difficulty: v })} />
+              <div className="anim-fade set-cols">
+                <div>
+                  <SectionTitle sub="Aim response and field of view">Aim and view</SectionTitle>
+                  <Slider label="Mouse sensitivity" value={s.sensitivity} min={0.5} max={10} step={0.1} onChange={v => set({ sensitivity: v })} hint="Horizontal and vertical look speed" />
+                  <Slider label="Aim sensitivity" value={s.adsSensitivity} min={0.2} max={1.5} step={0.05} onChange={v => set({ adsSensitivity: v })} hint="Relative speed while aiming" />
+                  <Slider label="Field of view" value={s.fov} min={70} max={120} unit="°" onChange={v => set({ fov: v })} />
+                  <Toggle label="Invert vertical look" value={s.invertY} onChange={v => set({ invertY: v })} />
+                  <Toggle label="Hold to aim" value={!s.adsToggle} onChange={v => set({ adsToggle: !v })} hint={s.adsToggle ? 'Click to toggle scope' : 'Hold right mouse to aim'} />
+                  <div className="mt-6">
+                    <SectionTitle sub="Enemy reaction and squad tactics">Difficulty</SectionTitle>
+                    <Segmented label="Threat level" value={s.difficulty} options={[{ v: 'Easy', l: 'Recruit' }, { v: 'Normal', l: 'Regular' }, { v: 'Hard', l: 'Veteran' }]} onChange={v => set({ difficulty: v })} />
+                  </div>
                 </div>
-                <div className="mt-6">
+                <div>
                   <SectionTitle sub="Applies on next deployment">Area of operations</SectionTitle>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2">
                     {/* Mission maps only — the arena is selected via Arena Mode on the main menu */}
                     {MAPS.filter(m => m.id !== 'arena').map(m => (
                       <button key={m.id} onClick={() => set({ map: m.id })} aria-pressed={s.map === m.id} className={`preset text-left ${s.map === m.id ? 'preset-on' : ''}`}>
@@ -83,25 +85,27 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
             )}
 
             {tab === 'graphics' && (
-              <div className="anim-fade">
-                <SectionTitle sub="One-click profiles — fine-tune below">Quality preset</SectionTitle>
-                <div className="grid grid-cols-4 gap-2 mb-5">
-                  {PRESETS.map(p => {
-                    const on = p.v.resolutionScale === s.resolutionScale && p.v.shadowQuality === s.shadowQuality && p.v.bloom === s.bloom;
-                    return (
-                      <button key={p.id} onClick={() => set(p.v)} aria-pressed={on} className={`preset ${on ? 'preset-on' : ''}`}>
-                        <div className="text-[12px] font-bold">{p.label}</div>
-                        <div className="mono text-[10px] text-[var(--bone-dim)] mt-0.5">{p.hint}</div>
-                      </button>
-                    );
-                  })}
+              <div className="anim-fade set-cols">
+                <div>
+                  <SectionTitle sub="One-click profiles — fine-tune below">Quality preset</SectionTitle>
+                  <div className="grid grid-cols-2 gap-2 mb-5">
+                    {PRESETS.map(p => {
+                      const on = p.v.resolutionScale === s.resolutionScale && p.v.shadowQuality === s.shadowQuality && p.v.bloom === s.bloom;
+                      return (
+                        <button key={p.id} onClick={() => set(p.v)} aria-pressed={on} className={`preset ${on ? 'preset-on' : ''}`}>
+                          <div className="text-[12px] font-bold">{p.label}</div>
+                          <div className="mono text-[10px] text-[var(--bone-dim)] mt-0.5">{p.hint}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <SectionTitle sub="Lower these first if performance drops">Performance</SectionTitle>
+                  <Slider label="Resolution scale" value={s.resolutionScale} min={40} max={100} unit="%" onChange={v => set({ resolutionScale: v })} />
+                  <Segmented label="Shadows" value={s.shadowQuality} options={[{ v: 'off', l: 'Off' }, { v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High' }]} onChange={v => set({ shadowQuality: v })} />
+                  <Toggle label="Adaptive resolution" value={s.adaptiveResolution ?? true} onChange={v => set({ adaptiveResolution: v })} />
+                  <Toggle label="Show FPS" value={s.showFps} onChange={v => set({ showFps: v })} />
                 </div>
-                <SectionTitle sub="Lower these first if performance drops">Performance</SectionTitle>
-                <Slider label="Resolution scale" value={s.resolutionScale} min={40} max={100} unit="%" onChange={v => set({ resolutionScale: v })} />
-                <Segmented label="Shadows" value={s.shadowQuality} options={[{ v: 'off', l: 'Off' }, { v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High' }]} onChange={v => set({ shadowQuality: v })} />
-                <Toggle label="Adaptive resolution" value={s.adaptiveResolution ?? true} onChange={v => set({ adaptiveResolution: v })} />
-                <Toggle label="Show FPS" value={s.showFps} onChange={v => set({ showFps: v })} />
-                <div className="mt-6">
+                <div>
                   <SectionTitle sub="Visual finish and clarity">Image</SectionTitle>
                   <Slider label="Brightness" value={s.brightness} min={80} max={170} unit="%" onChange={v => set({ brightness: v })} />
                   <Toggle label="Bloom" value={s.bloom} onChange={v => set({ bloom: v })} />

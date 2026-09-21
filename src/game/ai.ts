@@ -45,11 +45,17 @@ export interface AIContext {
 
 /* ================= NAV GRID (A*) ================= */
 export class NavGrid {
-  cell = 2;
+  cell: number;
   n: number;
   half: number;
   blocked: Uint8Array;
-  constructor(solids: AABB[], half: number, groundHeight: (x: number, z: number) => number = () => 0) {
+  /**
+   * `cell` defaults to the 2 m campaign grid. Tight arenas pass 1 m so a 3.2 m
+   * doorway always leaves a free cell instead of being inflated shut by the
+   * 0.35 m wall padding — that single change is what lets bots fight indoors.
+   */
+  constructor(solids: AABB[], half: number, groundHeight: (x: number, z: number) => number = () => 0, cell = 2) {
+    this.cell = cell;
     this.half = half; this.n = Math.ceil((half * 2) / this.cell);
     this.blocked = new Uint8Array(this.n * this.n);
     for (const b of solids) {
@@ -115,8 +121,11 @@ export class NavGrid {
         const t = open[i]; open[i] = open[p]; open[p] = t; heapIndex.set(open[i],i); heapIndex.set(open[p],p); i = p;
       }
     };
+    // Search budget scales with the grid: the arena runs 1 m cells (13 k nodes),
+    // where a fixed 2 500-node cap silently failed every cross-map request.
+    const budget = Math.max(2500, n * n);
     let iter = 0;
-    while (open.length && iter++ < 2500) {
+    while (open.length && iter++ < budget) {
       const cur = heapPop();
       const cx = cur % n, cz = Math.floor(cur / n);
       if (cx === gx && cz === gz) {

@@ -1301,3 +1301,257 @@ img { display: block; max-width: 100%; }
 .scope-zoom-panel.editing { border-color:#d8b877b0; }
 @media (max-width:800px) { .scope-zoom-panel { top:auto; bottom:80px; right:12px; transform:none; width:185px; padding:10px; } .scope-zoom-heading{margin-bottom:10px;} .scope-zoom-panel small{margin-top:8px;} }
 .pcard-fit { margin:7px 0 3px; font-size:9px; line-height:1.6; letter-spacing:.035em; color:var(--brass); }
+
+/* ============================================================
+   WAREHOUSE TDM — pre-match loadout screen + in-match HUD layer
+   ============================================================ */
+
+/* ---------- SETUP SCREEN ---------- */
+.tdm-root {
+  position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #0E0C09 0%, #14110D 55%, #0B0A07 100%);
+  overflow: hidden;
+}
+.tdm-root::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 80% at 50% 0%, transparent 45%, rgba(0,0,0,0.55) 100%);
+}
+.tdm-top {
+  position: relative; z-index: 2; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 22px;
+  padding: 12px clamp(14px, 2.4vw, 34px); border-bottom: 1px solid var(--line); background: rgba(12,10,8,0.72);
+}
+.tdm-top-title { display: flex; flex-direction: column; gap: 3px; }
+.tdm-top-title b {
+  font-family: var(--display); font-weight: 800; font-size: clamp(15px, 2vh, 21px);
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--bone);
+}
+.tdm-top-rules { display: flex; align-items: center; gap: 12px; font-size: 10px; letter-spacing: 0.1em; color: var(--bone-dim); }
+.tdm-top-rules i { width: 1px; height: 12px; background: var(--line-strong); }
+.tdm-top-rules span:first-child { color: var(--brass); }
+
+.tdm-main {
+  position: relative; z-index: 2; flex: 1; min-height: 0;
+  display: grid; grid-template-columns: minmax(232px, 0.92fr) minmax(0, 2.25fr) minmax(268px, 1.05fr);
+  gap: clamp(12px, 1.4vw, 22px); padding: clamp(10px, 1.4vh, 18px) clamp(14px, 2.4vw, 34px);
+}
+.tdm-left, .tdm-right, .tdm-center { min-height: 0; display: flex; flex-direction: column; }
+.tdm-left, .tdm-right { overflow-y: auto; padding-right: 4px; }
+
+/* armor cards */
+.tdm-armor-list { display: flex; flex-direction: column; gap: 8px; }
+.tdm-armor-card {
+  display: grid; grid-template-columns: 42px 1fr auto; gap: 11px; align-items: center; text-align: left;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px;
+  background: linear-gradient(135deg, rgba(237,228,211,0.035), rgba(237,228,211,0.01)); cursor: pointer;
+  transition: border-color 140ms, background 140ms, transform 140ms;
+}
+.tdm-armor-card:hover { border-color: var(--line-strong); transform: translateX(2px); }
+.tdm-armor-card.on { border-color: rgba(200,155,90,0.6); background: linear-gradient(135deg, rgba(200,155,90,0.14), rgba(200,155,90,0.03)); box-shadow: inset 3px 0 0 var(--brass); }
+.tdm-armor-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tdm-armor-body b { font-family: var(--display); font-weight: 800; font-size: 15px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--bone); }
+.tdm-armor-body em { font-style: normal; font-size: 10px; color: var(--brass); letter-spacing: 0.06em; }
+.tdm-armor-body i { font-style: normal; font-size: 11px; line-height: 1.35; color: var(--bone-mute); }
+.tdm-armor-mods { font-size: 9px; letter-spacing: 0.06em; color: var(--bone-dim); }
+.tdm-armor-hs { font-size: 9px; letter-spacing: 0.08em; color: var(--steel); align-self: flex-start; padding: 2px 5px; border: 1px solid var(--line); border-radius: 2px; }
+.tdm-armor-icon {
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 3px; font-size: 20px; line-height: 1;
+  border: 1px solid var(--line); background: rgba(0,0,0,0.35); color: var(--bone-dim);
+}
+.tdm-armor-icon[data-armor="1"] { color: #B9C2B4; border-color: rgba(185,194,180,0.35); background: rgba(122,122,82,0.12); }
+.tdm-armor-icon[data-armor="2"] { color: var(--brass-2); border-color: rgba(200,155,90,0.45); background: rgba(200,155,90,0.12); }
+.tdm-armor-icon[data-armor="0"] { color: var(--bone-mute); }
+
+/* enemy / squad roster preview */
+.tdm-enemy-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.tdm-enemy-list li {
+  display: grid; grid-template-columns: 30px 1fr auto auto; gap: 9px; align-items: center;
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: 3px; background: rgba(237,228,211,0.02);
+}
+.tdm-enemy-list.alpha li { border-left: 2px solid rgba(122,122,82,0.55); }
+.tdm-enemy-list li .tdm-armor-icon { width: 30px; height: 30px; font-size: 15px; }
+.tdm-enemy-list b { font-family: var(--display); font-weight: 700; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--bone); }
+.tdm-enemy-list em { font-style: normal; font-size: 10px; color: var(--bone-dim); }
+.tdm-enemy-list em i { font-style: normal; color: var(--bone-mute); }
+.tdm-enemy-hp { font-size: 10px; color: var(--brass); }
+.tdm-enemy-list li[data-armor="2"] { border-color: rgba(200,155,90,0.3); }
+
+/* centre column */
+.tdm-center { gap: clamp(8px, 1.2vh, 14px); }
+.tdm-stage {
+  display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 4px;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(200,155,90,0.05), transparent 60%), rgba(12,11,9,0.55);
+  min-height: 0; flex: 1;
+}
+.tdm-stage-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 10px 14px 6px; }
+.tdm-stage-head h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--bone); }
+.tdm-stage-head p { margin: 3px 0 0; font-size: 11px; color: var(--bone-dim); }
+.tdm-slot-tabs { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.tdm-slot-tabs .armory-tab { min-width: 132px; padding: 7px 10px; }
+.tdm-viewport { position: relative; flex: 1; min-height: 150px; }
+.tdm-viewport-hint {
+  position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+  font-size: 9px; letter-spacing: 0.1em; color: var(--bone-mute); pointer-events: none; white-space: nowrap;
+}
+.tdm-head-ttk b { color: var(--blood); }
+.tdm-stage .stage-ribbon { border-top: 1px solid var(--line); }
+
+/* weapon grids */
+.tdm-grids { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.tdm-grid-block { display: flex; flex-direction: column; min-height: 0; }
+.tdm-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 7px;
+  max-height: clamp(150px, 24vh, 260px); overflow-y: auto; padding-right: 4px;
+}
+.tdm-grid.compact { max-height: clamp(104px, 16vh, 180px); }
+.tdm-wcard {
+  position: relative; display: flex; gap: 10px; align-items: center; text-align: left;
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: 3px;
+  background: rgba(237,228,211,0.02); cursor: pointer; transition: border-color 140ms, background 140ms, transform 140ms;
+}
+.tdm-wcard:hover { border-color: var(--line-strong); background: rgba(237,228,211,0.045); transform: translateY(-1px); }
+.tdm-wcard.sel { border-color: rgba(200,155,90,0.65); background: rgba(200,155,90,0.1); box-shadow: inset 2px 0 0 var(--brass); }
+.tdm-wcard .wcard-thumb { width: 62px; height: 32px; object-fit: contain; background: transparent; }
+.tdm-wcard .wcard-name { font-family: var(--display); font-weight: 700; font-size: 13px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--bone); }
+.tdm-wcard .wcard-sub { display: flex; gap: 7px; align-items: center; font-size: 9px; }
+.tdm-wcard .wcard-cls { font-style: normal; color: var(--bone-mute); letter-spacing: 0.08em; text-transform: uppercase; }
+.tdm-wcard .wcard-owned { color: var(--olive); font-weight: 700; }
+.tdm-wcard .wcard-issue { color: var(--steel); font-weight: 700; }
+
+/* right column — hardpoints + rules */
+.tdm-slots { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.tdm-slot {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 11px; border: 1px solid var(--line); border-radius: 3px; background: rgba(237,228,211,0.02);
+  cursor: pointer; transition: border-color 140ms, background 140ms;
+}
+.tdm-slot:hover { border-color: var(--line-strong); background: rgba(237,228,211,0.05); }
+.tdm-slot.open { border-color: rgba(200,155,90,0.6); background: rgba(200,155,90,0.1); }
+.tdm-slot-name { font-size: 9px; letter-spacing: 0.12em; color: var(--bone-mute); text-transform: uppercase; }
+.tdm-slot-value { font-size: 11px; color: var(--brass); text-align: right; }
+.tdm-slot:not(.filled) .tdm-slot-value { color: var(--bone-mute); }
+.tdm-partmenu { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.tdm-partmenu .partmenu-list { overflow-y: auto; }
+.tdm-empty { font-size: 10px; color: var(--bone-mute); }
+.tdm-rules {
+  border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(200,155,90,0.05), transparent 70%), rgba(12,11,9,0.5);
+}
+.tdm-rules h3 {
+  margin: 0 0 9px; font-family: var(--display); font-weight: 800; font-size: 14px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--brass);
+}
+.tdm-rules ul { margin: 0; padding-left: 15px; display: flex; flex-direction: column; gap: 7px; }
+.tdm-rules li { font-size: 11px; line-height: 1.45; color: var(--bone-dim); }
+.tdm-rules li b { color: var(--bone); }
+.tdm-rules-hint { margin: 11px 0 0; font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; color: var(--bone-mute); }
+
+/* bottom bar */
+.tdm-bottom {
+  position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 11px clamp(14px, 2.4vw, 34px); border-top: 1px solid var(--line); background: rgba(12,10,8,0.78);
+}
+.tdm-loadout-summary { display: flex; gap: 16px; font-size: 10px; letter-spacing: 0.1em; color: var(--bone-dim); text-transform: uppercase; }
+.tdm-loadout-summary span:first-child, .tdm-loadout-summary span:nth-child(2) { color: var(--brass); }
+.tdm-deploy { display: inline-flex; align-items: center; gap: 14px; padding: 12px 26px; }
+.tdm-deploy .hint { color: rgba(20,8,0,0.7); }
+.tdm-toast {
+  position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%); z-index: 40;
+  padding: 9px 16px; border-radius: 3px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: #12100C; background: var(--brass); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+.tdm-toast.bad { background: var(--blood); color: var(--bone); }
+
+@media (max-width: 1180px) {
+  .tdm-main { grid-template-columns: minmax(200px, 0.8fr) minmax(0, 2fr); }
+  .tdm-right { grid-column: 1 / -1; }
+}
+
+/* ---------- IN-MATCH HUD ---------- */
+.tdm-board {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+  min-width: 340px; padding: 8px 14px 9px; text-align: center;
+  background: linear-gradient(180deg, rgba(10,9,7,0.78), rgba(10,9,7,0.5));
+  border: 1px solid var(--line); border-radius: 3px;
+  box-shadow: 0 10px 34px rgba(0,0,0,0.45);
+}
+.tdm-board-label { display: block; font-size: 8px; letter-spacing: 0.22em; color: var(--bone-mute); text-transform: uppercase; }
+.tdm-board-line { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 2px; }
+.tdm-score {
+  font-family: var(--display); font-weight: 800; font-size: 30px; line-height: 1;
+  color: var(--bone-dim); font-variant-numeric: tabular-nums; min-width: 46px;
+}
+.tdm-score.alpha.lead { color: var(--olive); text-shadow: 0 0 18px rgba(122,122,82,0.5); }
+.tdm-score.bravo.lead { color: var(--blood); text-shadow: 0 0 18px rgba(200,50,30,0.5); }
+.tdm-clock {
+  font-family: var(--mono); font-weight: 700; font-size: 19px; letter-spacing: 0.06em; color: var(--bone);
+  padding: 1px 12px; border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+}
+.tdm-clock.urgent { color: var(--blood); animation: tdm-tick 1s steps(2, end) infinite; }
+@keyframes tdm-tick { 50% { opacity: 0.35; } }
+.tdm-board-teams { display: flex; justify-content: space-between; font-size: 8px; letter-spacing: 0.18em; color: var(--bone-mute); margin-top: 2px; padding: 0 4px; }
+.tdm-roster { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); }
+.tdm-roster-col { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.tdm-roster-col.bravo { text-align: right; }
+.tdm-row { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--bone-dim); }
+.tdm-roster-col.bravo .tdm-row { flex-direction: row-reverse; }
+.tdm-row b { font-weight: 600; letter-spacing: 0.02em; }
+.tdm-row em { font-style: normal; font-size: 9px; color: var(--brass); }
+.tdm-row .tdm-armor { font-style: normal; font-size: 11px; color: var(--bone-mute); }
+.tdm-row .tdm-armor[data-armor="1"] { color: #B9C2B4; }
+.tdm-row .tdm-armor[data-armor="2"] { color: var(--brass-2); }
+.tdm-row.dead { opacity: 0.42; }
+.tdm-row.dead b { text-decoration: line-through; }
+.tdm-row.mine b { color: var(--bone); }
+.tdm-perch { text-decoration: none; font-size: 8px; color: var(--steel); }
+
+.tdm-respawn {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 22px 44px;
+  background: rgba(8,7,5,0.72); border: 1px solid rgba(200,50,30,0.4); border-radius: 4px;
+  box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+}
+.tdm-respawn-kicker { font-size: 8px; letter-spacing: 0.22em; color: var(--bone-mute); }
+.tdm-respawn h2 {
+  margin: 0; font-family: var(--display); font-weight: 900; font-size: 42px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--blood); text-shadow: 0 6px 26px rgba(200,50,30,0.4);
+}
+.tdm-respawn-sub { margin: 0; font-size: 13px; color: var(--bone-dim); }
+.tdm-respawn-sub b { color: var(--bone); font-size: 17px; }
+.tdm-respawn-bar { width: 260px; height: 3px; background: rgba(237,228,211,0.14); border-radius: 2px; overflow: hidden; }
+.tdm-respawn-bar span { display: block; height: 100%; background: var(--blood); transition: width 100ms linear; }
+.tdm-respawn-stats { display: flex; gap: 16px; font-size: 9px; letter-spacing: 0.1em; color: var(--bone-mute); }
+.tdm-respawn-stats b { color: var(--bone); }
+
+.tdm-armor-chip {
+  position: absolute; left: 8px; bottom: 148px; display: flex; align-items: center; gap: 8px;
+  padding: 5px 9px; font-size: 8px; letter-spacing: 0.16em; color: var(--bone-mute);
+  background: var(--hud-chip); border: 1px solid var(--line); border-radius: 2px;
+}
+.tdm-armor-chip b { color: var(--brass); letter-spacing: 0.08em; }
+.tdm-armor-bits { display: flex; gap: 2px; }
+.tdm-armor-bits i { width: 5px; height: 9px; background: rgba(237,228,211,0.14); }
+.tdm-armor-bits i.on { background: var(--brass); }
+.feed-row.feed-bot { font-size: 10px; letter-spacing: 0.03em; }
+.feed-row.feed-bot span:first-child { color: var(--bone-dim); }
+
+/* ---------- TDM DEBRIEF ---------- */
+.tdm-final { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin: 18px 0 6px; }
+.tdm-final-side { display: flex; flex-direction: column; gap: 2px; padding: 14px 18px; border: 1px solid var(--line); border-radius: 4px; }
+.tdm-final-side.alpha { text-align: left; border-left: 3px solid var(--olive); }
+.tdm-final-side.bravo { text-align: right; border-right: 3px solid var(--blood); }
+.tdm-final-side span { font-size: 9px; letter-spacing: 0.2em; color: var(--bone-mute); }
+.tdm-final-side b { font-family: var(--display); font-weight: 800; font-size: 44px; line-height: 1; color: var(--bone); }
+.tdm-final-clock { display: flex; flex-direction: column; align-items: center; font-size: 13px; letter-spacing: 0.1em; color: var(--bone-dim); }
+.tdm-final-clock i { font-style: normal; font-size: 8px; letter-spacing: 0.2em; color: var(--bone-mute); }
+
+/* ---- TDM setup: armor pitch under the picker ---- */
+.tdm-armor-pitch {
+  margin: 10px 2px 0;
+  padding: 9px 11px;
+  border-left: 2px solid rgba(200,155,90,0.55);
+  background: linear-gradient(90deg, rgba(200,155,90,0.10), rgba(200,155,90,0));
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tdm-armor-pitch b { color: var(--brass); font-family: var(--mono, monospace); }

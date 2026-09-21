@@ -77,6 +77,8 @@ class Part {
 /* ================= ENEMY SOLDIER ================= */
 export interface SoldierModel {
   group: THREE.Group;
+  /** Armor presentation handle — only the TDM operator sets it. */
+  armor?: { level: number; plate: THREE.Material; band: THREE.Material };
   parts: { torso: THREE.Object3D; head: THREE.Object3D; lLeg: THREE.Object3D; rLeg: THREE.Object3D; lShin: THREE.Object3D; rShin: THREE.Object3D; muzzle: THREE.Object3D; lArm: THREE.Object3D; rArm: THREE.Object3D; rifle: THREE.Object3D };
   hitMeshes: THREE.Mesh[];
 }
@@ -194,4 +196,169 @@ export function buildSoldier(): SoldierModel {
   const legHit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.45), ghost); legHit.position.y = 0.45; legHit.userData.part = 'limb'; g.add(legHit); hitMeshes.push(legHit);
 
   return { group: g, parts: { torso, head, lLeg, rLeg, lShin, rShin, muzzle, lArm, rArm, rifle }, hitMeshes };
+}
+
+/* ================= ARMORED TDM OPERATOR ================= */
+/**
+ * Warehouse-TDM combatant. Visually heavier than the campaign soldier and
+ * unmistakably plated at a glance:
+ *
+ *   torso    0.52 wide (campaign soldier: 0.40) with a raised plate carrier
+ *   helmet   1.25× the standard shell, plus ear plates on the heavy tier
+ *   arms     thicker sleeves, and pauldrons once the vest is a real plate
+ *   legs     heavier thighs/shins; thigh plates on the heavy tier
+ *   teams    alpha wears an olive armband, bravo rust, so 5v5 reads instantly
+ *
+ * Hit proxies stay generous (spec §4 wants long TTK, not hard-to-hit bodies) while
+ * the extra bulk is delivered as real geometry so damage reads honestly.
+ */
+export function buildArmoredSoldier(armor: number, team: 'alpha' | 'bravo'): SoldierModel {
+  const m = getSoldierMat();
+  const g = new THREE.Group();
+  const hitMeshes: THREE.Mesh[] = [];
+  const heavy = armor >= 2, light = armor === 1;
+  const torsoW = 0.52;
+  const bandColor = team === 'alpha' ? new THREE.MeshStandardMaterial({ color: 0x4E7A3A, roughness: 0.9 })
+    : new THREE.MeshStandardMaterial({ color: 0x8E3A2A, roughness: 0.9 });
+  const plateMat = new THREE.MeshStandardMaterial({ color: heavy ? 0x33352F : light ? 0x3A3C34 : 0x4A4838, roughness: 0.72, metalness: 0.12 });
+  const tag = (mesh: THREE.Mesh, part: string) => { mesh.userData.part = part; mesh.castShadow = false; hitMeshes.push(mesh); return mesh; };
+
+  // ---- torso (pivot at hips y=0.95) ----
+  const torso = new THREE.Group(); torso.position.y = 0.95;
+  const t = new Part();
+  t.box(torsoW - 0.08, 0.58, 0.30, SR.camo, 0, 0.30, 0);                       // shirt body (thick)
+  t.box(torsoW, 0.46, 0.36, SR.vest, 0, 0.30, 0);                              // bulky plate carrier
+  t.box(torsoW + 0.02, 0.12, 0.38, SR.vest, 0, 0.53, 0);                       // shoulder yoke
+  for (let row = 0; row < 3; row++) for (const px of [-0.15, 0, 0.15]) t.box(0.11, 0.13, 0.07, SR.webbing, px, 0.18 + row * 0.13, -0.20);
+  t.box(0.14, 0.12, 0.07, SR.webbing, 0.18, 0.44, -0.19);                      // radio pouch
+  t.box(0.36, 0.32, 0.16, SR.olive, 0, 0.32, 0.24);                            // assault pack
+  t.box(torsoW - 0.06, 0.08, 0.33, SR.black, 0, 0.05, 0);                      // belt
+  t.box(0.18, 0.16, 0.09, SR.olive, -0.21, 0.0, 0.07);                          // hip pouch
+  t.box(0.15, 0.13, 0.09, SR.black, 0.23, -0.02, 0.0);                          // holster
+  t.box(0.18, 0.12, 0.18, SR.camo, 0, 0.63, 0);                                // collar
+  torso.add(tag(t.mesh(m), 'torso'));
+  // The whole upper body hangs off the torso pivot, and the pivot hangs off the
+  // root group: an unattached torso renders (and raycasts) as legs only.
+  g.add(torso);
+
+  // Plate stack + shoulder straps in dedicated armour material: this is what makes
+  // an operator read as "vested" from 40 m away.
+  const plates = new Part();
+  plates.box(torsoW + 0.05, 0.34, 0.30, SR.vest, 0, 0.34, -0.02);
+  if (light || heavy) plates.box(torsoW + 0.07, 0.28, 0.26, SR.vest, 0, 0.24, 0.18);
+  if (heavy) {
+    plates.box(torsoW + 0.06, 0.16, 0.34, SR.vest, 0, 0.14, 0);                 // lower plate
+    plates.box(torsoW + 0.04, 0.30, 0.14, SR.vest, 0, 0.44, 0.14);              // upper back
+  }
+  // Team armband on the left shoulder: 5v5 friend/foe at a glance.
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, torsoW + 0.12), bandColor);
+  band.position.set(-0.28, 0.42, 0);
+  torso.add(tag(plates.mesh(plateMat), 'torso'));
+  torso.add(band);
+  g.add(tag(new Part().box(torsoW - 0.06, 0.24, 0.30, SR.camo, 0, 0.86, 0).mesh(m), 'torso'));
+
+  // ---- head (1.25× helmet) ----
+  const head = new THREE.Group(); head.position.y = 0.70;
+  const h = new Part();
+  h.sph(0.125, SR.skin, 0, 0.13, 0, 1, 1.12, 1.05);
+  h.box(0.07, 0.06, 0.05, SR.skin, 0, 0.10, -0.12);
+  h.sph(0.19, SR.helmet, 0, 0.20, 0, 1.1, 0.9, 1.15, Math.PI * 0.62);          // 1.25× helmet shell
+  h.box(0.35, 0.04, 0.08, SR.helmet, 0, 0.16, -0.17);                          // brim
+  if (light || heavy) {
+    for (const s of [-1, 1]) h.box(0.05, 0.13, 0.13, SR.helmet, s * 0.17, 0.16, 0.0);   // ear plates
+    h.box(0.24, 0.05, 0.06, SR.vest, 0, 0.30, -0.02);                          // helmet cover strap
+  }
+  if (heavy) h.box(0.30, 0.07, 0.12, SR.vest, 0, 0.33, -0.10);                 // NVG shroud block
+  h.box(0.06, 0.06, 0.06, SR.black, 0, 0.29, -0.17);
+  h.box(0.23, 0.075, 0.07, SR.visor, 0, 0.15, -0.11);                          // goggles
+  h.box(0.26, 0.035, 0.04, SR.black, 0, 0.17, 0.06);
+  h.box(0.06, 0.15, 0.03, SR.black, 0.12, 0.06, -0.03);
+  h.box(0.07, 0.07, 0.05, SR.black, -0.15, 0.13, -0.03);                       // comms
+  h.box(0.025, 0.13, 0.025, SR.black, -0.15, 0.06, -0.09);
+  head.add(tag(h.mesh(m), 'head'));
+  torso.add(head);
+
+  // ---- arms (pivot at shoulder), thicker + pauldrons ----
+  const mkArm = (side: number) => {
+    const a = new THREE.Group(); a.position.set(side * 0.31, 0.48, -0.02);
+    const p = new Part();
+    p.box(0.16, 0.34, 0.16, SR.camo, 0, -0.15, 0);                              // upper sleeve
+    p.box(0.19, 0.12, 0.19, SR.vest, 0, -0.02, 0);                              // shoulder pad
+    p.box(0.14, 0.09, 0.14, SR.black, 0, -0.35, 0);                             // elbow pad
+    p.box(0.13, 0.28, 0.13, SR.camo, 0, -0.47, 0);                              // forearm
+    p.box(0.115, 0.10, 0.13, SR.black, 0, -0.63, 0);                            // glove
+    a.add(tag(p.mesh(m), 'limb'));
+    if (heavy) {
+      const pauldron = new Part();
+      pauldron.box(0.22, 0.14, 0.22, SR.vest, 0, 0.02, 0);
+      pauldron.box(0.24, 0.05, 0.24, SR.vest, 0, 0.10, 0);
+      a.add(tag(pauldron.mesh(plateMat), 'limb'));
+    }
+    torso.add(a); return a;
+  };
+  const lArm = mkArm(-1), rArm = mkArm(1);
+
+  // ---- legs (thicker, with heavy thigh plates) ----
+  const mkLeg = (side: number) => {
+    const leg = new THREE.Group(); leg.position.set(side * 0.14, 0.92, 0);
+    const thigh = new Part();
+    thigh.box(0.21, 0.41, 0.22, SR.camo, 0, -0.205, 0);
+    thigh.box(0.14, 0.16, 0.07, SR.olive, side * 0.04, -0.21, -0.12);
+    if (heavy) thigh.box(0.23, 0.20, 0.10, SR.vest, 0, -0.14, -0.10);
+    leg.add(tag(thigh.mesh(m), 'limb'));
+    const shin = new THREE.Group(); shin.position.y = -0.43;
+    const lower = new Part();
+    lower.box(0.18, 0.13, 0.11, SR.black, 0, 0, -0.09);
+    lower.box(0.19, 0.35, 0.19, SR.camo, 0, -0.20, 0);
+    lower.box(0.19, 0.13, 0.29, SR.boot, 0, -0.41, -0.05);
+    lower.box(0.20, 0.05, 0.31, SR.black, 0, -0.475, -0.05);
+    shin.add(tag(lower.mesh(m), 'limb')); leg.add(shin); g.add(leg);
+    return { leg, shin };
+  };
+  const left = mkLeg(-1), right = mkLeg(1);
+
+  // ---- rifle (same world LOD AK as the campaign soldier) ----
+  const rifle = new THREE.Group();
+  const rb = new GunBuilder();
+  rifle.name = 'world AK rifle';
+  rb.name('world receiver').profile([[-0.151, -0.040], [-0.151, 0.035], [0.151, 0.035], [0.151, -0.032]], 0.063, WM.darkSteel);
+  rb.name('world dust cover').cyl(0.031, 0.031, 0.294, WM.darkSteel, 0, 0.022, 0, Math.PI / 2, 0, 0, 16);
+  rb.name('world stock').profile([[0.143, 0.031], [0.200, 0.026], [0.340, 0.020], [0.349, -0.083], [0.316, -0.085], [0.192, -0.027], [0.143, -0.024]], 0.055, WM.wood, 0, 0.002);
+  rb.name('world buttplate').box(0.058, 0.105, 0.012, WM.rubber, 0, -0.032, 0.348);
+  rb.name('world handguard').profile([[-0.148, 0.022], [-0.326, 0.022], [-0.334, -0.013], [-0.313, -0.033], [-0.170, -0.033], [-0.148, -0.014]], 0.060, WM.wood, 0, 0.002);
+  rb.name('world upper handguard').box(0.041, 0.027, 0.140, WM.wood, 0, 0.039, -0.237);
+  rb.name('world barrel').tube(0.012, 0.0045, 0.257, WM.steel, 0, 0.020, -0.426, Math.PI / 2, 0, 0, 16);
+  rb.name('world gas tube').cyl(0.007, 0.007, 0.215, WM.darkSteel, 0, 0.045, -0.318, Math.PI / 2, 0, 0, 12);
+  rb.name('world gas block').profile([[-0.401, 0.009], [-0.434, 0.009], [-0.425, 0.049], [-0.403, 0.055]], 0.025, WM.darkSteel);
+  rb.name('world front sight tower').profile([[-0.495, 0.010], [-0.520, 0.010], [-0.517, 0.079], [-0.500, 0.079]], 0.017, WM.darkSteel);
+  rb.name('world grip').profile([[0.035, -0.027], [0.074, -0.027], [0.105, -0.143], [0.061, -0.147]], 0.038, WM.wood, 0, 0.002);
+  rb.name('world magazine').profile([[-0.101, -0.029], [-0.031, -0.029], [-0.039, -0.112], [-0.062, -0.178], [-0.101, -0.243], [-0.167, -0.207], [-0.125, -0.146], [-0.106, -0.095]], 0.039, WM.darkSteel, 0, 0.001);
+  rb.name('world trigger guard').profile([[0.034, -0.029], [-0.025, -0.029], [-0.028, -0.080], [0.028, -0.080]], 0.009, WM.darkSteel, 0, 0.0005);
+  rb.name('world rear sight').box(0.028, 0.018, 0.041, WM.darkSteel, 0, 0.055, -0.134);
+  rb.build(rifle);
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.02, -0.56); rifle.add(muzzle);
+  rifle.position.set(0.1, 0.32, -0.44);
+  torso.add(rifle);
+
+  // ---- generous hit proxies (thicker body = wider torso box) ----
+  const ghost = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  // Wider than the campaign soldier's (0.86 vs 0.72) but cut off at shoulder height
+  // (world y 1.62) instead of the campaign's 1.81. A box that tall out-reaches the
+  // head sphere in every direction but dead ahead, so headshots silently stopped
+  // existing as soon as a target turned side-on — and this mode lives on them.
+  const torsoHit = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.95, 0.58), ghost);
+  torsoHit.position.y = 0.195; torsoHit.userData.part = 'torso'; torso.add(torsoHit); hitMeshes.push(torsoHit);
+  const headHit = new THREE.Mesh(new THREE.SphereGeometry(0.33, 10, 8), ghost);
+  headHit.position.y = 0.13; headHit.userData.part = 'head'; head.add(headHit); hitMeshes.push(headHit);
+  const neckHit = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.24, 8), ghost);
+  neckHit.position.y = -0.06; neckHit.userData.part = 'head'; head.add(neckHit); hitMeshes.push(neckHit);
+  const legHit = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.9, 0.5), ghost);
+  legHit.position.y = 0.45; legHit.userData.part = 'limb'; g.add(legHit); hitMeshes.push(legHit);
+
+  return {
+    group: g,
+    parts: { torso, head, lLeg: left.leg, rLeg: right.leg, lShin: left.shin, rShin: right.shin, muzzle, lArm, rArm, rifle },
+    hitMeshes,
+    armor: { level: armor, plate: plateMat, band: bandColor },
+  };
 }

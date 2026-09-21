@@ -4,10 +4,13 @@ import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
 import Armory from './ui/armory/Armory';
+import TdmSetup from './ui/TdmSetup';
+import { type ArmorLevel } from './game/tdm/armor';
+import type { Loadout } from './game/economy/loadout';
 import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory';
+type Phase = 'menu' | 'tdm-setup' | 'playing' | 'paused' | 'results' | 'armory';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
 /**
@@ -19,7 +22,7 @@ const afterPaint = () => new Promise<void>(resolve => {
   requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
 });
 const DEFAULT_HUD: HudState = {
-  hp: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
+  hp: 100, hpMax: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
@@ -39,7 +42,8 @@ function loadRichProfile(): PlayerProfile {
 function loadSettings(): GameSettings {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    return { ...DEFAULT_SETTINGS, ...raw, map: raw.map === 'kasbah' ? 'kasbah' : 'alrasul' };
+    const map = raw.map === 'kasbah' || raw.map === 'arena' ? raw.map : 'alrasul';
+    return { ...DEFAULT_SETTINGS, ...raw, map };
   } catch { return { ...DEFAULT_SETTINGS }; }
 }
 
@@ -61,6 +65,10 @@ export default function App() {
   const [fx, setFx] = useState<HudFx>(emptyFx);
   const [profile, setProfile] = useState<PlayerProfile>(loadRichProfile);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
+  // ---- Warehouse TDM setup state (survives across matches this session) ----
+  const [tdmArmor, setTdmArmor] = useState<ArmorLevel>(1);
+  const [tdmLoadout, setTdmLoadout] = useState<Loadout | null>(null);
+  const tdmMode = useRef(false);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -120,11 +128,21 @@ export default function App() {
       case 'kill':
         setFx(f => ({
           ...f,
-          feed: [...f.feed.slice(-2), { id, text: `YOU  [${event.weapon}]  ${event.name}`, headshot: event.headshot }],
+          feed: [...f.feed.slice(-2), {
+            id,
+            // Warehouse TDM reads like the kill feed it is; missions keep the ops label.
+            text: tdmMode.current ? `YOU killed ${event.name}` : `YOU  [${event.weapon}]  ${event.name}`,
+            headshot: event.headshot,
+          }],
           scorePops: [...f.scorePops.slice(-2), { id, text: event.headshot ? '+150 HEADSHOT' : '+100', headshot: event.headshot }],
         }));
         later(() => setFx(f => ({ ...f, feed: f.feed.filter(row => row.id !== id) })), 5200);
         later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1300);
+        break;
+      case 'feed':
+        // Squad-vs-squad attrition: both AI sides report into the same feed.
+        setFx(f => ({ ...f, feed: [...f.feed.slice(-2), { id, text: event.text, headshot: event.headshot, bot: !event.mine }] }));
+        later(() => setFx(f => ({ ...f, feed: f.feed.filter(row => row.id !== id) })), 5200);
         break;
       case 'cash':
         setFx(f => ({
@@ -157,12 +175,14 @@ export default function App() {
         engineRef.current?.setPaused(true);
         // Debrief payout: run cash × difficulty, plus the grade bonus on a win.
         // (Losses keep 100% of earned cash but forfeit extraction + grade.)
-        const gb = event.win ? gradeBonus(gradeFor(event).grade) : 0;
-        const earned = Math.round(event.cash * event.difficultyMul) + gb;
+        // Warehouse TDM pays no cash at all — it only banks the eliminations.
+        const tdm = event.tdm;
+        const gb = event.win && !tdm ? gradeBonus(gradeFor(event).grade) : 0;
+        const earned = tdm ? 0 : Math.round(event.cash * event.difficultyMul) + gb;
         const before = profileRef.current;
         const next = grantCash(before, earned, 'MISSION');
-        next.missions += 1;
-        next.kills += event.kills;
+        next.missions += tdm ? 0 : 1;
+        next.kills += tdm ? tdm.playerKills : event.kills;
         updateProfile(next);
         setWallet({ before: before.cash, after: next.cash, gradeBonus: gb, earned });
         changePhase('results');
@@ -220,7 +240,7 @@ export default function App() {
 
   useEffect(() => () => { session.current++; clearTimers(); engineRef.current?.dispose(); }, [clearTimers]);
 
-  const deploy = async () => {
+  const deploy = async (armor?: ArmorLevel, loadoutOverride?: Loadout) => {
     if (!canvasRef.current || launching) return;
     const epoch = ++session.current;
     clearTimers();
@@ -232,7 +252,12 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, settings.map, profileRef.current.loadout);
+      const tdmRound = settings.map === 'arena';
+      tdmMode.current = tdmRound;
+      const engine = await Engine.create(
+        canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); },
+        settings.map, loadoutOverride ?? profileRef.current.loadout, tdmRound ? (armor ?? tdmArmor) : 0,
+      );
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -269,6 +294,13 @@ export default function App() {
     if (document.pointerLockElement) document.exitPointerLock();
   };
 
+  const openTdmSetup = () => {
+    set({ map: 'arena' });
+    setShowSettings(false);
+    setError('');
+    changePhase('tdm-setup');
+    if (document.pointerLockElement) document.exitPointerLock();
+  };
   const openArmory = (from: 'menu' | 'results') => {
     setArmoryFrom(from);
     setShowSettings(false);
@@ -278,6 +310,8 @@ export default function App() {
   const armoryBack = () => {
     changePhase(armoryFrom === 'results' && results ? 'results' : 'menu');
   };
+  // The match starts only here, from the setup screen's own deploy button.
+  const deployTdm = () => { void deploy(tdmArmor, tdmLoadout ?? profileRef.current.loadout); };
   const fullscreen = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -289,7 +323,19 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} profile={profile} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onTdm={openTdmSetup} profile={profile} />}
+      {phase === 'tdm-setup' && (
+        <TdmSetup
+          profile={profile}
+          armor={tdmArmor}
+          onArmor={setTdmArmor}
+          loadout={tdmLoadout ?? profile.loadout}
+          onLoadout={setTdmLoadout}
+          onProfile={updateProfile}
+          onDeploy={deployTdm}
+          onBack={() => changePhase('menu')}
+        />
+      )}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={deploy} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={deploy} onBack={armoryBack} />}

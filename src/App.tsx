@@ -135,8 +135,10 @@ export default function App() {
       case 'tdmfeed':
         setFx(f => ({
           ...f,
-          feed: [...f.feed.slice(-3), { id, text: '', headshot: event.headshot, tdm: { killer: event.killer, weapon: event.weapon, victim: event.victim, killerTeam: event.killerTeam } }],
-          ...(event.killer === 'YOU' ? { scorePops: [...f.scorePops.slice(-2), { id, text: event.headshot ? '+150 HEADSHOT' : '+100', headshot: event.headshot }] } : {}),
+          feed: [...f.feed.slice(-3), { id, text: '', headshot: event.headshot, tdm: { killer: event.killer, weapon: event.weapon, victim: event.victim, killerTeam: event.killerTeam, zone: event.zone, kind: event.kind } }],
+          ...(event.killer === 'YOU' && event.kind !== 'down' && event.kind !== 'bled' && event.kind !== 'revive'
+            ? { scorePops: [...f.scorePops.slice(-2), { id, text: event.weapon === 'EXECUTED' ? '+200 STYLISH EXECUTION' : event.weapon === 'FINISH' ? '+100 FINISH' : event.headshot ? '+150 HEADSHOT' : '+100', headshot: event.headshot }] }
+            : {}),
         }));
         later(() => setFx(f => ({ ...f, feed: f.feed.filter(row => row.id !== id) })), 5200);
         if (event.killer === 'YOU') later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1300);

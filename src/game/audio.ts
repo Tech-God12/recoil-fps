@@ -588,6 +588,187 @@ export class SpatialAudioEngine {
     }
   }
 
+  /** Sound-trap flooring: 1.8× louder than a normal step, with a distinct crunch.
+   * Glass adds a shard tinkle; gravel gets a low scatter rumble. */
+  footstepTrap(kind: 'glass' | 'gravel', sprint: boolean, crouch = false) {
+    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * 1.8;
+    if (kind === 'gravel') {
+      this.burstDirect({ dur: 0.1, gain: g, freq: 640, q: 0.7, type: 'lowpass' });
+      this.burstDirect({ dur: 0.045, gain: g * 0.5, freq: 1500, q: 1.4, when: 0.03 });
+    } else {
+      this.burstDirect({ dur: 0.06, gain: g, freq: 2600, q: 1.1, hp: 1400 });
+      // shard tinkle
+      for (let i = 0; i < 2; i++) {
+        const ctx = this.ensure();
+        const t = ctx.currentTime + 0.02 + i * 0.05;
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(3200 + Math.random() * 2800, t);
+        const og = ctx.createGain();
+        og.gain.setValueAtTime(g * 0.22, t);
+        og.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+        o.connect(og); og.connect(this.master!);
+        o.start(t); o.stop(t + 0.1);
+        o.onended = () => { o.disconnect(); og.disconnect(); };
+      }
+    }
+  }
+
+  /** Distant world ambience — dog bark, wind gust or metal creak. 2D, quiet,
+   * scheduled by the engine every 12–20 s so the map feels lived beyond walls. */
+  playAmbient() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const pick = Math.floor(Math.random() * 3);
+    if (pick === 0) {
+      // far-off dog: 2-3 short pitched bursts with a falling tail
+      const n = 2 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < n; i++) {
+        const st = t + i * 0.19;
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(520 + Math.random() * 160, st);
+        o.frequency.exponentialRampToValueAtTime(260, st + 0.13);
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass'; bp.frequency.value = 700; bp.Q.value = 1.2;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.13, st);
+        g.gain.exponentialRampToValueAtTime(0.0001, st + 0.15);
+        o.connect(bp); bp.connect(g); g.connect(this.master!);
+        o.start(st); o.stop(st + 0.17);
+        o.onended = () => { o.disconnect(); bp.disconnect(); g.disconnect(); };
+      }
+    } else if (pick === 1) {
+      // wind gust swelling over the yard
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise();
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 420; bp.Q.value = 0.5;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.15, t + 1.1);
+      g.gain.linearRampToValueAtTime(0.0001, t + 2.8);
+      src.connect(bp); bp.connect(g); g.connect(this.master!);
+      src.start(t, Math.random() * 0.5); src.stop(t + 2.9);
+      src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); };
+    } else {
+      // metal creak: slow bent saw with vibrato, lowpassed
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(165, t);
+      o.frequency.linearRampToValueAtTime(120, t + 1.3);
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 5.2;
+      const lfoG = ctx.createGain();
+      lfoG.gain.value = 9;
+      lfo.connect(lfoG); lfoG.connect(o.frequency);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 900;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.09, t + 0.25);
+      g.gain.linearRampToValueAtTime(0.0001, t + 1.45);
+      o.connect(lp); lp.connect(g); g.connect(this.master!);
+      o.start(t); o.stop(t + 1.5); lfo.start(t); lfo.stop(t + 1.5);
+      o.onended = () => { o.disconnect(); lp.disconnect(); g.disconnect(); lfo.disconnect(); lfoG.disconnect(); };
+    }
+  }
+
+  /** Downed sting: muffled double heartbeat the moment you collapse. */
+  downedSting() {
+    const ctx = this.ensure();
+    for (const [when, gain] of [[0, 0.5], [0.28, 0.34]] as const) {
+      const t = ctx.currentTime + when;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(82, t);
+      o.frequency.exponentialRampToValueAtTime(38, t + 0.16);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(gain, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      o.connect(g); g.connect(this.master!);
+      o.start(t); o.stop(t + 0.24);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    }
+  }
+
+  /** Execution: pistol confirm for the fast finish; knife swish + wet thud + shing for stylish. */
+  execute(stylish: boolean) {
+    if (stylish) {
+      this.burstDirect({ dur: 0.14, gain: 0.4, freq: 3800, q: 0.7, hp: 2200, attack: 0.05 }); // swish
+      this.burstDirect({ dur: 0.1, gain: 0.55, freq: 210, q: 0.8, type: 'lowpass', when: 0.12 }); // thud
+      const ctx = this.ensure();
+      const t = ctx.currentTime + 0.2;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(4300, t);
+      o.frequency.exponentialRampToValueAtTime(5400, t + 0.1);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.16, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      o.connect(g); g.connect(this.master!);
+      o.start(t); o.stop(t + 0.3);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    } else {
+      this.firePistol();
+    }
+  }
+
+  /** Revive complete: soft rising two-note confirm. */
+  reviveComplete() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    for (const [f, when] of [[620, 0], [930, 0.11]] as const) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f, t + when);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.18, t + when);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.16);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + when); o.stop(t + when + 0.18);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    }
+  }
+
+  /** ON FIRE ignite: rising whoosh + crackle bed. */
+  onFireIgnite() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(320, t);
+    bp.frequency.exponentialRampToValueAtTime(1500, t + 0.5);
+    bp.Q.value = 0.8;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.28, t);
+    g.gain.linearRampToValueAtTime(0.12, t + 0.9);
+    g.gain.linearRampToValueAtTime(0.0001, t + 1.4);
+    src.connect(bp); bp.connect(g); g.connect(this.master!);
+    src.start(t, Math.random() * 0.4); src.stop(t + 1.45);
+    src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); };
+  }
+
+  /** SHUT DOWN sting: the bounty is collected. */
+  shutdown() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    for (const [f, when, dur] of [[740, 0, 0.1], [495, 0.09, 0.32]] as const) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(f, t + when);
+      o.frequency.exponentialRampToValueAtTime(f * 0.72, t + when + dur);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.22, t + when);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + when + dur);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + when); o.stop(t + when + dur + 0.02);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    }
+  }
+
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }
   throwWhoosh() { this.ensure(); this.burstDirect({ dur: 0.16, gain: 0.2, freq: 950, q: 0.5, attack: 0.04 }); }
 

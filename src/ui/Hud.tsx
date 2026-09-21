@@ -7,7 +7,7 @@ import ScopeView, { type ScopeControls } from './ScopeView';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
-  feed: { id: number; text: string; headshot: boolean; tdm?: { killer: string; weapon: string; victim: string; killerTeam: 'alpha' | 'bravo' } }[];
+  feed: { id: number; text: string; headshot: boolean; tdm?: { killer: string; weapon: string; victim: string; killerTeam: 'alpha' | 'bravo'; zone?: string; kind?: 'kill' | 'down' | 'executed' | 'bled' | 'revive' } }[];
   dmgArcs: { id: number; dir: number; opacity: number }[];
   scorePops: { id: number; text: string; headshot: boolean; cash?: boolean }[];
   banner: { id: number; label: string } | null;
@@ -26,10 +26,10 @@ function TdmFullBoard({ tdm }: { tdm: NonNullable<HudState['tdm']> }) {
       .sort((a, b) => b.kills - a.kills || b.headshots - a.headshots || a.deaths - b.deaths);
   const mvpKills = Math.max(...tdm.roster.map(r => r.kills));
   const Row = ({ r }: { r: TdmRosterEntry }) => (
-    <div className={`tdm-board-row ${r.you ? 'you' : ''} ${r.dead ? 'dead' : ''}`}>
+    <div className={`tdm-board-row ${r.you ? 'you' : ''} ${r.dead ? 'dead' : ''} ${r.downed ? 'downed' : ''} ${r.onFire ? 'fire' : ''}`}>
       <span className="tdm-board-name">
         {mvpKills > 0 && r.kills === mvpKills && <i className="mvp" title="Match leader">★</i>}
-        <em aria-hidden="true">{r.armorIcon}</em>{r.name}{r.you ? ' (YOU)' : ''}
+        <em aria-hidden="true">{r.armorIcon}</em>{r.name}{r.onFire ? ' 🔥' : ''}{r.you ? ' (YOU)' : ''}
       </span>
       <span className="tabular">{r.kills}</span>
       <span className="tabular">{r.deaths}</span>
@@ -127,16 +127,50 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           <div className="tdm-roster" aria-hidden="true">
             <span className="rteam">
               {hud.tdm.roster.filter(r => r.team === 'alpha').map(r => (
-                <span key={r.name} className={`rname a ${r.dead ? 'dead' : ''} ${r.you ? 'you' : ''}`}>{r.armorIcon}{r.name}{r.you ? '*' : ''}</span>
+                <span key={r.name} className={`rname a ${r.dead ? 'dead' : ''} ${r.you ? 'you' : ''} ${r.downed ? 'downed' : ''} ${r.onFire ? 'fire' : ''}`}>{r.armorIcon}{r.name}{r.onFire ? ' 🔥' : ''}{r.you ? '*' : ''}</span>
               ))}
             </span>
             <span className="rteam">
               {hud.tdm.roster.filter(r => r.team === 'bravo').map(r => (
-                <span key={r.name} className={`rname b ${r.dead ? 'dead' : ''}`}>{r.armorIcon}{r.name}</span>
+                <span key={r.name} className={`rname b ${r.dead ? 'dead' : ''} ${r.downed ? 'downed' : ''} ${r.onFire ? 'fire' : ''}`}>{r.armorIcon}{r.name}{r.onFire ? ' 🔥' : ''}</span>
               ))}
             </span>
           </div>
         </div>
+      )}
+
+      {/* ============ DOWNED OVERLAY (wounded crawl) ============ */}
+      {hud.tdm?.downed && (
+        <div className="tdm-downed" role="alert">
+          <span className="tdm-downed-title">DOWNED</span>
+          <div className="tdm-downed-bar"><span style={{ width: `${(hud.tdm.downedLeft / hud.tdm.downedMax) * 100}%` }} /></div>
+          <span className="tdm-downed-sub">HOLD W TO CRAWL · ALLIES CAN REVIVE · ENEMIES CAN EXECUTE</span>
+          {hud.tdm.reviveBy && (
+            <div className="tdm-revive-in">
+              <span className="mono">{hud.tdm.reviveBy.name} IS REVIVING YOU</span>
+              <div className="tdm-revive-bar"><span style={{ width: `${hud.tdm.reviveBy.progress * 100}%` }} /></div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============ HOLD-X CHANNEL (finish / execute / revive) ============ */}
+      {hud.tdm?.action && (
+        <div className="tdm-action">
+          <span className="tdm-action-label mono">
+            {hud.tdm.action.kind === 'exec'
+              ? hud.tdm.action.armed
+                ? `EXECUTING ${hud.tdm.action.name}…`
+                : `HOLD X — FINISH ${hud.tdm.action.name} · KEEP HOLDING FOR STYLISH +50`
+              : `REVIVING ${hud.tdm.action.name}…`}
+          </span>
+          <div className="tdm-action-bar"><span className={hud.tdm.action.kind === 'revive' ? 'ally' : ''} style={{ width: `${hud.tdm.action.progress * 100}%` }} /></div>
+        </div>
+      )}
+
+      {/* ============ ON FIRE MOMENTUM BANNER ============ */}
+      {hud.tdm?.onFire && (
+        <div className="tdm-fire-banner" role="status">🔥 ON FIRE — {Math.ceil(hud.tdm.onFireLeft)}s</div>
       )}
 
       {/* ============ TDM RESPAWN OVERLAY ============ */}
@@ -205,11 +239,12 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       {/* ============ KILL FEED + FPS ============ */}
       <div className="absolute top-14 right-5 flex flex-col items-end gap-1.5">
         {fx.feed.map(f => f.tdm ? (
-          <div key={f.id} className="feed-row text-right">
-            <span className={`font-black ${f.tdm.killer === 'YOU' ? 'text-[var(--brass)]' : f.tdm.killerTeam === 'alpha' ? 'text-[#7FC4D4]' : 'text-[#E08A7E]'}`}>{f.tdm.killer}</span>
+          <div key={f.id} className={`feed-row text-right ${f.tdm.kind === 'executed' ? 'feed-exec' : f.tdm.kind === 'down' ? 'feed-down' : f.tdm.kind === 'revive' ? 'feed-revive' : f.tdm.kind === 'bled' ? 'feed-bled' : ''}`}>
+            <span className={`font-black ${f.tdm.killer === 'YOU' ? 'text-[var(--brass)]' : f.tdm.killerTeam === 'alpha' ? 'text-[#7FC4D4]' : 'text-[#E08A7E]'}`}>{f.tdm.killer || '—'}</span>
             <span className="mono text-[var(--steel)] text-[9px] mx-1.5">[{f.tdm.weapon}]</span>
             {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
             <span className={f.tdm.victim === 'YOU' ? 'text-[var(--blood)] font-black' : 'text-white/90'}>{f.tdm.victim}</span>
+            {f.tdm.zone && <span className="feed-zone mono">— {f.tdm.zone}</span>}
           </div>
         ) : (
           <div key={f.id} className="feed-row text-right">
@@ -225,7 +260,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
 
       {/* ============ CENTER STACK ============ */}
-      {hud.ads < 0.3 && !hud.sprinting && (
+      {hud.ads < 0.3 && !hud.sprinting && !hud.tdm?.downed && (
         <div className="absolute left-1/2 top-1/2" style={{ opacity: 1 - hud.ads / 0.3 }}>
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>

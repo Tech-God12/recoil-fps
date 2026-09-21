@@ -15,7 +15,7 @@ import { weaponTexturesReady } from '../../game/weapons/finish';
 import GunViewer, { gunThumbnail } from './GunViewer';
 import {
   CALIBER, CLASS_LABEL, HardpointRows, OrangeDeploy, PartsPanel, StatBars,
-  TxBack, TxCheck, TxCoords, TxLock, TxMotto, txFmt, weaponTags,
+  TxBack, TxCheck, TxCoords, TxLock, txFmt, weaponTags,
 } from '../tactical';
 
 interface ArmoryProps {
@@ -223,7 +223,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
           <RankGlyph />
           <span className="arm2-op-body"><em>OPERATOR</em><b>RECOIL_01</b><i>LVL {level}</i></span>
         </div>
-        <TxMotto />
       </header>
 
       <div className="arm2-main">
@@ -267,10 +266,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
             })}
           </div>
           <p className="tx-hint mono">↑↓ NAVIGATE · ENTER PREVIEW</p>
-          <div className="arm2-creed" aria-hidden="true">
-            <span>DISCIPLINE&nbsp;&nbsp;&nbsp;&nbsp;OUTLASTS&nbsp;&nbsp;&nbsp;&nbsp;CHAOS.</span>
-            <i className="tx-rule" />
-          </div>
         </aside>
 
         {/* ================= STAGE ================= */}

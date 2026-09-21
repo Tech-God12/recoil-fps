@@ -40,16 +40,6 @@ export const TxCross = ({ size = 20 }: { size?: number }) => (
   </svg>
 );
 
-export function TxMotto({ align = 'right' }: { align?: 'right' | 'left' | 'center' }) {
-  return (
-    <div className={`tx-motto ${align}`} aria-hidden="true">
-      <span>SAME GROUND</span>
-      <span>DIFFERENT STORIES</span>
-      <i className="tx-rule" />
-    </div>
-  );
-}
-
 export function TxCoords({ lat, lon }: { lat: string; lon: string }) {
   return (
     <div className="tx-coords mono" aria-hidden="true">

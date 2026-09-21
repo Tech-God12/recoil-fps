@@ -18,10 +18,13 @@ function buildSlot(mapId: MapId): Slot {
   const hit = slotCache.get(mapId);
   if (hit) return hit;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(mapId === 'alrasul' ? 0xC9BB9E : 0xAEBAC0);
-  scene.fog = new THREE.Fog(mapId === 'alrasul' ? 0xC6B89C : 0xB4C0C5, 160, 520);
-  scene.add(new THREE.HemisphereLight(0xCFE0EE, 0x8C765A, 0.85));
-  const sun = new THREE.DirectionalLight(0xFFE4BE, 2.6);
+  // Per-arena grade: alrasul desert noon, kasbah overcast stone, arena warm dusk.
+  const sky = mapId === 'alrasul' ? 0xC9BB9E : mapId === 'arena' ? 0xD8B98E : 0xAEBAC0;
+  const haze = mapId === 'alrasul' ? 0xC6B89C : mapId === 'arena' ? 0xC9A87E : 0xB4C0C5;
+  scene.background = new THREE.Color(sky);
+  scene.fog = new THREE.Fog(haze, 160, 520);
+  scene.add(new THREE.HemisphereLight(mapId === 'arena' ? 0xF2D9B0 : 0xCFE0EE, 0x8C765A, 0.85));
+  const sun = new THREE.DirectionalLight(mapId === 'arena' ? 0xFFC98A : 0xFFE4BE, 2.6);
   sun.position.set(-65, 80, 40);
   scene.add(sun);
   scene.add(new THREE.AmbientLight(0x8A7A60, 0.2));

@@ -1536,7 +1536,7 @@ img { display: block; max-width: 100%; }
 .tdm-board-row.downed .tdm-board-name { text-decoration: line-through; text-decoration-color: rgba(200,50,30,0.7); }
 
 /* ============================================================
-   MAIN MENU — TACTICAL OPERATIONS INTERFACE (reference rebuild)
+   MAIN MENU (reference rebuild)
    Left wordmark + deploy nav · torn-paper AO slice · operator ·
    wallet chip, intel tabs, loadout card, key footer.
    ============================================================ */
@@ -1588,11 +1588,6 @@ img { display: block; max-width: 100%; }
 }
 .rm-coords svg { opacity: 0.7; margin-top: 2px; }
 .rm-coords span { font-size: 10px; line-height: 1.7; letter-spacing: 0.12em; }
-.rm-centerquote {
-  position: absolute; left: 0; right: 0; bottom: 88px;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-}
-.rm-centerquote span { font-size: 10px; letter-spacing: 0.3em; text-indent: 0.3em; color: rgba(237,230,214,0.88); }
 .rm-operator {
   position: absolute; right: 4.5%; bottom: 0; height: 97%; width: auto;
   z-index: 2; pointer-events: none;
@@ -1656,10 +1651,7 @@ img { display: block; max-width: 100%; }
 .rm-arrow { color: var(--rm-dim); display: grid; place-items: center; transition: color 0.16s, transform 0.2s; }
 .rm-item:hover .rm-arrow, .rm-item.sel .rm-arrow { color: #EDE6D6; transform: translateX(3px); }
 
-.rm-creed { margin-top: auto; padding-bottom: 66px; display: flex; flex-direction: column; gap: 2px; }
-.rm-creed span { font-size: 9px; letter-spacing: 0.34em; color: var(--rm-dim); }
-.rm-creed .rm-goldrule { margin: 10px 0 8px; }
-.rm-creed em { font-style: normal; font-family: var(--mono); font-size: 8px; letter-spacing: 0.18em; color: #55524b; }
+
 
 .rm-right { width: 292px; display: flex; flex-direction: column; align-items: flex-end; }
 .rm-topbar { display: flex; gap: 10px; align-items: stretch; }
@@ -1690,34 +1682,39 @@ img { display: block; max-width: 100%; }
 .rm-intel-readout { margin-top: 2px; font-size: 8px; letter-spacing: 0.16em; color: var(--rm-dim); min-height: 12px; }
 
 .rm-loadout {
-  margin-top: 18px; width: 196px; padding: 14px 14px 10px; text-align: left; cursor: pointer;
-  background: rgba(10,10,13,0.72); border: 1px solid var(--rm-line); border-radius: 2px;
+  margin-top: 18px; width: 236px; padding: 14px 14px 10px; text-align: left; cursor: pointer;
+  background: rgba(10,10,13,0.78); border: 1px solid var(--rm-line); border-radius: 2px;
   backdrop-filter: blur(4px); color: #EDE6D6;
   display: flex; flex-direction: column;
   transition: border-color 0.16s, transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s;
 }
 .rm-loadout:hover { border-color: rgba(201,161,90,0.45); transform: translateY(-2px); box-shadow: 0 14px 34px rgba(0,0,0,0.45); }
 .rm-lo-kicker { font-size: 8px; letter-spacing: 0.22em; color: var(--rm-mute); }
-.rm-lo-name { margin-top: 6px; font-family: var(--display); font-size: 17px; font-weight: 800; letter-spacing: 0.06em; }
-.rm-rifle { width: 100%; height: 30px; margin-top: 8px; color: #7d786d; }
+.rm-lo-main { display: flex; flex-direction: column; margin-top: 8px; }
+.rm-lo-tag { font-size: 7.5px; letter-spacing: 0.2em; color: var(--rm-gold); }
+.rm-lo-name { margin-top: 3px; font-family: var(--display); font-size: 17px; font-weight: 800; letter-spacing: 0.06em; }
+.rm-lo-gun {
+  width: 100%; height: 62px; margin-top: 4px; object-fit: contain;
+  background: radial-gradient(ellipse 85% 90% at 50% 55%, rgba(237,230,214,0.07), transparent 70%);
+  border: 1px solid rgba(237,230,214,0.07); border-radius: 2px;
+}
+.rm-lo-gun.sm { height: 40px; margin-top: 5px; border: 0; background: none; }
+.rm-lo-gun-loading { display: block; }
 .rm-lo-div { height: 1px; margin: 10px 0; background: var(--rm-line); }
-.rm-lo-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.rm-lo-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .rm-lo-slot {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
-  padding: 8px 2px 6px; background: rgba(237,230,214,0.03);
+  padding: 8px 4px 7px; background: rgba(237,230,214,0.03);
   border: 1px solid var(--rm-line); border-radius: 2px; color: #a09a8c;
 }
-.rm-lo-slot em { font-style: normal; font-family: var(--mono); font-size: 7px; letter-spacing: 0.1em; color: var(--rm-mute); }
+.rm-lo-slot svg { color: #8f8a7e; }
+.rm-lo-slot em { font-style: normal; font-family: var(--mono); font-size: 7.5px; letter-spacing: 0.08em; color: var(--rm-dim); text-align: center; }
 .rm-lo-foot {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--rm-line); color: var(--rm-mute);
 }
 .rm-lo-foot em { font-style: normal; font-family: var(--mono); font-size: 8px; letter-spacing: 0.16em; }
 .rm-lo-foot svg { width: 14px; height: 14px; }
-
-.rm-motto { margin-top: auto; padding-bottom: 66px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-.rm-motto span { font-size: 8px; letter-spacing: 0.22em; color: #55524b; }
-.rm-motto .rm-goldrule { margin: 8px 0 0; }
 
 .rm-foot {
   position: relative; z-index: 5; display: flex; align-items: center; gap: 16px;
@@ -1775,10 +1772,9 @@ img { display: block; max-width: 100%; }
 @media (max-width: 900px) {
   .rm-center { left: 0; width: 100%; opacity: 0.35; clip-path: none; }
   .rm-operator { opacity: 0.25; right: -10%; }
-  .rm-intel, .rm-motto, .rm-centerquote, .rm-coords { display: none; }
+  .rm-intel, .rm-coords { display: none; }
   .rm-layout { padding: 22px; }
   .rm-right { width: auto; }
-  .rm-creed { display: none; }
 }
 
 /* ============================================================
@@ -1808,13 +1804,6 @@ img { display: block; max-width: 100%; }
 .tx-title { display: flex; flex-direction: column; gap: 2px; padding-left: 18px; border-left: 1px solid rgba(237,228,211,0.12); }
 .tx-title b { font-family: var(--display); font-weight: 800; font-size: 19px; letter-spacing: 0.08em; line-height: 1; }
 .tx-title em { font-style: normal; font-size: 9px; letter-spacing: 0.22em; color: var(--bone-mute); }
-.tx-motto { display: flex; flex-direction: column; gap: 2px; text-align: right; }
-.tx-motto.left { text-align: left; }
-.tx-motto.center { text-align: center; align-items: center; }
-.tx-motto span { font-size: 8px; letter-spacing: 0.24em; color: var(--bone-mute); }
-.tx-motto .tx-rule { margin: 6px 0 0 auto; }
-.tx-motto.left .tx-rule { margin: 6px auto 0 0; }
-.tx-motto.center .tx-rule { margin: 6px auto 0; }
 .tx-rule { display: block; width: 22px; height: 2px; background: var(--brass); }
 .tx-coords { display: flex; gap: 9px; align-items: flex-start; color: rgba(237,228,211,0.6); }
 .tx-coords svg { margin-top: 1px; }
@@ -1962,22 +1951,18 @@ img { display: block; max-width: 100%; }
 
 .tdm2-center { display: flex; flex-direction: column; }
 .tdm2-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex: none; }
-.tdm2-hero h2 { margin: 0; font-family: var(--display); font-size: 30px; font-weight: 800; letter-spacing: 0.04em; line-height: 1; }
+.tdm2-hero h2 { margin: 0; font-family: var(--display); font-size: clamp(22px, 2.2vw, 30px); font-weight: 800; letter-spacing: 0.04em; line-height: 1; }
 .tdm2-class { margin: 5px 0 0; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--bone-dim); }
 .tdm2-blurb { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--bone-dim); max-width: 62ch; }
 .tdm2-stage {
   position: relative; display: grid; grid-template-columns: 200px minmax(0,1fr) 200px; gap: 14px; align-items: center;
   margin-top: 12px; padding: 14px;
   background: radial-gradient(80% 90% at 50% 50%, rgba(36,33,28,0.5), transparent 75%), rgba(10,9,7,0.5);
-  border: 1px solid var(--line); border-radius: 3px; min-height: 300px; flex: none;
+  border: 1px solid var(--line); border-radius: 3px; min-height: clamp(240px, 30vh, 340px); flex: none;
 }
 .tdm2-stage > .tx-coords { position: absolute; top: 12px; left: 44%; }
-.tdm2-watermark {
-  position: absolute; right: 16px; top: 12px; font-family: var(--display); font-weight: 800;
-  font-size: 15px; letter-spacing: 0.14em; line-height: 1.5; text-align: right;
-  color: rgba(237,228,211,0.07); transform: rotate(4deg); pointer-events: none;
-}
-.tdm2-viewer { position: relative; min-height: 280px; align-self: stretch; }
+
+.tdm2-viewer { position: relative; min-height: clamp(220px, 28vh, 320px); align-self: stretch; }
 .tdm2-viewer .gv-root { position: absolute; inset: 0; min-height: 0; }
 .tdm2-orbit-hint {
   position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%);
@@ -2091,12 +2076,11 @@ span.arm2-thumb { display: inline-block; }
 .arm2-owned { color: var(--bone-mute); font-weight: 500; }
 .arm2-price { color: var(--brass); font-weight: 700; }
 .arm2-lock { color: var(--brass); opacity: 0.85; flex: none; }
-.arm2-creed { margin-top: auto; padding-top: 14px; font-size: 9px; letter-spacing: 0.2em; color: var(--bone-mute); }
-.arm2-creed .tx-rule { margin-top: 8px; width: 18px; }
+
 
 .arm2-stage { display: flex; flex-direction: column; gap: 12px; }
 .arm2-hero { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; flex: none; }
-.arm2-hero h2 { margin: 0; font-family: var(--display); font-size: 34px; font-weight: 800; letter-spacing: 0.03em; line-height: 1; }
+.arm2-hero h2 { margin: 0; font-family: var(--display); font-size: clamp(24px, 2.4vw, 34px); font-weight: 800; letter-spacing: 0.03em; line-height: 1; }
 .arm2-class { margin: 4px 0 0; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--bone-dim); }
 .arm2-tags { margin: 6px 0 0; font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; color: var(--brass); }
 .arm2-blurb { margin: 6px 0 0; font-size: 12.5px; color: var(--bone-dim); max-width: 62ch; line-height: 1.5; }
@@ -2114,7 +2098,7 @@ span.arm2-thumb { display: inline-block; }
 .arm2-buy:hover { filter: brightness(1.07); }
 .arm2-locknote { font-size: 9px; letter-spacing: 0.16em; color: var(--brass); }
 .arm2-viewer {
-  position: relative; flex: 1; min-height: 290px;
+  position: relative; flex: 1; min-height: clamp(220px, 30vh, 400px);
   background: radial-gradient(75% 85% at 50% 55%, rgba(36,33,28,0.55), transparent 75%);
   border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
 }
@@ -2189,7 +2173,6 @@ span.arm2-thumb { display: inline-block; }
 .map2-brand > em { font-style: normal; font-size: 8.5px; letter-spacing: 0.2em; color: var(--bone-mute); }
 .map2-intel { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; margin-top: 10px; }
 .map2-intel span { font-size: 9px; letter-spacing: 0.24em; color: #5d5a53; }
-.map2-brand .tx-motto { margin-top: 8px; }
 
 .map2-cards {
   position: relative; z-index: 2; flex: 1; min-height: 0; align-content: center;
@@ -2262,33 +2245,63 @@ span.arm2-thumb { display: inline-block; }
 }
 
 /* ============================================================
+   ARENA MODE — two cards (Warehouse live, Foundry locked) + CTA.
+   Cards reuse .map2-card; the flyover layer is shared with theaters.
+   ============================================================ */
+.arena2-cards {
+  position: relative; z-index: 2; flex: 1; min-height: 0; align-content: center;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 400px)); justify-content: center;
+  gap: 18px; padding: 14px 30px 6px;
+}
+.arena2-cta {
+  position: relative; z-index: 2; flex: none;
+  display: flex; align-items: stretch; justify-content: center; gap: 12px;
+  padding: 10px 30px 14px;
+}
+
+/* Grid blowout guards — columns may shrink but never overlap. */
+.tdm2-main > *, .arm2-main > * { min-width: 0; min-height: 0; }
+
+/* ============================================================
    TACTICAL RESPONSIVE
    ============================================================ */
-@media (max-width: 1250px) {
-  .tdm2-main, .arm2-main { grid-template-columns: 260px minmax(0,1fr) 280px; }
+@media (max-width: 1300px) {
+  .tdm2-main { grid-template-columns: 260px minmax(0,1fr) 280px; }
+  .arm2-main { grid-template-columns: 264px minmax(0,1fr) 288px; }
   .tdm2-stage { grid-template-columns: 170px minmax(0,1fr); }
   .tdm2-desc { display: none; }
   .map2-cards { grid-template-columns: repeat(3, minmax(0,1fr)); }
 }
-@media (max-width: 1050px) {
-  .tdm2-main, .arm2-main { grid-template-columns: 250px minmax(0,1fr); overflow-y: auto; }
-  .tdm2-main .tx-col, .arm2-main .tx-col { overflow: visible; }
-  .tdm2-right, .arm2-panel { grid-column: 1 / -1; }
+@media (max-width: 1120px) {
+  /* Compact three-column: everything stays side-by-side, columns scroll inside. */
+  .tdm2-main, .arm2-main { grid-template-columns: 228px minmax(0,1fr) 248px; gap: 10px; padding: 10px 12px; }
+  .tx-col { padding: 12px; }
+  .arm2-stats { grid-template-columns: 1fr; gap: 10px; }
   .tdm2-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
-  .arm2-stats { grid-template-columns: 1fr; }
-  .map2-root { overflow-y: auto; }
+  .arm2-viewer-coords { display: none; }
+  .tdm2-match, .tdm2-mapchip, .arm2-op { display: none; }
+}
+@media (max-width: 920px) {
+  .tdm2-main, .arm2-main { grid-template-columns: 204px minmax(0,1fr) 224px; }
+  .arm2-thumb { width: 72px; height: 38px; }
+  .tx-head { gap: 12px; padding: 10px 14px; }
+  .map2-root, .arena2-root { overflow-y: auto; }
   .map2-cards { grid-template-columns: minmax(0,560px); flex: none; }
+  .arena2-cards { grid-template-columns: minmax(0,560px); flex: none; }
   .map2-features { flex-wrap: wrap; gap: 20px; }
   .map2-head { flex-wrap: wrap; }
   .map2-head > .tx-coords { display: none; }
 }
 @media (max-width: 700px) {
-  .tdm2-main, .arm2-main { grid-template-columns: minmax(0,1fr); }
+  /* Phones only: single column, the page scrolls as a last resort. */
+  .tdm2-main, .arm2-main { grid-template-columns: minmax(0,1fr); overflow-y: auto; }
+  .tdm2-main .tx-col, .arm2-main .tx-col { overflow: visible; }
+  .tdm2-right, .arm2-panel { grid-column: 1 / -1; }
   .tdm2-stage { grid-template-columns: minmax(0,1fr); }
   .tdm2-stage .tx-bars { order: 2; }
   .tdm2-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
-  .tdm2-match, .tdm2-mapchip, .arm2-op, .tx-head .tx-motto { display: none; }
   .tdm2-sum { display: none; }
   .map2-brand { display: none; }
   .map2-title { font-size: 32px; }
+  .arena2-cta { flex-wrap: wrap; }
 }

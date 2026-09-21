@@ -17,8 +17,10 @@ import mapArena from '../assets/map-arena.jpg';
 import ridgeArt from '../assets/map-ridgeline.jpg';
 import operatorArt from '../assets/operator.jpg';
 import menuCenter from '../assets/menu-center.jpg';
-import { TxBack, TxCoords, TxLock, TxMotto } from './tactical';
+import { TxBack, TxCoords, TxLock } from './tactical';
 import MapFlyover from './MapFlyover';
+import { gunThumbnail } from './armory/GunViewer';
+import { weaponTexturesReady } from '../game/weapons/finish';
 
 export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapArena };
 
@@ -53,22 +55,7 @@ const RankIcon = () => (
 const CrossIcon = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.1" aria-hidden="true"><circle cx="12" cy="12" r="6.5" /><path d="M12 2v5M12 17v5M2 12h5M17 12h5" /></svg>
 );
-const RifleIcon = () => (
-  <svg viewBox="0 0 120 26" aria-hidden="true" className="rm-rifle">
-    <g fill="currentColor">
-      <rect x="2" y="9" width="12" height="7" rx="1" />
-      <rect x="14" y="10" width="38" height="6" rx="1" />
-      <rect x="52" y="11" width="30" height="4" rx="1" />
-      <rect x="82" y="12" width="30" height="2" />
-      <rect x="112" y="10.5" width="5" height="5" rx="1" />
-      <polygon points="38,16 46,16 42,25 34,25" />
-      <polygon points="52,16 56,16 55,22 51,22" />
-      <rect x="22" y="6" width="7" height="4" rx="1" />
-      <rect x="76" y="7" width="2" height="4" />
-      <rect x="60" y="15" width="10" height="2" rx="1" />
-    </g>
-  </svg>
-);
+
 const PistolIcon = () => (
   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
     <path d="M2 8.5h13.5v3.6H11l-.8 5.4H7.4l.8-5.4H4.5v2.4H2z" />
@@ -83,13 +70,7 @@ const FragIcon = () => (
     <path d="M7 12.5h10" />
   </svg>
 );
-const KnifeIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-    <path d="M17.5 3.5l3 3-8.5 8.5-3-3z" />
-    <path d="M9.5 12.5l-6 6" />
-    <path d="M7.8 13.2l2.5 2.5" />
-  </svg>
-);
+
 
 const INTEL_TABS = [
   { id: 'people', label: 'PEOPLE' },
@@ -112,6 +93,9 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const [intel, setIntel] = useState(2);
   const [profileOpen, setProfileOpen] = useState(false);
   const [cashShown, setCashShown] = useState(0);
+  const [thumbs, setThumbs] = useState<{ primary: string; secondary: string }>({ primary: '', secondary: '' });
+  const primaryId = prof.loadout.primary.weapon;
+  const secondaryId = prof.loadout.secondary.weapon;
   const rootRef = useRef<HTMLElement | null>(null);
   const cashTarget = prof.cash;
   const level = 13 + prof.missions;
@@ -137,6 +121,17 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [cashTarget]);
+
+  // Whole-weapon renders for the loadout card — real 3D thumbnails, one per slot.
+  useEffect(() => {
+    let active = true;
+    void weaponTexturesReady.then(async () => {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      if (!active) return;
+      setThumbs({ primary: gunThumbnail(primaryId), secondary: gunThumbnail(secondaryId) });
+    });
+    return () => { active = false; };
+  }, [primaryId, secondaryId]);
 
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
@@ -183,11 +178,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
           <CrossIcon />
           <span>33.7731° N<br />44.4208° E</span>
         </div>
-        <div className="rm-centerquote seq" style={{ animationDelay: '.24s' }}>
-          <span>SAME GROUND</span>
-          <span>DIFFERENT STORIES</span>
-          <i className="rm-goldrule xs center" />
-        </div>
       </div>
       <img src={operatorArt} alt="" draggable={false} className="rm-operator" aria-hidden="true" />
       <div className="rm-vignette" aria-hidden="true" />
@@ -196,7 +186,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
       <div className="rm-layout">
         <div className="rm-left">
           <div className="rm-titleblock seq" style={{ animationDelay: '.02s' }}>
-            <span className="rm-kicker">TACTICAL OPERATIONS INTERFACE<br />V1.1.0</span>
+            <span className="rm-kicker">DEPLOYMENT TERMINAL<br />V1.1.0</span>
             <h1 className="rm-title">RECOIL<sup>®</sup></h1>
             <span className="rm-subtitle">DESERT OPERATIONS&nbsp;&nbsp;•&nbsp;&nbsp;SINGLE OPERATOR</span>
             <i className="rm-goldrule" aria-hidden="true" />
@@ -221,13 +211,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
             ))}
           </nav>
 
-          <div className="rm-creed seq" style={{ animationDelay: '.3s' }}>
-            <span>DISCIPLINE</span>
-            <span>OUTLASTS</span>
-            <span>CHAOS.</span>
-            <i className="rm-goldrule sm" aria-hidden="true" />
-            <em>RECOIL&nbsp;&nbsp;//&nbsp;&nbsp;FIELD NOTES&nbsp;&nbsp;//&nbsp;&nbsp;SURVIVE ADAPT WIN</em>
-          </div>
         </div>
 
         <div className="rm-right">
@@ -263,34 +246,41 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
 
           <button type="button" className="rm-loadout seq" style={{ animationDelay: '.2s' }} onClick={onArmory} title="Open loadout">
             <span className="rm-lo-kicker">CURRENT LOADOUT</span>
-            <b className="rm-lo-name">{primaryName}</b>
-            <RifleIcon />
+            <span className="rm-lo-main">
+              <span className="rm-lo-tag mono">PRIMARY</span>
+              <b className="rm-lo-name">{primaryName}</b>
+              {thumbs.primary
+                ? <img src={thumbs.primary} alt="" draggable={false} className="rm-lo-gun" />
+                : <span className="rm-lo-gun rm-lo-gun-loading" aria-hidden="true" />}
+            </span>
             <span className="rm-lo-div" aria-hidden="true" />
             <span className="rm-lo-slots">
-              <span className="rm-lo-slot"><PistolIcon /><em>{secondaryName}</em></span>
-              <span className="rm-lo-slot"><FragIcon /><em>FRAG</em></span>
-              <span className="rm-lo-slot"><KnifeIcon /><em>KNIFE</em></span>
+              <span className="rm-lo-slot">
+                <span className="rm-lo-tag mono">SIDEARM</span>
+                {thumbs.secondary
+                  ? <img src={thumbs.secondary} alt="" draggable={false} className="rm-lo-gun sm" />
+                  : <PistolIcon />}
+                <em>{secondaryName}</em>
+              </span>
+              <span className="rm-lo-slot">
+                <span className="rm-lo-tag mono">TACTICAL</span>
+                <FragIcon />
+                <em>FRAG ×2</em>
+              </span>
             </span>
-            <span className="rm-lo-foot"><em>CONFIG 01</em><Arrow /></span>
+            <span className="rm-lo-foot"><em>EDIT IN ARMORY</em><Arrow /></span>
           </button>
-
-          <div className="rm-motto seq" style={{ animationDelay: '.26s' }}>
-            <span>BUILT FOR THOSE</span>
-            <span>WHO KEEP GOING.</span>
-            <i className="rm-goldrule xs" aria-hidden="true" />
-          </div>
         </div>
       </div>
 
       <footer className="rm-foot seq" style={{ animationDelay: '.32s' }}>
         <span className="rm-keys">
           <span className="rm-key">W</span><span className="rm-key">A</span><span className="rm-key">S</span><span className="rm-key">D</span>
-          <em>NAVIGATE</em>
         </span>
         <span className="rm-sep" aria-hidden="true" />
-        <span className="rm-keys"><span className="rm-key wide">ENTER</span><em>SELECT</em></span>
+        <span className="rm-keys"><span className="rm-key wide">ENTER</span></span>
         <span className="rm-sep" aria-hidden="true" />
-        <span className="rm-keys"><span className="rm-key wide">TAB</span><em>PLAYER PROFILE</em></span>
+        <span className="rm-keys"><span className="rm-key wide">TAB</span></span>
         <span className="rm-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
       </footer>
 
@@ -319,8 +309,115 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
 }
 
 /* ================================================================
+   ARENA MODE — hovering the Warehouse card turns the whole screen into
+   a live 3D orbit of the arena (same MapFlyover tech as theater select).
+   ================================================================ */
+function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup }: {
+  primaryName: string; secondaryName: string;
+  onBack: () => void; onMap: (map: GameSettings['map']) => void;
+  onDeploy: (map?: GameSettings['map']) => void; onArenaSetup?: () => void;
+}) {
+  const [live, setLive] = useState(false);
+  const [denied, setDenied] = useState('');
+  useEffect(() => {
+    if (!denied) return;
+    const t = window.setTimeout(() => setDenied(''), 2200);
+    return () => window.clearTimeout(t);
+  }, [denied]);
+  const lockNote = () => setDenied('SECOND ARENA OFFLINE — INTEL PENDING');
+  return (
+    <main className="tx-root arena2-root">
+      <div className="map2-base" aria-hidden="true" />
+      <div className={`map2-flyover ${live ? 'live' : ''}`} aria-hidden="true">
+        <div className="map2-flyover-slot" style={{ opacity: live ? 1 : 0 }}>
+          <MapFlyover mapId="arena" active={live} />
+        </div>
+      </div>
+      <div className="tx-grain" aria-hidden="true" />
+
+      <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
+        <TxBack onClick={onBack} />
+        <div className="map2-titleblock">
+          <span className="map2-kicker">ARENA MODE<br />TEAM DEATHMATCH</span>
+          <h1 className="map2-title">5V5 — FIRST TO THE WHISTLE</h1>
+          <span className="map2-sub">MOST ELIMINATIONS WHEN THE CLOCK DIES WINS.</span>
+          <i className="tx-rule" aria-hidden="true" />
+        </div>
+        <TxCoords lat="33.7731° N" lon="44.4208° E" />
+        <div className="map2-brand">
+          <b>RECOIL</b>
+          <em>{primaryName}&nbsp;&nbsp;//&nbsp;&nbsp;{secondaryName}</em>
+        </div>
+      </header>
+
+      <div className="arena2-cards" role="listbox" aria-label="Choose an arena">
+        <button
+          type="button"
+          role="option"
+          aria-selected={live}
+          className={`map2-card seq ${live ? 'sel' : ''}`}
+          style={{ animationDelay: '.08s' }}
+          onMouseEnter={() => setLive(true)}
+          onMouseLeave={() => setLive(false)}
+          onFocus={() => setLive(true)}
+          onBlur={() => setLive(false)}
+          onClick={() => { onMap('arena'); onDeploy('arena'); }}
+          aria-label="Warehouse arena, deploy"
+        >
+          <img src={MAP_ART.arena} alt="" draggable={false} className="map2-art" />
+          <span className="map2-shade" aria-hidden="true" />
+          <span className="map2-num mono">01</span>
+          <span className="map2-info">
+            <b>WAREHOUSE</b>
+            <em>CONTAINER YARD · TWIN HALLS</em>
+            <span className="map2-obj mono">5V5 · 2:30 · 5S RESPAWN</span>
+          </span>
+          <span className="map2-go"><Arrow /></span>
+        </button>
+        <button
+          type="button"
+          className={`map2-card seq locked ${denied ? 'denied' : ''}`}
+          style={{ animationDelay: '.14s' }}
+          onClick={lockNote}
+          aria-label="Second arena, locked"
+        >
+          <img src={ridgeArt} alt="" draggable={false} className="map2-art" />
+          <span className="map2-shade" aria-hidden="true" />
+          <span className="map2-num mono">02</span>
+          <span className="map2-classified mono"><TxLock size={13} /> OFFLINE</span>
+          <span className="map2-info">
+            <b>FOUNDRY</b>
+            <em>INTEL PENDING</em>
+            <span className="map2-obj mono">5V5 · CLASSIFIED</span>
+          </span>
+        </button>
+      </div>
+      <p className={`map2-hint mono ${denied ? 'denied' : ''}`} role="status">
+        {denied || 'HOVER WAREHOUSE FOR A LIVE FLYOVER · CLICK TO DEPLOY'}
+      </p>
+
+      <div className="arena2-cta seq" style={{ animationDelay: '.2s' }}>
+        <button className="deploy-btn" onClick={() => { onMap('arena'); onDeploy('arena'); }}>
+          <span>Play</span>
+          <span className="hint">Warehouse · 5v5 TDM</span>
+          <Arrow />
+        </button>
+        <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
+          Set up loadout <span>armor + weapon</span>
+        </button>
+      </div>
+
+      <footer className="map2-foot mono">
+        <span>ALPHA 5&nbsp;&nbsp;//&nbsp;&nbsp;BRAVO 5</span>
+        <span className="map2-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
+      </footer>
+    </main>
+  );
+}
+
+/* ================================================================
    MAIN MENU — three screens:
-   HOME     · title left, stacked menu (Missions / Loadout / Settings),
+   HOME     · title left, stacked menu (Missions / Arena / Loadout / Settings),
               operator character art on the right.
    MAPS     · pick the AO — hovering a tile turns the WHOLE screen into a
               live 3D orbit of that arena.
@@ -418,7 +515,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
           <div className="map2-titleblock">
             <span className="map2-kicker">OPERATIONS COMMAND<br />THEATER SELECT</span>
             <h1 className="map2-title">SELECT AREA OF OPERATIONS</h1>
-            <span className="map2-sub">DEPLOY TO A THEATER. DIFFERENT GROUND. DIFFERENT STORIES.</span>
+            <span className="map2-sub">DEPLOY TO A THEATER.</span>
             <i className="tx-rule" aria-hidden="true" />
           </div>
           <TxCoords lat="33.7731° N" lon="44.4208° E" />
@@ -428,7 +525,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
             <div className="map2-intel" aria-hidden="true">
               <span>PEOPLE</span><span>TERRAIN</span><span>OBJECTIVES</span><span>RESULTS</span>
             </div>
-            <TxMotto />
           </div>
         </header>
 
@@ -475,10 +571,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         </p>
 
         <div className="map2-features seq" style={{ animationDelay: '.26s' }}>
-          <div className="map2-creed" aria-hidden="true">
-            <span>DISCIPLINE</span><span>OUTLASTS</span><span>CHAOS.</span>
-            <i className="tx-rule" />
-          </div>
           <div className="map2-feat">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c-5.5 5-5.5 12 0 17M12 3.5c5.5 5 5.5 12 0 17" /></svg>
             <span><b>THREE THEATERS</b><em>UNIQUE ENVIRONMENTS</em></span>
@@ -504,44 +596,14 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
   /* ---------------- ARENA MODE ---------------- */
   if (view === 'arena') {
     return (
-      <main className="menu-root msn-root">
-        <div className="menu-bg" aria-hidden="true" />
-        <div className="msn-art" aria-hidden="true" style={{ backgroundImage: `url(${MAP_ART.arena})` }} />
-        <div className="msn-art-fade" aria-hidden="true" />
-        <div className="paper-grain" aria-hidden="true" />
-        <header className="menu-header">
-          <button className="cmd-back" onClick={() => setView('home')}><span aria-hidden="true">‹</span> Back</button>
-          <span className="pick-heading">
-            <span className="menu-eyebrow">Arena Mode</span>
-            <b>5v5 Team Deathmatch</b>
-          </span>
-          <span className="menu-loadout" aria-label="Equipped loadout">
-            <span><b>1</b> {primaryName}</span>
-            <span><b>2</b> {secondaryName}</span>
-          </span>
-        </header>
-        <div className="msn-wrap arena-wrap">
-          <button className="arena-map-card seq" style={{ animationDelay: '.05s' }} onClick={() => { onMap('arena'); void 0; }} aria-pressed="true">
-            <img src={MAP_ART.arena} alt="" draggable={false} />
-            <span className="arena-map-card-info">
-              <span className="mono">MAP</span>
-              <b>Warehouse</b>
-              <em>5v5 · 2:30 · 5s respawn</em>
-            </span>
-            <span className="arena-map-card-check mono" aria-hidden="true">SELECTED</span>
-          </button>
-          <div className="msn-cta seq" style={{ animationDelay: '.12s' }}>
-            <button className="deploy-btn" onClick={() => { onMap('arena'); onDeploy('arena'); }}>
-              <span>Play</span>
-              <span className="hint">Warehouse · 5v5 TDM</span>
-              <Arrow />
-            </button>
-            <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
-              Set up loadout <span>armor + weapon</span>
-            </button>
-          </div>
-        </div>
-      </main>
+      <ArenaView
+        primaryName={primaryName}
+        secondaryName={secondaryName}
+        onBack={() => setView('home')}
+        onMap={onMap}
+        onDeploy={onDeploy}
+        onArenaSetup={onArenaSetup}
+      />
     );
   }
 

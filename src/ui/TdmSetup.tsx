@@ -15,7 +15,7 @@ import GunViewer, { gunThumbnail } from './armory/GunViewer';
 import { BRAVO_ROSTER, TDM_ARMOR_NAMES, TDM_BASE_HP, TDM_HP_PER_ARMOR, TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, type TDMArmor } from '../game/tdm';
 import {
   ArmorIcon, CALIBER, CLASS_LABEL, HardpointRows, OrangeDeploy, PartsPanel, StatBars,
-  TxBack, TxCheck, TxCoords, TxLock, TxMotto, txFmt, weaponTags,
+  TxBack, TxCheck, TxCoords, TxLock, txFmt, weaponTags,
 } from './tactical';
 import mapArena from '../assets/map-arena.jpg';
 import tdmBackdrop from '../assets/tdm-backdrop.jpg';
@@ -131,7 +131,6 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
           <img src={mapArena} alt="" draggable={false} />
           <span>WAREHOUSE<em className="mono">5V5 TDM</em></span>
         </div>
-        <TxMotto />
       </header>
 
       <div className="tdm2-main">
@@ -185,7 +184,6 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
           </div>
 
           <div className="tdm2-stage">
-            <div className="tdm2-watermark" aria-hidden="true">DISCIPLINE<br />OUTLASTS<br />CHAOS.</div>
             <TxCoords lat="33.7731° N" lon="44.4208° E" />
             <StatBars entry={entry} stats={stats} variant="tdm" />
             <div className="tdm2-viewer">

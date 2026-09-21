@@ -24,6 +24,11 @@ import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
 import type { MissionReport, MissionPhase } from './systems/mission';
 import type { PressureStats } from './systems/reinforcements';
+import {
+  TDMManager, TDM_BASE_HP, TDM_HP_PER_ARMOR, TDM_DAMAGE_MUL, TDM_MATCH_SECONDS, TDM_RESPAWN_SECONDS,
+  TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, TDM_ARMOR_ICONS,
+  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam,
+} from './tdm';
 
 export interface GameSettings {
   // Gameplay
@@ -124,6 +129,29 @@ export interface HudState {
   worldHalf: number;
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
+  tdm?: TdmHud;
+}
+
+/** Warehouse TDM scoreboard payload — present only when the arena map is running. */
+export interface TdmHud {
+  alphaScore: number;
+  bravoScore: number;
+  timeLeft: number;
+  playerKills: number;
+  playerDead: boolean;
+  respawnIn: number;
+  maxHp: number;
+  roster: TdmRosterEntry[];
+}
+export interface TdmRosterEntry {
+  name: string;
+  team: TDMTeam;
+  dead: boolean;
+  armorIcon: string;
+  you?: boolean;
+  kills: number;
+  deaths: number;
+  headshots: number;
 }
 
 export type GameEvent =
@@ -136,7 +164,8 @@ export type GameEvent =
   | { type: 'streak'; label: string }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
-  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number };
+  | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam }
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] } };
 
 export interface CashLogEntry { reason: string; amount: number; t: number }
 
@@ -193,6 +222,8 @@ interface Grenade {
   fuse: number;
   kind: 'frag' | 'flash';
   fromAI: boolean;
+  /** TDM: which bot lobbed it (credits kills to the right team). */
+  owner?: TDMBot;
 }
 
 const V = () => new THREE.Vector3();
@@ -254,6 +285,15 @@ export class Engine {
   private effects!: Effects;
   private ai!: AIManager;
   private missionRuntime!: MissionRuntime;
+  // ---- Warehouse 5v5 TDM (arena map only) ----
+  private isTDM = false;
+  private tdm: TDMManager | null = null;
+  private tdmArmor: TDMArmor = 1;
+  private tdmPlayerDead = false;
+  private tdmRespawnT = 0;
+  private tdmPlayerKills = 0;
+  private tdmPlayerDeaths = 0;
+  private tdmRosterVersion = -1;
   private rosterVersion = -1;
   private started = false;
   private finishDelay = -1;
@@ -408,14 +448,20 @@ export class Engine {
    * could even paint. create() stages it across frames and pre-compiles shaders off the
    * blocking path instead.
    */
-  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null): Promise<Engine> {
+  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1): Promise<Engine> {
     const engine = new Engine(canvas);
-    await engine.init(difficulty, onEvent, mapId, loadout);
+    await engine.init(difficulty, onEvent, mapId, loadout, tdmArmor);
     return engine;
   }
 
-  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null) {
+  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1) {
     this.onEvent = onEvent;
+    this.isTDM = mapId === 'arena';
+    this.tdmArmor = tdmArmor;
+    if (this.isTDM) {
+      this.hp = TDM_BASE_HP + tdmArmor * TDM_HP_PER_ARMOR;
+      this.frags = 3; this.flashes = 1;
+    }
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     // Cap pixel ratio at 1.25 — the single biggest FPS win on high-DPI screens
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
@@ -720,11 +766,50 @@ void main(){
         this.addPing(p);
       },
       onEliminated: enemy => this.missionRuntime?.recordElimination(enemy),
-      canAcquire: () => this.graceBroken || this.missionRuntime.mission.elapsed >= OPENING_GRACE,
+      canAcquire: () => this.isTDM || this.graceBroken || this.missionRuntime.mission.elapsed >= OPENING_GRACE,
     };
 
     // Ten pooled soldier models plus the nav grid over the whole sector.
     await nextFrame();
+    if (this.isTDM) {
+      // ---- Warehouse TDM: no mission runtime, no pressure director. A single
+      // TDMManager owns both five-man teams and the match clock. ----
+      const tdmCtx: TDMContext = {
+        scene: this.scene,
+        occluders: this.world.occluders,
+        coverNodes: this.world.coverNodes,
+        solids: this.world.solids,
+        half: this.world.half,
+        groundHeight: (x, z) => (this.world.navigationHeight ?? this.world.groundHeight)(x, z),
+        effects: this.effects,
+        playerPos: () => this.eyePos(),
+        playerFeet: () => this.pos.clone(),
+        playerAlive: () => !this.dead,
+        damagePlayer: (a, f, killer) => this.damagePlayerTDM(a, f, killer),
+        moveCollide: ctx.moveCollide,
+        onCallout: (k, p, team) => {
+          if (team === 'bravo' && p.distanceTo(this.pos) < 42) {
+            const labels: Record<string, string> = { grenade: 'Frag out!', push: 'They are pushing!', flank: 'Hostiles flanking!', fallback: 'They are falling back!' };
+            this.onEvent({ type: 'callout', text: labels[k] ?? 'Contact!' });
+            voice.enemyCallout(k);
+          }
+        },
+        throwGrenade: (from, target, owner) => this.spawnGrenade(from, target, true, 'frag', owner),
+        onBotFire: (p, team) => {
+          audio.enemyFireSpatial(p.x, p.y, p.z);
+          if (team === 'bravo') this.addPing(p);
+        },
+        onFeed: (killer, weapon, victim, headshot, killerTeam) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam }),
+        onScore: () => { /* scoreboard reads live values from hud() */ },
+      };
+      this.tdm = new TDMManager(tdmCtx, tdmArmor);
+      this.ai = new AIManager(ctx, []); // empty roster: keeps every mission-path callsite alive
+      this.pos.copy(this.tdm.getSpawn('alpha'));
+      this.yaw = Math.atan2(this.pos.x - 0, this.pos.z - 0);
+      this.buildSolidGrid();
+      this.renderer.shadowMap.needsUpdate = true;
+      this.rebuildHittables();
+    } else {
     this.ai = new AIManager(ctx, []);
     this.missionRuntime = new MissionRuntime({
       scene: this.scene, world: this.world, camera: this.camera, ai: this.ai, player: this.pos,
@@ -757,6 +842,7 @@ void main(){
     const first = this.missionRuntime.mission.current.at;
     this.yaw = Math.atan2(this.pos.x - first[0], this.pos.z - first[2]);
     this.rebuildHittables();
+    }
 
     this.bindInput();
     this.resize();
@@ -1465,7 +1551,7 @@ void main(){
     // never eat your own bullet) — but never ignore an enemy, even point-blank.
     let h: THREE.Intersection | null = null;
     for (const cand of rawHits) {
-      const isEnemy = (cand.object.userData.enemy as Enemy | undefined) !== undefined;
+      const isEnemy = cand.object.userData.enemy !== undefined || cand.object.userData.tdmBot !== undefined;
       if (!isEnemy && cand.distance < skip) continue;
       h = cand;
       break;
@@ -1482,11 +1568,40 @@ void main(){
     if (h && h.object.userData.glass && h.instanceId !== undefined) {
       const c = this.world.breakGlass(h.instanceId);
       if (c) { this.effects.glassShatter(c); audio.glassBreakSpatial(c.x, c.y, c.z); }
-      h = rawHits.find(x => x !== h && !(x.object.userData.glass) && (x.distance >= skip || x.object.userData.enemy)) ?? null;
+      h = rawHits.find(x => x !== h && !(x.object.userData.glass) && (x.distance >= skip || x.object.userData.enemy || x.object.userData.tdmBot)) ?? null;
     }
 
     if (h) {
       if (!d.suppressed) this.effects.tracer(muzzleWorld, h.point);
+      const tdmBot = (h.object.userData.tdmBot as TDMBot | undefined);
+      if (tdmBot && !tdmBot.dead && this.isTDM && this.tdm) {
+        const part = h.object.userData.part as string;
+        let dmg = d.damage * TDM_DAMAGE_MUL;
+        if (part === 'head') dmg *= d.headMul;
+        else if (part === 'limb') dmg *= d.limbMul;
+        if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
+        // TTK floor: no weapon may two-tap the 150 HP base pool (3+ headshots always)
+        dmg = Math.min(dmg, 74);
+        if (!shotHit) { this.hits++; shotHit = true; }
+        this.effects.blood(h.point);
+        audio.fleshImpact(0);
+        if (part === 'head') audio.headshotDink();
+        const killed = tdmBot.takeDamage(dmg, part === 'head', 'player');
+        if (killed) {
+          this.tdmPlayerKills++;
+          this.kills++;
+          this.score += part === 'head' ? 150 : 100;
+          audio.killConfirm();
+          if (part === 'head') { this.headshots++; voice.headshot(); }
+          this.tdm.handleKill('player', tdmBot, part === 'head', d.name);
+          this.onEvent({ type: 'hit', kill: true });
+          this.rebuildHittables();
+        } else {
+          audio.hitMarker();
+          this.onEvent({ type: 'hit', kill: false });
+        }
+        continue;
+      }
       const enemy = (h.object.userData.enemy as Enemy | undefined);
       if (enemy && !enemy.dead) {
         const part = h.object.userData.part as string;
@@ -1589,6 +1704,7 @@ void main(){
     this.vmLight.intensity = d.suppressed ? 1.2 : 3.5;
     if (!d.suppressed) this.effects.playerFlash(origin.clone().addScaledVector(dir, 1.0));
     this.ai.notifyGunshot(this.pos, d.noiseRadius ?? 65);
+    this.tdm?.notifyGunshot(this.pos, d.noiseRadius ?? 65);
     this.staticTime = 0;
   }
 
@@ -1725,7 +1841,7 @@ void main(){
       const rawHits = this.raycaster.intersectObjects(this.hittables, false);
       let h: THREE.Intersection | null = null;
       for (const cand of rawHits) {
-        const isEnemy = (cand.object.userData.enemy as Enemy | undefined) !== undefined;
+        const isEnemy = cand.object.userData.enemy !== undefined || cand.object.userData.tdmBot !== undefined;
         if (!isEnemy && cand.distance < skip) continue;
         h = cand;
         break;
@@ -1739,6 +1855,27 @@ void main(){
         continue;
       }
       this.effects.tracer(mw, h.point);
+      const mkBot = (h.object.userData.tdmBot as TDMBot | undefined);
+      if (mkBot && !mkBot.dead && this.isTDM && this.tdm) {
+        const part = h.object.userData.part as string;
+        let dmg = 13 * TDM_DAMAGE_MUL;
+        if (part === 'head') dmg *= d.headMul;
+        else if (part === 'limb') dmg *= d.limbMul;
+        if (h.distance > 14) dmg *= 0.4;
+        this.hits++;
+        anyHit = true;
+        this.effects.blood(h.point);
+        audio.fleshImpact(0);
+        if (mkBot.takeDamage(dmg, part === 'head', 'player')) {
+          this.tdmPlayerKills++;
+          this.kills++;
+          this.score += 100;
+          audio.killConfirm();
+          this.tdm.handleKill('player', mkBot, part === 'head', 'MASTERKEY');
+          anyKill = true;
+        }
+        continue;
+      }
       const enemy = (h.object.userData.enemy as Enemy | undefined);
       if (!enemy || enemy.dead) continue;
       const part = h.object.userData.part as string;
@@ -1770,6 +1907,7 @@ void main(){
     if (anyHit && !anyKill) { audio.hitMarker(); this.onEvent({ type: 'hit', kill: false }); }
     if (anyKill) { this.onEvent({ type: 'hit', kill: true }); this.rebuildHittables(); }
     this.ai.notifyGunshot(this.pos, 70);
+    this.tdm?.notifyGunshot(this.pos, 70);
   }
 
   private rebuildHittables() {
@@ -1778,6 +1916,7 @@ void main(){
     for (const e of this.ai.enemies) {
       if (!e.dead) this.hittables.push(...e.model.hitMeshes);
     }
+    if (this.isTDM && this.tdm) this.hittables.push(...this.tdm.getHittables());
   }
 
   // ==================== GRENADE SYSTEM ====================
@@ -1791,7 +1930,7 @@ void main(){
     return v;
   }
 
-  private spawnGrenade(from: THREE.Vector3, target: THREE.Vector3, fromAI: boolean, kind: 'frag' | 'flash' = 'frag') {
+  private spawnGrenade(from: THREE.Vector3, target: THREE.Vector3, fromAI: boolean, kind: 'frag' | 'flash' = 'frag', owner?: TDMBot) {
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.08, 10, 8),
       new THREE.MeshStandardMaterial({ color: kind === 'frag' ? 0x243224 : 0x2A2A38, roughness: 0.5, metalness: 0.6 })
@@ -1806,6 +1945,7 @@ void main(){
       fuse: fromAI ? 3.2 : (kind === 'flash' ? 1.8 : Math.max(0.3, 4 - this.cookT)),
       kind,
       fromAI,
+      owner,
     });
   }
 
@@ -1871,7 +2011,36 @@ void main(){
       this.shake = Math.max(this.shake, Math.min(1.1, 9 / Math.max(2.5, distP)));
       if (distP < 6.5) {
         const dmg = distP < 3.2 ? 95 : THREE.MathUtils.lerp(95, 20, (distP - 3.2) / 3.3);
-        this.damagePlayer(dmg, g.pos);
+        if (this.isTDM) {
+          // grenades from your own team never hurt you in the arena
+          if (!g.owner || g.owner.team === 'bravo') this.damagePlayerTDM(dmg, g.pos, g.owner ?? null);
+        } else this.damagePlayer(dmg, g.pos);
+      }
+      // TDM: splash resolves against every bot on both teams, with armor applied
+      if (this.isTDM && this.tdm) {
+        for (const bot of this.tdm.bots) {
+          if (bot.dead) continue;
+          if (g.owner && g.owner.team === bot.team) continue;          // no team kills
+          if (!g.owner && !g.fromAI && bot.team === 'alpha') continue; // player frag spares allies
+          const d = bot.pos.distanceTo(g.pos);
+          if (d < 7) {
+            // scaled for the bigger TDM health pools — a close frag finishes fights
+            const dmg = (d < 3.5 ? 170 : THREE.MathUtils.lerp(140, 35, (d - 3.5) / 3.5));
+            const killed = bot.takeDamage(dmg, false, g.owner ?? 'player');
+            if (killed) {
+              if (g.owner) this.tdm.handleKill(g.owner, bot, false, 'FRAG');
+              else {
+                this.tdmPlayerKills++;
+                this.kills++;
+                this.score += 100;
+                this.tdm.handleKill('player', bot, false, 'FRAG');
+                audio.killConfirm();
+                this.onEvent({ type: 'hit', kill: true });
+              }
+              this.rebuildHittables();
+            }
+          }
+        }
       }
       for (const e of this.ai.enemies) {
         if (e.dead) continue;
@@ -1907,6 +2076,11 @@ void main(){
       }
       for (const e of this.ai.enemies) {
         if (!e.dead && e.pos.distanceTo(g.pos) < 12) e.applyStun(4.0);
+      }
+      if (this.isTDM && this.tdm) {
+        for (const bot of this.tdm.bots) {
+          if (!bot.dead && bot.pos.distanceTo(g.pos) < 12) bot.applyStun(4.0);
+        }
       }
     }
     this.scene.remove(g.mesh);
@@ -2022,8 +2196,77 @@ void main(){
     }
   }
 
+  /** TDM player damage: armor reduction, then death → 5s respawn (not match end). */
+  private damagePlayerTDM(amount: number, from: THREE.Vector3, killer: TDMBot | null) {
+    if (this.dead || this.ended) return;
+    const isHead = amount >= 40; // bot headshot rounds arrive at 44
+    const reduced = amount * (1 - (isHead ? TDM_HEAD_REDUCTION[this.tdmArmor] : TDM_BODY_REDUCTION[this.tdmArmor]));
+    this.hp -= reduced;
+    this.lastDamageT = 0;
+    this.shake = Math.max(this.shake, Math.min(0.7, reduced / 35));
+    audio.playerHurt();
+    this.onEvent({ type: 'damage', dir: this.dirToScreenDeg(from), amount: reduced });
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.dead = true;
+      this.tdmPlayerDead = true;
+      this.tdmPlayerDeaths++;
+      this.tdmRespawnT = TDM_RESPAWN_SECONDS;
+      this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
+      if (this.tdm && killer) this.tdm.handleKill(killer, 'player', false, 'RIFLE');
+      voice.defeat();
+    }
+  }
+
+  /** Redeploy the player at a protected pad with full HP and fresh utility. */
+  private tdmRespawnPlayer() {
+    if (!this.tdm || this.ended) return;
+    this.tdmPlayerDead = false;
+    this.dead = false;
+    this.hp = TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR;
+    this.frags = 3; this.flashes = 1;
+    this.pos.copy(this.tdm.getSpawn('alpha'));
+    this.vel.set(0, 0, 0); this.vx = 0; this.vz = 0;
+    this.yaw = Math.atan2(this.pos.x, this.pos.z); // face mid
+    this.pitch = 0;
+    // top up mags so a respawn is never a dry spawn
+    for (let i = 0; i < this.weapons.length; i++) this.mags[i] = this.weapons[i].magSize;
+    this.reloadT = -1; this.reloadStages = []; this.currentReloadStage = 'idle';
+  }
+
+  private endTDMMatch() {
+    if (this.ended || !this.tdm) return;
+    this.ended = true;
+    const win = this.tdm.alphaScore > this.tdm.bravoScore;
+    if (win) this.score += 500; // match victory bonus
+    const mission: MissionReport = {
+      id: 'tdm-warehouse', name: 'Warehouse TDM', map: 'arena',
+      status: win ? 'complete' : 'failed', duration: TDM_MATCH_SECONDS - this.tdm.timeLeft,
+      phases: [],
+    };
+    const pressure: PressureStats = { totalSpawned: 10, peakLive: 10, retired: 0, pending: 0, candidateChecks: 0, sightChecks: 0, deferred: 0 };
+    this.pendingResult = {
+      type: 'end', win, kills: this.tdmPlayerKills, score: this.score, shots: this.shots, hits: this.hits,
+      headshots: this.headshots, timeSec: mission.duration,
+      cash: this.cashEarned, cashLog: [...this.cashLog], difficultyMul: difficultyMultiplier(this.difficultyId),
+      mission, pressure,
+      tdm: {
+        alphaScore: this.tdm.alphaScore, bravoScore: this.tdm.bravoScore, playerKills: this.tdmPlayerKills,
+        roster: [
+          { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots },
+          ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots })),
+        ],
+      },
+    };
+    this.finishDelay = 1.2;
+    this.triggerHeld = false; this.rmb = false; this.keys.clear();
+    if (win) voice.objective('Match over. Alpha squad takes the yard.');
+    else voice.defeat();
+  }
+
   private endMatch(win: boolean) {
     if (this.ended) return;
+    if (this.isTDM) { this.endTDMMatch(); return; }
     if (win && this.missionRuntime.mission.status !== 'complete') return;
     this.ended = true;
     if (!win) this.missionRuntime.mission.fail();
@@ -2194,6 +2437,7 @@ void main(){
         }
         if (!this.crouched) {
           this.ai.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
+          this.tdm?.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
         }
       }
     }
@@ -2241,10 +2485,11 @@ void main(){
     if (this.pos.distanceTo(this.lastPos) < 0.4) this.staticTime += dt;
     else { this.staticTime = 0; this.lastPos.copy(this.pos); }
 
-    // Health regen (to 50 HP after 5s)
+    // Health regen (to 50 HP after 5s; TDM regenerates to 40% of the armored pool)
     this.lastDamageT += dt;
-    if (!this.dead && this.lastDamageT > 5 && this.hp < 50) {
-      this.hp = Math.min(50, this.hp + dt * 10);
+    const regenCap = this.isTDM ? Math.round((TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR) * 0.4) : 50;
+    if (!this.dead && this.lastDamageT > 5 && this.hp < regenCap) {
+      this.hp = Math.min(regenCap, this.hp + dt * 10);
     }
 
     // Auto weapon fire
@@ -2306,7 +2551,22 @@ void main(){
     this.composeCamera(dt);
     this.animateViewmodel(dt);
     this.camera.updateMatrixWorld(true);
-    this.missionRuntime.update(dt, this.keys.has('KeyX') && this.reloadT < 0 && !this.cooking && !this.sprinting);
+    if (this.isTDM && this.tdm) {
+      this.tdm.update(dt);
+      // player respawn cooldown
+      if (this.tdmPlayerDead && !this.ended) {
+        this.tdmRespawnT -= dt;
+        if (this.tdmRespawnT <= 0 && this.tdm.timeLeft > 2) this.tdmRespawnPlayer();
+      }
+      // match clock
+      if (this.tdm.timeLeft <= 0 && !this.ended) this.endTDMMatch();
+      if (this.tdm.rosterVersion !== this.tdmRosterVersion) {
+        this.tdmRosterVersion = this.tdm.rosterVersion;
+        this.rebuildHittables();
+      }
+    } else {
+      this.missionRuntime.update(dt, this.keys.has('KeyX') && this.reloadT < 0 && !this.cooking && !this.sprinting);
+    }
     if (this.ai.rosterVersion !== this.rosterVersion) {
       this.rosterVersion = this.ai.rosterVersion;
       this.rebuildHittables();
@@ -2636,6 +2896,11 @@ void main(){
     audio.ensure();
     voice.unlock();
     this.started = true;
+    if (this.isTDM) {
+      this.onEvent({ type: 'callout', text: 'Warehouse TDM — most kills at 2:30 wins.' });
+      voice.objective('Weapons free. Take the yard.');
+      return;
+    }
     this.missionRuntime.start();
   }
 
@@ -2778,6 +3043,13 @@ void main(){
       const d = e.pos.distanceTo(this.pos);
       if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(e.pos), dist: d, above: e.pos.y - this.pos.y }; }
     }
+    if (this.isTDM && this.tdm) {
+      for (const b of this.tdm.bots) {
+        if (b.dead || b.team !== 'bravo') continue;
+        const d = b.pos.distanceTo(this.pos);
+        if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(b.pos), dist: d, above: b.pos.y - this.pos.y }; }
+      }
+    }
     return {
       hp: Math.round(this.hp),
       mag: this.mags[this.cur],
@@ -2801,9 +3073,9 @@ void main(){
       frags: this.frags,
       flashes: this.flashes,
       bearing: ((-this.yaw * 180 / Math.PI) % 360 + 360) % 360,
-      kills: this.kills,
+      kills: this.isTDM ? this.tdmPlayerKills : this.kills,
       score: this.score,
-      enemiesLeft: this.ai.aliveCount(),
+      enemiesLeft: this.isTDM && this.tdm ? this.tdm.aliveCount('bravo') : this.ai.aliveCount(),
       cooking: this.cooking,
       sprinting: this.sprinting,
       ads: this.ads,
@@ -2814,16 +3086,25 @@ void main(){
       // Accurate map data (consumed by the HUD tactical radar)
       mapImage: this.mapImage,
       playerMap: { nx: (this.pos.x + H) / (2 * H), nz: (this.pos.z + H) / (2 * H) },
-      enemiesMap: this.ai.enemies
-        .filter(e => !e.dead)
-        .map(e => ({
-          nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H),
-          // Heading (deg) + engagement state let the radar draw directional
-          // wedges and burn hostiles red the moment they have eyes on you.
-          yaw: -e.yaw * 180 / Math.PI,
-          hot: e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE',
-        })),
+      enemiesMap: this.isTDM && this.tdm
+        ? this.tdm.bots
+          .filter(b => !b.dead && b.team === 'bravo')
+          .map(b => ({
+            nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H),
+            yaw: -b.yaw * 180 / Math.PI,
+            hot: b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK',
+          }))
+        : this.ai.enemies
+          .filter(e => !e.dead)
+          .map(e => ({
+            nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H),
+            // Heading (deg) + engagement state let the radar draw directional
+            // wedges and burn hostiles red the moment they have eyes on you.
+            yaw: -e.yaw * 180 / Math.PI,
+            hot: e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE',
+          })),
       missionMap: (() => {
+        if (this.isTDM) return undefined;
         const phase = this.missionRuntime.mission.current;
         if (!phase) return undefined;
         return {
@@ -2837,7 +3118,20 @@ void main(){
       magSize: this.def().magSize,
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
-      mission: this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
+      mission: this.isTDM ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
+      tdm: this.isTDM && this.tdm ? {
+        alphaScore: this.tdm.alphaScore,
+        bravoScore: this.tdm.bravoScore,
+        timeLeft: this.tdm.timeLeft,
+        playerKills: this.tdmPlayerKills,
+        playerDead: this.tdmPlayerDead,
+        respawnIn: Math.max(0, this.tdmRespawnT),
+        maxHp: TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR,
+        roster: [
+          { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots },
+          ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots })),
+        ],
+      } : undefined,
     };
   }
 
@@ -2870,7 +3164,8 @@ void main(){
       material.dispose();
     }
     for(const texture of textures) texture.dispose();
-    this.missionRuntime.dispose();
+    this.missionRuntime?.dispose();
+    this.tdm?.dispose();
     this.ai.dispose();
     this.composer.dispose();
     this.bloom.dispose();

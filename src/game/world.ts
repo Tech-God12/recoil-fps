@@ -10,10 +10,11 @@ import { getMaterials, type TextureSet } from './textures';
 (THREE.BufferGeometry.prototype as unknown as { disposeBoundsTree: typeof disposeBoundsTree }).disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type MapId = 'alrasul' | 'kasbah';
+export type MapId = 'alrasul' | 'kasbah' | 'arena';
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
   { id: 'alrasul', name: 'Sandblast', desc: 'Two bridges. One dry river. A souk under siege in the shadow of the water tower.' },
   { id: 'kasbah', name: 'Town', desc: 'Six trades beneath a stone crown. Break the citadel, then disappear through the west gate.' },
+  { id: 'arena', name: 'Warehouse', desc: '5v5 team deathmatch. Twin steel warehouses, container yards and barricade lines. Most kills in 2:30 wins.' },
 ];
 
 export interface AABB { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
@@ -523,7 +524,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   }
 
   const playerSpawn = new THREE.Vector3();
-  const half = mapId === 'alrasul' ? 124 : 134;
+  const half = mapId === 'alrasul' ? 124 : mapId === 'arena' ? 46 : 134;
+  if (mapId !== 'arena') {
   terrain(520, half + 12);
   perimeter(half);
   for (const side of [-1,1]) {
@@ -543,7 +545,176 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       paved(laneX,(end+centre+14)/2,7,end-centre-14,cobble);
     } else paved(laneX,0,7,half*1.6,cobble);
   }
+  }
 
+  // =====================================================================
+  // ARENA — "WAREHOUSE" 5v5 TDM (PUBG-Mobile-style training ground)
+  // Compact 92x92m combat box with strict 180-degree symmetry so neither team
+  // gets a better side. Three clean lanes: twin steel warehouses + connecting
+  // corridor in the centre, and one open container yard on each flank.
+  // Alpha deploys south (+z), Bravo north (-z). Every position mirrors.
+  // =====================================================================
+  if (mapId === 'arena') {
+    playerSpawn.set(0, 0, 38);
+    terrain(520, half + 8); // flat desert apron beyond the walls — no void horizon
+    const concreteM = M.concrete, metal = iron, rusted = M.rustedMetal ?? iron;
+
+    // ---- floor: poured concrete slab, asphalt cross lane + yard pads, paver spawn aprons ----
+    ground(0, 0, half * 2, half * 2, concreteM, 0.015);
+    concrete.push({ minX: -half, maxX: half, minZ: -half, maxZ: half, minY: -1, maxY: 3 });
+    ground(0, 0, half * 2, 10, M.asphalt, 0.03);                    // E-W cross lane through the yards
+    for (const x of [-31, 31]) ground(x, 0, 26, 56, M.asphalt, 0.028); // container yard pads
+    for (const z of [-38, 38]) ground(0, z, 30, 13, pavers, 0.04);  // spawn aprons
+
+    // ---- 6m perimeter walls (concrete, with pilasters) ----
+    for (const s of [-1, 1]) {
+      box(0, 3, s * half, half * 2 + 1.2, 6, 1.2, concreteM);
+      box(s * half, 3, 0, 1.2, 6, half * 2 + 1.2, concreteM);
+      for (let p = -30; p <= 30; p += 15) {
+        box(p, 3.1, s * (half - 0.9), 1.0, 6.2, 0.7, stone);
+        box(s * (half - 0.9), 3.1, p, 0.7, 6.2, 1.0, stone);
+      }
+    }
+    for (const [cx, cz] of [[-half, -half], [half, -half], [-half, half], [half, half]] as const)
+      box(cx, 3.6, cz, 3, 7.2, 3, concreteM);
+
+    // ---- twin warehouses (14x20m, 5.5m tall) joined by a central corridor ----
+    // Doors on ALL four faces (4.8m — always one free 2m nav cell through them).
+    const warehouse = (wx: number) => {
+      const w = 14, d = 20, hgt = 5.5, x0 = wx - w / 2, z0 = -d / 2;
+      wallRun(false, x0, z0, d, hgt, 0.35, [[d / 2 - 2.4, d / 2 + 2.4, 0, 3.2]], metal, 0, false);
+      wallRun(false, x0 + w, z0, d, hgt, 0.35, [[d / 2 - 2.4, d / 2 + 2.4, 0, 3.2]], metal, 0, false);
+      wallRun(true, x0, z0, w, hgt, 0.35, [[w / 2 - 2.4, w / 2 + 2.4, 0, 3.2]], metal, 0, false);
+      wallRun(true, x0, z0 + d, w, hgt, 0.35, [[w / 2 - 2.4, w / 2 + 2.4, 0, 3.2]], metal, 0, false);
+      box(wx, hgt + 0.18, 0, w + 0.7, 0.36, d + 0.7, metal);        // roof slab
+      box(wx, hgt + 0.55, 0, 2.2, 0.4, d - 2, rusted, false);       // ridge cap
+      ground(wx, 0, w - 1, d - 1, concreteM, 0.045);
+      interiors.push({ minX: x0, minY: 0, minZ: z0, maxX: x0 + w, maxY: hgt, maxZ: z0 + d });
+      for (const bz of [-6, 6]) {                                    // steel roof beams
+        box(x0 + 1.1, 2.6, bz, 0.5, 5.2, 0.5, METAL);
+        box(x0 + w - 1.1, 2.6, bz, 0.5, 5.2, 0.5, METAL);
+        box(wx, 5.05, bz, w - 1.6, 0.28, 0.34, METAL, false);
+      }
+      // two crates per hall — enough for a gunfight, never a maze
+      const cs = wx < 0 ? 1 : -1;
+      box(wx - cs * 2.6, 0.6, -4.5, 1.2, 1.2, 1.2, timber); cover(wx - cs * 2.6, -2.9);
+      box(wx + cs * 2.4, 0.6, 4.5, 1.2, 1.2, 1.2, timber); cover(wx + cs * 2.4, 2.9);
+      lightSpots.push(new THREE.Vector3(wx, 4.2, 0));
+      // mezzanine catwalk on the outer wall + interior stair — the hall's power
+      // position, watching both roller doors from 2.7m up. The east hall is the
+      // 180-degree rotation of the west hall so neither team owns a faster climb.
+      const ms = wx < 0 ? 1 : -1;                    // mirror sign
+      const mzX = wx < 0 ? x0 + 2.0 : x0 + w - 2.0;
+      const mzZ = -3 * ms;
+      box(mzX, 2.6, mzZ, 3.0, 0.25, 11, metal);
+      box(mzX + 1.45 * ms, 3.15, mzZ, 0.08, 0.9, 11, METAL, false); // rail
+      for (const pz of [mzZ - 4.5 * ms, mzZ + 4.5 * ms]) box(mzX, 1.25, pz, 0.3, 2.5, 0.3, METAL); // legs
+      // stair top lands at the catwalk end nearest that team's own yard
+      const stairTopZ = 2.8 * ms;
+      const stN = Math.ceil(2.72 / 0.28), stRun = 2.72 * 2.5 / stN;
+      for (let i = 0; i < stN; i++) {
+        const h = 2.72 * (stN - i) / stN;
+        box(mzX, h / 2, stairTopZ + ms * i * stRun, 2.6, h, stRun + 0.03, M.concrete);
+      }
+      overlooks.push({
+        name: wx < 0 ? 'West hall catwalk' : 'East hall catwalk',
+        at: new THREE.Vector3(mzX, 2.75, mzZ),
+        approach: new THREE.Vector3(mzX, 0, 9 * ms),
+        route: [new THREE.Vector3(mzX, 2.75, 2 * ms), new THREE.Vector3(mzX, 2.75, mzZ)],
+      });
+    };
+    warehouse(-10.5); warehouse(10.5);
+    // connecting corridor (5.8m wide) between the two halls
+    wallRun(true, -3.5, -2.9, 7, 3.4, 0.3, [], metal, 0, false);
+    wallRun(true, -3.5, 2.9, 7, 3.4, 0.3, [], metal, 0, false);
+    box(0, 3.55, 0, 7.6, 0.3, 6.4, metal); // corridor roof
+    ground(0, 0, 6.6, 5.4, concreteM, 0.05);
+    landmarks.push({ name: 'Twin warehouses', at: new THREE.Vector3(0, 6, 0) });
+
+    // ---- U-shaped concrete barriers (1.8m): back wall 3.2m + two 2.2m cheeks ----
+    // `facing` = the direction incoming fire arrives from; the solid back wall
+    // sits on that side and the U opens toward the defender's own ground.
+    const uBarrier = (x: number, z: number, facing: 'n' | 's' | 'e' | 'w') => {
+      const bh = 1.8, t = 0.35;
+      if (facing === 'n' || facing === 's') {
+        const s = facing === 'n' ? -1 : 1;
+        box(x, bh / 2, z + s * 1.1, 3.2, bh, t, concreteM);
+        box(x - 1.6, bh / 2, z, t, bh, 2.2, concreteM);
+        box(x + 1.6, bh / 2, z, t, bh, 2.2, concreteM);
+        cover(x, z); cover(x - 1.1, z); cover(x + 1.1, z);
+      } else {
+        const s = facing === 'e' ? 1 : -1;
+        box(x + s * 1.1, bh / 2, z, t, bh, 3.2, concreteM);
+        box(x, bh / 2, z - 1.6, 2.2, bh, t, concreteM);
+        box(x, bh / 2, z + 1.6, 2.2, bh, t, concreteM);
+        cover(x, z); cover(x, z - 1.1); cover(x, z + 1.1);
+      }
+    };
+    // spawn protection line: three barriers per team, shielding the pads
+    for (const x of [-12, 0, 12]) { uBarrier(x, 26, 'n'); uBarrier(x, -26, 's'); }
+    // one mid barrier per yard half — cross-lane cover that never plugs the lane
+    uBarrier(-27, 9, 'n'); uBarrier(27, 9, 'n');
+    uBarrier(-27, -9, 's'); uBarrier(27, -9, 's');
+
+    // ---- shipping containers (2.5w x 2.6h x 6.2d) — the yard cover ----
+    const container = (x: number, z: number, ry: number, m: THREE.Material, stack = false) => {
+      const alongX = Math.abs(Math.sin(ry)) > 0.5;
+      const w = alongX ? 6.2 : 2.5, d = alongX ? 2.5 : 6.2;
+      box(x, 1.3, z, w, 2.6, d, m);
+      for (const sx of [-1, 1]) box(x + sx * (w / 2 - 0.06), 1.3, z, 0.14, 2.65, alongX ? d + 0.06 : 0.2, METAL, false);
+      if (stack) box(x + (alongX ? 0.4 : 0), 3.9, z + (alongX ? 0 : 0.4), w, 2.6, d, rusted);
+      cover(x + (alongX ? w / 2 + 1 : 0), z + (alongX ? 0 : d / 2 + 1));
+      cover(x - (alongX ? w / 2 + 1 : 0), z - (alongX ? 0 : d / 2 + 1));
+    };
+    // yards mirror each other exactly: double stack north, single south (and vice versa)
+    container(-30, -13, 0, rusted, true); container(-30, 13, 0, ACC_TURQ);
+    container(30, 13, 0, rusted, true); container(30, -13, 0, ACC_TERRA);
+    // climbable container at each yard's outer edge — stairs land level with the
+    // top. dir=+1 climbs from the south (alpha), dir=-1 from the north (bravo),
+    // keeping the 180-degree symmetry honest.
+    const stairsZ = (x: number, zTop: number, height: number, width: number, dir: 1 | -1) => {
+      const n = Math.ceil(height / 0.28), run = height * 2.5 / n;
+      for (let i = 0; i < n; i++) {
+        const h = height * (n - i) / n;
+        box(x, h / 2, zTop + dir * i * run, width, h, run + 0.03, M.concrete);
+      }
+    };
+    container(-38, 2, Math.PI / 2, col(0x33556B, 0.8)); stairsZ(-38, 3.45, 2.6, 2.5, 1);
+    container(38, -2, Math.PI / 2, col(0x7A4A2E, 0.8)); stairsZ(38, -3.45, 2.6, 2.5, -1);
+    overlooks.push(
+      { name: 'West yard container', at: new THREE.Vector3(-38, 2.7, 2), approach: new THREE.Vector3(-38, 0, 10), route: [new THREE.Vector3(-38, 2.7, 2)] },
+      { name: 'East yard container', at: new THREE.Vector3(38, 2.7, -2), approach: new THREE.Vector3(38, 0, -10), route: [new THREE.Vector3(38, 2.7, -2)] },
+    );
+
+    // ---- light mid cover: one crate guarding each roller-door approach ----
+    const crate = (x: number, z: number, s = 1.2) => { box(x, s / 2, z, s, s, s, timber); cover(x + s, z); cover(x - s, z); };
+    crate(-10.5, 15); crate(10.5, 15); crate(-10.5, -15); crate(10.5, -15);
+    // oil drums flanking the yard lanes (tiny, visual rhythm + soft cover)
+    const drum = (x: number, z: number) => {
+      shape(new THREE.CylinderGeometry(0.4, 0.4, 1.05, 12), ACC_TERRA, x, 0.55, z);
+      solids.push({ minX: x - 0.45, minY: 0, minZ: z - 0.45, maxX: x + 0.45, maxY: 1.1, maxZ: z + 0.45 });
+    };
+    drum(-21, 4); drum(21, -4); drum(-21, -18); drum(21, 18);
+
+    // ---- sandbag nests flanking each spawn apron ----
+    sandbags(-16, 30); sandbags(16, 30); sandbags(-16, -30); sandbags(16, -30);
+
+    // ---- dressing: light masts, team banners, painted lane marks ----
+    for (const [lx, lz] of [[-24, -24], [24, 24], [-24, 24], [24, -24]] as const) {
+      shape(new THREE.CylinderGeometry(0.09, 0.13, 7.2, 8), METAL, lx, 3.6, lz);
+      solids.push({ minX: lx - 0.15, minY: 0, minZ: lz - 0.15, maxX: lx + 0.15, maxY: 7.2, maxZ: lz + 0.15 });
+      shape(new THREE.SphereGeometry(0.2, 10, 8), GLOW, lx, 7.0, lz);
+    }
+    // team banners orient the player instantly: teal = your yard, terracotta = theirs
+    banner(-13, 41, 0, ACC_TURQ); banner(13, 41, 0, ACC_TURQ);
+    banner(-13, -41, 0, ACC_TERRA); banner(13, -41, 0, ACC_TERRA);
+    // painted centre circle + team lane chevrons pointing at mid
+    shape(new THREE.RingGeometry(4.2, 4.5, 40), col(0xd8ccb2), 0, 0.055, 0, -Math.PI / 2);
+    for (const s of [-1, 1]) for (let i = 0; i < 3; i++)
+      shape(new THREE.PlaneGeometry(2.2, 0.4), s > 0 ? ACC_TURQ : ACC_TERRA, 0, 0.05, s * (14 + i * 4), -Math.PI / 2, 0, s * Math.PI / 4);
+
+    landmarks.push({ name: 'Alpha yard', at: new THREE.Vector3(0, 2, 38) }, { name: 'Bravo yard', at: new THREE.Vector3(0, 2, -38) });
+  }
 
   if (mapId === 'alrasul') {
     playerSpawn.set(-12, 0, 94);
@@ -667,7 +838,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const [x,z] of [[-48,37],[-71,59],[-76,89]]) house(x,z,12,12,{wallMat:earth,door:'east'});
     for (const [x,z] of [[-22,23],[0,26],[-35,-22],[-8,-33],[18,-22],[41,5],[77,76],[-52,24]]) sandbags(x,z);
     state(true, () => { ground(46,36,11,9,col(0x39352e),0.07); smoke(46,36,3,true); });
-  } else {
+  } else if (mapId === 'kasbah') {
     playerSpawn.set(0,0,100);
     // Residential shoulders enclose the industries without paving over their trades.
     for(const [x,z,w,d] of [[-95,85,12,12],[-73,91,11,10],[-93,52,11,13],[-95,-70,12,12],[-77,-88,12,12],[-49,-91,13,11],[45,-96,10,12],[93,-83,12,13],[99,-5,10,14],[85,18,12,10],[62,94,13,10],[20,80,10,10],[-18,57,10,12]] as const) {

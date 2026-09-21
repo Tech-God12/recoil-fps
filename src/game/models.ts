@@ -195,3 +195,120 @@ export function buildSoldier(): SoldierModel {
 
   return { group: g, parts: { torso, head, lLeg, rLeg, lShin, rShin, muzzle, lArm, rArm, rifle }, hitMeshes };
 }
+
+/* ================= TDM ARMORED SOLDIER =================
+ * Bulkier combat frame for the Warehouse arena: thicker torso (0.52 vs 0.40),
+ * an oversized plate carrier, 1.25x helmet and heavier limbs. `armor` drives
+ * the visible kit — 0 fatigues only, 1 light plates, 2 heavy plates + shoulder
+ * pauldrons — and `tint` separates the two teams at a glance.
+ */
+export function buildArmoredSoldier(armor: 0 | 1 | 2, tint?: number): SoldierModel {
+  const m = getSoldierMat();
+  const teamMat = tint !== undefined
+    ? new THREE.MeshStandardMaterial({ color: tint, roughness: 0.7, metalness: 0.25 })
+    : null;
+  const g = new THREE.Group();
+  const hitMeshes: THREE.Mesh[] = [];
+  const tag = (mesh: THREE.Mesh, part: string) => { mesh.userData.part = part; mesh.castShadow = false; hitMeshes.push(mesh); return mesh; };
+
+  // ---- torso (pivot at hips y=0.95) — visibly wider than the mission soldier ----
+  const torso = new THREE.Group(); torso.position.y = 0.95;
+  const t = new Part();
+  t.box(0.52, 0.58, 0.30, SR.camo, 0, 0.30, 0);                    // thick shirt body
+  t.box(0.58, 0.48, 0.37, SR.vest, 0, 0.30, 0);                    // bulky plate carrier
+  t.box(0.60, 0.10, 0.39, SR.vest, 0, 0.54, 0);                    // shoulder straps
+  if (armor >= 1) {
+    t.box(0.46, 0.34, 0.05, SR.black, 0, 0.32, -0.21);             // front plate
+    t.box(0.46, 0.34, 0.05, SR.black, 0, 0.32, 0.21);              // back plate
+  }
+  if (armor >= 2) {
+    t.box(0.62, 0.14, 0.41, SR.black, 0, 0.10, 0);                 // heavy waist band
+    t.box(0.20, 0.16, 0.10, SR.black, -0.36, 0.44, 0);             // shoulder pauldron L
+    t.box(0.20, 0.16, 0.10, SR.black, 0.36, 0.44, 0);              // shoulder pauldron R
+    t.box(0.30, 0.12, 0.06, SR.helmet, 0, 0.50, -0.21);            // throat guard
+  }
+  for (const px of [-0.16, 0, 0.16]) t.box(0.11, 0.16, 0.08, SR.webbing, px, 0.20, -0.22);
+  t.box(0.13, 0.11, 0.07, SR.webbing, 0.20, 0.44, -0.20);          // radio
+  t.box(0.38, 0.34, 0.16, SR.olive, 0, 0.32, 0.24);                // pack
+  t.box(0.56, 0.07, 0.34, SR.black, 0, 0.05, 0);                   // belt
+  t.box(0.20, 0.12, 0.20, SR.camo, 0, 0.64, 0);                    // collar
+  const torsoMesh = tag(t.mesh(m), 'torso'); torso.add(torsoMesh);
+  if (teamMat) { // team band across the carrier
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.07, 0.385), teamMat);
+    band.position.y = 0.47; band.castShadow = false; band.userData.part = 'torso';
+    torso.add(band); hitMeshes.push(band);
+  }
+  g.add(torso);
+  const pv = new Part(); pv.box(0.50, 0.24, 0.31, SR.camo, 0, 0.85, 0);
+  g.add(tag(pv.mesh(m), 'torso'));
+
+  // ---- head: helmet scaled 1.25x — a clear but honest headshot target ----
+  const head = new THREE.Group(); head.position.y = 0.72;
+  const h = new Part();
+  h.sph(0.115, SR.skin, 0, 0.13, 0, 1, 1.12, 1);
+  h.box(0.06, 0.05, 0.04, SR.skin, 0, 0.10, -0.11);
+  h.sph(0.19, SR.helmet, 0, 0.19, 0, 1.0, 0.88, 1.12, Math.PI * 0.62); // big shell
+  h.box(0.34, 0.035, 0.07, SR.helmet, 0, 0.15, -0.15);                 // brim
+  if (armor >= 1) h.box(0.26, 0.10, 0.05, SR.visor, 0, 0.14, -0.13);   // ballistic visor
+  if (armor >= 2) { h.box(0.10, 0.09, 0.05, SR.black, -0.16, 0.13, -0.02); h.box(0.10, 0.09, 0.05, SR.black, 0.16, 0.13, -0.02); } // ear armor
+  h.box(0.05, 0.15, 0.02, SR.black, 0.12, 0.05, -0.02);
+  head.add(tag(h.mesh(m), 'head'));
+  torso.add(head);
+
+  // ---- arms (thicker sleeves) ----
+  const mkArm = (side: number) => {
+    const a = new THREE.Group(); a.position.set(side * 0.30, 0.48, -0.02);
+    const p = new Part();
+    p.box(0.16, 0.36, 0.16, SR.camo, 0, -0.15, 0);
+    p.box(0.19, 0.12, 0.19, armor >= 2 ? SR.black : SR.vest, 0, -0.02, 0);
+    p.box(0.13, 0.09, 0.13, SR.black, 0, -0.35, 0);
+    p.box(0.12, 0.30, 0.12, SR.camo, 0, -0.48, 0);
+    p.box(0.10, 0.10, 0.11, SR.black, 0, -0.65, 0);
+    a.add(tag(p.mesh(m), 'limb'));
+    torso.add(a); return a;
+  };
+  const lArm = mkArm(-1), rArm = mkArm(1);
+
+  // ---- legs (thicker) ----
+  const mkLeg = (side: number) => {
+    const leg = new THREE.Group(); leg.position.set(side * 0.14, 0.92, 0);
+    const thigh = new Part();
+    thigh.box(0.20, 0.41, 0.21, SR.camo, 0, -0.205, 0);
+    if (armor >= 1) thigh.box(0.16, 0.20, 0.06, SR.black, 0, -0.20, -0.12);
+    thigh.box(0.14, 0.14, 0.06, SR.olive, side * 0.04, -0.22, -0.11);
+    leg.add(tag(thigh.mesh(m), 'limb'));
+    const shin = new THREE.Group(); shin.position.y = -0.43;
+    const lower = new Part();
+    lower.box(0.17, 0.13, 0.10, SR.black, 0, 0, -0.09);
+    lower.box(0.16, 0.35, 0.17, SR.camo, 0, -0.20, 0);
+    lower.box(0.17, 0.13, 0.28, SR.boot, 0, -0.41, -0.05);
+    lower.box(0.18, 0.045, 0.30, SR.black, 0, -0.47, -0.05);
+    shin.add(tag(lower.mesh(m), 'limb')); leg.add(shin); g.add(leg);
+    return { leg, shin };
+  };
+  const left = mkLeg(-1), right = mkLeg(1);
+
+  // ---- rifle: blocky carbine silhouette (cheap world LOD) ----
+  const rifle = new THREE.Group();
+  const rp = new Part();
+  rp.box(0.055, 0.09, 0.34, SR.black, 0, 0, 0.02);          // receiver
+  rp.box(0.05, 0.07, 0.20, SR.black, 0, -0.005, -0.24);     // handguard
+  rp.cyl(0.013, 0.013, 0.24, 10, SR.black, 0, 0.012, -0.44, Math.PI / 2);
+  rp.box(0.045, 0.14, 0.05, SR.black, 0, -0.10, 0.06);      // grip+mag block
+  rp.box(0.05, 0.09, 0.16, SR.black, 0, -0.005, 0.24);      // stock
+  rp.box(0.02, 0.03, 0.14, SR.black, 0, 0.06, -0.06);       // top rail/optic
+  const rifleMesh = rp.mesh(m); rifleMesh.castShadow = false;
+  rifle.add(rifleMesh);
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.012, -0.56); rifle.add(muzzle);
+  rifle.position.set(0.10, 0.32, -0.42);
+  torso.add(rifle);
+
+  // ---- generous invisible hit proxies (scaled to the wider frame) ----
+  const ghost = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const torsoHit = new THREE.Mesh(new THREE.BoxGeometry(0.84, 1.18, 0.68), ghost); torsoHit.position.y = 0.28; torsoHit.userData.part = 'torso'; torso.add(torsoHit); hitMeshes.push(torsoHit);
+  const headHit = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), ghost); headHit.position.y = 0.14; headHit.userData.part = 'head'; head.add(headHit); hitMeshes.push(headHit);
+  const neckHit = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.24, 8), ghost); neckHit.position.y = -0.06; neckHit.userData.part = 'head'; head.add(neckHit); hitMeshes.push(neckHit);
+  const legHit = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.9, 0.5), ghost); legHit.position.y = 0.45; legHit.userData.part = 'limb'; g.add(legHit); hitMeshes.push(legHit);
+
+  return { group: g, parts: { torso, head, lLeg: left.leg, rLeg: right.leg, lShin: left.shin, rShin: right.shin, muzzle, lArm, rArm, rifle }, hitMeshes };
+}

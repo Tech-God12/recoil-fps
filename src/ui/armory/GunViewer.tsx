@@ -417,6 +417,10 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       (floor.material as THREE.Material).dispose();
       environment.dispose();
       renderer.dispose();
+      // Actively release the GL context — browsers cap live WebGL contexts, and
+      // repeated loadout-screen visits could exhaust the pool and break the
+      // NEXT match launch (Engine.create fails → player dumped to the menu).
+      renderer.forceContextLoss();
       mount.removeChild(renderer.domElement);
       apiRef.current = null;
     };

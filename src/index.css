@@ -1011,16 +1011,6 @@ img { display: block; max-width: 100%; }
 .gv-root { position: relative; flex: 1; min-height: 320px; overflow: hidden; }
 .gv-wrap { position: relative; flex: 1; min-height: 0; }
 .gv-canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; }
-.gv-hotspot {
-  position: absolute; display: inline-flex; align-items: center; gap: 7px; transform: translate(-50%,-50%);
-  padding: 5px 8px; background: var(--ink-2); border: 1px solid var(--line); border-radius: 20px;
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bone-dim);
-  cursor: pointer; box-shadow: 0 2px 0 rgba(0,0,0,0.5); transition: border-color 140ms, transform 140ms;
-}
-.gv-hotspot:hover { border-color: var(--line-strong); transform: translate(-50%,-50%) scale(1.04); color: var(--bone); }
-.gv-hotspot[data-active="true"] { border-color: var(--brass); color: var(--bone); }
-.gv-hotspot i { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: 2px solid var(--brass); box-shadow: 0 0 0 4px rgba(200,155,90,0.14); }
-.gv-hotspot[data-active="true"] i { background: var(--brass); box-shadow: 0 0 0 5px rgba(200,155,90,0.18); }
 .gv-flash { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--brass); opacity: 0; pointer-events: none; }
 .gv-flash.on { animation: gvFlash 420ms ease-out; }
 @keyframes gvFlash { 0% { transform: scale(0.6); opacity: 0.85; } 100% { transform: scale(3.2); opacity: 0; } }
@@ -1249,11 +1239,6 @@ img { display: block; max-width: 100%; }
 .hardpoint.filled b { color: var(--bone); }
 .hardpoint.filled i { color: var(--brass); }
 .hardpoint span { color: var(--bone-mute); font-size: 14px; line-height: 1; }
-
-/* hotspot — brass pin */
-.gv-hotspot { background: rgba(27,24,19,0.92); backdrop-filter: blur(4px); border-color: rgba(237,228,211,0.14); box-shadow: 0 2px 0 rgba(0,0,0,0.6), 0 6px 16px rgba(0,0,0,0.35); }
-.gv-hotspot:hover { border-color: var(--brass); transform: translate(-50%,-50%) scale(1.06); }
-.gv-hotspot i { box-shadow: 0 0 0 4px rgba(200,155,90,0.14), 0 1px 0 rgba(0,0,0,0.6); }
 
 /* responsive — stack on mobile */
 @media (max-width: 980px) {

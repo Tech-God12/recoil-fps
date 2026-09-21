@@ -1,4 +1,4 @@
-// Recoil FPS — Armory 3D gun viewer: orbit showcase, socket hotspots, live attach flash.
+// Recoil FPS — Armory 3D gun viewer: orbit showcase, click-to-fit sockets, live attach flash.
 // Own renderer/scene; materials are cloned per viewer so fade/flash never leak into the game's WM.
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
@@ -28,9 +28,9 @@ export interface GunViewerProps {
   weapon: WeaponId;
   skin: SkinId;
   build: WeaponBuild;
-  activeSlot: AttachSlot | null;
   /** Bump `key` to pulse the slot's freshly attached part. */
   flashSlot: { slot: AttachSlot; key: number } | null;
+  /** Click (not drag) on/near a socket opens that slot's parts. */
   onHotspot: (slot: AttachSlot) => void;
 }
 
@@ -48,11 +48,8 @@ interface ViewerApi {
   flashes: { mats: THREE.MeshStandardMaterial[]; t: number }[];
   ownedMats: THREE.Material[];
   slots: AttachSlot[];
-  hotspotEls: Map<AttachSlot, HTMLButtonElement>;
-  activeSlot: AttachSlot | null;
   raf: number;
   disposed: boolean;
-  center: THREE.Vector3;
 }
 
 const FIT_RADIUS = 0.42;
@@ -130,12 +127,11 @@ function ownMaterials(root: THREE.Object3D, api: ViewerApi): void {
   });
 }
 
-export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, onHotspot }: GunViewerProps) {
+export default function GunViewer({ weapon, skin, build, flashSlot, onHotspot }: GunViewerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<ViewerApi | null>(null);
   const onHotspotRef = useRef(onHotspot);
   onHotspotRef.current = onHotspot;
-  const slots = weaponById(weapon)?.slots ?? [];
 
   // ---- one-time scene setup ----
   useEffect(() => {
@@ -222,11 +218,9 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
       yaw: -1.10, pitch: 0.23, targetYaw: -1.10, targetPitch: 0.23,
       zoom: 0.96, targetZoom: 0.96, lastInput: performance.now(),
       transition: null, incoming: null, flashes: [], ownedMats: [],
-      slots: [], hotspotEls: new Map(), activeSlot: null, raf: 0,
-      disposed: false, center: new THREE.Vector3(),
+      slots: [], raf: 0, disposed: false,
     };
     apiRef.current = api;
-    mount.querySelectorAll<HTMLButtonElement>('[data-slot]').forEach(btn => api.hotspotEls.set(btn.dataset.slot as AttachSlot, btn));
 
     const resize = () => {
       const w = mount.clientWidth || 2;
@@ -301,10 +295,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     el.addEventListener('pointercancel', up);
     el.addEventListener('wheel', wheel, { passive: false });
 
-    const proj = new THREE.Vector3();
     const projV = new THREE.Vector3();
-    const toSocket = new THREE.Vector3();
-    const toCam = new THREE.Vector3();
     let last = performance.now();
     const loop = (now: number) => {
       if (api.disposed) return;
@@ -364,30 +355,6 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
         if (e >= 1) {
           for (const m of f.mats) m.emissiveIntensity = 0;
           api.flashes.splice(i, 1);
-        }
-      }
-
-      // project hotspots from live sockets
-      if (api.model) {
-        api.fitGroup.updateMatrixWorld(true);
-        const w = mount.clientWidth || 2;
-        const h = mount.clientHeight || 2;
-        toCam.copy(camera.position).sub(api.center).normalize();
-        for (const s of api.slots) {
-          const btn = api.hotspotEls.get(s);
-          const socket = api.model.sockets[s];
-          if (!btn || !socket) continue;
-          socket.getWorldPosition(proj);
-          toSocket.copy(proj).sub(api.center);
-          const facing = toSocket.lengthSq() > 1e-8 ? toSocket.normalize().dot(toCam) : 1;
-          proj.project(camera);
-          const behind = proj.z > 1;
-          const x = (proj.x * 0.5 + 0.5) * w;
-          const y = (-proj.y * 0.5 + 0.5) * h;
-          const op = behind ? 0 : THREE.MathUtils.clamp((facing + 0.65) / 0.8, 0.40, 1);
-          btn.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
-          btn.style.opacity = op.toFixed(2);
-          btn.style.pointerEvents = !behind && facing > -0.3 ? 'auto' : 'none';
         }
       }
 
@@ -484,7 +451,6 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     fitWeapon(api, model);
     api.model = model;
     api.slots = weaponById(weapon)?.slots ?? [];
-    api.center.set(0, 0, 0);
   }, [weapon]);
 
   // ---- live build (cheap: only on click, never per frame) ----
@@ -527,40 +493,7 @@ export default function GunViewer({ weapon, skin, build, activeSlot, flashSlot, 
     if (mats.length) api.flashes.push({ mats, t: 0 });
   }, [flashSlot?.key]);
 
-  // ---- active hotspot ring ----
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    api.activeSlot = activeSlot;
-    for (const [s, btn] of api.hotspotEls) btn.dataset.active = String(s === activeSlot);
-  }, [activeSlot]);
-
-  return (
-    <div ref={mountRef} className="gv-root">
-      {slots.map(s => (
-        <button
-          key={s}
-          ref={node => {
-            const api = apiRef.current;
-            if (!api) return;
-            if (node) api.hotspotEls.set(s, node);
-            else api.hotspotEls.delete(s);
-          }}
-          data-slot={s}
-          data-active={s === activeSlot}
-          className="gv-hotspot"
-          onClick={e => {
-            e.stopPropagation();
-            onHotspotRef.current(s);
-          }}
-          aria-label={`${SLOT_LABELS[s]} slot`}
-        >
-          <i />
-          <span>{SLOT_LABELS[s]}</span>
-        </button>
-      ))}
-    </div>
-  );
+  return <div ref={mountRef} className="gv-root" />;
 }
 
 /* ================= thumbnails: one 256×128 render per gun, cached ================= */

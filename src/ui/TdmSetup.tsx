@@ -187,8 +187,8 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
             <TxCoords lat="33.7731° N" lon="44.4208° E" />
             <StatBars entry={entry} stats={stats} variant="tdm" />
             <div className="tdm2-viewer">
-              <GunViewer weapon={selected} skin={skin} build={build} activeSlot={menuSlot} flashSlot={flash} onHotspot={openSlot} />
-              <div className="tdm2-orbit-hint mono" aria-hidden="true">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK PINS TO FIT PARTS</div>
+              <GunViewer weapon={selected} skin={skin} build={build} flashSlot={flash} onHotspot={openSlot} />
+              <div className="tdm2-orbit-hint mono" aria-hidden="true">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK THE GUN TO FIT PARTS</div>
             </div>
             <div className="tdm2-desc">
               <b>{tags.join('. ')}.</b>
@@ -255,7 +255,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
                 <p>▸ Respawn in <b>5s</b> at your protected yard.</p>
                 <p>▸ Most kills at <b>2:30</b> wins the match.</p>
               </div>
-              <p className="tx-hint mono">CLICK A HARDPOINT OR A BRASS PIN TO FIT PARTS</p>
+              <p className="tx-hint mono">CLICK A HARDPOINT OR THE GUN TO FIT PARTS</p>
             </>
           )}
         </aside>

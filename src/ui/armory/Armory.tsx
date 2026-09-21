@@ -27,7 +27,7 @@ interface ArmoryProps {
 
 const TUTORIAL = [
   { title: 'Pick a weapon', body: 'Select any gun to preview. Buying equips it instantly.', anchor: 'rail' },
-  { title: 'Hardpoints', body: 'Click a brass pin on the gun or a slot in the panel to open parts.', anchor: 'stage' },
+  { title: 'Hardpoints', body: 'Click the gun or a slot in the panel to open parts.', anchor: 'stage' },
   { title: 'Build it', body: 'Buy to auto-equip. Finishes repaint the whole gun live.', anchor: 'panel' },
 ] as const;
 
@@ -257,8 +257,8 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
           </div>
 
           <div className="arm2-viewer">
-            <GunViewer weapon={selected} skin={skin} build={build} activeSlot={menuSlot} flashSlot={flash} onHotspot={openSlot} />
-            <div className="arm2-orbit-hint mono" aria-hidden="true">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK PINS TO FIT PARTS</div>
+            <GunViewer weapon={selected} skin={skin} build={build} flashSlot={flash} onHotspot={openSlot} />
+            <div className="arm2-orbit-hint mono" aria-hidden="true">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK THE GUN TO FIT PARTS</div>
             <div className="arm2-viewer-coords"><TxCoords lat="33.7731° N" lon="44.4208° E" /></div>
           </div>
 

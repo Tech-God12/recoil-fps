@@ -2,7 +2,7 @@
  * Headless acceptance harness for the arena Part B/C mechanics.
  * Drives TDMManager + bots in isolation (no engine, no WebGL) and asserts:
  *   S1  down → no score → crawl → execute confirm (score + feed zone)
- *   S2  bleed-out after 4 s with no confirm (no kill credit)
+ *   S2  bleed-out after 9 s with no confirm (no kill credit)
  *   S3  ally bot revives the downed player (heavy tier → 75 HP)
  *   S4  momentum: 3 kills/30 s ignites, enemies hunt the burning target, fire ends
  * Run: node --import tsx --loader ./scripts/asset-loader.mjs scripts/tdm-scenarios.ts
@@ -127,7 +127,7 @@ bled.takeDamage(999, false, 'player');
 check('second bot downed', bled.downed);
 feed.length = 0;
 drive(bled, TDM_DOWNED_SECONDS + 1.5);
-check('bled out after ~4 s', bled.dead && !bled.downed);
+check('bled out after ~9 s', bled.dead && !bled.downed);
 check('bled feed has no killer credit', feed.some(f => /^\[BLED OUT\]/.test(f)));
 check('bleed-out scored nothing', mgr.alphaScore === scoreBeforeExec + 1);
 

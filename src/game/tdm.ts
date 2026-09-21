@@ -1,7 +1,7 @@
 // Recoil FPS — Warehouse 5v5 Team Deathmatch.
 // One bot brain drives BOTH teams: the four allies fighting beside the player use
 // exactly the same targeting, pushes, flanks and grenade logic as the five hostiles.
-// Wounded/execution layer: hits to zero HP DOWN a combatant (4 s bleed-out crawl);
+// Wounded/execution layer: hits to zero HP DOWN a combatant (9 s bleed-out crawl);
 // kills only score on confirm — execute, shoot the body, or revive. Momentum layer:
 // 3 kills inside 30 s ignites ON FIRE (+damage, +speed) but every enemy hunts you.
 import * as THREE from 'three';
@@ -22,7 +22,7 @@ export const TDM_RESPAWN_SECONDS = 5;
 export const TDM_BASE_HP = 150;
 export const TDM_HP_PER_ARMOR = 20;
 // ---- wounded / execution system ----
-export const TDM_DOWNED_SECONDS = 4;
+export const TDM_DOWNED_SECONDS = 9;
 export const TDM_REVIVE_SECONDS = 2.0;
 /** Revive HP by the downed combatant's armor tier: [none, light, heavy]. */
 export const TDM_REVIVE_HP = [40, 50, 75];

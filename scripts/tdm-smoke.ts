@@ -107,11 +107,10 @@ async function main() {
     playerAlive: () => true,
     damagePlayer: () => {}, moveCollide,
     onCallout: () => {}, throwGrenade: () => {}, onBotFire: () => {},
-    executePlayer: () => {}, revivePlayer: () => {},
-    playerDowned: () => false, playerOnFire: () => false,
-    onFeed: (k: string, w: string, v: string, _hs: boolean, _t: string, zone?: string, kind?: string) => console.log(`  FEED ${k} [${w}] ${v}${zone ? ` — ${zone} (${kind})` : ''}`),
+    playerOnFire: () => false,
+    onFeed: (k: string, w: string, v: string, _hs: boolean, _t: string, zone?: string) => console.log(`  FEED ${k} [${w}] ${v}${zone ? ` — ${zone}` : ''}`),
     onScore: () => {},
-  } as any, 1);
+  } as any);
   console.log('TDM OK — bots', mgr.bots.length, 'spawn spread alpha:', mgr.bots.filter(b => b.team === 'alpha').map(b => b.pos.toArray().map(v => +v.toFixed(0)).join(',')).join(' | '));
 
   const stuckAcc = new Map<any, { t: number; lx: number; lz: number; worst: number }>();

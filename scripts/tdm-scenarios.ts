@@ -1,14 +1,12 @@
 /**
- * Headless acceptance harness for the arena Part B/C mechanics.
+ * Headless acceptance harness for the lethal arena TDM rules.
  * Drives TDMManager + bots in isolation (no engine, no WebGL) and asserts:
- *   S1  down → no score → crawl → execute confirm (score + feed zone)
- *   S2  bleed-out after 9 s with no confirm (no kill credit)
- *   S3  ally bot revives the downed player (heavy tier → 75 HP)
- *   S4  momentum: 3 kills/30 s ignites, enemies hunt the burning target, fire ends
+ *   S1  one lethal hit kills outright: dead + scored + zoned feed, no wounded state
+ *   S2  momentum: 3 kills/30 s ignites, enemies hunt the burning target, fire ends
  * Run: node --import tsx --loader ./scripts/asset-loader.mjs scripts/tdm-scenarios.ts
  */
 import * as THREE from 'three';
-import { TDMManager, TDM_DOWNED_SECONDS, TDM_FIRE_KILLS } from '../src/game/tdm';
+import { TDMManager, TDM_FIRE_KILLS } from '../src/game/tdm';
 import { buildWorld } from '../src/game/world';
 import { NavGrid } from '../src/game/ai';
 import type { TDMBot, TDMContext } from '../src/game/tdm';
@@ -43,7 +41,6 @@ const feed: string[] = [];
 const calls: string[] = [];
 const playerPos = new THREE.Vector3(0, 1.6, 38);
 let playerHP = 150;
-let playerDownedFlag = false;
 const scene = new THREE.Scene();
 const world = buildWorld(scene, 'arena');
 const nav = new NavGrid(world.solids, world.half, world.groundHeight);
@@ -53,7 +50,7 @@ const ctx: TDMContext = {
   scene, occluders: world.occluders, nav,
   coverNodes: world.coverNodes, solids: world.solids, half,
   groundHeight: world.groundHeight, effects: effectsStub,
-  playerAlive: () => !playerDownedFlag,
+  playerAlive: () => playerHP > 0,
   playerPos: () => playerPos.clone(),
   playerFeet: () => new THREE.Vector3(playerPos.x, 0, playerPos.z),
   random: () => Math.random(),
@@ -72,15 +69,12 @@ const ctx: TDMContext = {
   damagePlayer: (a: number) => { playerHP -= a; },
   onCallout: (k: string) => { calls.push(k); },
   throwGrenade: () => {}, onBotFire: () => {},
-  executePlayer: () => { feed.push('player-executed'); },
-  revivePlayer: (hp: number, by: string) => { feed.push(`player-revived:${hp}:${by}`); },
-  playerDowned: () => playerDownedFlag,
   playerOnFire: () => false,
-  onFeed: (k: string, w: string, v: string, _hs: boolean, _t: 'alpha' | 'bravo', zone?: string, kind?: string) => feed.push(`${k}[${w}]${v}@${zone}:${kind}`),
+  onFeed: (k: string, w: string, v: string, _hs: boolean, _t: 'alpha' | 'bravo', zone?: string) => feed.push(`${k}[${w}]${v}@${zone}`),
   onScore: () => {},
 } as unknown as TDMContext;
 
-const mgr = new TDMManager(ctx, 1);
+const mgr = new TDMManager(ctx);
 const bot = (team: 'alpha' | 'bravo', nth = 0) => mgr.bots.filter(b => b.team === team)[nth];
 const isolate = (b: TDMBot, x: number, z: number) => { b.pos.set(x, 0, z); b.lastKnown = null; };
 
@@ -96,75 +90,30 @@ const drive = (b: TDMBot, seconds: number) => {
   }
 };
 
-// ================= S1: down → crawl → execute =================
-console.log('S1: down, crawl, execute');
+// ================= S1: lethal hit kills outright =================
+console.log('S1: lethal kill, immediate score + feed');
 const prey = bot('bravo', 0);
 isolate(prey, 2, 28);
 const aScore0 = mgr.alphaScore;
-const died = prey.takeDamage(999, true, 'player');
-check('one lethal hit does NOT instantly kill', !died);
-check('bot is downed, not dead', prey.downed && !prey.dead);
-check('no score on the down', mgr.alphaScore === aScore0);
-check('down feed emitted', feed.some(f => f.includes('[DOWN]')));
-feed.length = 0;
-const crawlFrom = prey.pos.clone();
-drive(prey, 2);
-check('downed bot crawls toward cover', prey.pos.distanceTo(crawlFrom) > 0.2);
-check('downed marker floats above the body', !!prey.downedMarker && prey.downedMarker.visible);
-check('downed pose is prone', prey.model.group.rotation.x < -0.8);
-const scoreBeforeExec = mgr.alphaScore;
-const confirmed = prey.finishDown('player', true);
-check('stylish finishDown confirms the kill', confirmed && prey.dead);
-check('execution scores exactly one kill', mgr.alphaScore === scoreBeforeExec + 1);
-check('EXECUTED feed carries the zone', feed.some(f => f.includes('[EXECUTED]') && /@[A-Z ]+:executed$/.test(f)));
-check('killer momentum registered (1 kill)', prey.deaths === 1);
+const killed = prey.takeDamage(999, true, 'player');
+check('one lethal hit kills outright (no wounded state)', killed && prey.dead);
+check('corpse state is DEAD', prey.state === 'DEAD');
+mgr.handleKill('player', prey, true, 'RIFLE');
+check('kill scored immediately', mgr.alphaScore === aScore0 + 1);
+check('feed carries killer, weapon and zone', feed.some(f => /^YOU\[RIFLE\].+@[A-Z ]+$/.test(f)));
+check('victim deaths incremented', prey.deaths === 1);
+// a second bot goes down to bot fire the same way — lethal for everyone
+const prey2 = bot('bravo', 1);
+isolate(prey2, 40, 40);
+const shooter = bot('alpha', 3);
+const bScore0 = mgr.bravoScore;
+const killed2 = prey2.takeDamage(999, false, shooter);
+check('bot-vs-bot lethal hit kills outright', killed2 && prey2.dead);
+mgr.handleKill(shooter, prey2, false, 'RIFLE');
+check('bot kill scored for alpha', mgr.alphaScore === aScore0 + 2 && mgr.bravoScore === bScore0);
 
-// ================= S2: bleed-out with no confirm =================
-console.log('S2: bleed-out');
-const bled = bot('bravo', 1);
-isolate(bled, 40, 40);
-bled.takeDamage(999, false, 'player');
-check('second bot downed', bled.downed);
-feed.length = 0;
-drive(bled, TDM_DOWNED_SECONDS + 1.5);
-check('bled out after ~9 s', bled.dead && !bled.downed);
-check('bled feed has no killer credit', feed.some(f => /^\[BLED OUT\]/.test(f)));
-check('bleed-out scored nothing', mgr.alphaScore === scoreBeforeExec + 1);
-
-// ================= S3: ally bot revives the player =================
-console.log('S3: bot revives the player');
-playerDownedFlag = true;
-playerHP = 0;
-playerPos.set(1, 1.6, 31);
-const medic = bot('alpha', 1);
-isolate(medic, 1, 29);
-feed.length = 0;
-let chose = false;
-for (let i = 0; i < 40 && !chose; i++) { (medic as any).considerRevive(); chose = medic.state === 'REVIVE'; } // 70% roll — retry
-check('medic chose to revive', chose && medic.state === 'REVIVE');
-drive(medic, 1.2);
-check('revive channel is live on the manager', !!mgr.playerRevive && mgr.playerRevive.by === medic);
-medic.reviveT = 1.9; // nearly done — channel completes on the next tick
-drive(medic, 0.5);
-check('revive completed: player up at 50 HP (medium armor tier)', feed.some(f => /^player-revived:50:/.test(f)));
-playerDownedFlag = false; // player back up — a fresh channel would abort on the next tick
-drive(medic, 0.6);
-check('playerRevive cleared after completion', mgr.playerRevive === null);
-playerHP = 100;
-
-// stale-revive guard: a reviver that dies mid-channel drops the marker
-const medic2 = bot('alpha', 2);
-playerDownedFlag = true;
-isolate(medic2, 3, 29);
-(medic2 as any).considerRevive();
-mgr.playerRevive = { by: medic2, t: 0.4 };
-medic2.takeDamage(999, true, 'player'); // knocked down mid-revive
-mgr.update(1 / 30);
-check('stale revive cleared when the reviver drops', mgr.playerRevive === null);
-playerDownedFlag = false;
-
-// ================= S4: momentum ON FIRE =================
-console.log('S4: on fire');
+// ================= S2: momentum ON FIRE =================
+console.log('S2: on fire');
 const hunter = bot('bravo', 2);
 const target = bot('alpha', 0);
 isolate(hunter, 10, 0);
@@ -174,7 +123,7 @@ hunter.killTimes.push(now - 2000, now - 1000);
 hunter.registerKill();
 hunter.updateFire(1 / 60); // momentum is evaluated on the fire tick
 hunter.updateVisualFrame(1 / 60); // vfx visibility is driven by the visual frame
-check('3 kills inside 30 s ignites', hunter.onFire);
+check(`${TDM_FIRE_KILLS} kills inside 30 s ignites`, hunter.onFire);
 check('fire lasts 15 s (timer set)', hunter.onFireT > 14);
 check('ignition callout sent', calls.includes('onfire'));
 check('fire vfx live on the model', !!hunter.fireGlow && hunter.fireGlow.visible && !!hunter.fireParticles && hunter.fireParticles.visible);

@@ -674,63 +674,6 @@ export class SpatialAudioEngine {
     }
   }
 
-  /** Downed sting: muffled double heartbeat the moment you collapse. */
-  downedSting() {
-    const ctx = this.ensure();
-    for (const [when, gain] of [[0, 0.5], [0.28, 0.34]] as const) {
-      const t = ctx.currentTime + when;
-      const o = ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(82, t);
-      o.frequency.exponentialRampToValueAtTime(38, t + 0.16);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(gain, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-      o.connect(g); g.connect(this.master!);
-      o.start(t); o.stop(t + 0.24);
-      o.onended = () => { o.disconnect(); g.disconnect(); };
-    }
-  }
-
-  /** Execution: pistol confirm for the fast finish; knife swish + wet thud + shing for stylish. */
-  execute(stylish: boolean) {
-    if (stylish) {
-      this.burstDirect({ dur: 0.14, gain: 0.4, freq: 3800, q: 0.7, hp: 2200, attack: 0.05 }); // swish
-      this.burstDirect({ dur: 0.1, gain: 0.55, freq: 210, q: 0.8, type: 'lowpass', when: 0.12 }); // thud
-      const ctx = this.ensure();
-      const t = ctx.currentTime + 0.2;
-      const o = ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(4300, t);
-      o.frequency.exponentialRampToValueAtTime(5400, t + 0.1);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.16, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
-      o.connect(g); g.connect(this.master!);
-      o.start(t); o.stop(t + 0.3);
-      o.onended = () => { o.disconnect(); g.disconnect(); };
-    } else {
-      this.firePistol();
-    }
-  }
-
-  /** Revive complete: soft rising two-note confirm. */
-  reviveComplete() {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    for (const [f, when] of [[620, 0], [930, 0.11]] as const) {
-      const o = ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(f, t + when);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.18, t + when);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.16);
-      o.connect(g); g.connect(this.master!);
-      o.start(t + when); o.stop(t + when + 0.18);
-      o.onended = () => { o.disconnect(); g.disconnect(); };
-    }
-  }
-
   /** ON FIRE ignite: rising whoosh + crackle bed. */
   onFireIgnite() {
     const ctx = this.ensure();

@@ -1,8 +1,8 @@
-// Recoil FPS — Armory: hero workbench with tactile rack and spec sheet
+// Recoil FPS — Armory: weapons, gear and customization.
 import { useEffect, useMemo, useState } from 'react';
 import {
   WEAPON_CATALOG, attachmentById, attachmentsFor, weaponById,
-  type AttachSlot, type AttachmentId, type SlotId, type WeaponId,
+  type AttachSlot, type AttachmentId, type WeaponClass, type WeaponId,
 } from '../../game/economy/catalog';
 import { resolveWeaponStats } from '../../game/economy/stats';
 import {
@@ -12,32 +12,48 @@ import {
 import { SKIN_CATALOG, skinById, type SkinId } from '../../game/economy/skins';
 import CashCounter from './CashCounter';
 import { weaponTexturesReady } from '../../game/weapons/finish';
-import GunViewer, { SLOT_LABELS, gunThumbnail } from './GunViewer';
+import GunViewer, { gunThumbnail } from './GunViewer';
+import {
+  CALIBER, CLASS_LABEL, HardpointRows, OrangeDeploy, PartsPanel, StatBars,
+  TxBack, TxCheck, TxCoords, TxLock, TxMotto, txFmt, weaponTags,
+} from '../tactical';
 
 interface ArmoryProps {
   profile: PlayerProfile;
   onProfile: (next: PlayerProfile) => void;
   onDeploy: () => void;
   onBack: () => void;
+  deployHint?: string;
 }
 
 const TUTORIAL = [
   { title: 'Pick a weapon', body: 'Select any gun to preview. Buying equips it instantly.', anchor: 'rail' },
   { title: 'Hardpoints', body: 'Click a brass pin on the gun or a slot in the panel to open parts.', anchor: 'stage' },
-  { title: 'Build it', body: 'Buy to auto-equip. Hover to preview stat changes.', anchor: 'panel' },
+  { title: 'Build it', body: 'Buy to auto-equip. Finishes repaint the whole gun live.', anchor: 'panel' },
 ] as const;
 
-const fmt = (n: number) => `$${n.toLocaleString('en-US')}`;
+const CLASS_TABS: { id: string; label: string; classes: WeaponClass[] }[] = [
+  { id: 'assault', label: 'ASSAULT RIFLES', classes: ['AR', 'BR'] },
+  { id: 'smg', label: 'SMGS', classes: ['SMG', 'PDW'] },
+  { id: 'sniper', label: 'SNIPER RIFLES', classes: ['SR'] },
+  { id: 'lmg', label: 'LMGS', classes: ['LMG'] },
+  { id: 'shotgun', label: 'SHOTGUNS', classes: ['SG'] },
+  { id: 'sidearm', label: 'SIDEARMS', classes: ['PISTOL'] },
+];
 
-const LockIcon = () => (
-  <svg className="wcard-lock" viewBox="0 0 16 16" aria-hidden="true">
-    <rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor" />
-    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+const tabFor = (id: WeaponId): string => {
+  const cls = weaponById(id)?.cls;
+  return CLASS_TABS.find(t => cls && t.classes.includes(cls))?.id ?? 'assault';
+};
+
+const RankGlyph = () => (
+  <svg width="20" height="20" viewBox="0 0 22 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="miter">
+    <path d="M3 7.5l8-5 8 5" /><path d="M3 12.5l8-5 8 5" /><path d="M3 17.5l8-5 8 5" />
   </svg>
 );
 
-export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryProps) {
-  const [tab, setTab] = useState<SlotId>('primary');
+export default function Armory({ profile, onProfile, onDeploy, onBack, deployHint }: ArmoryProps) {
+  const [group, setGroup] = useState<string>(tabFor(profile.loadout.primary.weapon));
   const [selected, setSelected] = useState<WeaponId>(profile.loadout.primary.weapon);
   const [menuSlot, setMenuSlot] = useState<AttachSlot | null>(null);
   const [flash, setFlash] = useState<{ slot: AttachSlot; key: number } | null>(null);
@@ -49,7 +65,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
   useEffect(() => {
     let active = true;
     void weaponTexturesReady.then(async () => {
-      // Yield between thumbnails so the hero and controls stay responsive on first entry.
       for (const w of WEAPON_CATALOG) {
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
         if (!active) return;
@@ -71,14 +86,16 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
   const entry = weaponById(selected)!;
   const owned = profile.ownedWeapons.includes(selected);
   const skin = skinFor(profile, selected);
-  const skinName = skinById(skin).name;
+  const skinDef = skinById(skin);
   const fielded = profile.loadout[entry.slot].weapon === selected;
   const build = useMemo(() => buildForWeapon(profile, selected), [profile, selected]);
   const stats = useMemo(() => {
     const mods = Object.values(build.attachments).map(id => attachmentById(id)?.mods).filter(m => !!m);
     return resolveWeaponStats(entry.base, mods);
   }, [build, entry]);
-  const rail = WEAPON_CATALOG.filter(w => w.slot === tab);
+  const tags = weaponTags(entry, stats);
+  const rail = WEAPON_CATALOG.filter(w => CLASS_TABS.find(t => t.id === group)?.classes.includes(w.cls));
+  const level = 13 + profile.missions;
 
   const pulse = (slot: AttachSlot) => {
     const key = flashKey + 1;
@@ -86,15 +103,16 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
     setFlash({ slot, key });
   };
 
-  const pickTab = (t: SlotId) => {
-    setTab(t);
-    setSelected(profile.loadout[t].weapon);
+  const pickGroup = (id: string) => {
+    setGroup(id);
     setMenuSlot(null);
+    const list = WEAPON_CATALOG.filter(w => CLASS_TABS.find(t => t.id === id)?.classes.includes(w.cls));
+    if (!list.some(w => w.id === selected) && list.length) setSelected(list[0].id);
   };
 
   const selectWeapon = (id: WeaponId) => {
     const w = weaponById(id)!;
-    setTab(w.slot);
+    setGroup(tabFor(id));
     setSelected(id);
     setMenuSlot(null);
     if (profile.ownedWeapons.includes(id) && profile.loadout[w.slot].weapon !== id) {
@@ -110,7 +128,7 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
     if (owned) return;
     const bought = buyWeapon(profile, selected);
     if (!bought.ok) {
-      say(bought.error === 'INSUFFICIENT_FUNDS' ? `Need ${fmt(entry.price)} — ${fmt(profile.cash)} available` : 'Purchase failed', true);
+      say(bought.error === 'INSUFFICIENT_FUNDS' ? `Need ${txFmt(entry.price)} — ${txFmt(profile.cash)} available` : 'Purchase failed', true);
       return;
     }
     const fieldedRes = setLoadoutWeapon(bought.value, entry.slot, selected);
@@ -119,8 +137,6 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
   };
 
   const openSlot = (slot: AttachSlot) => {
-    // Browsing parts is always allowed, even on unowned guns — window shopping
-    // shows exactly what a locked weapon can become before you commit.
     setMenuSlot(cur => (cur === slot ? null : slot));
   };
 
@@ -189,169 +205,156 @@ export default function Armory({ profile, onProfile, onDeploy, onBack }: ArmoryP
   const ownedParts = profile.ownedAttachments[selected] ?? [];
 
   return (
-    <div className="armory-root" onClick={tutStep >= 0 ? advanceTutorial : undefined}
+    <div className="tx-root arm2-root" onClick={tutStep >= 0 ? advanceTutorial : undefined}
       onKeyDown={e => { if (e.key === 'Escape' && menuSlot) setMenuSlot(null); }}>
+      <div className="arm2-glow" aria-hidden="true" />
+      <div className="tx-grain" aria-hidden="true" />
 
-      <div className="armory-glow" aria-hidden="true" />
-      <div className="armory-vignette" aria-hidden="true" />
-
-      <header className="cmdbar">
-        <button className="cmd-back" onClick={onBack}><span aria-hidden="true">‹</span> Back</button>
-        <div className="cmd-cash"><span className="cmd-coin" aria-hidden="true" /><CashCounter value={profile.cash} /></div>
-        <button className="cmd-deploy" onClick={onDeploy}>Deploy <span aria-hidden="true">→</span></button>
+      {/* ================= HEADER ================= */}
+      <header className="tx-head seq" style={{ animationDelay: '.02s' }}>
+        <TxBack onClick={onBack} />
+        <div className="arm2-brand"><b>RECOIL</b></div>
+        <div className="tx-title"><b>ARMORY</b><em>WEAPONS, GEAR AND CUSTOMIZATION</em></div>
+        <div className="arm2-wallet" title="Wallet balance">
+          <span className="arm2-coin" aria-hidden="true" />
+          <CashCounter value={profile.cash} />
+        </div>
+        <div className="arm2-op">
+          <RankGlyph />
+          <span className="arm2-op-body"><em>OPERATOR</em><b>RECOIL_01</b><i>LVL {level}</i></span>
+        </div>
+        <TxMotto />
       </header>
 
-      <div className="armory-main">
-        {/* ============ RACK ============ */}
-        <aside className={`armory-rail ${tutStep === 0 ? 'tut-ring' : ''}`} aria-label="Weapon rack">
-          <div className="rail-head">
-            <span className="stencil">Rack</span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--bone-mute)' }}>{rail.length} items</span>
-          </div>
-          <div className="armory-tabs" role="tablist">
-            {(['primary', 'secondary'] as SlotId[]).map(t => (
-              <button key={t} role="tab" aria-selected={tab === t} className={`armory-tab ${tab === t ? 'on' : ''}`} onClick={() => pickTab(t)}>
-                {t}
+      <div className="arm2-main">
+        {/* ================= RACK ================= */}
+        <aside className={`tx-col arm2-rail seq ${tutStep === 0 ? 'tut-ring' : ''}`} style={{ animationDelay: '.06s' }} aria-label="Weapon rack">
+          <div className="arm2-tabs" role="tablist" aria-label="Weapon class">
+            {CLASS_TABS.map(t => (
+              <button
+                key={t.id} type="button" role="tab" aria-selected={group === t.id}
+                className={`arm2-tab ${group === t.id ? 'on' : ''}`}
+                onClick={() => pickGroup(t.id)}
+              >
+                {t.label}
               </button>
             ))}
           </div>
-          <div className="armory-cards" tabIndex={0} onKeyDown={railKey} aria-label={`${tab} weapons`}>
-            {rail.map(w => {
+          <div className="arm2-cards" tabIndex={0} onKeyDown={railKey} aria-label={`${group} weapons`}>
+            {rail.map((w, i) => {
               const isOwned = profile.ownedWeapons.includes(w.id);
               const isFielded = profile.loadout[w.slot].weapon === w.id;
               const isSel = w.id === selected;
               return (
-                <button key={w.id} className={`wcard ${isSel ? 'sel' : ''} ${isOwned ? '' : 'locked'}`} onClick={() => selectWeapon(w.id)} aria-pressed={isSel}>
-                  <span className="wcard-sel" aria-hidden="true" />
-                  {thumbs[w.id] ? <img src={thumbs[w.id]} alt="" draggable={false} className="wcard-thumb" /> : <span className="wcard-thumb" />}
-                  <span className="wcard-body">
-                    <span className="wcard-name">{w.name}</span>
-                    <span className="wcard-sub">
-                      <i className="wcard-cls">{w.cls}</i>
-                      {isFielded ? <b className="wcard-fielded">Equipped</b> : isOwned ? <b className="wcard-owned">Owned</b> : <b className="wcard-price">{fmt(w.price)}</b>}
+                <button
+                  key={w.id} type="button"
+                  className={`arm2-card ${isSel ? 'sel' : ''} ${isOwned ? '' : 'locked'}`}
+                  onClick={() => selectWeapon(w.id)}
+                  aria-pressed={isSel}
+                >
+                  <span className="arm2-num mono">0{i + 1}</span>
+                  {thumbs[w.id] ? <img src={thumbs[w.id]} alt="" draggable={false} className="arm2-thumb" /> : <span className="arm2-thumb" />}
+                  <span className="arm2-card-body">
+                    <span className="arm2-name">{w.name}</span>
+                    <span className="arm2-sub">
+                      <i className="arm2-cls">{w.cls}</i>
+                      {isFielded ? <b className="arm2-fielded">Equipped</b> : isOwned ? <b className="arm2-owned">Owned</b> : <b className="arm2-price">{txFmt(w.price)}</b>}
                     </span>
                   </span>
-                  {!isOwned && <LockIcon />}
+                  {!isOwned && <span className="arm2-lock"><TxLock /></span>}
                 </button>
               );
             })}
           </div>
-          <p className="armory-rail-hint mono">↑↓ navigate · Enter preview</p>
+          <p className="tx-hint mono">↑↓ NAVIGATE · ENTER PREVIEW</p>
+          <div className="arm2-creed" aria-hidden="true">
+            <span>DISCIPLINE&nbsp;&nbsp;&nbsp;&nbsp;OUTLASTS&nbsp;&nbsp;&nbsp;&nbsp;CHAOS.</span>
+            <i className="tx-rule" />
+          </div>
         </aside>
 
-        {/* ============ STAGE — HERO WORKBENCH ============ */}
-        <section className={`armory-stage ${tutStep === 1 ? 'tut-ring' : ''}`} aria-label="Weapon preview">
-          <div className="armory-stage-head">
+        {/* ================= STAGE ================= */}
+        <section className={`tx-col arm2-stage seq ${tutStep === 1 ? 'tut-ring' : ''}`} style={{ animationDelay: '.1s' }} aria-label="Weapon preview">
+          <div className="arm2-hero">
             <div>
               <h2>{entry.name}</h2>
-              <p>{entry.cls} · {skinName} finish {!owned && <span className="locknote">Locked preview</span>}</p>
+              <p className="arm2-class">{CLASS_LABEL[entry.cls]}</p>
+              <p className="arm2-tags">{tags.join('. ')}.</p>
+              <p className="arm2-blurb">{entry.blurb}</p>
+              <div className="arm2-chips">
+                <span className="arm2-chip">{CALIBER[entry.id].round}</span>
+                <span className="arm2-chip">{stats.auto ? 'FULL-AUTO' : entry.boltAction ? 'BOLT' : entry.pump ? 'PUMP' : 'SEMI'}</span>
+                <span className="arm2-chip">{stats.magSize} RD</span>
+              </div>
             </div>
-            <div className="armory-stage-tags">
-              {fielded ? <span className="tag-fielded">Equipped</span> : owned ? <span className="tag-owned">In rack</span> : (
-                <span className="tag-stack">
-                  <span className="tag-price">{fmt(entry.price)}</span>
-                  <button className="stage-buy" onClick={buyGun}>Buy {entry.short}</button>
+            <div className="arm2-hero-side">
+              {fielded ? <span className="tx-tag gold">EQUIPPED</span> : owned ? <span className="tx-tag">IN RACK</span> : (
+                <span className="tx-tagstack">
+                  <span className="tx-tag gold">{txFmt(entry.price)}</span>
+                  <button type="button" className="arm2-buy" onClick={buyGun}>BUY {entry.short}</button>
                 </span>
               )}
+              {!owned && <span className="arm2-locknote mono">LOCKED PREVIEW</span>}
             </div>
           </div>
 
-          <div className="stage-viewport">
+          <div className="arm2-viewer">
             <GunViewer weapon={selected} skin={skin} build={build} activeSlot={menuSlot} flashSlot={flash} onHotspot={openSlot} />
-            <div className="stage-fallback mono" aria-hidden="true">Drag to orbit · Scroll to zoom · Click pins to fit parts</div>
+            <div className="arm2-orbit-hint mono" aria-hidden="true">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK PINS TO FIT PARTS</div>
+            <div className="arm2-viewer-coords"><TxCoords lat="33.7731° N" lon="44.4208° E" /></div>
           </div>
 
-          {/* Key figures ribbon under the gun — the numbers that matter at a glance */}
-          <div className="stage-ribbon mono" aria-label="Key weapon figures">
-            <div><span>DMG</span><b>{stats.damage.toFixed(0)}</b></div>
-            <div><span>RPM</span><b>{stats.rpm}</b></div>
-            <div><span>MAG</span><b>{stats.magSize}</b></div>
-            <div><span>ADS</span><b>{(stats.adsTime * 1000).toFixed(0)}ms</b></div>
-            <div><span>RELOAD</span><b>{stats.tacReload.toFixed(1)}s</b></div>
-            <div className={stats.suppressed ? 'on' : ''}><span>SUPPR</span><b>{stats.suppressed ? 'YES' : '—'}</b></div>
+          <div className="arm2-stats">
+            <div>
+              <div className="tx-sec"><span>WEAPON STATS</span></div>
+              <StatBars entry={entry} stats={stats} variant="armory" />
+            </div>
+            <div className="arm2-caliber">
+              <b className="mono">{CALIBER[entry.id].round}</b>
+              <p>{CALIBER[entry.id].note}</p>
+            </div>
           </div>
-
         </section>
 
-        {/* ============ SPEC SHEET ============ */}
-        <aside className={`armory-panel ${tutStep === 2 ? 'tut-ring' : ''}`} aria-label="Spec sheet">
+        {/* ================= SPEC SHEET ================= */}
+        <aside className={`tx-col arm2-panel seq ${tutStep === 2 ? 'tut-ring' : ''}`} style={{ animationDelay: '.14s' }} aria-label="Spec sheet">
           {menuSlot ? (
-            <div className="partmenu" key={menuSlot}>
-              <div className="partmenu-head">
-                <span>{SLOT_LABELS[menuSlot]} — {entry.short}</span>
-                <button className="util-btn" style={{ padding: '6px 10px', fontSize: 11 }} onClick={() => setMenuSlot(null)}>Close</button>
-              </div>
-              {build.attachments[menuSlot] && (
-                <button className="part-strip" onClick={() => unequipSlot(menuSlot)}>
-                  <span>Strip {attachmentById(build.attachments[menuSlot]!)!.name}</span>
-                  <span className="mono">Back to stock</span>
-                </button>
-              )}
-              <div className="partmenu-list">
-                {menuParts.map(part => {
-                  const isOwned = ownedParts.includes(part.id);
-                  const isEquipped = build.attachments[menuSlot] === part.id;
-                  return (
-                    <div key={part.id} className={`pcard ${isEquipped ? 'equipped' : ''}`}>
-                      <div className="pcard-head">
-                        <strong>{part.name}</strong>
-                        <span className="pcard-tier" aria-label={`tier ${part.tier}`}>
-                          {[1, 2, 3].map(i => <i key={i} className={i <= part.tier ? 'on' : ''} />)}
-                        </span>
-                      </div>
-                      <div className="pcard-fit mono">{part.family ?? "Dedicated fit"} · {part.compat.map(id=>weaponById(id)?.name).join(" / ")}</div>
-                      <p className="pcard-desc">{part.desc}</p>
-                      <div className="pcard-mods">
-                        {part.pros.map(p => <span key={p} className="pro">+ {p}</span>)}
-                        {part.cons.map(c => <span key={c} className="con">− {c}</span>)}
-                      </div>
-                      {isEquipped ? (
-                        <button className="pcard-btn equipped" onClick={() => unequipSlot(menuSlot)}>Equipped — click to strip</button>
-                      ) : isOwned ? (
-                        <button className="pcard-btn" onClick={() => equipPart(part.id)}>Equip</button>
-                      ) : (
-                        <button className={`pcard-btn buy ${profile.cash < part.price ? 'cant' : ''}`} onClick={() => buyPart(part.id)}>
-                          Buy — {fmt(part.price)}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-                {menuParts.length === 0 && <p className="partmenu-empty mono">No compatible parts for this socket.</p>}
-              </div>
-            </div>
+            <PartsPanel
+              entry={entry} build={build} slot={menuSlot} parts={menuParts} owned={ownedParts}
+              cash={profile.cash} mode="armory"
+              onEquip={equipPart} onBuy={buyPart} onStrip={() => unequipSlot(menuSlot)} onClose={() => setMenuSlot(null)}
+            />
           ) : (
-            <div className="statpanel">
-              <div className="sec-label"><span>Equipped</span><span className="mono">{entry.short}</span></div>
-              <div className="hardpoint-list" aria-label="Equipped attachments">
-                {entry.slots.map(slot => {
-                  const id = build.attachments[slot];
-                  const part = id ? attachmentById(id) : undefined;
-                  return (
-                    <button key={slot} className={`hardpoint ${part ? 'filled' : ''}`} onClick={() => openSlot(slot)}>
-                      <i>{SLOT_LABELS[slot]}</i>
-                      <b>{part ? part.name : 'Stock'}</b>
-                      <span aria-hidden="true">›</span>
-                    </button>
-                  );
-                })}
-              </div>
+            <>
+              <div className="tx-sec"><span>EQUIPPED PARTS</span><b className="mono">{entry.slots.length}/{entry.slots.length}</b></div>
+              <HardpointRows entry={entry} build={build} onOpen={openSlot} />
 
-              <div className="sec-label"><span>Finish</span><span className="mono">{skinName}</span></div>
-              <div className="skin-row">
+              <div className="tx-sec" style={{ marginTop: 16 }}><span>FINISH</span><b className="mono">{skinDef.name.toUpperCase()}</b></div>
+              <div className="arm2-skins" role="radiogroup" aria-label="Weapon finish">
                 {SKIN_CATALOG.map(s => (
-                  <button key={s.id} className={`skin-swatch ${s.id === skin ? 'on' : ''}`} onClick={() => pickSkin(s.id)} title={s.desc} aria-pressed={s.id === skin}>
-                    <i style={{ background: s.swatch }} />
-                    <b>{s.name}</b>
+                  <button
+                    key={s.id} type="button" role="radio" aria-checked={s.id === skin}
+                    className={`arm2-skin ${s.id === skin ? 'on' : ''}`}
+                    onClick={() => pickSkin(s.id)}
+                    title={s.desc}
+                  >
+                    <i style={{ background: s.swatch }}>{s.id === skin && <TxCheck size={12} />}</i>
+                    <em>{s.name}</em>
                   </button>
                 ))}
               </div>
+              <p className="arm2-finish-note">{skinDef.desc}</p>
 
-              <p className="statpanel-hint mono">Click a hardpoint to fit parts</p>
-            </div>
+              <div className="arm2-cta">
+                <OrangeDeploy title="DEPLOY" hint={deployHint ?? 'READY'} onClick={onDeploy} wide />
+                <button type="button" className="arm2-custom" onClick={() => openSlot(entry.slots[0])}>
+                  <b>CUSTOMIZE</b>
+                  <span>MODS, PARTS, SKINS AND APPEARANCE</span>
+                </button>
+              </div>
+            </>
           )}
         </aside>
-
       </div>
 
       {tutStep >= 0 && (

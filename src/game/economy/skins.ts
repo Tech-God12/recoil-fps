@@ -4,7 +4,7 @@
 // more entry here: id + name + swatch + per-role coats.
 
 /** Union grows here as finishes ship: 'factory' | 'sandstorm' | ... */
-export type SkinId = 'factory';
+export type SkinId = 'factory' | 'desert' | 'olive' | 'black' | 'urban' | 'coyote';
 
 export type SkinRole =
   | 'poly' | 'steel' | 'darkSteel' | 'dark' | 'tan'

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
 import type { CashLogEntry, GameSettings } from '../game/engine';
 import { weaponById } from '../game/economy/catalog';
 import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
@@ -14,10 +14,20 @@ import { voice } from '../game/voice';
 import mapAlrasul from '../assets/map-alrasul.jpg';
 import mapKasbah from '../assets/map-kasbah.jpg';
 import mapArena from '../assets/map-arena.jpg';
+import ridgeArt from '../assets/map-ridgeline.jpg';
 import operatorArt from '../assets/operator.jpg';
+import menuCenter from '../assets/menu-center.jpg';
+import { TxBack, TxCoords, TxLock, TxMotto } from './tactical';
 import MapFlyover from './MapFlyover';
 
 export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapArena };
+
+/* Theater cards: Town + Sandblast are live operations, Ridgeline is locked intel. */
+const THEATERS = [
+  { num: '01', code: 'TOWN', id: 'kasbah' as MapId | null, type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E', locked: false },
+  { num: '02', code: 'SANDBLAST', id: 'alrasul' as MapId | null, type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E', locked: false },
+  { num: '03', code: 'RIDGELINE', id: null, type: 'MOUNTAIN OUTPOST', art: ridgeArt, lat: '33.8812° N', lon: '42.7732° E', locked: true },
+];
 
 export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
@@ -32,6 +42,281 @@ export interface Results {
 const Arrow = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="square" /></svg>
 );
+
+/* ---------- tactical-home glyphs (inline, no extra assets) ---------- */
+const CoinIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="none" stroke="#C9A15A" strokeWidth="1.4" /><circle cx="6" cy="6" r="1.6" fill="#C9A15A" /></svg>
+);
+const RankIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 22 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="miter"><path d="M3 7.5l8-5 8 5" /><path d="M3 12.5l8-5 8 5" /><path d="M3 17.5l8-5 8 5" /></svg>
+);
+const CrossIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.1" aria-hidden="true"><circle cx="12" cy="12" r="6.5" /><path d="M12 2v5M12 17v5M2 12h5M17 12h5" /></svg>
+);
+const RifleIcon = () => (
+  <svg viewBox="0 0 120 26" aria-hidden="true" className="rm-rifle">
+    <g fill="currentColor">
+      <rect x="2" y="9" width="12" height="7" rx="1" />
+      <rect x="14" y="10" width="38" height="6" rx="1" />
+      <rect x="52" y="11" width="30" height="4" rx="1" />
+      <rect x="82" y="12" width="30" height="2" />
+      <rect x="112" y="10.5" width="5" height="5" rx="1" />
+      <polygon points="38,16 46,16 42,25 34,25" />
+      <polygon points="52,16 56,16 55,22 51,22" />
+      <rect x="22" y="6" width="7" height="4" rx="1" />
+      <rect x="76" y="7" width="2" height="4" />
+      <rect x="60" y="15" width="10" height="2" rx="1" />
+    </g>
+  </svg>
+);
+const PistolIcon = () => (
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
+    <path d="M2 8.5h13.5v3.6H11l-.8 5.4H7.4l.8-5.4H4.5v2.4H2z" />
+    <path d="M15.5 8.5V12 M18.5 8.5h2.8v2.6h-2.8" />
+  </svg>
+);
+const FragIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <rect x="9" y="2.5" width="6" height="3.4" rx="1" />
+    <circle cx="16.6" cy="4.4" r="1.7" />
+    <path d="M7 9.5h10V15a5 5 0 0 1-10 0z" />
+    <path d="M7 12.5h10" />
+  </svg>
+);
+const KnifeIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+    <path d="M17.5 3.5l3 3-8.5 8.5-3-3z" />
+    <path d="M9.5 12.5l-6 6" />
+    <path d="M7.8 13.2l2.5 2.5" />
+  </svg>
+);
+
+const INTEL_TABS = [
+  { id: 'people', label: 'PEOPLE' },
+  { id: 'terrain', label: 'TERRAIN' },
+  { id: 'objectives', label: 'OBJECTIVES' },
+  { id: 'results', label: 'RESULTS' },
+] as const;
+
+/* ================================================================
+   TACTICAL HOME — full-bleed operations interface.
+   Left: wordmark + stacked deploy nav. Center: torn-paper AO slice.
+   Right: wallet + operator chip, intel tabs, loadout card, motto.
+   Fully interactive: mouse + WASD/arrows + Enter + Tab profile.
+   ================================================================ */
+function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings }: {
+  prof: PlayerProfile; primaryName: string; secondaryName: string;
+  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void;
+}) {
+  const [sel, setSel] = useState(0);
+  const [intel, setIntel] = useState(2);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [cashShown, setCashShown] = useState(0);
+  const rootRef = useRef<HTMLElement | null>(null);
+  const cashTarget = prof.cash;
+  const level = 13 + prof.missions;
+  const phaseCount = getMission('kasbah').phases.length + getMission('alrasul').phases.length;
+  const intelReadouts = [
+    '1 OPERATOR · RECOIL_01',
+    'DESERT VALLEY · GRID 39S',
+    `2 ARENAS · ${phaseCount} PHASES`,
+    prof.missions > 0 || prof.kills > 0 ? `${prof.missions} OPS · ${prof.kills} KILLS` : 'AWAITING DEPLOYMENT',
+  ];
+
+  // Wallet ticker — rolls up fast on mount.
+  useEffect(() => {
+    let raf = 0;
+    const t0 = performance.now();
+    const dur = 900;
+    const tick = (t: number) => {
+      const k = Math.min(1, (t - t0) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      setCashShown(Math.round(cashTarget * e));
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [cashTarget]);
+
+  const items = [
+    { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
+    { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 TEAM DEATHMATCH', action: () => onSelect('arena') },
+    { id: 'loadout', idx: '03', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
+    { id: 'settings', idx: '04', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
+  ];
+  const activate = useCallback((i: number) => { items[i]?.action(); }, [onSelect, onArmory, onSettings]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Tab') { e.preventDefault(); setProfileOpen(o => !o); return; }
+      if (e.code === 'Escape') { setProfileOpen(false); return; }
+      if (profileOpen) return;
+      if (e.code === 'KeyW' || e.code === 'ArrowUp') { e.preventDefault(); setSel(s => (s + 3) % 4); }
+      else if (e.code === 'KeyS' || e.code === 'ArrowDown') { e.preventDefault(); setSel(s => (s + 1) % 4); }
+      else if (e.code === 'KeyA' || e.code === 'ArrowLeft') { setIntel(v => (v + 3) % 4); }
+      else if (e.code === 'KeyD' || e.code === 'ArrowRight') { setIntel(v => (v + 1) % 4); }
+      else if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); activate(sel); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activate, profileOpen, sel]);
+
+  // Pointer parallax — backdrop layers drift against the operator.
+  const onMouse = (e: RMouseEvent) => {
+    const el = rootRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const nx = ((e.clientX - r.left) / r.width - 0.5) * 2;
+    const ny = ((e.clientY - r.top) / r.height - 0.5) * 2;
+    el.style.setProperty('--mx', nx.toFixed(3));
+    el.style.setProperty('--my', ny.toFixed(3));
+  };
+
+  return (
+    <main ref={rootRef} className="rm-root" onMouseMove={onMouse}>
+      <div className="rm-base" aria-hidden="true" />
+      <div className="rm-topo" aria-hidden="true" />
+      <div className="rm-center" aria-hidden="true">
+        <img src={menuCenter} alt="" draggable={false} />
+        <div className="rm-center-shade" />
+        <div className="rm-coords mono seq" style={{ animationDelay: '.18s' }}>
+          <CrossIcon />
+          <span>33.7731° N<br />44.4208° E</span>
+        </div>
+        <div className="rm-centerquote seq" style={{ animationDelay: '.24s' }}>
+          <span>SAME GROUND</span>
+          <span>DIFFERENT STORIES</span>
+          <i className="rm-goldrule xs center" />
+        </div>
+      </div>
+      <img src={operatorArt} alt="" draggable={false} className="rm-operator" aria-hidden="true" />
+      <div className="rm-vignette" aria-hidden="true" />
+      <div className="rm-grain" aria-hidden="true" />
+
+      <div className="rm-layout">
+        <div className="rm-left">
+          <div className="rm-titleblock seq" style={{ animationDelay: '.02s' }}>
+            <span className="rm-kicker">TACTICAL OPERATIONS INTERFACE<br />V1.1.0</span>
+            <h1 className="rm-title">RECOIL<sup>®</sup></h1>
+            <span className="rm-subtitle">DESERT OPERATIONS&nbsp;&nbsp;•&nbsp;&nbsp;SINGLE OPERATOR</span>
+            <i className="rm-goldrule" aria-hidden="true" />
+          </div>
+
+          <nav className="rm-nav" aria-label="Main menu">
+            {items.map((it, i) => (
+              <button
+                key={it.id}
+                type="button"
+                className={`rm-item seq${i === sel ? ' sel' : ''}`}
+                style={{ animationDelay: `${0.08 + i * 0.05}s` }}
+                onMouseEnter={() => setSel(i)}
+                onFocus={() => setSel(i)}
+                onClick={() => activate(i)}
+                aria-current={i === sel ? 'true' : undefined}
+              >
+                <span className="rm-idx mono">{it.idx}</span>
+                <span className="rm-item-body"><b>{it.title}</b><em>{it.sub}</em></span>
+                <span className="rm-arrow"><Arrow /></span>
+              </button>
+            ))}
+          </nav>
+
+          <div className="rm-creed seq" style={{ animationDelay: '.3s' }}>
+            <span>DISCIPLINE</span>
+            <span>OUTLASTS</span>
+            <span>CHAOS.</span>
+            <i className="rm-goldrule sm" aria-hidden="true" />
+            <em>RECOIL&nbsp;&nbsp;//&nbsp;&nbsp;FIELD NOTES&nbsp;&nbsp;//&nbsp;&nbsp;SURVIVE ADAPT WIN</em>
+          </div>
+        </div>
+
+        <div className="rm-right">
+          <div className="rm-topbar seq" style={{ animationDelay: '.06s' }}>
+            <span className="rm-cash" title="Wallet balance">
+              <CoinIcon />
+              <b className="mono tabular">${cashShown.toLocaleString('en-US')}</b>
+            </span>
+            <button type="button" className="rm-op" onClick={() => setProfileOpen(true)} title="Open player profile (Tab)">
+              <RankIcon />
+              <span className="rm-op-body"><em>OPERATOR</em><b>RECOIL_01</b><i>LVL {level}</i></span>
+            </button>
+          </div>
+
+          <div className="rm-intel seq" style={{ animationDelay: '.14s' }} role="tablist" aria-label="Field intel">
+            {INTEL_TABS.map((t, i) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={i === intel}
+                className={`rm-intel-tab${i === intel ? ' on' : ''}`}
+                onMouseEnter={() => setIntel(i)}
+                onFocus={() => setIntel(i)}
+                onClick={() => setIntel(i)}
+              >
+                {t.label}
+              </button>
+            ))}
+            <span className="rm-intel-readout mono">{intelReadouts[intel]}</span>
+            <i className="rm-goldrule sm right" aria-hidden="true" />
+          </div>
+
+          <button type="button" className="rm-loadout seq" style={{ animationDelay: '.2s' }} onClick={onArmory} title="Open loadout">
+            <span className="rm-lo-kicker">CURRENT LOADOUT</span>
+            <b className="rm-lo-name">{primaryName}</b>
+            <RifleIcon />
+            <span className="rm-lo-div" aria-hidden="true" />
+            <span className="rm-lo-slots">
+              <span className="rm-lo-slot"><PistolIcon /><em>{secondaryName}</em></span>
+              <span className="rm-lo-slot"><FragIcon /><em>FRAG</em></span>
+              <span className="rm-lo-slot"><KnifeIcon /><em>KNIFE</em></span>
+            </span>
+            <span className="rm-lo-foot"><em>CONFIG 01</em><Arrow /></span>
+          </button>
+
+          <div className="rm-motto seq" style={{ animationDelay: '.26s' }}>
+            <span>BUILT FOR THOSE</span>
+            <span>WHO KEEP GOING.</span>
+            <i className="rm-goldrule xs" aria-hidden="true" />
+          </div>
+        </div>
+      </div>
+
+      <footer className="rm-foot seq" style={{ animationDelay: '.32s' }}>
+        <span className="rm-keys">
+          <span className="rm-key">W</span><span className="rm-key">A</span><span className="rm-key">S</span><span className="rm-key">D</span>
+          <em>NAVIGATE</em>
+        </span>
+        <span className="rm-sep" aria-hidden="true" />
+        <span className="rm-keys"><span className="rm-key wide">ENTER</span><em>SELECT</em></span>
+        <span className="rm-sep" aria-hidden="true" />
+        <span className="rm-keys"><span className="rm-key wide">TAB</span><em>PLAYER PROFILE</em></span>
+        <span className="rm-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
+      </footer>
+
+      {profileOpen && (
+        <div className="rm-profile-scrim" onClick={() => setProfileOpen(false)}>
+          <aside className="rm-profile" role="dialog" aria-label="Player profile" onClick={e => e.stopPropagation()}>
+            <div className="rm-profile-head">
+              <span>OPERATOR FILE</span>
+              <button type="button" onClick={() => setProfileOpen(false)} aria-label="Close profile">✕</button>
+            </div>
+            <div className="rm-profile-callsign">RECOIL_01</div>
+            <div className="rm-profile-lvl">LVL {level} · DESERT OPERATIONS</div>
+            <div className="rm-profile-rows">
+              <div><span>MISSIONS</span><b className="tabular">{prof.missions}</b></div>
+              <div><span>ELIMINATIONS</span><b className="tabular">{prof.kills}</b></div>
+              <div><span>WALLET</span><b className="tabular">${prof.cash.toLocaleString('en-US')}</b></div>
+              <div><span>PRIMARY</span><b>{primaryName}</b></div>
+              <div><span>SECONDARY</span><b>{secondaryName}</b></div>
+            </div>
+            <div className="rm-profile-foot">TAB / ESC — CLOSE</div>
+          </aside>
+        </div>
+      )}
+    </main>
+  );
+}
 
 /* ================================================================
    MAIN MENU — three screens:
@@ -55,122 +340,163 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
   const secondaryName = weaponById(prof.loadout.secondary.weapon)?.short ?? '—';
   const [view, setView] = useState<'home' | 'maps' | 'missions' | 'arena'>(initialView ?? 'home');
   const [hovered, setHovered] = useState<MapId | null>(null);
+  const [denied, setDenied] = useState('');
+  const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const focusIdxRef = useRef(0);
+  // Theater keyboard: arrows/A-D hop between cards (focus drives the live
+  // overview), native Enter/Space on the focused card deploys to its operation.
+  useEffect(() => {
+    if (view !== 'maps') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        e.preventDefault();
+        focusIdxRef.current = (focusIdxRef.current + 1) % THEATERS.length;
+        cardRefs.current[focusIdxRef.current]?.focus();
+      } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        e.preventDefault();
+        focusIdxRef.current = (focusIdxRef.current + THEATERS.length - 1) % THEATERS.length;
+        cardRefs.current[focusIdxRef.current]?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view]);
+  useEffect(() => {
+    if (!denied) return;
+    const t = window.setTimeout(() => setDenied(''), 2400);
+    return () => window.clearTimeout(t);
+  }, [denied]);
   // Missions cover the story maps only — the arena lives under Arena Mode.
   const mapOrder = MAPS.filter(m => m.id !== 'arena').sort(a => (a.id === 'kasbah' ? -1 : 1));
 
   /* ---------------- HOME ---------------- */
   if (view === 'home') {
     return (
-      <main className="menu-root home-root">
-        <div className="menu-bg" aria-hidden="true" />
-        <div className="paper-grain" aria-hidden="true" />
-        <img src={operatorArt} alt="" draggable={false} className="home-operator seq" style={{ animationDelay: '.1s' }} aria-hidden="true" />
-        <div className="home-operator-fade" aria-hidden="true" />
-
-        <div className="home-left">
-          <div className="home-title-block seq" style={{ animationDelay: '.04s' }}>
-            <span className="home-eyebrow">Desert operations · single operator</span>
-            <h1 className="home-title">RECOIL</h1>
-            <span className="home-rule" aria-hidden="true" />
-          </div>
-
-          <nav className="home-nav" aria-label="Main menu">
-            <button className="home-item seq" style={{ animationDelay: '.12s' }} onClick={() => setView('maps')}>
-              <span className="home-item-idx mono">01</span>
-              <span className="home-item-body">
-                <b>Missions</b>
-                <em>Choose your battlefield and deploy</em>
-              </span>
-              <Arrow />
-            </button>
-            <button className="home-item seq" style={{ animationDelay: '.16s' }} onClick={() => setView('arena')}>
-              <span className="home-item-idx mono">02</span>
-              <span className="home-item-body">
-                <b>Arena Mode</b>
-                <em>5v5 team deathmatch · Warehouse</em>
-              </span>
-              <Arrow />
-            </button>
-            <button className="home-item seq" style={{ animationDelay: '.20s' }} onClick={onArmory}>
-              <span className="home-item-idx mono">03</span>
-              <span className="home-item-body">
-                <b>Loadout</b>
-                <em>{primaryName} + {secondaryName} · ${prof.cash.toLocaleString('en-US')}</em>
-              </span>
-              <Arrow />
-            </button>
-            <button className="home-item seq" style={{ animationDelay: '.24s' }} onClick={onSettings}>
-              <span className="home-item-idx mono">04</span>
-              <span className="home-item-body">
-                <b>Settings</b>
-                <em>Video, audio and controls</em>
-              </span>
-              <Arrow />
-            </button>
-          </nav>
-        </div>
-
-        <footer className="menu-footer">
-          <span>{s.difficulty} difficulty<i />Unlimited ammo<i />Render · WebGL</span>
-          <span className="menu-keys">
-            <span className="keycap">WASD</span> Move <i /> <span className="keycap">RMB</span> Aim <i /> <span className="keycap">G</span> Frag <i /> <span className="keycap">Esc</span> Pause
-          </span>
-        </footer>
-      </main>
+      <TacticalHome
+        prof={prof}
+        primaryName={primaryName}
+        secondaryName={secondaryName}
+        onSelect={v => setView(v)}
+        onArmory={() => onArmory?.()}
+        onSettings={onSettings}
+      />
     );
   }
 
-  /* ---------------- MAPS ---------------- */
+  /* ---------------- MAPS — THEATER SELECT ---------------- */
   if (view === 'maps') {
+    const activateTheater = (index: number) => {
+      const t = THEATERS[index];
+      if (t.locked || !t.id) {
+        setDenied('RIDGELINE THEATER LOCKED — INTEL PENDING');
+        return;
+      }
+      onMap(t.id);
+      setHovered(null);
+      setView('missions');
+    };
+    const preview = (index: number, on: boolean) => {
+      const t = THEATERS[index];
+      if (t.locked || !t.id) return;
+      setHovered(on ? t.id : cur => (cur === t.id ? null : cur));
+    };
     return (
-      <main className="menu-root pick-root">
-        <div className="menu-bg" aria-hidden="true" />
-        {/* Hovering a map takes over the ENTIRE screen with a live 3D orbit. */}
-        <div className={`pick-flyover ${hovered ? 'live' : ''}`} aria-hidden="true">
+      <main className="tx-root map2-root">
+        <div className="map2-base" aria-hidden="true" />
+        {/* Hovering a live theater takes over the screen with a 3D orbit. */}
+        <div className={`map2-flyover ${hovered ? 'live' : ''}`} aria-hidden="true">
           {mapOrder.map(map => (
-            <div key={map.id} className="pick-flyover-slot" style={{ opacity: hovered === map.id ? 1 : 0 }}>
+            <div key={map.id} className="map2-flyover-slot" style={{ opacity: hovered === map.id ? 1 : 0 }}>
               <MapFlyover mapId={map.id} active={hovered === map.id} />
             </div>
           ))}
         </div>
-        <div className="paper-grain" aria-hidden="true" />
+        <div className="tx-grain" aria-hidden="true" />
 
-        <header className="menu-header">
-          <button className="cmd-back" onClick={() => setView('home')}><span aria-hidden="true">‹</span> Back</button>
-          <span className="pick-heading">
-            <span className="menu-eyebrow">Missions</span>
-            <b>Select area of operations</b>
-          </span>
-          <span className="menu-loadout" aria-label="Equipped loadout">
-            <span><b>1</b> {primaryName}</span>
-            <span><b>2</b> {secondaryName}</span>
-          </span>
+        <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
+          <TxBack onClick={() => setView('home')} />
+          <div className="map2-titleblock">
+            <span className="map2-kicker">OPERATIONS COMMAND<br />THEATER SELECT</span>
+            <h1 className="map2-title">SELECT AREA OF OPERATIONS</h1>
+            <span className="map2-sub">DEPLOY TO A THEATER. DIFFERENT GROUND. DIFFERENT STORIES.</span>
+            <i className="tx-rule" aria-hidden="true" />
+          </div>
+          <TxCoords lat="33.7731° N" lon="44.4208° E" />
+          <div className="map2-brand">
+            <b>RECOIL</b>
+            <em>DESERT OPERATIONS&nbsp;&nbsp;//&nbsp;&nbsp;GLOBAL REACH</em>
+            <div className="map2-intel" aria-hidden="true">
+              <span>PEOPLE</span><span>TERRAIN</span><span>OBJECTIVES</span><span>RESULTS</span>
+            </div>
+            <TxMotto />
+          </div>
         </header>
 
-        <div className={`pick-tiles ${hovered ? 'dimmed' : ''}`} role="radiogroup" aria-label="Choose a map">
-          {mapOrder.map((map, index) => {
-            const opt = getMission(map.id);
+        <div className="map2-cards" role="listbox" aria-label="Choose a theater">
+          {THEATERS.map((t, i) => {
+            const obj = t.id ? getMission(t.id).phases.length : 4;
+            const isLive = !t.locked && hovered === t.id;
             return (
               <button
-                key={map.id}
-                onClick={() => { onMap(map.id); setHovered(null); setView('missions'); }}
-                onMouseEnter={() => setHovered(map.id)}
-                onMouseLeave={() => setHovered(cur => (cur === map.id ? null : cur))}
-                className={`map-tile ${hovered === map.id ? 'selected' : ''}`}
+                key={t.code}
+                ref={node => { cardRefs.current[i] = node; }}
+                type="button"
+                role="option"
+                aria-selected={isLive}
+                disabled={false}
+                onClick={() => activateTheater(i)}
+                onMouseEnter={() => preview(i, true)}
+                onMouseLeave={() => preview(i, false)}
+                onFocus={() => { focusIdxRef.current = i; preview(i, true); }}
+                onBlur={() => preview(i, false)}
+                className={`map2-card seq ${isLive ? 'sel' : ''} ${t.locked ? 'locked' : ''} ${denied && t.locked ? 'denied' : ''}`}
+                style={{ animationDelay: `${0.08 + i * 0.06}s` }}
+                aria-label={t.locked ? `${t.code} theater, locked` : `${t.code} theater, ${obj} objectives`}
               >
-                <img src={MAP_ART[map.id]} alt="" draggable={false} className="map-tile-art" />
-                <span className="map-tile-shade" aria-hidden="true" />
-                <span className="map-tile-info">
-                  <span className="map-tile-num">0{index + 1}</span>
-                  <span className="map-tile-name">{map.name}</span>
-                  <span className="map-tile-type">{map.id === 'alrasul' ? 'Desert river valley' : 'Fortified market town'}</span>
-                  <span className="map-tile-tag">{`${opt.phases.length} objectives · ${opt.name}`}</span>
+                <img src={t.art} alt="" draggable={false} className="map2-art" />
+                <span className="map2-shade" aria-hidden="true" />
+                <span className="map2-num mono">{t.num}</span>
+                <span className="map2-cardcoords mono">{t.lat}<br />{t.lon}</span>
+                {t.locked && (
+                  <span className="map2-classified mono"><TxLock size={13} /> CLASSIFIED</span>
+                )}
+                <span className="map2-info">
+                  <b>{t.code}</b>
+                  <em>{t.type}</em>
+                  <span className="map2-obj mono">{t.locked ? `${obj} OBJECTIVES · CLASSIFIED` : `${obj} OBJECTIVES · ${t.code}`}</span>
                 </span>
+                <span className="map2-go"><Arrow /></span>
               </button>
             );
           })}
         </div>
-        <p className="pick-hint mono">Hover a sector for a live overview · click to view missions</p>
+        <p className={`map2-hint mono ${denied ? 'denied' : ''}`} role="status">
+          {denied || 'HOVER A THEATER FOR A LIVE OVERVIEW · CLICK TO VIEW ITS OPERATION'}
+        </p>
+
+        <div className="map2-features seq" style={{ animationDelay: '.26s' }}>
+          <div className="map2-creed" aria-hidden="true">
+            <span>DISCIPLINE</span><span>OUTLASTS</span><span>CHAOS.</span>
+            <i className="tx-rule" />
+          </div>
+          <div className="map2-feat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c-5.5 5-5.5 12 0 17M12 3.5c5.5 5 5.5 12 0 17" /></svg>
+            <span><b>THREE THEATERS</b><em>UNIQUE ENVIRONMENTS</em></span>
+          </div>
+          <div className="map2-feat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="8.5" cy="8" r="3" /><circle cx="16" cy="9.5" r="2.4" /><path d="M3 20c0-3.3 2.5-5.5 5.5-5.5S14 16.7 14 20M15 14.7c2.8.2 5 2.2 5 5.3" /></svg>
+            <span><b>DIFFERENT THREATS</b><em>REAL OPERATIONS</em></span>
+          </div>
+          <div className="map2-feat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" strokeLinejoin="round"><path d="M3 19L10 6l4 7 2.5-4L21 19z" /><path d="M10 6l-2 3.5M12.5 13L11 15.5" /></svg>
+            <span><b>PROVE YOURSELF</b><em>COMPLETE ALL OBJECTIVES</em></span>
+          </div>
+        </div>
+
+        <footer className="map2-foot mono">
+          <span>RECOIL&nbsp;&nbsp;//&nbsp;&nbsp;FIELD NOTES&nbsp;&nbsp;//&nbsp;&nbsp;SURVIVE ADAPT WIN</span>
+          <span className="map2-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
+        </footer>
       </main>
     );
   }

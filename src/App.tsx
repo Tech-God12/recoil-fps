@@ -7,6 +7,7 @@ import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
 import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
+import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
 type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup';
@@ -331,7 +332,7 @@ export default function App() {
       {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} />}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
         <TdmSetup
           profile={profile}

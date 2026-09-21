@@ -1555,3 +1555,181 @@ img { display: block; max-width: 100%; }
   line-height: 1.5;
 }
 .tdm-armor-pitch b { color: var(--brass); font-family: var(--mono, monospace); }
+
+/* ================================================================
+   DUSTYARD TACTICAL (CS2) — cs-* block
+   ================================================================ */
+.cs-board {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+  min-width: 380px; padding: 8px 14px 9px; text-align: center;
+  background: linear-gradient(180deg, rgba(8,10,9,0.8), rgba(8,10,9,0.52));
+  border: 1px solid var(--line); border-radius: 3px;
+  box-shadow: 0 10px 34px rgba(0,0,0,0.45);
+}
+.cs-board-label { display: block; font-size: 8px; letter-spacing: 0.24em; color: var(--bone-mute); text-transform: uppercase; }
+.cs-board-line { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 2px; }
+.cs-score {
+  font-family: var(--display); font-weight: 800; font-size: 30px; line-height: 1;
+  color: var(--bone-dim); font-variant-numeric: tabular-nums; min-width: 46px;
+}
+.cs-score.alpha.lead { color: #6FA8DC; }
+.cs-score.bravo.lead { color: #E0A03A; }
+.cs-clock { font-size: 15px; letter-spacing: 0.14em; color: var(--bone); min-width: 74px; }
+.cs-clock.urgent { color: var(--blood); animation: cs-pulse 0.9s ease-in-out infinite; }
+.cs-clock.planted { color: #FF5A48; }
+.cs-board-teams { display: flex; justify-content: space-between; gap: 12px; font-size: 9px; letter-spacing: 0.14em; color: var(--bone-mute); margin-top: 2px; }
+
+.cs-roster { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; margin-top: 6px; }
+.cs-roster-col { display: flex; flex-direction: column; gap: 2px; }
+.cs-row {
+  display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--bone-dim);
+  padding: 1px 4px; border-radius: 2px;
+}
+.cs-row.mine { background: rgba(111,168,220,0.10); color: var(--bone); }
+.cs-row.dead { opacity: 0.38; text-decoration: line-through; }
+.cs-row b { font-weight: 600; flex: 1; text-align: left; }
+.cs-row em { font-style: normal; color: var(--bone-mute); }
+.cs-armor { font-style: normal; width: 12px; color: var(--bone-mute); }
+.cs-armor[data-armor='1'] { color: #9FB6C8; }
+.cs-armor[data-armor='2'] { color: var(--volt); }
+.cs-bomb-tag { font-style: normal; color: #FF5A48; animation: cs-pulse 1s steps(2) infinite; }
+.cs-money-tag { font-style: normal; font-size: 9px; color: #7FA860; }
+
+@keyframes cs-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* freeze + planted + banners */
+.cs-freeze {
+  position: absolute; left: 50%; top: 130px; transform: translateX(-50%);
+  text-align: center; padding: 10px 22px;
+  background: rgba(8,10,9,0.72); border: 1px solid var(--line); border-radius: 3px;
+}
+.cs-freeze h2 { font-size: 18px; letter-spacing: 0.3em; color: #6FA8DC; }
+.cs-freeze h2 b { color: var(--bone); }
+.cs-freeze p { font-size: 10px; letter-spacing: 0.16em; color: var(--bone-mute); margin-top: 4px; }
+.cs-planted {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 16px; font-family: var(--mono, monospace); font-size: 13px; letter-spacing: 0.16em;
+  color: #FF6A54; background: rgba(40,6,4,0.72); border: 1px solid rgba(255,90,72,0.5); border-radius: 3px;
+  animation: cs-pulse 1s steps(2) infinite;
+}
+.cs-planted.final { animation-duration: 0.4s; }
+.cs-planted-dot { width: 8px; height: 8px; border-radius: 50%; background: #FF3020; box-shadow: 0 0 8px #FF3020; }
+.cs-round-banner {
+  position: absolute; left: 50%; top: 34%; transform: translateX(-50%);
+  text-align: center; padding: 14px 34px;
+  background: rgba(8,10,9,0.82); border: 1px solid var(--line); border-radius: 3px;
+}
+.cs-round-banner h2 { font-size: 24px; letter-spacing: 0.3em; }
+.cs-round-banner.win h2 { color: #6FA8DC; }
+.cs-round-banner.lose h2 { color: #E0A03A; }
+.cs-round-banner p { font-size: 11px; letter-spacing: 0.14em; color: var(--bone-mute); margin-top: 4px; }
+.cs-halftime {
+  position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%);
+  font-size: 12px; letter-spacing: 0.24em; color: var(--brass);
+  padding: 6px 16px; background: rgba(8,10,9,0.7); border: 1px solid var(--line); border-radius: 3px;
+}
+
+/* wallet + armor chip (bottom left, replaces the mission cash block) */
+.cs-wallet {
+  position: absolute; left: 18px; bottom: 18px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; background: rgba(8,10,9,0.66); border: 1px solid var(--line); border-radius: 3px;
+}
+.cs-wallet-money { font-size: 20px; font-weight: 700; color: #9CCB74; }
+.cs-wallet-armor { font-size: 13px; color: var(--bone); display: inline-flex; gap: 6px; align-items: center; }
+.cs-kit { font-style: normal; font-size: 9px; color: var(--volt); letter-spacing: 0.12em; border: 1px solid var(--line); padding: 1px 4px; border-radius: 2px; }
+.cs-loss { font-size: 9px; letter-spacing: 0.12em; color: var(--bone-mute); }
+
+/* spectate + C4 chip */
+.cs-spectate {
+  position: absolute; left: 50%; bottom: 26%; transform: translateX(-50%);
+  text-align: center; padding: 10px 24px;
+  background: rgba(20,4,4,0.72); border: 1px solid rgba(255,90,72,0.4); border-radius: 3px;
+}
+.cs-spectate h2 { font-size: 16px; letter-spacing: 0.3em; color: #FF6A54; }
+.cs-spectate p { font-size: 10px; letter-spacing: 0.14em; color: var(--bone-mute); margin-top: 3px; }
+.cs-c4-chip {
+  position: absolute; right: 18px; bottom: 130px;
+  font-size: 10px; letter-spacing: 0.16em; color: #FF6A54;
+  padding: 4px 10px; background: rgba(8,10,9,0.66); border: 1px solid rgba(255,90,72,0.4); border-radius: 3px;
+}
+
+/* ============ BUY MENU ============ */
+.cs-buy-root {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(4,5,4,0.82); z-index: 40;
+}
+.cs-buy-root.cs-buy-overlay { background: rgba(4,5,4,0.6); backdrop-filter: blur(2px); }
+.cs-buy-panel {
+  width: min(1060px, 94vw); max-height: 92vh; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, rgba(14,16,14,0.97), rgba(9,10,9,0.97));
+  border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+}
+.cs-buy-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px; border-bottom: 1px solid var(--line);
+}
+.cs-buy-eyebrow { font-family: var(--mono, monospace); font-size: 9px; letter-spacing: 0.26em; color: var(--bone-mute); }
+.cs-buy-title { font-family: var(--display); font-size: 22px; letter-spacing: 0.08em; color: var(--bone); }
+.cs-buy-wallet { display: flex; align-items: center; gap: 12px; }
+.cs-buy-money { font-size: 22px; font-weight: 700; color: #9CCB74; }
+.cs-eco-chip {
+  font-family: var(--mono, monospace); font-size: 9px; letter-spacing: 0.2em;
+  padding: 3px 8px; border: 1px solid var(--line); border-radius: 2px; color: var(--bone-mute);
+}
+.cs-eco-chip[data-eco='ECO'] { color: #E0A03A; border-color: rgba(224,160,58,0.5); }
+.cs-eco-chip[data-eco='FORCE'] { color: var(--brass); border-color: rgba(200,150,60,0.5); }
+.cs-eco-chip[data-eco='FULL BUY'] { color: #9CCB74; border-color: rgba(156,203,116,0.5); }
+.cs-buy-body { display: grid; grid-template-columns: 1fr 260px; gap: 0; overflow: hidden; }
+.cs-buy-catalog { padding: 12px 16px 16px; overflow-y: auto; max-height: calc(92vh - 74px); }
+.cs-buy-cat { margin-bottom: 14px; }
+.cs-buy-cat-title {
+  font-family: var(--mono, monospace); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--bone-mute); margin-bottom: 6px;
+}
+.cs-buy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.cs-card {
+  text-align: left; padding: 9px 10px; cursor: pointer;
+  background: rgba(255,255,255,0.025); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--bone-dim); transition: border-color 0.12s, background 0.12s;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.cs-card:hover { border-color: var(--volt); background: rgba(255,255,255,0.05); }
+.cs-card.owned { border-color: rgba(156,203,116,0.55); background: rgba(156,203,116,0.07); }
+.cs-card.poor { opacity: 0.45; }
+.cs-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.cs-card-name { font-size: 13px; color: var(--bone); letter-spacing: 0.04em; }
+.cs-card-price { font-size: 12px; color: #9CCB74; }
+.cs-card.poor .cs-card-price { color: var(--blood); }
+.cs-card-stats { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 9px; color: var(--bone-mute); }
+.cs-card-stats i { font-style: normal; }
+.cs-card-stats b { color: var(--brass); margin-right: 2px; }
+.cs-card-blurb { font-size: 9px; color: var(--bone-mute); line-height: 1.35; }
+.cs-card-nade { position: relative; }
+.cs-nade-ctl { display: flex; align-items: center; gap: 10px; }
+.cs-nade-ctl button {
+  width: 22px; height: 22px; border: 1px solid var(--line); background: rgba(255,255,255,0.04);
+  color: var(--bone); border-radius: 2px; cursor: pointer; font-size: 13px; line-height: 1;
+}
+.cs-nade-ctl button:hover { border-color: var(--volt); }
+.cs-buy-side {
+  border-left: 1px solid var(--line); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+  background: rgba(255,255,255,0.015); overflow-y: auto; max-height: calc(92vh - 74px);
+}
+.cs-load-rows { display: flex; flex-direction: column; gap: 4px; }
+.cs-load-row {
+  display: flex; justify-content: space-between; font-size: 11.5px; color: var(--bone-mute);
+  border-bottom: 1px dashed rgba(255,255,255,0.06); padding-bottom: 3px;
+}
+.cs-load-row b { color: var(--bone); font-weight: 600; }
+.cs-buy-total { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.cs-total-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--bone-mute); }
+.cs-total-row b { color: var(--bone); font-size: 16px; }
+.cs-total-row.dim b { color: var(--bone-mute); font-size: 12px; }
+.cs-buy-commit { margin-top: 8px; justify-content: center; }
+.cs-buy-commit.cs-deny { filter: saturate(0.4) brightness(0.8); }
+.cs-deploy { justify-content: center; }
+.cs-deny-note { font-size: 10.5px; color: var(--blood); letter-spacing: 0.08em; animation: cs-shake 0.4s; }
+@keyframes cs-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.cs-buy-hint { font-size: 9px; line-height: 1.5; color: var(--bone-mute); letter-spacing: 0.06em; }

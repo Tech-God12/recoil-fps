@@ -4,6 +4,7 @@ import { Reticle } from './Settings';
 import MissionObjective from './MissionObjective';
 import ScopeView, { type ScopeControls } from './ScopeView';
 import TdmHud from './TdmHud';
+import CsHud from './CsHud';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
@@ -44,6 +45,7 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
       {hud.mission && <MissionObjective mission={hud.mission} />}
       {/* ============ WAREHOUSE TDM LAYER ============ */}
       {hud.tdm && <TdmHud tdm={hud.tdm} hp={hud.hp} hpMax={hud.hpMax} />}
+      {hud.cs && <CsHud cs={hud.cs} />}
 
       {/* ============ THREAT READOUT (slim — no centre ring clutter) ============ */}
       {hud.ads < .3 && hud.nearest && hud.nearest.dist < 30 && (() => {
@@ -93,7 +95,7 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
       </div>
 
       {/* ============ CASH (missions only — Warehouse TDM pays in kills) ============ */}
-      {!hud.tdm && (
+      {!hud.tdm && !hud.cs && (
         <div className="hud-cash mono" aria-label={`Cash ${hud.cash}`}>
           <span>$</span>{hud.cash.toLocaleString('en-US')}
         </div>

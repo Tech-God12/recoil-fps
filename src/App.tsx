@@ -5,12 +5,14 @@ import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
+import CSBuy from './ui/CSBuy';
+import { DEFAULT_CS_LOADOUT, loadoutCost as loadoutCostLocal, type CSLoadout } from './game/cs/economy';
 import { type ArmorLevel } from './game/tdm/armor';
 import type { Loadout } from './game/economy/loadout';
 import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 
-type Phase = 'menu' | 'tdm-setup' | 'playing' | 'paused' | 'results' | 'armory';
+type Phase = 'menu' | 'tdm-setup' | 'cs-setup' | 'playing' | 'paused' | 'results' | 'armory';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
 /**
@@ -69,6 +71,9 @@ export default function App() {
   const [tdmArmor, setTdmArmor] = useState<ArmorLevel>(1);
   const [tdmLoadout, setTdmLoadout] = useState<Loadout | null>(null);
   const tdmMode = useRef(false);
+  // ---- DUSTYARD TACTICAL ----
+  const [csLoadout, setCsLoadout] = useState<CSLoadout>({ ...DEFAULT_CS_LOADOUT });
+  const [csBuyOpen, setCsBuyOpen] = useState(false);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -147,7 +152,8 @@ export default function App() {
       case 'cash':
         setFx(f => ({
           ...f,
-          scorePops: [...f.scorePops.slice(-2), { id, text: `+$${event.amount}`, headshot: false, cash: true }],
+          // DUSTYARD spends from the same ledger: purchases pop as −$N.
+          scorePops: [...f.scorePops.slice(-2), { id, text: event.amount >= 0 ? `+$${event.amount}` : `−$${-event.amount}`, headshot: false, cash: true }],
         }));
         later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1300);
         break;
@@ -171,18 +177,24 @@ export default function App() {
         setFx(f => ({ ...f, missionBanner: { id, title: event.phase.title, index: event.index } }));
         later(() => setFx(f => f.missionBanner?.id === id ? { ...f, missionBanner: null } : f), 2600);
         break;
+      case 'cs-buy':
+        // The buy overlay owns the cursor; the engine keeps ticking freeze time.
+        setCsBuyOpen(event.open);
+        if (event.open && document.pointerLockElement) document.exitPointerLock();
+        break;
       case 'end': {
         engineRef.current?.setPaused(true);
         // Debrief payout: run cash × difficulty, plus the grade bonus on a win.
         // (Losses keep 100% of earned cash but forfeit extraction + grade.)
         // Warehouse TDM pays no cash at all — it only banks the eliminations.
         const tdm = event.tdm;
-        const gb = event.win && !tdm ? gradeBonus(gradeFor(event).grade) : 0;
-        const earned = tdm ? 0 : Math.round(event.cash * event.difficultyMul) + gb;
+        const cs = event.cs;
+        const gb = event.win && !tdm && !cs ? gradeBonus(gradeFor(event).grade) : 0;
+        const earned = tdm || cs ? 0 : Math.round(event.cash * event.difficultyMul) + gb;
         const before = profileRef.current;
         const next = grantCash(before, earned, 'MISSION');
-        next.missions += tdm ? 0 : 1;
-        next.kills += tdm ? tdm.playerKills : event.kills;
+        next.missions += tdm || cs ? 0 : 1;
+        next.kills += cs ? cs.playerKills : tdm ? tdm.playerKills : event.kills;
         updateProfile(next);
         setWallet({ before: before.cash, after: next.cash, gradeBonus: gb, earned });
         changePhase('results');
@@ -209,7 +221,8 @@ export default function App() {
         engine.setPaused(false);
         changePhase('playing');
         setError('');
-      } else if (phaseRef.current === 'playing' && !engine.scopeAdjusting) {
+      } else if (phaseRef.current === 'playing' && !engine.scopeAdjusting && !engine.buyMenuOpen) {
+        // The CS buy overlay intentionally releases the cursor — that is not a pause.
         engine.setPaused(true);
         setHud(engine.hud());
         changePhase('paused');
@@ -240,7 +253,7 @@ export default function App() {
 
   useEffect(() => () => { session.current++; clearTimers(); engineRef.current?.dispose(); }, [clearTimers]);
 
-  const deploy = async (armor?: ArmorLevel, loadoutOverride?: Loadout) => {
+  const deploy = async (armor?: ArmorLevel, loadoutOverride?: Loadout, csGear?: CSLoadout) => {
     if (!canvasRef.current || launching) return;
     const epoch = ++session.current;
     clearTimers();
@@ -253,10 +266,13 @@ export default function App() {
     if (session.current !== epoch) return;
     try {
       const tdmRound = settings.map === 'arena';
+      const csRound = settings.map === 'dustyard';
       tdmMode.current = tdmRound;
+      if (csRound) setCsBuyOpen(false);
       const engine = await Engine.create(
         canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); },
         settings.map, loadoutOverride ?? profileRef.current.loadout, tdmRound ? (armor ?? tdmArmor) : 0,
+        csRound ? (csGear ?? csLoadout) : null,
       );
       engineRef.current = engine;
       engine.applySettings(settings);
@@ -301,6 +317,14 @@ export default function App() {
     changePhase('tdm-setup');
     if (document.pointerLockElement) document.exitPointerLock();
   };
+  const openCsSetup = () => {
+    set({ map: 'dustyard' });
+    setShowSettings(false);
+    setError('');
+    setCsBuyOpen(false);
+    changePhase('cs-setup');
+    if (document.pointerLockElement) document.exitPointerLock();
+  };
   const openArmory = (from: 'menu' | 'results') => {
     setArmoryFrom(from);
     setShowSettings(false);
@@ -312,6 +336,7 @@ export default function App() {
   };
   // The match starts only here, from the setup screen's own deploy button.
   const deployTdm = () => { void deploy(tdmArmor, tdmLoadout ?? profileRef.current.loadout); };
+  const deployCs = () => { void deploy(undefined, undefined, csLoadout); };
   const fullscreen = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -323,7 +348,7 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onTdm={openTdmSetup} profile={profile} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={deploy} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onTdm={openTdmSetup} onCs={openCsSetup} profile={profile} />}
       {phase === 'tdm-setup' && (
         <TdmSetup
           profile={profile}
@@ -336,9 +361,36 @@ export default function App() {
           onBack={() => changePhase('menu')}
         />
       )}
+      {phase === 'cs-setup' && (
+        <CSBuy
+          money={800}
+          gear={csLoadout}
+          onBuy={cart => {
+            // Pre-match wallet is fresh ($800) — validate locally, no engine yet.
+            if (loadoutCostLocal(cart, 'alpha', csLoadout) > 800) return false;
+            setCsLoadout({ ...cart });
+            return true;
+          }}
+          onDeploy={deployCs}
+          onBack={() => changePhase('menu')}
+        />
+      )}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={deploy} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={deploy} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={deploy} onBack={armoryBack} />}
+      {phase === 'playing' && csBuyOpen && (
+        <CSBuy
+          overlay
+          money={engineRef.current?.csMoney ?? 800}
+          gear={csLoadout}
+          onBuy={cart => {
+            const ok = engineRef.current?.csBuyCart(cart) ?? false;
+            if (ok) setCsLoadout({ ...cart });
+            return ok;
+          }}
+          onClose={() => { engineRef.current?.closeBuyMenu(); setCsBuyOpen(false); void engineRef.current?.requestLock(); }}
+        />
+      )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>

@@ -28,6 +28,12 @@ import {
   TDM_FLASHES, TDM_FRAGS, TDM_MATCH_SECONDS, TDM_RESPAWN_SECONDS,
   armorMaxHp, armorOf, blastArmorMul, tdmFragDamage, tdmWeaponDamage, type ArmorLevel, type TeamId,
 } from './tdm/armor';
+import { CSManager, type CsHudState, type CsReport, type CSPhase } from './cs/manager';
+import { CSBot, type CSBotCtx } from './cs/bot';
+import {
+  DEFAULT_CS_LOADOUT, gunById, loadoutCost,
+  CS_KNIFE_DAMAGE, CS_KNIFE_BACKSTAB, CS_KNIFE_SPEED_MUL, type CSLoadout, type CSWeaponClass, type CSWeaponId,
+} from './cs/economy';
 import type { MissionReport, MissionPhase } from './systems/mission';
 import type { PressureStats } from './systems/reinforcements';
 
@@ -134,6 +140,8 @@ export interface HudState {
   mission?: MissionHud;
   /** Warehouse 5v5 TDM readout (scoreboard, clock, respawn, rosters). */
   tdm?: TdmHudState;
+  /** DUSTYARD TACTICAL readout (rounds, money, bomb, freeze, rosters). */
+  cs?: CsHudState;
 }
 
 export type GameEvent =
@@ -147,7 +155,8 @@ export type GameEvent =
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
   | { type: 'feed'; text: string; headshot: boolean; mine: boolean }
-  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: TdmReport };
+  | { type: 'cs-buy'; open: boolean }
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: TdmReport; cs?: CsReport };
 
 /** Warehouse TDM debrief: both scores, the personal line, and the winning side. */
 export interface TdmReport {
@@ -193,6 +202,8 @@ interface WeaponDef {
   moveSpeedMul?: number;
   suppressed?: boolean;
   boltAction?: boolean;
+  /** CS knife: 2.3 m reach, 40 dmg, 150 backstab, 1.15× move speed. */
+  knife?: boolean;
   reticle?: ScopeReticle;
   lpvo?: boolean;
   lpvoHigh?: boolean;
@@ -208,7 +219,7 @@ interface Grenade {
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   fuse: number;
-  kind: 'frag' | 'flash';
+  kind: 'frag' | 'flash' | 'smoke' | 'molotov';
   fromAI: boolean;
   /** TDM: which side threw it — frags only hurt the other team. */
   team: TeamId;
@@ -283,6 +294,18 @@ export class Engine {
   private tdmPlayerDeaths = 0;
   private tdmMatchTimeLeft = TDM_MATCH_SECONDS;
   private tdmRosterVersion = -1;
+  // ---- DUSTYARD TACTICAL (CS2 competitive) ----
+  private isCS = false;
+  private csArmor: ArmorLevel = 0;
+  private cs!: CSManager;
+  private csRosterVersion = -1;
+  /** The gear the player is carrying right now; death resets it to the starter pistol. */
+  private csGear: CSLoadout = { ...DEFAULT_CS_LOADOUT };
+  /** Parallel to this.weapons — the kill-reward class of every equipped gun. */
+  private csClasses: CSWeaponClass[] = [];
+  /** True when the player finished the previous round alive (guns persist). */
+  private csSurvived = false;
+  private csPhase: CSPhase = 'FREEZE';
   private rosterVersion = -1;
   private started = false;
   private finishDelay = -1;
@@ -438,19 +461,23 @@ export class Engine {
    * could even paint. create() stages it across frames and pre-compiles shaders off the
    * blocking path instead.
    */
-  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, armor: ArmorLevel = 0): Promise<Engine> {
+  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, armor: ArmorLevel = 0, csGear: CSLoadout | null = null): Promise<Engine> {
     const engine = new Engine(canvas);
-    await engine.init(difficulty, onEvent, mapId, loadout, armor);
+    await engine.init(difficulty, onEvent, mapId, loadout, armor, csGear);
     return engine;
   }
 
-  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, armor: ArmorLevel = 0) {
+  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, armor: ArmorLevel = 0, csGear: CSLoadout | null = null) {
     this.onEvent = onEvent;
     // Warehouse is the TDM arena: same engine, different ruleset (no mission
     // runtime, armor-sized health pools, 10 s respawns, 2:30 clock).
     this.isTDM = mapId === 'arena';
     this.tdmArmor = this.isTDM ? armor : 0;
     if (this.isTDM) { this.hpMax = armorMaxHp(this.tdmArmor); this.hp = this.hpMax; this.frags = TDM_FRAGS; this.flashes = TDM_FLASHES; }
+    // de_dustyard is the TACTICAL competitive mode: MR8 rounds, the CS2 economy,
+    // the C4 — and like the arena, no mission runtime and no respawns mid-round.
+    this.isCS = mapId === 'dustyard';
+    if (this.isCS) this.csGear = csGear ? { ...csGear } : { ...DEFAULT_CS_LOADOUT };
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     // Cap pixel ratio at 1.25 — the single biggest FPS win on high-DPI screens
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
@@ -684,6 +711,7 @@ void main(){
     this.reserves = [Infinity, Infinity, Infinity, Infinity, Infinity];
     this.difficultyId = difficulty;
     if (loadout) this.armLoadout(loadout);
+    if (this.isCS) this.armCSGear();
 
     // Muzzle Flash
     const fm = new THREE.MeshBasicMaterial({
@@ -762,7 +790,8 @@ void main(){
     await nextFrame();
     this.ai = new AIManager(ctx, []);
     if (this.isTDM) this.createTDM(ctx);
-    if (!this.isTDM) this.missionRuntime = new MissionRuntime({
+    if (this.isCS) this.createCS(ctx);
+    if (!this.isTDM && !this.isCS) this.missionRuntime = new MissionRuntime({
       scene: this.scene, world: this.world, camera: this.camera, ai: this.ai, player: this.pos,
       isAlive: () => !this.dead,
       phaseChanged: (phase, index) => this.onEvent({ type: 'objective', phase, index }),
@@ -847,7 +876,24 @@ void main(){
       this.flashes--;
       const dir = this.camDir();
       this.spawnGrenade(this.throwOrigin(dir), this.eyePos().addScaledVector(dir, 20), false, 'flash');
+    }
+    // ---- DUSTYARD utility throws: smoke (Z) and molotov/incendiary (N) ----
+    if (this.isCS && e.code === 'KeyZ' && this.csGear.smoke > 0 && this.reloadT < 0 && !this.dead) {
+      this.csGear.smoke--;
+      const dir = this.camDir();
+      this.spawnGrenade(this.throwOrigin(dir), this.eyePos().addScaledVector(dir, 20), false, 'smoke', 'alpha');
       audio.throwWhoosh();
+    }
+    if (this.isCS && e.code === 'KeyN' && this.csGear.molotov > 0 && this.reloadT < 0 && !this.dead) {
+      this.csGear.molotov--;
+      const dir = this.camDir();
+      this.spawnGrenade(this.throwOrigin(dir), this.eyePos().addScaledVector(dir, 20), false, 'molotov', 'alpha');
+      audio.throwWhoosh();
+    }
+    // ---- DUSTYARD buy menu toggle (B) — only inside the freeze-time buy window ----
+    if (this.isCS && e.code === 'KeyB') {
+      if (this.csBuyWindowOpen) this.toggleBuyMenu(!this.csBuyMenuOpen);
+      else if (this.csBuyMenuOpen) this.toggleBuyMenu(false);
     }
 
     // CROUCH & SLIDE MECHANIC
@@ -1462,6 +1508,10 @@ void main(){
     this.mags[this.cur]--;
     this.fireCD = 60 / d.rpm;
     this.shots++;
+    // The knife never runs dry: infinite free slashes (CS rule), no ammo bookkeeping.
+    if (!d.knife) this.mags[this.cur]--;
+    this.fireCD = 60 / d.rpm;
+    this.shots += d.knife ? 0 : 1;
     if (d.boltAction ?? this.cur === 3) { this.boltCycle = 1.25; this.rmb = false; }
     this.shotResetT = 0.28;
     if (d.pumpShotgun) {
@@ -1533,7 +1583,55 @@ void main(){
       if (!d.suppressed) this.effects.tracer(muzzleWorld, h.point);
       const enemy = (h.object.userData.enemy as Enemy | undefined);
       const tdmBot = (h.object.userData.tdmBot as TDMBot | undefined);
-      if (tdmBot && !tdmBot.dead) {
+      const csBot = (h.object.userData.csBot as CSBot | undefined);
+      if (csBot && !csBot.dead) {
+        // ---- DUSTYARD TACTICAL: bots of the BRAVO side (or traitor ALPHA in theory) ----
+        const part = h.object.userData.part as string;
+        let raw = d.damage;
+        if (d.knife) {
+          // Backstab: striking inside the target's rear 130° pays the instant kill.
+          const victimFwd = this._t3.set(-Math.sin(csBot.yaw), 0, -Math.cos(csBot.yaw));
+          const behind = victimFwd.dot(dir) > 0.42;
+          raw = behind ? CS_KNIFE_BACKSTAB : d.damage;
+        } else {
+          if (part === 'head') raw *= d.headMul;
+          else if (part === 'limb') raw *= d.limbMul;
+          if (h.distance > (d.falloffStart ?? 35)) raw *= (d.falloffMul ?? 0.85);
+        }
+        if (!shotHit) { this.hits++; shotHit = true; }
+        this.effects.blood(h.point);
+        audio.fleshImpact(0);
+        if (part === 'head' && !d.knife) audio.headshotDink();
+        // Full-damage CS model: no TDM 0.55× softening — armor lives in takeDamage.
+        const killed = csBot.takeDamage(raw, part === 'head' && !d.knife, 'PLAYER');
+        if (killed) {
+          this.kills++;
+          this.score += part === 'head' ? 150 : 100;
+          audio.killConfirm();
+          if (part === 'head' && !d.knife) { this.headshots++; voice.headshot(); }
+          if (this.kills === 1) voice.firstBlood();
+          const now = performance.now();
+          if (now - this.lastKillT < 2600) this.streak++;
+          else { this.streak = 1; this.streakPaidMark = 0; }
+          this.lastKillT = now;
+          if (this.streak >= 2) {
+            const label = this.streak >= 6 ? 'UNSTOPPABLE'
+              : this.streak === 5 ? 'PENTA KILL'
+                : this.streak === 4 ? 'QUAD KILL'
+                  : this.streak === 3 ? 'TRIPLE KILL' : 'DOUBLE KILL';
+            voice.streak(label);
+            this.onEvent({ type: 'streak', label });
+          }
+          // The CS economy pays by the GUN's class ($1500 for the knife!).
+          this.cs.playerKill(d.knife ? 'knife' : (this.csClasses[this.cur] ?? 'rifle'), csBot);
+          this.onEvent({ type: 'hit', kill: true });
+          this.onEvent({ type: 'kill', name: csBot.name, weapon: d.name, headshot: part === 'head' && !d.knife, label: '+1 KILL' });
+          this.rebuildHittables();
+        } else {
+          audio.hitMarker();
+          this.onEvent({ type: 'hit', kill: false });
+        }
+      } else if (tdmBot && !tdmBot.dead) {
         // ---- Warehouse TDM: bots of the opposite team ----
         const part = h.object.userData.part as string;
         let raw = d.damage;
@@ -1653,6 +1751,13 @@ void main(){
     this.vmKickRot = 1;
 
     // Audio & Muzzle Flash — each weapon gets its own signature report
+    if (d.knife) {
+      // A knife makes neither bang nor flash — just the swing.
+      this.ai.notifyGunshot(this.pos, 6);
+      if (this.isCS) this.cs.notifyGunshot(this.pos, 6, 'alpha');
+      this.staticTime = 0;
+      return;
+    }
     if (d.suppressed) audio.fireSuppressed();
     else {
       const tag = d.audioTag ?? (['m4', 'ak', 'pistol', 'sniper', 'smg'] as const)[this.cur] ?? 'm4';
@@ -1863,6 +1968,7 @@ void main(){
     this.hittables = [...this.world.occluders];
     if (this.world.glass) this.hittables.push(this.world.glass);
     if (this.isTDM) this.hittables.push(...this.tdm.getHittables());
+    if (this.isCS) this.hittables.push(...this.cs.getHittables());
     for (const e of this.ai.enemies) {
       if (!e.dead) this.hittables.push(...e.model.hitMeshes);
     }
@@ -1879,10 +1985,15 @@ void main(){
     return v;
   }
 
-  private spawnGrenade(from: THREE.Vector3, target: THREE.Vector3, fromAI: boolean, kind: 'frag' | 'flash' = 'frag', team: TeamId = 'bravo') {
+  private spawnGrenade(from: THREE.Vector3, target: THREE.Vector3, fromAI: boolean, kind: 'frag' | 'flash' | 'smoke' | 'molotov' = 'frag', team: TeamId = 'bravo') {
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.08, 10, 8),
-      new THREE.MeshStandardMaterial({ color: kind === 'frag' ? 0x243224 : 0x2A2A38, roughness: 0.5, metalness: 0.6 })
+      new THREE.MeshStandardMaterial({
+        color: kind === 'frag' ? 0x243224
+          : kind === 'flash' ? 0x2A2A38
+            : kind === 'smoke' ? 0x6E7276 : 0x8A4A20,
+        roughness: 0.5, metalness: 0.6,
+      })
     );
     mesh.castShadow = true;
     mesh.position.copy(from);
@@ -1944,6 +2055,22 @@ void main(){
 
   private explode(g: Grenade) {
     const distP = g.pos.distanceTo(this.eyePos());
+    // ---- DUSTYARD utility: smoke screen and incendiary zone ----
+    if (g.kind === 'smoke') {
+      audio.smokePop(g.pos.x, g.pos.y, g.pos.z);
+      if (this.isCS) this.cs.detonateSmoke(g.pos.clone());
+      this.scene.remove(g.mesh);
+      g.mesh.geometry.dispose();
+      return;
+    }
+    if (g.kind === 'molotov') {
+      audio.fireIgnite(g.pos.x, g.pos.y, g.pos.z);
+      if (this.isCS) this.cs.detonateFire(g.pos.clone(), g.team);
+      this.effects.explosion(g.pos);
+      this.scene.remove(g.mesh);
+      g.mesh.geometry.dispose();
+      return;
+    }
     if (g.kind === 'frag') {
       this.effects.explosion(g.pos);
       // blast wave blows out nearby windows
@@ -1962,6 +2089,8 @@ void main(){
         // Arena blasts run the TDM blast model: raw frag damage scaled by the
         // plate you are wearing, handed over pre-armored so nothing applies twice.
         if (distP < 7) this.damagePlayerTDM(tdmFragDamage(distP) * blastArmorMul(this.tdmArmor), g.pos, false, true);
+      } else if (this.isCS) {
+        if (distP < 7) this.damagePlayerCS(tdmFragDamage(distP) * blastArmorMul(this.csArmor), g.pos, false, undefined, true);
       } else if (distP < 6.5) {
         const dmg = distP < 3.2 ? 95 : THREE.MathUtils.lerp(95, 20, (distP - 3.2) / 3.3);
         this.damagePlayer(dmg, g.pos);
@@ -1972,6 +2101,18 @@ void main(){
         if (kills.length && !g.fromAI) {
           for (const victim of kills) {
             this.tdmPlayerKills++; this.kills++;
+            this.onEvent({ type: 'kill', name: victim.name, weapon: 'FRAG', headshot: false, label: '+1 KILL' });
+          }
+          audio.killConfirm();
+          this.rebuildHittables();
+        }
+      }
+      if (this.isCS) {
+        const { kills } = this.cs.applyExplosion(g.pos, 'frag', g.team, !g.fromAI);
+        if (kills.length && !g.fromAI) {
+          for (const victim of kills) {
+            this.kills++;
+            this.cs.playerKill('grenade', victim);   // pays the $300 grenade award
             this.onEvent({ type: 'kill', name: victim.name, weapon: 'FRAG', headshot: false, label: '+1 KILL' });
           }
           audio.killConfirm();
@@ -2011,6 +2152,7 @@ void main(){
         }
       }
       if (this.isTDM) this.tdm.applyExplosion(g.pos, 'flash', g.team);
+      if (this.isCS) this.cs.applyExplosion(g.pos, 'flash', g.team);
       for (const e of this.ai.enemies) {
         if (!e.dead && e.pos.distanceTo(g.pos) < 12) e.applyStun(4.0);
       }
@@ -2284,6 +2426,293 @@ void main(){
     else voice.defeat();
   }
 
+  /* ==================== DUSTYARD TACTICAL (CS2 competitive) ==================== */
+
+  /** Armory weapon id → CS kill-reward class (drive-by helper for the buy menu). */
+  private static csClass(id: CSWeaponId): CSWeaponClass { return gunById(id).cls; }
+
+  /** Build the competitive match: nine bots with duties, MR8 clock, the C4. */
+  private createCS(ctx: AIContext) {
+    const botCtx: CSBotCtx = {
+      occluders: this.world.occluders,
+      coverNodes: this.world.coverNodes,
+      groundHeight: this.world.navigationHeight ?? this.world.groundHeight,
+      moveCollide: ctx.moveCollide,
+      effects: this.effects,
+      playerFeet: () => this.pos.clone(),
+      playerEye: () => this.eyePos(),
+      playerAlive: () => !this.dead,
+      playerArmor: () => this.csArmor,
+      // Bots deal RAW damage; the vest is applied here, once, exactly like TDM.
+      damagePlayer: (amount, from, head) => this.damagePlayerCS(amount, from, head),
+      onCallout: (kind, at, team) => this.csCallout(kind, at, team),
+      aiThrowGrenade: (from, target, team, kind) => this.spawnGrenade(from, target, true, kind ?? 'frag', team),
+      onBotFire: at => { audio.enemyFireSpatial(at.x, at.y, at.z); this.addPing(at); },
+      smokes: () => this.cs.smokes,
+    };
+    this.cs = new CSManager({
+      world: this.world,
+      scene: this.scene,
+      ctx: botCtx,
+      onFeed: (text, headshot, mine) => this.onEvent({ type: 'feed', text, headshot, mine }),
+      onMoney: (amount, reason) => this.onEvent({ type: 'cash', amount, reason, total: this.cs.playerMoney }),
+      onPhase: phase => this.onCSPhase(phase),
+      onRoundEnd: (winner) => {
+        // Guns persist only for a survivor; the manager owns the wallet.
+        this.csSurvived = !this.cs.playerDead;
+        if (winner === 'alpha') { voice.roundWin(); this.onEvent({ type: 'callout', text: 'ALPHA WINS THE ROUND' }); }
+        else { voice.roundLose(); this.onEvent({ type: 'callout', text: 'BRAVO WINS THE ROUND' }); }
+      },
+      onBombPlanted: () => voice.bombPlanted(),
+      onBombBeep: at => audio.bombBeepSpatial(at.x, at.y, at.z),
+      onBombExploded: at => {
+        audio.bombExplode(at.x, at.y, at.z);
+        this.effects.explosion(at);
+        this.effects.explosion(at.clone().add(new THREE.Vector3(1.5, 1, -1)));
+        this.shake = Math.max(this.shake, 1.4);
+      },
+      onBombDefused: () => { audio.bombDefused(); voice.bombDefused(); },
+      onRoundStart: (spawn, yaw) => this.roundStartCS(spawn, yaw),
+      onMatchEnd: () => this.endCSMatch(),
+    });
+    this.cs.playerPosCallback = () => this.pos;
+    this.cs.playerAliveCallback = () => !this.dead;
+    this.cs.playerFireDamageCallback = (amount, from) => this.damagePlayerCS(amount, from, false);
+    this.cs.playerKillCallback = () => { if (!this.dead) this.killPlayerCS(); };
+  }
+
+  /** Squad radio for DUSTYARD: allies inform, enemies warn. */
+  private csCallout(kind: string, at: THREE.Vector3, team: TeamId) {
+    if (at.distanceTo(this.pos) > 46) return;
+    if (team === 'alpha') this.onEvent({ type: 'callout', text: `ALPHA: ${kind}` });
+    else { this.onEvent({ type: 'callout', text: 'Hostiles moving!' }); voice.enemyCallout('contact'); }
+  }
+
+  /** The buy menu commits a cart. False = denied (out of money or out of window). */
+  csBuyCart(cart: CSLoadout): boolean {
+    if (!this.isCS || !this.cs.canBuyNow) { audio.buyDenied(); return false; }
+    const cost = loadoutCost(cart, 'alpha', this.csGear);
+    if (cost > this.cs.playerMoney || !this.cs.chargePlayer(cost)) { audio.buyDenied(); return false; }
+    this.csGear = { ...cart };
+    this.armCSGear();
+    // Nade pouches update on the spot — a mid-freeze buy must be throwable now.
+    this.frags = this.csGear.frag;
+    this.flashes = this.csGear.flash;
+    audio.buyClick();
+    return true;
+  }
+
+  /** Cart price preview for the buy menu — free because csGear IS the cart base. */
+  csCartCost(cart: CSLoadout): number {
+    return loadoutCost(cart, 'alpha', this.csGear);
+  }
+
+  get csMoney(): number { return this.isCS ? this.cs.playerMoney : 0; }
+  get csBuyWindowOpen(): boolean { return this.isCS && this.cs.canBuyNow; }
+  get currentPhaseCS(): CSPhase { return this.csPhase; }
+  /** The buy overlay owns the cursor: the engine reports it so pointer-lock loss is not read as a pause. */
+  private csBuyMenuOpen = false;
+  get buyMenuOpen(): boolean { return this.isCS && this.csBuyMenuOpen; }
+  /** B pressed in-game (or freeze ended): toggle the buy overlay. */
+  private toggleBuyMenu(open: boolean) {
+    this.csBuyMenuOpen = open;
+    this.onEvent({ type: 'cs-buy', open });
+  }
+  /** Explicit close (Escape / purchase done) — relocks the pointer from App. */
+  closeBuyMenu() {
+    if (!this.csBuyMenuOpen) return;
+    this.toggleBuyMenu(false);
+  }
+
+  /**
+   * Rebuild the viewmodel arsenal from csGear: primary, sidearm, and the knife
+   * that every operator carries for free on slot 3.
+   */
+  private armCSGear() {
+    for (const w of this.weapons) this.vmScene.remove(w.model.group);
+    const defs: WeaponDef[] = [];
+    this.csClasses = [];
+    if (this.csGear.primary) {
+      defs.push(this.buildLoadoutWeapon({ weapon: this.csGear.primary, attachments: {}, skin: 'factory' }));
+      this.csClasses.push(Engine.csClass(this.csGear.primary));
+    } else { defs.push(this.buildLoadoutWeapon({ weapon: 'm1911', attachments: {}, skin: 'factory' })); this.csClasses.push('pistol'); }
+    defs.push(this.buildLoadoutWeapon({ weapon: this.csGear.secondary ?? 'm1911', attachments: {}, skin: 'factory' }));
+    this.csClasses.push(Engine.csClass(this.csGear.secondary ?? 'm1911'));
+    defs.push(this.buildKnifeWeapon());
+    this.csClasses.push('knife');
+    this.weapons = defs;
+    for (const w of this.weapons) this.vmScene.add(w.model.group);
+    this.weapons[1].model.group.visible = false;
+    if (this.weapons[2]) this.weapons[2].model.group.visible = false;
+    this.mags = this.weapons.map(w => w.magSize);
+    this.reserves = this.weapons.map(() => Infinity);
+    this.cur = 0;
+    this.lastCur = 1;
+  }
+
+  /** The free knife: 1.15× legs, 40 dmg slashes, 150 backstab. */
+  private buildKnifeWeapon(): WeaponDef {
+    const group = new THREE.Group();
+    const blade = new THREE.Mesh(
+      new THREE.BoxGeometry(0.016, 0.05, 0.22),
+      new THREE.MeshStandardMaterial({ color: 0xB9C2CC, roughness: 0.25, metalness: 0.85 }),
+    );
+    blade.position.set(0, 0.01, -0.16);
+    const guard = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.014, 0.02),
+      new THREE.MeshStandardMaterial({ color: 0x24261F, roughness: 0.6, metalness: 0.4 }),
+    );
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.026, 0.036, 0.11),
+      new THREE.MeshStandardMaterial({ color: 0x2E2A22, roughness: 0.85, metalness: 0.1 }),
+    );
+    grip.position.set(0, -0.004, 0.02);
+    group.add(blade, guard, grip);
+    group.rotation.z = -0.12;
+    group.visible = false;
+    return {
+      name: 'KNIFE',
+      model: { group, adsHidden: [], attached: {} } as unknown as WeaponDef['model'],
+      auto: true, rpm: 120, damage: CS_KNIFE_DAMAGE, headMul: 1, limbMul: 1,
+      magSize: 1, reserve: Infinity,
+      hipSpread: 0, adsSpread: 0, pattern: [[0, 0]], adsFov: 68, tacReload: 0.1, emptyReload: 0.1,
+      knife: true, noiseRadius: 6,
+    };
+  }
+
+  private onCSPhase(phase: CSPhase) {
+    this.csPhase = phase;
+    if (phase === 'FREEZE') {
+      // Auto-open at round start; the cart persists so re-buys are one click.
+      this.toggleBuyMenu(true);
+      voice.roundStart();
+    } else if (this.csBuyMenuOpen) {
+      this.toggleBuyMenu(false);
+    }
+  }
+
+  /** Round reset for the human: reposition, re-arm, restore the kept-or-lost gear. */
+  private roundStartCS(spawn: THREE.Vector3, yaw: number) {
+    if (!this.csSurvived) {
+      // You died last round: the guns went with you. Wallet and starter pistol stay.
+      this.csGear = { ...DEFAULT_CS_LOADOUT };
+    }
+    this.pos.copy(spawn);
+    this.lastPos.copy(this.pos);
+    this.vel.set(0, 0, 0); this.vx = 0; this.vz = 0;
+    this.csArmor = this.csGear.armor;
+    this.hpMax = armorMaxHp(this.csArmor);
+    this.hp = this.hpMax;
+    this.dead = false;
+    this.armCSGear();
+    // Nade pouches follow the cart (frags/flashes feed the G/F throw pipeline).
+    this.frags = this.csGear.frag;
+    this.flashes = this.csGear.flash;
+    this.crouched = false; this.grounded = true; this.landDip = 0;
+    this.lean = 0; this.leanTarget = 0;
+    this.yaw = yaw; this.pitch = 0;
+    this.recoilP = 0; this.recoilY = 0; this.shake = 0;
+    this.cs.resetPlayerDefuse();
+    this.csRosterVersion = -1;
+    this.rebuildHittables();
+  }
+
+  /**
+   * Player damage in TACTICAL: identical vest math to TDM (head or body multiplier
+   * against the armor pool), but death is final until the round resets.
+   */
+  private damagePlayerCS(amount: number, from: THREE.Vector3, head: boolean, attacker?: unknown, preArmored = false) {
+    if (this.dead || this.ended || !this.started) return;
+    if (attacker instanceof CSBot) this.csLastAttacker = attacker;
+    const spec = armorOf(this.csArmor);
+    const dealt = preArmored ? Math.max(1, amount) : Math.max(1, amount * (head ? spec.headMul : spec.bodyMul));
+    this.hp -= dealt;
+    this.playerDamageCS += dealt;
+    this.lastDamageT = 0;
+    this.shake = Math.max(this.shake, Math.min(0.7, dealt / 35));
+    if (head) audio.headshotDink();
+    audio.playerHurt();
+    this.onEvent({ type: 'damage', dir: this.dirToScreenDeg(from), amount: dealt });
+    if (this.hp <= 0) { this.hp = 0; this.killPlayerCS(); }
+  }
+  private csLastAttacker: CSBot | null = null;
+  private playerDamageCS = 0;
+
+  /** No respawn in TACTICAL — the round plays out and the next one revives you. */
+  private killPlayerCS() {
+    if (this.dead) return;
+    this.dead = true;
+    this.csSurvived = false;
+    this.cooking = false; this.triggerHeld = false; this.rmb = false;
+    this.reloadT = -1; this.switchT = -1; this.sliding = false;
+    this.cs.resetPlayerDefuse();
+    this.cs.playerDied(this.csLastAttacker);
+    this.csLastAttacker = null;
+    audio.playerHurt();
+    voice.defeat();
+  }
+
+  /** One TACTICAL tick: the match manager plus the player's defuse channel. */
+  private updateCS(dt: number) {
+    this.cs.update(dt);
+    if (this.cs.rosterVersion !== this.csRosterVersion) {
+      this.csRosterVersion = this.cs.rosterVersion;
+      this.rebuildHittables();
+    }
+    // ---- player defuse channel (hold X near the planted C4) ----
+    if (this.csPhase === 'PLANTED' && !this.dead && this.keys.has('KeyX') && this.cs.canPlayerDefuse(this.pos)) {
+      const before = this.csDefuseAnchor;
+      if (!before || before.distanceTo(this.pos) > 0.35) {
+        // Moving off the wire resets the channel — CS rule, bots included.
+        this.cs.resetPlayerDefuse();
+        this.csDefuseAnchor = this.pos.clone();
+      }
+      const res = this.cs.playerDefuseTick(dt, this.pos);
+      if (res.ok) {
+        this.csDefuseAudio -= dt;
+        if (this.csDefuseAudio <= 0) { this.csDefuseAudio = 0.4; audio.defuseTick(); }
+        if (res.t >= res.total) this.cs.onBombDefused('PLAYER');
+      }
+    } else {
+      this.cs.resetPlayerDefuse();
+      this.csDefuseAnchor = null;
+    }
+    this.defuseProgress = this.cs.playerDefuseT;
+  }
+  private csDefuseAnchor: THREE.Vector3 | null = null;
+  private csDefuseAudio = 0;
+  /** 0..1 defuse channel progress for the HUD bar. */
+  defuseProgress = 0;
+
+  /** Match point decided: pack the debrief with the full CS report. */
+  private endCSMatch() {
+    if (this.ended) return;
+    this.ended = true;
+    const rep = this.cs.report();
+    const win = rep.winner === 'alpha';
+    const draw = rep.winner === 'draw';
+    this.score += win ? 1000 : 0;
+    const report: MissionReport = {
+      id: 'dustyard-tactical', name: 'Dustyard Tactical', map: 'dustyard',
+      status: win ? 'complete' : 'failed', duration: Math.round(rep.duration),
+      phases: [{
+        id: 'cs', title: `${rep.alphaRounds} – ${rep.bravoRounds} vs BRAVO (first to 9)`,
+        type: 'hold', seconds: Math.round(rep.duration), complete: win,
+      }],
+    };
+    this.pendingResult = {
+      type: 'end', win: win && !draw, kills: rep.playerKills, score: this.score,
+      shots: this.shots, hits: this.hits, headshots: this.headshots, timeSec: Math.round(rep.duration),
+      cash: 0, cashLog: [], difficultyMul: 1,
+      mission: report,
+      pressure: { totalSpawned: 0, peakLive: 0, retired: 0, pending: 0, candidateChecks: 0, sightChecks: 0, deferred: 0 },
+      cs: rep,
+    };
+    this.finishDelay = 1.2;
+    this.triggerHeld = false; this.rmb = false; this.keys.clear();
+    if (win) voice.matchWin(); else voice.matchLose();
+  }
+
   private inputMoving(): boolean {
     const k = this.keys;
     return k.has('KeyW') || k.has('KeyA') || k.has('KeyS') || k.has('KeyD');
@@ -2388,6 +2817,13 @@ void main(){
       else if (moving) speed = 4.2;
       // Armor has mass: heavy plates cost 6 % of your foot speed, bare chest gains 6 %.
       if (this.isTDM) speed *= armorOf(this.tdmArmor).moveMul;
+      if (this.isCS) {
+        // FREEZE TIME pins your boots — buy your gear, watch the lines, hold still.
+        if (this.csPhase === 'FREEZE') speed = 0;
+        else speed *= armorOf(this.csArmor).moveMul;
+        // Knife out: the fastest legs on the server (CS's 1.15× rule).
+        if (this.def().knife) speed *= CS_KNIFE_SPEED_MUL;
+      }
     }
     speed *= this.def().moveSpeedMul ?? 1;
 
@@ -2551,6 +2987,7 @@ void main(){
     this.animateViewmodel(dt);
     this.camera.updateMatrixWorld(true);
     if (this.isTDM) this.updateTDM(dt);
+    else if (this.isCS) this.updateCS(dt);
     else this.missionRuntime.update(dt, this.keys.has('KeyX') && this.reloadT < 0 && !this.cooking && !this.sprinting);
     if (this.ai.rosterVersion !== this.rosterVersion) {
       this.rosterVersion = this.ai.rosterVersion;
@@ -2903,6 +3340,11 @@ void main(){
     if (this.isTDM) {
       this.tdm.start();
       voice.objective('Warehouse. Five versus five. Two minutes thirty. Good hunting.');
+    } else if (this.isCS) {
+      // MR8 match: round 1 opens on freeze time with the buy menu already up.
+      this.csSurvived = true;
+      this.cs.startMatch();
+      voice.objective('Dustyard. Tactical rules. First team to nine rounds.');
     } else this.missionRuntime.start();
   }
 
@@ -3078,7 +3520,9 @@ void main(){
       bearing: ((-this.yaw * 180 / Math.PI) % 360 + 360) % 360,
       kills: this.kills,
       score: this.score,
-      enemiesLeft: this.isTDM ? this.tdm.bravo.filter(b => !b.dead).length : this.ai.aliveCount(),
+      enemiesLeft: this.isTDM ? this.tdm.bravo.filter(b => !b.dead).length
+        : this.isCS ? this.cs.bravo.filter(b => !b.dead).length
+          : this.ai.aliveCount(),
       cooking: this.cooking,
       sprinting: this.sprinting,
       ads: this.ads,
@@ -3106,7 +3550,7 @@ void main(){
             yaw: -e.yaw * 180 / Math.PI,
             hot: e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE',
           })),
-      missionMap: this.isTDM ? undefined : (() => {
+      missionMap: (this.isTDM || this.isCS) ? undefined : (() => {
         const phase = this.missionRuntime.mission.current;
         if (!phase) return undefined;
         return {
@@ -3123,6 +3567,18 @@ void main(){
       mission: this.isTDM ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
       tdm: this.isTDM
         ? { ...this.tdm.hud('YOU', this.tdmPlayerKills, this.tdmPlayerDead), timeLeft: this.tdmMatchTimeLeft }
+        : undefined,
+      cs: this.isCS
+        ? {
+          ...this.cs.hud(this.pos),
+          weapon: this.def().name,
+          mag: this.mags[this.cur],
+          magSize: this.def().magSize,
+          knifeOut: !!this.def().knife,
+          defusePct: this.defuseProgress,
+          fragN: this.frags, flashN: this.flashes,
+          smokeN: this.csGear.smoke, molotovN: this.csGear.molotov,
+        }
         : undefined,
     };
   }
@@ -3156,7 +3612,8 @@ void main(){
       material.dispose();
     }
     for(const texture of textures) texture.dispose();
-    if (!this.isTDM) this.missionRuntime.dispose();
+    if (!this.isTDM && !this.isCS) this.missionRuntime.dispose();
+    else if (this.isCS) this.cs.dispose();
     else this.tdm.dispose();
     this.ai.dispose();
     this.composer.dispose();

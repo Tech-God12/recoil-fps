@@ -108,6 +108,16 @@ class VoiceManager {
   lowAmmo() { this.speak('Reloading.', 'announcer', { key: 'lowammo', cooldownMs: 15000, volume: 0.55 }); }
   defeat() { this.speak('Operator down. Mission failed.', 'announcer', { key: 'lose', cooldownMs: 60000 }); }
 
+  // ---------- DUSTYARD TACTICAL (CS2) announcer ----------
+  roundStart() { this.speak('Round start. Buy your gear.', 'announcer', { key: 'cs-start', cooldownMs: 8000, volume: 0.6 }); }
+  bombPlanted() { this.speak('The bomb has been planted.', 'announcer', { key: 'cs-planted', cooldownMs: 6000, volume: 0.85 }); }
+  bombDefused() { this.speak('Bomb has been defused.', 'announcer', { key: 'cs-defused', cooldownMs: 6000, volume: 0.85 }); }
+  bombDropped() { this.speak('The bomb has been dropped.', 'announcer', { key: 'cs-dropped', cooldownMs: 4000, volume: 0.6 }); }
+  roundWin() { this.speak('Counter-terrorists win.', 'announcer', { key: 'cs-win', cooldownMs: 3000, volume: 0.85 }); }
+  roundLose() { this.speak('Terrorists win.', 'announcer', { key: 'cs-lose', cooldownMs: 3000, volume: 0.85 }); }
+  matchWin() { this.speak('You win the match.', 'announcer', { key: 'cs-match-end', cooldownMs: 60000, volume: 0.95 }); }
+  matchLose() { this.speak('You lose the match.', 'announcer', { key: 'cs-match-end', cooldownMs: 60000, volume: 0.95 }); }
+
   // ---------- Enemy squad voices (short barks, anti-spam) ----------
   enemyCallout(kind: string) {
     const lines: Record<string, string[]> = {

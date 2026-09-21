@@ -325,6 +325,149 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.025, gain: 0.35, freq: 2600, q: 1.8, when: 0.07 });
   }
 
+  /* ==================== DUSTYARD TACTICAL (CS2) ==================== */
+
+  /** C4 heartbeat: the short 1 kHz pip. Fast beeps read as danger without volume. */
+  bombBeepSpatial(x: number, y: number, z: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(x, y, z);
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.setValueAtTime(1040, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.22, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    o.connect(g); g.connect(panner);
+    o.start(t); o.stop(t + 0.1);
+  }
+
+  /** Plant channel: two rising pips then the arming click. */
+  bombPlant() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    for (const [f, when] of [[880, 0], [1180, 0.16]] as const) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(f, t + when);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.14, t + when);
+      g.gain.exponentialRampToValueAtTime(0.001, t + when + 0.1);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + when); o.stop(t + when + 0.12);
+    }
+    this.burstDirect({ dur: 0.03, gain: 0.4, freq: 2400, q: 2.2, when: 0.34 });
+    this.burstDirect({ dur: 0.05, gain: 0.3, freq: 1400, q: 1.8, when: 0.4 });
+  }
+
+  /** Defuse channel: soft wire-cut ticks. */
+  defuseTick() {
+    this.burstDirect({ dur: 0.015, gain: 0.22, freq: 3200, q: 2.6 });
+  }
+
+  bombDefused() {
+    // Relieved two-note resolve.
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    for (const [f, when] of [[523, 0], [784, 0.18]] as const) {
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(f, t + when);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.18, t + when);
+      g.gain.exponentialRampToValueAtTime(0.001, t + when + 0.5);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + when); o.stop(t + when + 0.55);
+    }
+  }
+
+  /** The big one: layered sub-drop + debris crack, louder than a frag. */
+  bombExplode(x: number, y: number, z: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(x, y, z);
+    const t = ctx.currentTime;
+    this.explosion(Math.max(4, Math.hypot(x, y, z)));
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(900, t);
+    lp.frequency.exponentialRampToValueAtTime(120, t + 1.4);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(1.2, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+    src.connect(lp); lp.connect(g); g.connect(panner);
+    g.connect(this.master!);
+    src.start(t);
+    src.stop(t + 1.7);
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(70, t);
+    o.frequency.exponentialRampToValueAtTime(24, t + 1.1);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.9, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 1.3);
+    o.connect(og); og.connect(this.master!);
+    o.start(t); o.stop(t + 1.4);
+  }
+
+  /** Buy menu:确认 click for a purchase, harsh buzz for denied. */
+  buyClick() {
+    this.burstDirect({ dur: 0.02, gain: 0.32, freq: 2800, q: 2.4 });
+    this.burstDirect({ dur: 0.03, gain: 0.22, freq: 1800, q: 1.8, when: 0.05 });
+  }
+  buyDenied() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(160, t);
+    o.frequency.setValueAtTime(120, t + 0.09);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.16, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + 0.22);
+  }
+
+  /** Molotov ignition — a wet whoomp with crackle tail. */
+  fireIgnite(x: number, y: number, z: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(x, y, z);
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(400, t);
+    bp.frequency.exponentialRampToValueAtTime(1600, t + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.6, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+    src.connect(bp); bp.connect(g); g.connect(panner);
+    src.start(t);
+    src.stop(t + 1);
+  }
+
+  /** Smoke grenade: pressurised hiss. */
+  smokePop(x: number, y: number, z: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(x, y, z);
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2600;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, t);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+    src.connect(hp); hp.connect(g); g.connect(panner);
+    src.start(t);
+    src.stop(t + 1.7);
+  }
+
   beltCoverOpen() {
     this.burstDirect({ dur: 0.03, gain: 0.35, freq: 1500, q: 1.4 });
     this.burstDirect({ dur: 0.05, gain: 0.25, freq: 900, q: 1.2, when: 0.08 });

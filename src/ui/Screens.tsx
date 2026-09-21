@@ -6,6 +6,7 @@ import { MAPS, type MapId } from '../game/world';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { TdmReport } from '../game/engine';
 import { TDM_RESPAWN_SECONDS, armorOf } from '../game/tdm/armor';
+import type { CsReport } from '../game/cs/manager';
 import type { MissionHud } from '../game/systems/mission-runtime';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
@@ -16,10 +17,11 @@ import { voice } from '../game/voice';
 import mapAlrasul from '../assets/map-alrasul.jpg';
 import mapKasbah from '../assets/map-kasbah.jpg';
 import mapWarehouse from '../assets/map-warehouse.jpg';
+import mapDustyard from '../assets/map-dustyard.jpg';
 import operatorArt from '../assets/operator.jpg';
 import MapFlyover from './MapFlyover';
 
-export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapWarehouse };
+export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapWarehouse, dustyard: mapDustyard };
 
 export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
@@ -27,6 +29,8 @@ export interface Results {
   cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
   /** Present only for a Warehouse 5v5 deathmatch debrief. */
   tdm?: TdmReport;
+  /** Present only for a Dustyard TACTICAL debrief. */
+  cs?: CsReport;
 }
 
 const Arrow = () => (
@@ -46,9 +50,9 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onTdm, profile }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onTdm, onCs, profile }: {
   s: GameSettings; onDeploy: () => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; onTdm?: () => void; profile?: PlayerProfile;
+  onArmory?: () => void; onTdm?: () => void; onCs?: () => void; profile?: PlayerProfile;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
@@ -142,19 +146,23 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onTdm, prof
         <div className={`pick-tiles ${hovered ? 'dimmed' : ''}`} role="radiogroup" aria-label="Choose a map">
           {mapOrder.map((map, index) => {
             const tdm = map.id === 'arena';
+            const cs = map.id === 'dustyard';
             const opt = getMission(map.id);
             const type = map.id === 'alrasul' ? 'Desert river valley'
               : map.id === 'kasbah' ? 'Fortified market town'
-                : 'Freight yard · 5v5 TDM';
+                : map.id === 'arena' ? 'Freight yard · 5v5 TDM'
+                  : 'Bombsites · 5v5 TACTICAL';
             return (
               <button
                 key={map.id}
                 onClick={() => {
                   onMap(map.id);
                   setHovered(null);
-                  // Warehouse is a deathmatch arena, not an operation: it opens the
-                  // TDM loadout screen instead of a mission list.
-                  if (tdm && onTdm) onTdm(); else setView('missions');
+                  // Warehouse and Dustyard are competitive arenas, not operations:
+                  // they open their own loadout screens instead of a mission list.
+                  if (tdm && onTdm) onTdm();
+                  else if (cs && onCs) onCs();
+                  else setView('missions');
                 }}
                 onMouseEnter={() => setHovered(map.id)}
                 onMouseLeave={() => setHovered(cur => (cur === map.id ? null : cur))}
@@ -166,8 +174,9 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onTdm, prof
                   <span className="map-tile-num">0{index + 1}</span>
                   <span className="map-tile-name">{map.name}</span>
                   <span className="map-tile-type">{type}</span>
-                  <span className="map-tile-tag">{tdm ? '5v5 TDM · 2:30 · armor loadout' : `${opt.phases.length} objectives · ${opt.name}`}</span>
+                  <span className="map-tile-tag">{tdm ? '5v5 TDM · 2:30 · armor loadout' : cs ? 'MR8 · first to 9 · CS economy' : `${opt.phases.length} objectives · ${opt.name}`}</span>
                   {tdm && <span className="map-tile-badge">TDM</span>}
+                  {cs && <span className="map-tile-badge">TACTICAL</span>}
                 </span>
               </button>
             );
@@ -251,6 +260,7 @@ export function BootScreen({ map }: { map?: MapId }) {
   const [line, setLine] = useState(0);
   const [pct, setPct] = useState(0);
   const tdm = map === 'arena';
+  const cs = map === 'dustyard';
   const mission = getMission(map ?? 'alrasul');
   const mapName = MAPS.find(m => m.id === (map ?? 'alrasul'))?.name ?? '';
   useEffect(() => {
@@ -266,6 +276,10 @@ export function BootScreen({ map }: { map?: MapId }) {
       voice.briefing('Warehouse team deathmatch. Five versus five. Two minutes thirty on the clock, ten second respawns. Most eliminations takes the yard. Frag out.');
       return;
     }
+    if (cs) {
+      voice.briefing('Dustyard tactical. Five versus five, first to nine rounds. Buy your gear, plant the bomb or stop the plant. Money wins rounds. Good luck, operator.');
+      return;
+    }
     const first = mission.phases[0];
     const narration = `Operation ${mission.name}. ${mission.brief} First objective: ${first.title.toLowerCase()}, at the ${first.location.toLowerCase()}. ${mission.phases.length} objectives stand between you and extraction. Good luck, operator.`;
     voice.briefing(narration);
@@ -279,8 +293,8 @@ export function BootScreen({ map }: { map?: MapId }) {
       <div className="boot-cine-grid" aria-hidden="true" />
 
       <div className="boot-cine-top">
-        <span className="boot-kicker">{tdm ? `Matchmaking — ${mapName}` : `Insertion — ${mapName}`}</span>
-        <h2 className="boot-cine-title">{tdm ? 'Warehouse 5v5 TDM' : `Operation ${mission.name}`}</h2>
+        <span className="boot-kicker">{tdm || cs ? `Matchmaking — ${mapName}` : `Insertion — ${mapName}`}</span>
+        <h2 className="boot-cine-title">{tdm ? 'Warehouse 5v5 TDM' : cs ? 'Dustyard Tactical' : `Operation ${mission.name}`}</h2>
       </div>
 
       <div className="boot-cine-bottom">
@@ -292,7 +306,7 @@ export function BootScreen({ map }: { map?: MapId }) {
         <div className="boot-cine-railwrap">
           <div className="boot-bar" aria-hidden="true"><span className="boot-bar__fill" style={{ width: `${pct}%` }} /></div>
           <div className="boot-cine-railmeta mono">
-            <span>{tdm ? '5v5 · 2:30 · 10s respawn · armor loadout' : `${mission.phases[0].title} · ${mission.phases[0].location}`}</span>
+            <span>{tdm ? '5v5 · 2:30 · 10s respawn · armor loadout' : cs ? 'MR8 · first to 9 · buy · plant · defuse' : `${mission.phases[0].title} · ${mission.phases[0].location}`}</span>
             <span className="tabular">{String(pct).padStart(3, '0')}%</span>
           </div>
         </div>
@@ -434,6 +448,97 @@ function TdmResults({ r, onRedeploy, onMenu }: { r: Results; onRedeploy: () => v
 }
 
 /* ================================================================
+   RESULTS — DUSTYARD TACTICAL DEBRIEF
+   ================================================================ */
+function CsResults({ r, onRedeploy, onMenu }: { r: Results; onRedeploy: () => void; onMenu: () => void }) {
+  const t = r.cs!;
+  const accuracy = r.shots ? Math.round(r.hits / r.shots * 100) : 0;
+  const kd = t.playerDeaths ? (t.playerKills / t.playerDeaths).toFixed(2) : t.playerKills.toFixed(2);
+  const win = t.winner === 'alpha';
+  const draw = t.winner === 'draw';
+  const title = draw ? 'Dustyard drawn' : win ? 'Dustyard secured' : 'Dustyard lost';
+  const sub = draw
+    ? 'Thirteen rounds of trades and nobody blinked. Split the pot, operator.'
+    : win
+      ? 'ALPHA takes the yard. Every plant was answered, every angle owned.'
+      : 'BRAVO read your retakes like a book. Reset the wallet and go again.';
+  const board = [...t.rows].sort((a, b) => b.kills - a.kills || b.damage - a.damage);
+  return (
+    <main className={`results-root ${win ? '' : 'lose'}`}>
+      <div className="results-wrap">
+        <div className="results-header">
+          <div className="stamp"><span className="stamp-grade" style={{ color: win ? 'var(--olive)' : 'var(--blood)' }}>{win ? 'W' : draw ? 'D' : 'L'}</span></div>
+          <div className="stamp-label">5v5 TACTICAL · first to 9</div>
+          <h2 className="results-title">{title}</h2>
+          <p className="results-sub">{sub}</p>
+        </div>
+
+        <div className="tdm-final">
+          <div className="tdm-final-side alpha">
+            <span className="mono">ALPHA</span>
+            <b className="tabular">{t.alphaRounds}</b>
+          </div>
+          <div className="tdm-final-clock mono">{missionClock(t.duration)}<i>final</i></div>
+          <div className="tdm-final-side bravo">
+            <span className="mono">BRAVO</span>
+            <b className="tabular">{t.bravoRounds}</b>
+          </div>
+        </div>
+
+        <div className="stats-grid">
+          <div className="stat-cell">
+            <span className="stat-label">Eliminations</span>
+            <div className="stat-value tabular red"><CountUp to={t.playerKills} /></div>
+          </div>
+          <div className="stat-cell">
+            <span className="stat-label">Deaths</span>
+            <div className="stat-value tabular"><CountUp to={t.playerDeaths} /></div>
+          </div>
+          <div className="stat-cell">
+            <span className="stat-label">K/D</span>
+            <div className="stat-value tabular volt">{kd}</div>
+          </div>
+          <div className="stat-cell">
+            <span className="stat-label">ADR</span>
+            <div className="stat-value tabular volt"><CountUp to={t.adr} /></div>
+          </div>
+          <div className="stat-cell">
+            <span className="stat-label">Accuracy</span>
+            <div className={`stat-value tabular ${accuracy >= 50 ? 'volt' : accuracy >= 25 ? '' : 'red'}`}><CountUp to={accuracy} /><small>%</small></div>
+          </div>
+          <div className="stat-cell">
+            <span className="stat-label">Headshots</span>
+            <div className="stat-value tabular"><CountUp to={r.headshots} /></div>
+          </div>
+        </div>
+
+        <section className="cash-card" aria-label="Match scoreboard">
+          <div className="sec-label"><span>Final scoreboard</span><span className="mono">★ MVP</span></div>
+          {board.map(row => (
+            <div className="cash-row" key={`${row.team}-${row.name}`} style={row.you ? { color: 'var(--volt)' } : undefined}>
+              <span className="cash-row-label">
+                {row.mvp ? '★ ' : ''}{row.name}
+                <small> {row.team === 'alpha' ? 'ALPHA' : 'BRAVO'}{row.you ? ' · you' : ''}</small>
+              </span>
+              <span className="cash-row-val mono">{row.kills} / {row.deaths} · {row.damage} dmg</span>
+            </div>
+          ))}
+          <div className="cash-wallet">
+            <span>Round history</span>
+            <span className="tabular">{t.rounds.map(rd => `${rd.alpha}-${rd.bravo}`).join('  ') || '—'}</span>
+          </div>
+        </section>
+
+        <div className="results-actions">
+          <button className="btn btn-primary" style={{ padding: '12px 20px' }} onClick={onRedeploy}><span>Redeploy to dustyard</span><Arrow /></button>
+          <button className="btn btn-ghost" onClick={onMenu}>Return to base</button>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+/* ================================================================
    RESULTS — AFTER-ACTION REPORT
    ================================================================ */
 export type ResultsWallet = { before: number; after: number; gradeBonus: number; earned: number };
@@ -446,6 +551,7 @@ const CASH_REASONS: Record<string, string> = {
 export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   r: Results; wallet: ResultsWallet; onRedeploy: () => void; onMenu: () => void; onArmory: () => void;
 }) {
+  if (r.cs) return <CsResults r={r} onRedeploy={onRedeploy} onMenu={onMenu} />;
   if (r.tdm) return <TdmResults r={r} onRedeploy={onRedeploy} onMenu={onMenu} />;
   const accuracy = r.shots ? Math.round(r.hits / r.shots * 100) : 0;
   const completed = r.mission.phases.filter(p => p.complete).length;

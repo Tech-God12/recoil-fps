@@ -132,15 +132,21 @@ export default function App() {
         later(() => setFx(f => ({ ...f, feed: f.feed.filter(row => row.id !== id) })), 5200);
         later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1300);
         break;
-      case 'tdmfeed':
+      case 'tdmfeed': {
+        // award label reflects HOW the kill confirmed (headshot / finisher / shutdown)
+        const pop = event.weapon === 'FINISHER' ? '+150 FINISHER'
+          : event.weapon === 'EXECUTED' ? '+100 EXECUTED'
+          : event.weapon === 'SHUTDOWN' ? 'SHUT DOWN'
+          : event.headshot ? '+150 HEADSHOT' : '+100';
         setFx(f => ({
           ...f,
-          feed: [...f.feed.slice(-3), { id, text: '', headshot: event.headshot, tdm: { killer: event.killer, weapon: event.weapon, victim: event.victim, killerTeam: event.killerTeam } }],
-          ...(event.killer === 'YOU' ? { scorePops: [...f.scorePops.slice(-2), { id, text: event.headshot ? '+150 HEADSHOT' : '+100', headshot: event.headshot }] } : {}),
+          feed: [...f.feed.slice(-3), { id, text: '', headshot: event.headshot, tdm: { killer: event.killer, weapon: event.weapon, victim: event.victim, killerTeam: event.killerTeam, zone: event.zone } }],
+          ...(event.killer === 'YOU' ? { scorePops: [...f.scorePops.slice(-2), { id, text: pop, headshot: event.headshot }] } : {}),
         }));
         later(() => setFx(f => ({ ...f, feed: f.feed.filter(row => row.id !== id) })), 5200);
         if (event.killer === 'YOU') later(() => setFx(f => ({ ...f, scorePops: f.scorePops.filter(row => row.id !== id) })), 1300);
         break;
+      }
       case 'cash':
         setFx(f => ({
           ...f,

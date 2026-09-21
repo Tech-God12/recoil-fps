@@ -7,7 +7,7 @@ import ScopeView, { type ScopeControls } from './ScopeView';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
-  feed: { id: number; text: string; headshot: boolean; tdm?: { killer: string; weapon: string; victim: string; killerTeam: 'alpha' | 'bravo' } }[];
+  feed: { id: number; text: string; headshot: boolean; tdm?: { killer: string; weapon: string; victim: string; killerTeam: 'alpha' | 'bravo'; zone?: string } }[];
   dmgArcs: { id: number; dir: number; opacity: number }[];
   scorePops: { id: number; text: string; headshot: boolean; cash?: boolean }[];
   banner: { id: number; label: string } | null;
@@ -30,6 +30,7 @@ function TdmFullBoard({ tdm }: { tdm: NonNullable<HudState['tdm']> }) {
       <span className="tdm-board-name">
         {mvpKills > 0 && r.kills === mvpKills && <i className="mvp" title="Match leader">★</i>}
         <em aria-hidden="true">{r.armorIcon}</em>{r.name}{r.you ? ' (YOU)' : ''}
+        {r.onFire && <i className="roster-fire" title="ON FIRE">🔥</i>}
       </span>
       <span className="tabular">{r.kills}</span>
       <span className="tabular">{r.deaths}</span>
@@ -127,12 +128,12 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           <div className="tdm-roster" aria-hidden="true">
             <span className="rteam">
               {hud.tdm.roster.filter(r => r.team === 'alpha').map(r => (
-                <span key={r.name} className={`rname a ${r.dead ? 'dead' : ''} ${r.you ? 'you' : ''}`}>{r.armorIcon}{r.name}{r.you ? '*' : ''}</span>
+                <span key={r.name} className={`rname a ${r.dead ? 'dead' : ''} ${r.you ? 'you' : ''}`}>{r.armorIcon}{r.name}{r.you ? '*' : ''}{r.onFire && <i className="roster-fire">🔥</i>}</span>
               ))}
             </span>
             <span className="rteam">
               {hud.tdm.roster.filter(r => r.team === 'bravo').map(r => (
-                <span key={r.name} className={`rname b ${r.dead ? 'dead' : ''}`}>{r.armorIcon}{r.name}</span>
+                <span key={r.name} className={`rname b ${r.dead ? 'dead' : ''}`}>{r.armorIcon}{r.name}{r.onFire && <i className="roster-fire">🔥</i>}</span>
               ))}
             </span>
           </div>
@@ -147,6 +148,49 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           <div className="tdm-respawn-bar"><span style={{ width: `${(1 - hud.tdm.respawnIn / 5) * 100}%` }} /></div>
           <span className="tdm-respawn-sub">REDEPLOYING TO ALPHA YARD</span>
           <span className="tdm-respawn-score">ALPHA {hud.tdm.alphaScore} — {hud.tdm.bravoScore} BRAVO · YOUR KILLS {hud.tdm.playerKills}</span>
+        </div>
+      )}
+
+      {/* ============ DOWNED OVERLAY (bleeding out — crawl to cover) ============ */}
+      {hud.tdm?.downed && (
+        <div className="downed-overlay" role="alert">
+          <div className="downed-vignette" />
+          <span className="downed-title">DOWNED</span>
+          <div className="downed-bar"><span className="fill" style={{ width: `${Math.max(0, (hud.tdm.downed.bleedout / hud.tdm.downed.total) * 100)}%` }} /></div>
+          <span className="downed-hint mono">CRAWL WITH <span className="keycap">WASD</span> — HOLD ON FOR ALLIES{hud.tdm.downed.executedBy ? ` — ${hud.tdm.downed.executedBy} IS FINISHING YOU` : ''}</span>
+          {hud.tdm.downed.executedBy && (
+            <div className="downed-threat">
+              <span className="lbl">EXECUTION</span>
+              <div className="bar danger"><span className="fill" style={{ width: `${(hud.tdm.downed.execProgress ?? 0) * 100}%` }} /></div>
+            </div>
+          )}
+          {hud.tdm.downed.reviveBy && (
+            <div className="downed-threat ally">
+              <span className="lbl">{hud.tdm.downed.reviveBy} REVIVING</span>
+              <div className="bar ally"><span className="fill" style={{ width: `${(hud.tdm.downed.reviveProgress ?? 0) * 100}%` }} /></div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============ HOLD-X INTERACT PROMPT (execute / finisher / revive) ============ */}
+      {hud.tdm?.interact && !hud.tdm.downed && (
+        <div className={`interact-prompt ${hud.tdm.interact.danger ? 'danger' : 'ally'}`} role="status">
+          <span className="keycap">X</span>
+          <span className="lbl">{hud.tdm.interact.label}</span>
+          <span className="sub mono">{hud.tdm.interact.sub}</span>
+          {hud.tdm.interact.progress > 0 && (
+            <div className="bar"><span className="fill" style={{ width: `${hud.tdm.interact.progress * 100}%` }} /></div>
+          )}
+        </div>
+      )}
+
+      {/* ============ ON FIRE momentum banner ============ */}
+      {hud.tdm && hud.tdm.onFire > 0 && (
+        <div className="onfire-banner" role="status">
+          <span className="flame">🔥</span>
+          <span className="lbl">ON FIRE</span>
+          <span className="secs tabular">{Math.ceil(hud.tdm.onFire)}s</span>
         </div>
       )}
 
@@ -210,6 +254,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
             <span className="mono text-[var(--steel)] text-[9px] mx-1.5">[{f.tdm.weapon}]</span>
             {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
             <span className={f.tdm.victim === 'YOU' ? 'text-[var(--blood)] font-black' : 'text-white/90'}>{f.tdm.victim}</span>
+            {f.tdm.zone && <span className="feed-zone">— {f.tdm.zone}</span>}
           </div>
         ) : (
           <div key={f.id} className="feed-row text-right">

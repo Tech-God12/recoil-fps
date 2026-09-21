@@ -40,6 +40,12 @@ export interface World {
   landmarks: { name: string; at: THREE.Vector3 }[];
   overlooks: { name: string; at: THREE.Vector3; approach: THREE.Vector3; route: THREE.Vector3[] }[];
   breakGlass(instanceId: number): THREE.Vector3 | null;
+  /** Sound-trap floor patches (broken glass / gravel) — louder footsteps, zero collision. */
+  soundTraps: { minX: number; minZ: number; maxX: number; maxZ: number; kind: 'glass' | 'gravel' }[];
+  /** Buzzing warehouse bulbs the engine flickers each frame. */
+  flickerLights: { light: THREE.PointLight; seed: number }[];
+  /** Dust motes drifting in the roof light shafts (positions animated, base kept). */
+  motes: { points: THREE.Points; base: Float32Array }[];
 }
 
 const _m4 = new THREE.Matrix4();
@@ -62,6 +68,9 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   const windows: WindowHole[] = [];
   const landmarks: World['landmarks'] = [];
   const overlooks: World['overlooks'] = [];
+  const soundTraps: World['soundTraps'] = [];
+  const flickerLights: World['flickerLights'] = [];
+  const motes: World['motes'] = [];
   let changed = false;
   const intactGroup = new THREE.Group(), wreckGroup = new THREE.Group();
   const intactSolids: AABB[] = [], wreckSolids: AABB[] = [];
@@ -666,9 +675,16 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       cover(x + (alongX ? w / 2 + 1 : 0), z + (alongX ? 0 : d / 2 + 1));
       cover(x - (alongX ? w / 2 + 1 : 0), z - (alongX ? 0 : d / 2 + 1));
     };
+    // Team-tinted container coding: read your map position from a single glance.
+    // South (z>15, Alpha) = cool teal/blue, north (z<-15, Bravo) = warm rust/orange, mid = neutral.
+    const COOL_MATS = [ACC_TURQ, col(0x33556B, 0.8)], WARM_MATS = [ACC_TERRA, col(0x7A4A2E, 0.8)], NEUTRAL_MATS = [col(0x8A8A84, 0.85), col(0xCFCBBD, 0.85)];
+    const zoneMat = (x: number, z: number) => {
+      const pool = z > 15 ? COOL_MATS : z < -15 ? WARM_MATS : NEUTRAL_MATS;
+      return pool[Math.abs(Math.round(x * 3 + z * 7)) % pool.length];
+    };
     // yards mirror each other exactly: double stack north, single south (and vice versa)
-    container(-30, -13, 0, rusted, true); container(-30, 13, 0, ACC_TURQ);
-    container(30, 13, 0, rusted, true); container(30, -13, 0, ACC_TERRA);
+    container(-30, -13, 0, zoneMat(-30, -13), true); container(-30, 13, 0, zoneMat(-30, 13));
+    container(30, 13, 0, zoneMat(30, 13), true); container(30, -13, 0, zoneMat(30, -13));
     // climbable container at each yard's outer edge — stairs land level with the
     // top. dir=+1 climbs from the south (alpha), dir=-1 from the north (bravo),
     // keeping the 180-degree symmetry honest.
@@ -679,8 +695,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
         box(x, h / 2, zTop + dir * i * run, width, h, run + 0.03, M.concrete);
       }
     };
-    container(-38, 2, Math.PI / 2, col(0x33556B, 0.8)); stairsZ(-38, 3.45, 2.6, 2.5, 1);
-    container(38, -2, Math.PI / 2, col(0x7A4A2E, 0.8)); stairsZ(38, -3.45, 2.6, 2.5, -1);
+    container(-38, 2, Math.PI / 2, zoneMat(-38, 2)); stairsZ(-38, 3.45, 2.6, 2.5, 1);
+    container(38, -2, Math.PI / 2, zoneMat(38, -2)); stairsZ(38, -3.45, 2.6, 2.5, -1);
     overlooks.push(
       { name: 'West yard container', at: new THREE.Vector3(-38, 2.7, 2), approach: new THREE.Vector3(-38, 0, 10), route: [new THREE.Vector3(-38, 2.7, 2)] },
       { name: 'East yard container', at: new THREE.Vector3(38, 2.7, -2), approach: new THREE.Vector3(38, 0, -10), route: [new THREE.Vector3(38, 2.7, -2)] },
@@ -712,6 +728,242 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     shape(new THREE.RingGeometry(4.2, 4.5, 40), col(0xd8ccb2), 0, 0.055, 0, -Math.PI / 2);
     for (const s of [-1, 1]) for (let i = 0; i < 3; i++)
       shape(new THREE.PlaneGeometry(2.2, 0.4), s > 0 ? ACC_TURQ : ACC_TERRA, 0, 0.05, s * (14 + i * 4), -Math.PI / 2, 0, s * Math.PI / 4);
+
+    // =====================================================================
+    // PART A POLISH — readability & lived-in dressing (visual/audio only,
+    // zero new nav-blocking collision unless explicitly noted).
+    // =====================================================================
+
+    // ---- procedural decal/trap textures (tiny canvases, made once) ----
+    const canvasTex = (w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void) => {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      draw(c.getContext('2d')!);
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const glassTex = canvasTex(128, 128, ctx => {
+      ctx.fillStyle = '#5E6A66'; ctx.fillRect(0, 0, 128, 128);
+      for (let i = 0; i < 60; i++) { // glinting shards
+        ctx.fillStyle = ['#BFD8D2', '#8FB2AC', '#DCEAE6', '#6E7E7A'][i % 4];
+        ctx.beginPath();
+        const x = Math.random() * 128, y = Math.random() * 128, r = 4 + Math.random() * 13, a = Math.random() * Math.PI;
+        ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+        ctx.lineTo(x + Math.cos(a + 2.1) * r, y + Math.sin(a + 2.1) * r);
+        ctx.lineTo(x + Math.cos(a + 4.2) * r, y + Math.sin(a + 4.2) * r);
+        ctx.fill();
+      }
+    });
+    const gravelTex = canvasTex(128, 128, ctx => {
+      ctx.fillStyle = '#6A6154'; ctx.fillRect(0, 0, 128, 128);
+      for (let i = 0; i < 420; i++) {
+        const g = 70 + Math.random() * 90;
+        ctx.fillStyle = `rgb(${g + 18},${g},${g - 22})`;
+        ctx.beginPath(); ctx.arc(Math.random() * 128, Math.random() * 128, 1 + Math.random() * 2.6, 0, 7); ctx.fill();
+      }
+    });
+    const arrowTex = canvasTex(128, 192, ctx => {
+      ctx.clearRect(0, 0, 128, 192);
+      ctx.strokeStyle = '#C9A94F'; ctx.lineWidth = 10; ctx.lineJoin = 'round';
+      ctx.beginPath();              // forklift-lane chevron arrow, points +v
+      ctx.moveTo(24, 168); ctx.lineTo(64, 96); ctx.lineTo(104, 168);
+      ctx.moveTo(24, 104); ctx.lineTo(64, 28); ctx.lineTo(104, 104);
+      ctx.stroke();
+    });
+    const holeTex = canvasTex(64, 64, ctx => {
+      ctx.clearRect(0, 0, 64, 64);
+      const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 26);
+      g.addColorStop(0, 'rgba(8,7,5,0.98)'); g.addColorStop(0.45, 'rgba(20,16,12,0.85)'); g.addColorStop(1, 'rgba(20,16,12,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(32, 32, 26, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(12,10,8,0.7)'; ctx.lineWidth = 1.6;
+      for (let i = 0; i < 5; i++) { // radial cracks
+        const a = Math.random() * Math.PI * 2;
+        ctx.beginPath(); ctx.moveTo(32 + Math.cos(a) * 6, 32 + Math.sin(a) * 6);
+        ctx.lineTo(32 + Math.cos(a + 0.3) * (14 + Math.random() * 10), 32 + Math.sin(a + 0.3) * (14 + Math.random() * 10));
+        ctx.stroke();
+      }
+    });
+    const scorchTex = canvasTex(128, 128, ctx => {
+      ctx.clearRect(0, 0, 128, 128);
+      const g = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+      g.addColorStop(0, 'rgba(10,9,7,0.95)'); g.addColorStop(0.55, 'rgba(24,20,15,0.55)'); g.addColorStop(1, 'rgba(24,20,15,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(64, 64, 62, 0, 7); ctx.fill();
+    });
+
+    // -- 1. SOUND-TRAP FLOORING: broken glass / gravel on the flank routes.
+    // Flanking is now a choice: run through loud, or creep around. Zero collision,
+    // zero nav impact — the engine only multiplies footstep volume inside the AABBs.
+    const trapGlassMat = new THREE.MeshStandardMaterial({ map: glassTex, transparent: true, roughness: 0.4, metalness: 0.15, polygonOffset: true, polygonOffsetFactor: -1 });
+    const trapGravelMat = new THREE.MeshStandardMaterial({ map: gravelTex, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1 });
+    const trapPatch = (x: number, z: number, kind: 'glass' | 'gravel') => {
+      shape(new THREE.PlaneGeometry(3, 3), kind === 'glass' ? trapGlassMat : trapGravelMat, x, 0.05, z, -Math.PI / 2, 0, Math.random() * Math.PI);
+      soundTraps.push({ minX: x - 1.5, maxX: x + 1.5, minZ: z - 1.5, maxZ: z + 1.5, kind });
+    };
+    trapPatch(-33, 18, 'glass');    // west yard flank, past the container
+    trapPatch(33, -18, 'gravel');   // east yard flank (mirror)
+    trapPatch(21, 27, 'gravel');    // behind Alpha's sandbag line
+    trapPatch(-21, -27, 'glass');   // behind Bravo's sandbag line
+
+    // -- 2. TEAM-TINTED SPAWN DRESSING: teal tarps + cool glow south, rust + warm
+    // glow north. After a chaotic fight you always know which way you face.
+    const tarpTeal = new THREE.MeshStandardMaterial({ color: 0x2C7C8E, emissive: 0x1A5462, emissiveIntensity: 0.55, roughness: 0.95, side: THREE.DoubleSide });
+    const tarpRust = new THREE.MeshStandardMaterial({ color: 0x9A4A2E, emissive: 0x5E2B18, emissiveIntensity: 0.55, roughness: 0.95, side: THREE.DoubleSide });
+    for (const s of [-1, 1]) {      // s=-1 → south/alpha teal, s=+1 → north/bravo rust
+      const mat = s < 0 ? tarpTeal : tarpRust;
+      shape(new THREE.PlaneGeometry(5, 2.6), mat, -13, 3.3, s * 45.1, -Math.PI / 2, s > 0 ? Math.PI : 0, 0.06);
+      shape(new THREE.PlaneGeometry(5, 2.6), mat, 13, 3.3, s * 45.1, -Math.PI / 2, s > 0 ? Math.PI : 0, -0.06);
+      shape(new THREE.PlaneGeometry(2.8, 2.0), mat, -16, 1.05, s * 30, -Math.PI / 2 + s * 0.42);   // draped over the sandbags
+      shape(new THREE.PlaneGeometry(2.8, 2.0), mat, 16, 1.05, s * 30, -Math.PI / 2 + s * 0.42);
+      const pl = new THREE.PointLight(s < 0 ? 0x2C7C8E : 0x9A4A2E, 30, 30, 1.7);
+      pl.position.set(0, 4.4, s * 37);
+      scene.add(pl);
+      box(0, 4.62, s * 37, 0.5, 0.14, 0.24, METAL, false);
+      shape(new THREE.SphereGeometry(0.1, 8, 6), GLOW, 0, 4.5, s * 37);
+    }
+
+    // -- 3. ONE UNIQUE LANDMARK PER QUADRANT — four silhouettes, zero "where am I?".
+    // Bases collide (real cover); tilts/overhangs do not. All under 3m so no sightline dies.
+    { // NW — wrecked van
+      shape(new THREE.BoxGeometry(3.1, 1.7, 2.0), rusted, -35.6, 0.95, -36, 0, 0.5, 0.05);
+      shape(new THREE.BoxGeometry(1.5, 1.15, 1.9), rusted, -33.5, 1.0, -34.9, 0, 0.5, 0.16);
+      for (const [ox, oz] of [[-1.6, -1.05], [1.5, -1.05], [-1.6, 1.05], [1.5, 1.05]] as const)
+        shape(new THREE.CylinderGeometry(0.42, 0.42, 0.28, 10), METAL, -35.6 + ox * 0.9 + oz * 0.48, 0.42, -36 + ox * 0.48 - oz * 0.9, Math.PI / 2, 0.5, 0);
+      solids.push({ minX: -38.2, maxX: -33.0, minY: 0, maxY: 1.4, minZ: -38.1, maxZ: -33.9 });
+      landmarks.push({ name: 'Wrecked van', at: new THREE.Vector3(-36, 2, -36) });
+    }
+    { // NE — cable spool stack
+      shape(new THREE.CylinderGeometry(1.25, 1.25, 0.85, 16), timber, 35.4, 0.43, -36.6);
+      shape(new THREE.CylinderGeometry(0.5, 0.5, 1.2, 12), timber, 35.4, 0.5, -36.6);
+      shape(new THREE.CylinderGeometry(1.05, 1.05, 0.75, 16), timber, 37.2, 0.38, -35.0);
+      shape(new THREE.CylinderGeometry(0.95, 0.95, 0.7, 16), timber, 35.4, 1.28, -36.6, 0, 0, 0.16);
+      solids.push({ minX: 34.05, maxX: 36.75, minY: 0, maxY: 1.0, minZ: -37.95, maxZ: -35.25 });
+      solids.push({ minX: 36.1, maxX: 38.3, minY: 0, maxY: 0.85, minZ: -36.1, maxZ: -33.9 });
+      landmarks.push({ name: 'Cable spools', at: new THREE.Vector3(36, 2, -36) });
+    }
+    { // SW — horizontal fuel tank on saddles
+      shape(new THREE.CylinderGeometry(1.15, 1.15, 4.4, 16), rusted, -36, 1.3, 36, 0, 0, Math.PI / 2);
+      shape(new THREE.SphereGeometry(1.15, 14, 10), rusted, -38.2, 1.3, 36);
+      shape(new THREE.SphereGeometry(1.15, 14, 10), rusted, -33.8, 1.3, 36);
+      shape(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 8), METAL, -35.0, 2.5, 36);
+      box(-37.5, 0.35, 36, 0.5, 0.7, 2.2, METAL);
+      box(-34.5, 0.35, 36, 0.5, 0.7, 2.2, METAL);
+      solids.push({ minX: -38.4, maxX: -33.6, minY: 0, maxY: 2.45, minZ: 34.85, maxZ: 37.15 });
+      landmarks.push({ name: 'Fuel tank', at: new THREE.Vector3(-36, 2, 36) });
+    }
+    { // SE — crane base with jib and hook
+      box(36, 0.18, 36, 2.0, 0.36, 2.0, concreteM);
+      box(36, 1.6, 36, 0.55, 2.9, 0.55, METAL);
+      box(36.95, 2.82, 36, 1.9, 0.22, 0.3, METAL, false);
+      box(37.72, 2.5, 36, 0.06, 0.66, 0.06, METAL, false);
+      shape(new THREE.TorusGeometry(0.2, 0.05, 8, 14), METAL, 37.72, 2.05, 36, Math.PI / 2);
+      landmarks.push({ name: 'Crane base', at: new THREE.Vector3(36, 3, 36) });
+    }
+
+    // -- 4. FLICKERING BULB + DUST MOTES inside each warehouse corner.
+    for (const [fx, fz] of [[-15.4, -7.8], [15.4, 7.8]] as const) {
+      const light = new THREE.PointLight(0xFFD9A0, 16, 15, 1.6);
+      light.position.set(fx, 4.6, fz);
+      scene.add(light);
+      flickerLights.push({ light, seed: Math.random() * 10 });
+      box(fx, 5.08, fz, 0.5, 0.12, 0.24, METAL, false);
+      shape(new THREE.SphereGeometry(0.09, 8, 6), GLOW, fx, 4.98, fz);
+      // dust motes hanging in the light shaft from the roof
+      const N = 20, pos = new Float32Array(N * 3), base = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++) {
+        const r = Math.random() * 1.1, a = Math.random() * Math.PI * 2;
+        base[i * 3] = fx + Math.cos(a) * r;
+        base[i * 3 + 1] = 0.5 + Math.random() * 4.2;
+        base[i * 3 + 2] = fz + Math.sin(a) * r;
+      }
+      pos.set(base);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const points = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xEADFB8, size: 0.05, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+      points.frustumCulled = false;
+      group.add(points);
+      motes.push({ points, base });
+    }
+
+    // -- 5. SPARSE GROUND LITTER — papers, cones, tires, planks. Never collides,
+    // never casts a shadow: visual density without nav snagging.
+    {
+      const litter = new Map<THREE.Material, THREE.BufferGeometry[]>();
+      const litterPush = (g: THREE.BufferGeometry, m: THREE.Material) => {
+        let arr = litter.get(m); if (!arr) { arr = []; litter.set(m, arr); }
+        arr.push(g);
+      };
+      const paper = col(0xC5BBA4, 0.95), tire = col(0x1C1C1A, 0.95), coneM = col(0xC46A2A, 0.8);
+      const scatter: [number, number, 'paper' | 'cone' | 'tire' | 'plank' | 'barrel', number][] = [
+        [-40, 10, 'paper', 0.4], [-42, -6, 'paper', 2.1], [26, 20, 'paper', 1.2], [40, -18, 'paper', 3.3],
+        [-26, -20, 'paper', 0.9], [8, 18, 'paper', 2.6], [-24, 24, 'cone', 0], [24, -24, 'cone', 1.5],
+        [-12, 12, 'cone', 2.8], [12, -12, 'cone', 0.7], [-41, 20, 'tire', 0.3], [41, -20, 'tire', 1.1],
+        [-6, -32, 'tire', 2.2], [28, 6, 'plank', 0.5], [-28, -6, 'plank', 1.9], [0, 20, 'plank', 2.7],
+        [-40, -12, 'barrel', 0.8], [40, 12, 'barrel', 2.4],
+      ];
+      for (const [x, z, kind, rot] of scatter) {
+        if (kind === 'paper') {
+          const g = new THREE.PlaneGeometry(0.34, 0.46);
+          litterPush(g, paper);
+          shape(g, paper, x, 0.036, z, -Math.PI / 2, 0, rot);
+        } else if (kind === 'cone') {
+          litterPush(new THREE.ConeGeometry(0.26, 0.62, 10), coneM);
+          shape(new THREE.ConeGeometry(0.26, 0.62, 10), coneM, x, 0.31, z, 0, rot, 0.06);
+        } else if (kind === 'tire') {
+          for (let t = 0; t < 2; t++) {
+            litterPush(new THREE.TorusGeometry(0.4, 0.17, 8, 16).translate(0, 0.17 + t * 0.34, 0), tire);
+            shape(new THREE.TorusGeometry(0.4, 0.17, 8, 16).translate(0, 0.17 + t * 0.34, 0), tire, x, 0, z, 0, rot + t * 0.4, 0);
+          }
+        } else if (kind === 'plank') {
+          litterPush(new THREE.BoxGeometry(1.7, 0.05, 0.28), timber);
+          shape(new THREE.BoxGeometry(1.7, 0.05, 0.28), timber, x, 0.03, z, 0, rot, 0.02);
+        } else {
+          litterPush(new THREE.CylinderGeometry(0.32, 0.32, 0.95, 12), ACC_TERRA);
+          shape(new THREE.CylinderGeometry(0.32, 0.32, 0.95, 12), ACC_TERRA, x, 0.33, z, 0, rot, Math.PI / 2);
+        }
+      }
+      for (const [m, geos] of litter) {
+        const merged = mergeGeometries(geos, false);
+        for (const g of geos) g.dispose();
+        if (!merged) continue;
+        const mesh = new THREE.Mesh(merged, m);
+        mesh.castShadow = false; mesh.receiveShadow = true;
+        group.add(mesh);
+      }
+    }
+
+    // -- 7. FORKLIFT-LANE ARROWS pointing into mid + tire skid marks at the
+    // cross-lane corners. Faded decals; new players flow toward the action.
+    const arrowMat = new THREE.MeshBasicMaterial({ map: arrowTex, transparent: true, opacity: 0.26, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    const arrow = (x: number, z: number, ry: number) => shape(new THREE.PlaneGeometry(1.5, 2.4), arrowMat, x, 0.045, z, -Math.PI / 2, ry, 0);
+    arrow(-31, 22, 0); arrow(-31, -22, Math.PI);     // west yard lane → mid
+    arrow(31, 22, 0); arrow(31, -22, Math.PI);       // east yard lane → mid
+    arrow(-22, 0, -Math.PI / 2); arrow(22, 0, Math.PI / 2); // cross lane → centre
+    arrow(0, 26, 0); arrow(0, -26, Math.PI);         // spawn lanes → mid
+    const skidMat = new THREE.MeshBasicMaterial({ color: 0x14140F, transparent: true, opacity: 0.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    for (const [sx, sz, rot] of [[-26, 5.6, 0.4], [26, -5.6, 0.4], [-26, -5.6, -0.6], [26, 5.6, -0.6]] as const)
+      shape(new THREE.RingGeometry(2.0, 2.3, 14, 1, 0, 1.9), skidMat, sx, 0.045, sz, -Math.PI / 2, 0, rot);
+
+    // -- 10. BULLET-HOLE & SCORCH DECALS — this yard has been fought over before.
+    const holeMat = new THREE.MeshBasicMaterial({ map: holeTex, transparent: true, opacity: 0.62, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const bulletSpatter = (x: number, y: number, z: number, nx: number, nz: number, count: number) => {
+      const ry = Math.atan2(nx, nz);
+      for (let i = 0; i < count; i++) {
+        const t = (Math.random() - 0.5) * 2.0;
+        const s = 0.14 + Math.random() * 0.12;
+        shape(new THREE.PlaneGeometry(s, s), holeMat,
+          x + nx * 0.035 - nz * t, y + (Math.random() - 0.5) * 0.9, z + nz * 0.035 + nx * t,
+          (Math.random() - 0.5) * 0.14, ry, (Math.random() - 0.5) * 0.14);
+      }
+    };
+    bulletSpatter(-3.46, 1.25, -7, 1, 0, 4); bulletSpatter(-3.46, 1.2, 7, 1, 0, 3);      // corridor walls by the roller doors
+    bulletSpatter(3.54, 1.25, -7, -1, 0, 3); bulletSpatter(3.54, 1.2, 7, -1, 0, 4);
+    bulletSpatter(-17.46, 1.3, -4, 1, 0, 3); bulletSpatter(17.54, 1.3, 4, -1, 0, 3);     // outer hall walls
+    bulletSpatter(-13, 1.2, 10.04, 0, 1, 4); bulletSpatter(13, 1.2, -10.04, 0, -1, 4);   // south/north door frames
+    bulletSpatter(-27, 1.1, 7.86, 0, -1, 3); bulletSpatter(27, 1.1, -7.86, 0, 1, 3);     // U-barrier peeks
+    bulletSpatter(0, 1.15, 24.86, 0, -1, 4); bulletSpatter(-12, 1.15, 24.86, 0, -1, 3);  // spawn barrier line
+    const scorchMat = new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, opacity: 0.4, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    for (const [sx, sz, r] of [[-10.5, 11.6, 1.0], [10.5, -11.6, 1.0], [-31, 0, 1.2], [31, 0, 1.2], [0, 8.5, 0.9]] as const)
+      shape(new THREE.CircleGeometry(r, 18), scorchMat, sx, 0.048, sz, -Math.PI / 2, 0, Math.random() * Math.PI);
 
     landmarks.push({ name: 'Alpha yard', at: new THREE.Vector3(0, 2, 38) }, { name: 'Bravo yard', at: new THREE.Vector3(0, 2, -38) });
   }
@@ -1040,7 +1292,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   for (let i = 0; i < Math.min(40, validCover.length); i++) coverNodes.push(validCover[Math.floor(i * validCover.length / Math.min(40, validCover.length))]);
   scene.add(group);
   group.updateMatrixWorld(true);
-  return { groundHeight, navigationHeight, detonate, get changed() { return changed; }, landmarks, overlooks, group, solids, occluders, coverNodes, playerSpawn, interiors, concrete, wood, half, lightSpots, windows, glass, breakGlass };
+  return { groundHeight, navigationHeight, detonate, get changed() { return changed; }, landmarks, overlooks, group, solids, occluders, coverNodes, playerSpawn, interiors, concrete, wood, half, lightSpots, windows, glass, breakGlass, soundTraps, flickerLights, motes };
 }
 
 export function pointInAABB(x: number, y: number, z: number, b: AABB): boolean {

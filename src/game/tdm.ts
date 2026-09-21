@@ -9,12 +9,28 @@ import { NavGrid } from './ai';
 
 export type TDMTeam = 'alpha' | 'bravo';
 export type TDMArmor = 0 | 1 | 2;
-export type TDMBotState = 'PATROL' | 'ENGAGE' | 'FLANK' | 'PUSH' | 'COVER' | 'DEAD';
+export type TDMBotState = 'PATROL' | 'ENGAGE' | 'FLANK' | 'PUSH' | 'COVER' | 'DOWNED' | 'EXECUTE' | 'REVIVE' | 'DEAD';
 
 export const TDM_MATCH_SECONDS = 150;
 export const TDM_RESPAWN_SECONDS = 5;
 export const TDM_BASE_HP = 150;
 export const TDM_HP_PER_ARMOR = 20;
+// ---- wounded / execution system ----
+/** Time on the floor before bleeding out (player + bots alike). */
+export const TDM_DOWNED_SECONDS = 4;
+/** Extra damage a downed body absorbs before bullets finish it. */
+export const TDM_EXECUTE_HP = 40;
+/** Channel time for a bot executing a downed enemy (player/bot alike). */
+export const TDM_BOT_EXECUTE_CHANNEL = 1.2;
+/** Hold-X channels for the player: fast finish, flashy finisher, revive. */
+export const TDM_PLAYER_EXECUTE_FAST = 1.0;
+export const TDM_PLAYER_EXECUTE_SLOW = 2.5;
+export const TDM_REVIVE_CHANNEL = 2.0;
+/** ---- momentum: ON FIRE ---- */
+export const TDM_ONFIRE_KILLS = 3;
+export const TDM_ONFIRE_WINDOW = 30;
+export const TDM_ONFIRE_DURATION = 15;
+export const TDM_ONFIRE_COOLDOWN = 20;
 /** Player-weapon damage multiplier in TDM. Full damage — bullets must FEEL like
  * they hurt. The 3-headshot floor is enforced by the engine's per-round damage
  * cap (74), not by gutting every hit. */
@@ -43,8 +59,33 @@ export interface TDMContext {
   onCallout(kind: string, pos: THREE.Vector3, team: TDMTeam): void;
   throwGrenade(from: THREE.Vector3, target: THREE.Vector3, owner: TDMBot): void;
   onBotFire(pos: THREE.Vector3, team: TDMTeam): void;
-  onFeed(killer: string, weapon: string, victim: string, headshot: boolean, killerTeam: TDMTeam): void;
+  onFeed(killer: string, weapon: string, victim: string, headshot: boolean, killerTeam: TDMTeam, zone: string): void;
   onScore(): void; // roster / scoreboard changed
+  // ---- wounded / execution system ----
+  /** The player is on the floor (bleeding out), not yet confirmed dead. */
+  playerDowned(): boolean;
+  /** The player currently has the ON FIRE momentum buff. */
+  playerOnFire(): boolean;
+  /** Ally bot finished reviving the player. */
+  revivePlayer(): void;
+  /** Enemy bot finished executing the downed player. */
+  finishDownedPlayer(killer: TDMBot, style: 'fast' | 'slow'): void;
+  /** A confirmed player kill (bullet, frag, execution, bleed-out credit). */
+  onPlayerKillConfirmed(victim: TDMBot | 'player', weapon: string, headshot: boolean, victimOnFire: boolean): void;
+}
+
+/** Result of a bot takeDamage() call. Kills only SCORE once confirmed (2) —
+ * dropping a target to the floor (1) starts the wounded phase instead. */
+export type TakeDamageResult = 0 | 1 | 2;
+export const TD_HIT = 0, TD_DOWN = 1, TD_KILLED = 2;
+
+/** Map quadrants for kill-feed callouts — "Havoc [M4] Wraith — DOCK A". */
+export function tdmZoneAt(x: number, z: number): string {
+  if (z >= 24) return 'ALPHA YARD';
+  if (z <= -24) return 'BRAVO YARD';
+  if (Math.abs(x) <= 18.5 && Math.abs(z) <= 11) return 'WAREHOUSE';
+  if (x < -18.5 || x > 18.5) return 'CONTAINERS';
+  return z > 0 ? 'DOCK A' : 'DOCK B';
 }
 
 const ray = new THREE.Raycaster();
@@ -117,6 +158,31 @@ export class TDMBot {
   stunTimer = 0;
   /** 0 cautious .. 1 aggressive. >0.58 = pusher, 0.35–0.75 may flank, else holder. */
   personality = Math.random();
+
+  // ---- wounded / execution state ----
+  /** On the floor, bleeding out. Kills only score once this resolves. */
+  downed = false;
+  downedTimer = 0;
+  /** Extra damage a downed body soaks before gunfire finishes it. */
+  executeHp = 0;
+  downedBy: TDMBot | 'player' | null = null;
+  /** Set on any confirmed death while the momentum buff was active (SHUT DOWN bounty). */
+  diedOnFire = false;
+  /** Progress of the bot's own execute/revive channel. */
+  channelT = 0;
+  execTarget: { isPlayer: boolean; bot: TDMBot | null } | null = null;
+  rescue: { isPlayer: boolean; bot: TDMBot | null } | null = null;
+  private downedCover: THREE.Vector3 | null = null;
+  private downedRepathT = 0;
+
+  // ---- momentum: ON FIRE ----
+  onFire = false;
+  private fireT = 0;
+  private fireCD = 0;
+  private killTimes: number[] = [];
+  private fireVfxT = 0;
+  private fireLight: THREE.PointLight | null = null;
+  private hunting: TargetRef | null = null;
 
   private ctx: TDMContext;
   private mgr: TDMManager;
@@ -191,6 +257,15 @@ export class TDMBot {
 
   eyePos() { return tmpB.set(this.pos.x, this.pos.y + 1.62 - (this.crouched ? 0.4 : 0), this.pos.z).clone(); }
 
+  /** Manager hook: order this bot to finish off a downed victim right now. */
+  forceExecute(target: { isPlayer: boolean; bot: TDMBot | null }) {
+    this.execTarget = target;
+    this.channelT = 0;
+    this.state = 'EXECUTE';
+    this.stateTime = 0;
+    this.path = null;
+  }
+
   respawn(at: THREE.Vector3) {
     this.pos.copy(at);
     this.hp = this.maxHp;
@@ -205,6 +280,13 @@ export class TDMBot {
     this.stunTimer = 0; this.flinch = 0; this.grenadeCD = 5 + Math.random() * 7;
     this.crouched = false; this.walkPhase = 0; this.locomotion = 0;
     this.lastX = at.x; this.lastZ = at.z;
+    // wounded / execution + momentum resets
+    this.downed = false; this.downedTimer = 0; this.executeHp = 0; this.downedBy = null;
+    this.diedOnFire = false; this.channelT = 0; this.execTarget = null; this.rescue = null;
+    this.downedCover = null; this.downedRepathT = 0;
+    this.killTimes.length = 0; this.hunting = null;
+    if (this.fireLight) { this.fireLight.removeFromParent(); this.fireLight = null; }
+    this.onFire = false; this.fireT = 0; this.fireCD = TDM_ONFIRE_COOLDOWN * 0.5;
     const g = this.model.group;
     g.visible = true; g.position.copy(this.pos); g.rotation.set(0, this.yaw, 0);
     this.model.parts.torso.position.y = 0.95; this.model.parts.torso.rotation.set(0, 0, 0);
@@ -228,7 +310,7 @@ export class TDMBot {
 
   /** Heard gunfire: soft intel — hunt the noise if not already fighting. */
   hearShot(pos: THREE.Vector3) {
-    if (this.dead) return;
+    if (this.dead || this.downed) return;
     if (this.state === 'PATROL') {
       this.lastKnown = pos.clone();
       this.lastSeenT = Math.min(this.lastSeenT, 4);
@@ -237,9 +319,18 @@ export class TDMBot {
   }
 
   /** Damage already scaled by TDM rules; armor reduction applied here so it also
-   * protects against bot fire and grenades, not only the player's bullets. */
-  takeDamage(amount: number, isHead: boolean, attacker: TDMBot | 'player', applyArmor = true): boolean {
-    if (this.dead) return false;
+   * protects against bot fire and grenades, not only the player's bullets.
+   * Returns TD_HIT / TD_DOWN (wounded phase starts) / TD_KILLED (confirmed —
+   * the caller is expected to credit the kill through handleKill). */
+  takeDamage(amount: number, isHead: boolean, attacker: TDMBot | 'player', applyArmor = true): TakeDamageResult {
+    if (this.dead) return TD_HIT;
+    if (this.downed) {
+      // gunfire into a downed body chips its execute health — finishing shot credited to the shooter
+      this.executeHp -= amount;
+      this.downedBy = attacker;
+      if (this.executeHp <= 0) { this.finishFromDamage(); return TD_KILLED; }
+      return TD_HIT;
+    }
     let dmg = amount;
     if (applyArmor) dmg *= 1 - (isHead ? TDM_HEAD_REDUCTION[this.armor] : TDM_BODY_REDUCTION[this.armor]);
     this.hp -= dmg;
@@ -248,11 +339,78 @@ export class TDMBot {
     const from = attacker === 'player' ? this.ctx.playerFeet() : attacker.pos;
     this.lastKnown = from.clone();
     this.lastSeenT = 0;
-    if (this.hp <= 0) { this.die(); return true; }
+    // an execution/revive channel dies the moment the actor takes a real hit
+    if (this.state === 'EXECUTE' || this.state === 'REVIVE') {
+      this.execTarget = null; this.rescue = null; this.channelT = 0;
+      this.setState('ENGAGE');
+    }
+    if (this.hp <= 0) { this.enterDowned(attacker); return TD_DOWN; }
     if (this.state === 'PATROL') this.state = 'ENGAGE';
     // Badly hurt → break for cover
     if (this.hp < this.maxHp * 0.35 && this.state !== 'COVER' && Math.random() < 0.65) this.enterCover();
-    return false;
+    return TD_HIT;
+  }
+
+  /** Lethal damage on a standing target starts the 4s wounded crawl instead of
+   * an instant death. No score changes here — kills land on confirmation. */
+  private enterDowned(attacker: TDMBot | 'player') {
+    this.hp = 0;
+    this.downed = true;
+    this.downedTimer = TDM_DOWNED_SECONDS;
+    this.executeHp = TDM_EXECUTE_HP;
+    this.downedBy = attacker;
+    this.diedOnFire = this.onFire; // burning targets keep the glow until confirmed
+    this.crouched = false;
+    this.downedCover = null; this.downedRepathT = 0;
+    this.execTarget = null; this.rescue = null; this.channelT = 0;
+    this.state = 'DOWNED'; this.stateTime = 0; this.path = null;
+    this.ctx.onCallout('mandown', this.pos, this.team);
+    this.mgr.notifyDown(this);
+  }
+
+  /** Gunfire/grenade finished an already-downed body. Returns whether the victim
+   * went down while ON FIRE (callers pass it into handleKill for the bounty). */
+  finishFromDamage(): boolean {
+    if (this.dead) return this.diedOnFire;
+    this.resolveDeath();
+    return this.diedOnFire;
+  }
+
+  /** A held execution (player hold-X or a bot channel) confirms the kill. */
+  confirmExecution(by: TDMBot | 'player', style: 'fast' | 'slow') {
+    if (this.dead || !this.downed) return;
+    this.resolveDeath();
+    void style; // style only changes feed text/score, handled by the caller's weapon tag
+    const weapon = style === 'slow' ? 'FINISHER' : 'EXECUTED';
+    this.mgr.handleKill(by, this, false, weapon, this.diedOnFire);
+  }
+
+  /** Bleed-out: nobody finished us in time; whoever landed the down gets the kill. */
+  private bleedOut() {
+    if (this.dead) return;
+    this.resolveDeath();
+    if (this.downedBy) this.mgr.handleKill(this.downedBy, this, false, 'BLEED OUT', this.diedOnFire);
+  }
+
+  /** Shared death resolution for every confirm path (no scoring here). */
+  private resolveDeath() {
+    this.downed = false;
+    this.rescue = null; this.execTarget = null; this.channelT = 0;
+    this.downedCover = null;
+    this.diedOnFire = this.onFire;
+    this.endFire();
+    this.die();
+  }
+
+  /** Back on your feet after a teammate's revive channel. */
+  revive(hp: number) {
+    if (this.dead || !this.downed) return;
+    this.downed = false;
+    this.hp = Math.min(hp, this.maxHp);
+    this.downedTimer = 0; this.executeHp = 0; this.downedBy = null;
+    this.downedCover = null; this.channelT = 0;
+    this.state = 'ENGAGE'; this.stateTime = 0; this.path = null;
+    this.crouched = false;
   }
 
   private die() {
@@ -265,6 +423,32 @@ export class TDMBot {
       if (this.pos.x > b.minX - 0.3 && this.pos.x < b.maxX + 0.3 && this.pos.z > b.minZ - 0.3 && this.pos.z < b.maxZ + 0.3) surfaceY = b.maxY;
     }
     this.ctx.effects.bloodDecal(this.pos, surfaceY);
+  }
+
+  // ==================== MOMENTUM: ON FIRE ====================
+  /** Call once per CONFIRMED kill by this bot. 3 within 30s ignites the buff. */
+  noteKill() {
+    const now = performance.now() / 1000;
+    this.killTimes.push(now);
+    while (this.killTimes.length && now - this.killTimes[0] > TDM_ONFIRE_WINDOW) this.killTimes.shift();
+    if (!this.onFire && this.killTimes.length >= TDM_ONFIRE_KILLS && this.fireCD <= 0 && !this.dead && !this.downed) this.ignite();
+  }
+
+  private ignite() {
+    this.onFire = true;
+    this.fireT = TDM_ONFIRE_DURATION;
+    this.fireLight = new THREE.PointLight(0xFF6A1E, 18, 10, 1.8);
+    this.fireLight.position.set(0, 1.35, 0);
+    this.model.group.add(this.fireLight);
+    // the whole enemy team knows — this is the debuff side of the buff
+    this.ctx.onCallout('onfire', this.pos, this.team);
+  }
+
+  private endFire() {
+    this.onFire = false;
+    this.fireT = 0;
+    this.fireCD = TDM_ONFIRE_COOLDOWN;
+    if (this.fireLight) { this.fireLight.removeFromParent(); this.fireLight = null; }
   }
 
   private setState(s: TDMBotState) {
@@ -296,7 +480,9 @@ export class TDMBot {
     }
   }
 
-  /** Pick the nearest live enemy (bravo bots also hunt the player). */
+  /** Pick the nearest live enemy (bravo bots also hunt the player). Downed
+   * enemies stay visible at a heavy distance penalty so bots finish their
+   * kills when nothing live is closer — live targets always win. */
   private acquireTarget(): TargetRef | null {
     let best: TargetRef | null = null;
     let bestD = Infinity;
@@ -307,10 +493,45 @@ export class TDMBot {
     }
     for (const bot of this.mgr.bots) {
       if (bot.team === this.team || bot.dead) continue;
-      const d = bot.pos.distanceTo(this.pos);
+      const d = bot.pos.distanceTo(this.pos) + (bot.downed ? 30 : 0);
       if (d < bestD) { bestD = d; best = { feet: bot.pos.clone(), eye: bot.eyePos(), isPlayer: false, bot }; }
     }
     return best;
+  }
+
+  /** Live position of a reference, or null when it can no longer be acted on. */
+  private liveFeet(t: TargetRef): THREE.Vector3 | null {
+    // a player target is live while alive OR downed (the ON FIRE hunt chases a
+    // standing, burning player; execute/revive targets are always downed)
+    if (t.isPlayer) return (this.ctx.playerAlive() || this.ctx.playerDowned()) ? this.ctx.playerFeet() : null;
+    return t.bot && !t.bot.dead ? t.bot.pos : null;
+  }
+
+  private isDownedRef(t: TargetRef): boolean {
+    return t.isPlayer ? this.ctx.playerDowned() : !!t.bot && t.bot.downed && !t.bot.dead;
+  }
+
+  /** MOMENTUM HUNT: the nearest burning enemy within 50m overrides everything —
+   * the on-fire debuff makes you the bounty the whole enemy squad pushes. */
+  private findBounty(): TargetRef | null {
+    let best: TargetRef | null = null;
+    let bd = 50;
+    if (this.team === 'bravo' && this.ctx.playerAlive() && this.ctx.playerOnFire()) {
+      const feet = this.ctx.playerFeet();
+      const d = feet.distanceTo(this.pos);
+      if (d < bd) { bd = d; best = { feet, eye: this.ctx.playerPos(), isPlayer: true, bot: null }; }
+    }
+    for (const b of this.mgr.bots) {
+      if (b.team === this.team || b.dead || b.downed || !b.onFire) continue;
+      const d = b.pos.distanceTo(this.pos);
+      if (d < bd) { bd = d; best = { feet: b.pos.clone(), eye: b.eyePos(), isPlayer: false, bot: b }; }
+    }
+    return best;
+  }
+
+  private validRescue(r: { isPlayer: boolean; bot: TDMBot | null }): boolean {
+    if (r.isPlayer) return this.ctx.playerDowned() && this.ctx.playerFeet().distanceTo(this.pos) < 30;
+    return !!r.bot && r.bot.downed && !r.bot.dead && r.bot.pos.distanceTo(this.pos) < 30;
   }
 
   private checkLOS(target: TargetRef): boolean {
@@ -324,6 +545,7 @@ export class TDMBot {
 
   /** Navigate; returns true on arrival (or when the goal proves unreachable). */
   private goTo(target: THREE.Vector3, speed: number, dt: number): boolean {
+    if (this.onFire) speed *= 1.05; // momentum buff: +5% move speed
     const dist = Math.hypot(target.x - this.pos.x, target.z - this.pos.z);
     if (dist < 0.5) { this.path = null; return true; }
     this.repathT -= dt;
@@ -423,13 +645,14 @@ export class TDMBot {
       const headshot = Math.random() < 0.10;
       // 44 head / 18-24 body — tuned against the lighter TDM armor curve so a
       // full-HP player survives roughly 7-9 hits (plus regen between fights)
-      const dmg = headshot ? 44 : 18 + Math.random() * 6;
+      // ON FIRE momentum: +10% damage while burning
+      const dmg = (headshot ? 44 : 18 + Math.random() * 6) * (this.onFire ? 1.1 : 1);
       if (target.isPlayer) {
         if (this.ctx.playerAlive()) this.ctx.damagePlayer(dmg, this.pos, this);
       } else if (target.bot && !target.bot.dead) {
         this.ctx.effects.blood(aimAt);
-        const killed = target.bot.takeDamage(dmg, headshot, this);
-        if (killed) this.mgr.handleKill(this, target.bot, headshot, 'RIFLE');
+        const res = target.bot.takeDamage(dmg, headshot, this);
+        if (res === TD_KILLED) this.mgr.handleKill(this, target.bot, headshot, 'RIFLE', target.bot.diedOnFire);
       }
     } else {
       const miss = aimAt.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.6, (Math.random() - 0.3) * 1.8, (Math.random() - 0.5) * 2.6));
@@ -467,8 +690,51 @@ export class TDMBot {
 
   updateLogic(dt: number) {
     if (this.dead || this.stunTimer > 0) return;
+    // ---- DOWNED: bleed-out clock + crawl to the nearest cover ----
+    if (this.downed) {
+      this.downedTimer -= dt;
+      if (this.downedTimer <= 0) { this.bleedOut(); return; }
+      this.downedRepathT -= dt;
+      if (!this.downedCover || this.downedRepathT <= 0) {
+        this.downedRepathT = 2.5;
+        let best: THREE.Vector3 | null = null, bestD = 14;
+        for (const n of this.ctx.coverNodes) {
+          const d = n.distanceTo(this.pos);
+          if (d > 1.5 && d < bestD) { bestD = d; best = n; }
+        }
+        this.downedCover = best ? best.clone() : null;
+      }
+      if (this.downedCover) this.goTo(this.downedCover, 1.0, dt);
+      else {
+        // no known cover: drag yourself away from whoever put you down
+        const away = this.downedBy === 'player' ? this.ctx.playerFeet() : this.downedBy?.pos;
+        if (away) {
+          const dx = this.pos.x - away.x, dz = this.pos.z - away.z, d = Math.hypot(dx, dz) || 1;
+          this.ctx.moveCollide(this.pos, (dx / d) * dt, (dz / d) * dt, 0.36);
+          this.yaw = Math.atan2(-dx, -dz);
+        }
+      }
+      return;
+    }
+
     this.stateTime += dt; this.lastSeenT += dt;
     this.grenadeCD = Math.max(0, this.grenadeCD - dt);
+
+    // ---- MOMENTUM: burning enemies override every other priority ----
+    const bounty = this.findBounty();
+    this.hunting = bounty;
+    if (bounty && this.state !== 'EXECUTE' && this.state !== 'REVIVE' && this.state !== 'PUSH') {
+      this.pushTarget = bounty.feet.clone();
+      this.setState('PUSH');
+      this.ctx.onCallout('hunt', this.pos, this.team);
+    }
+
+    // ---- RESCUE: a parked intention becomes a REVIVE once the fight allows ----
+    if (this.rescue && this.state !== 'REVIVE' && this.state !== 'EXECUTE' && this.state !== 'PUSH') {
+      if (!this.validRescue(this.rescue)) this.rescue = null;
+      else if (!this.target || !this.hasLOS || this.lastSeenT > 2.5) this.setState('REVIVE');
+      // else: enemies still in view — suppress first, revive after (fight-first doctrine)
+    }
 
     this.losTimer -= dt;
     if (this.losTimer <= 0) {
@@ -492,6 +758,14 @@ export class TDMBot {
 
     const target = this.target;
     const dist = target ? Math.hypot(target.feet.x - this.pos.x, target.feet.z - this.pos.z) : Infinity;
+
+    // A downed enemy at arm's reach is a finished kill waiting to happen.
+    if (target && this.isDownedRef(target) && dist < 2.6 && this.state !== 'EXECUTE' && this.state !== 'REVIVE') {
+      this.execTarget = target;
+      this.channelT = 0;
+      this.setState('EXECUTE');
+      return;
+    }
 
     switch (this.state) {
       case 'PATROL': {
@@ -573,13 +847,80 @@ export class TDMBot {
       }
       case 'PUSH': {
         this.crouched = false;
+        // hunting a bounty keeps the destination live and never times out early
+        if (this.hunting) {
+          const lf = this.liveFeet(this.hunting);
+          if (lf) this.pushTarget = lf.clone();
+          else this.hunting = null;
+        }
         if (!this.pushTarget) { this.setState('ENGAGE'); break; }
         // shoot on the move whenever sight opens up (still needs to face them)
         if (this.hasLOS && target && canFire(target)) {
           this.shotTimer -= dt;
           if (this.shotTimer <= 0) { this.burstIdx = 1; this.fireShot(target); this.shotTimer = 0.22 + Math.random() * 0.08; }
         }
-        if (this.goTo(this.pushTarget, 4.6, dt) || this.stateTime > 7) { this.pushTarget = null; this.setState('ENGAGE'); }
+        const huntSpeed = this.hunting ? 6.4 : 4.6;
+        const expire = this.hunting ? 15 : 7;
+        if (this.goTo(this.pushTarget, huntSpeed, dt) || this.stateTime > expire) { this.pushTarget = null; this.hunting = null; this.setState('ENGAGE'); }
+        break;
+      }
+      case 'EXECUTE': {
+        this.crouched = false;
+        const t = this.execTarget;
+        const feet = t ? (t.isPlayer ? (this.ctx.playerDowned() ? this.ctx.playerFeet() : null) : (t.bot && !t.bot.dead && t.bot.downed ? t.bot.pos : null)) : null;
+        if (!t || !feet) {
+          this.execTarget = null; this.channelT = 0;
+          this.setState('PATROL');
+          break;
+        }
+        const execDist = this.pos.distanceTo(feet);
+        if (execDist > 2.2) {
+          // sprint to the body — the bleed-out clock is running
+          this.channelT = 0;
+          if (this.goTo(feet, 6.4, dt) || this.stateTime > 5) { this.execTarget = null; this.channelT = 0; this.setState('PATROL'); }
+          break;
+        }
+        if (execDist > 3.4) { this.execTarget = null; this.channelT = 0; this.setState('PATROL'); break; }
+        this.faceTarget(feet);
+        this.channelT += dt;
+        if (this.channelT >= TDM_BOT_EXECUTE_CHANNEL) {
+          const victim = t;
+          this.execTarget = null; this.channelT = 0;
+          if (victim.isPlayer) this.ctx.finishDownedPlayer(this, 'fast');
+          else victim.bot!.confirmExecution(this, 'fast');
+          this.setState('PATROL');
+        }
+        break;
+      }
+      case 'REVIVE': {
+        this.crouched = false;
+        const r = this.rescue;
+        const feet = r ? (r.isPlayer ? (this.ctx.playerDowned() ? this.ctx.playerFeet() : null) : (r.bot && !r.bot.dead && r.bot.downed ? r.bot.pos : null)) : null;
+        if (!r || !feet) {
+          this.rescue = null; this.channelT = 0;
+          this.setState('PATROL');
+          break;
+        }
+        const d = this.pos.distanceTo(feet);
+        if (d > 2.0) {
+          this.channelT = 0;
+          this.goTo(feet, 4.4, dt);
+        } else {
+          this.faceTarget(feet);
+          this.channelT += dt;
+          if (this.channelT >= TDM_REVIVE_CHANNEL) {
+            const saved = r;
+            this.rescue = null; this.channelT = 0;
+            if (saved.isPlayer) this.ctx.revivePlayer();
+            else saved.bot!.revive(saved.bot!.armor === 2 ? 75 : 50);
+            this.setState('PATROL');
+          }
+        }
+        // a live threat at point-blank ends the rescue — fight first
+        if (this.stateTime > 0.6 && this.target && this.hasLOS && this.target.feet.distanceTo(this.pos) < 9) {
+          this.rescue = null; this.channelT = 0;
+          this.setState('ENGAGE');
+        }
         break;
       }
       case 'FLANK': {
@@ -641,6 +982,18 @@ export class TDMBot {
     this.ctx.onCallout('flank', this.pos, this.team);
   }
 
+  /** Fire particles + light pulse while the momentum buff is live. Pooled
+   * bursts only — a burning bot costs a couple of slots, never allocations. */
+  private tickFireVfx(dt: number) {
+    this.fireVfxT -= dt;
+    if (this.fireVfxT <= 0) {
+      this.fireVfxT = 0.16;
+      tmpA.set(this.pos.x + (Math.random() - 0.5) * 0.5, this.pos.y + 1.0 + Math.random() * 0.6, this.pos.z + (Math.random() - 0.5) * 0.5);
+      this.ctx.effects.fireBurst(tmpA);
+    }
+    if (this.fireLight) this.fireLight.intensity = 13 + Math.sin(performance.now() * 0.02) * 5 + Math.random() * 2;
+  }
+
   updateVisualFrame(dt: number) {
     if (this.allyMarker) {
       this.allyMarker.visible = !this.dead;
@@ -659,7 +1012,37 @@ export class TDMBot {
       if (this.deadAge > TDM_RESPAWN_SECONDS - 1.5) this.model.group.visible = false;
       return;
     }
+    // ---- DOWNED: settle onto the floor and drag forward with the legs ----
+    if (this.downed) {
+      const g = this.model.group;
+      const settle = Math.min(1, (TDM_DOWNED_SECONDS - this.downedTimer) * 2.2);
+      g.position.set(this.pos.x, this.pos.y + 0.05, this.pos.z);
+      g.rotation.x = -1.3 * settle;
+      const g2 = this.model.parts;
+      this.walkPhase += dt * 5;
+      const crawl = Math.sin(this.walkPhase) * 0.5;
+      g2.lLeg.rotation.x = -0.5 + crawl;
+      g2.rLeg.rotation.x = -0.5 - crawl;
+      g2.lShin.rotation.x = 0.7; g2.rShin.rotation.x = 0.55;
+      g2.torso.position.y = 0.55;
+      g2.rifle.rotation.x = 0.5;
+      g2.lArm.rotation.x = 0.4; g2.rArm.rotation.x = 0.55;
+      let dyd = this.yaw - g.rotation.y;
+      while (dyd > Math.PI) dyd -= Math.PI * 2; while (dyd < -Math.PI) dyd += Math.PI * 2;
+      g.rotation.y += dyd * Math.min(1, dt * 6);
+      // burning downed bodies keep flickering until the kill is confirmed
+      if (this.onFire) this.tickFireVfx(dt);
+      return;
+    }
     if (this.stunTimer > 0) this.stunTimer -= dt;
+    // momentum buff clock lives here so it never stalls (logic runs at half rate)
+    if (this.onFire) {
+      this.fireT -= dt;
+      this.tickFireVfx(dt);
+      if (this.fireT <= 0) this.endFire();
+    } else if (this.fireCD > 0) {
+      this.fireCD -= dt;
+    }
     this.flinch = Math.max(0, this.flinch - dt);
     const g = this.model.group;
     this.pos.y = Math.max(this.pos.y, this.ctx.groundHeight(this.pos.x, this.pos.z));
@@ -748,17 +1131,46 @@ export class TDMManager {
     return best!;
   }
 
-  handleKill(killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string) {
+  handleKill(killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string, victimOnFire = false) {
     const killerTeam: TDMTeam = killer === 'player' ? 'alpha' : killer.team;
     if (killerTeam === 'alpha') this.alphaScore++; else this.bravoScore++;
     // per-combatant stat lines (the player's own line lives in the engine)
-    if (killer !== 'player') { killer.kills++; if (headshot) killer.headshots++; }
+    if (killer !== 'player') { killer.kills++; if (headshot) killer.headshots++; killer.noteKill(); }
     if (victim !== 'player') victim.deaths++;
     this.rosterVersion++;
+    // ON FIRE bounty: shutting down a burning enemy pays the killer $500
+    if (victimOnFire && killer === 'player') this.ctx.onPlayerKillConfirmed(victim, 'SHUTDOWN', false, true);
+    else if (killer === 'player') this.ctx.onPlayerKillConfirmed(victim, weapon, headshot, false);
     const killerName = killer === 'player' ? 'YOU' : killer.name;
     const victimName = victim === 'player' ? 'YOU' : victim.name;
-    this.ctx.onFeed(killerName, weapon, victimName, headshot, killerTeam);
+    const vPos = victim === 'player' ? this.ctx.playerFeet() : victim.pos;
+    this.ctx.onFeed(killerName, weapon, victimName, headshot, killerTeam, tdmZoneAt(vPos.x, vPos.z));
     this.ctx.onScore();
+  }
+
+  /** A teammate went down. Teammates roll for the rescue (70% when it's safe,
+   * 30% cover-first when enemies are near); enemies may send one executor. */
+  notifyDown(victim: TDMBot | 'player') {
+    const vTeam: TDMTeam = victim === 'player' ? 'alpha' : victim.team;
+    const vPos = victim === 'player' ? this.ctx.playerFeet() : victim.pos;
+    const ref = victim === 'player' ? { isPlayer: true, bot: null } : { isPlayer: false, bot: victim };
+    const claimed = this.bots.some(m => m.rescue && ((ref.isPlayer && m.rescue.isPlayer) || (!ref.isPlayer && m.rescue.bot === victim)));
+    let executor = false;
+    const enemiesNear = this.bots.some(e => e.team !== vTeam && !e.dead && !e.downed && e.pos.distanceTo(vPos) < 15);
+    for (const b of this.bots) {
+      if (b.dead || b.downed) continue;
+      if (!ref.isPlayer && b === victim) continue;
+      const d = b.pos.distanceTo(vPos);
+      if (b.team === vTeam) {
+        // TEAMMATE: decide once — go now when safe, fight first when contested
+        if (b.rescue || claimed || d > 14) continue;
+        if ((!enemiesNear && Math.random() < 0.7) || (enemiesNear && Math.random() < 0.3)) b.rescue = { ...ref };
+      } else if (!executor && d < (enemiesNear ? 14 : 22) && (d < 14 || Math.random() < 0.5)) {
+        // ENEMY: finish the job before the medics get there
+        b.forceExecute({ ...ref });
+        executor = true;
+      }
+    }
   }
 
   aliveCount(team: TDMTeam) { return this.bots.filter(b => b.team === team && !b.dead).length; }

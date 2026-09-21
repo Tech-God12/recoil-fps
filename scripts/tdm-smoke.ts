@@ -104,8 +104,9 @@ async function main() {
     scene, occluders: world.occluders, coverNodes: world.coverNodes, solids, half,
     groundHeight: gh, effects: effectsStub,
     playerPos: () => playerPos.clone(), playerFeet: () => new THREE.Vector3(playerPos.x, 0, playerPos.z),
-    playerAlive: () => true,
+    playerAlive: () => true, playerDowned: () => false, playerOnFire: () => false,
     damagePlayer: () => {}, moveCollide,
+    revivePlayer: () => {}, finishDownedPlayer: () => {}, onPlayerKillConfirmed: () => {},
     onCallout: () => {}, throwGrenade: () => {}, onBotFire: () => {},
     onFeed: (k: string, w: string, v: string) => console.log(`  FEED ${k} [${w}] ${v}`),
     onScore: () => {},
@@ -133,5 +134,103 @@ async function main() {
     const s = stuckAcc.get(b)!;
     console.log(`  ${b.team} ${b.name.padEnd(8)} state ${b.state.padEnd(7)} pos ${b.pos.x.toFixed(0)},${b.pos.z.toFixed(0)} worstStill ${s.worst.toFixed(1)}s`);
   }
+
+  // ================= PART B/C ACCEPTANCE CHECKS =================
+  const { TD_DOWN, TD_KILLED, TDM_DOWNED_SECONDS, TDM_ONFIRE_KILLS } = await import('../src/game/tdm');
+  const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error('ACCEPT FAIL: ' + msg); console.log('  OK', msg); };
+
+  // fresh manager for deterministic tests
+  let playerDownedFlag = false, playerOnFireFlag = false;
+  const events2: string[] = [];
+  const mgr2 = new TDMManager({
+    scene, occluders: world.occluders, coverNodes: world.coverNodes, solids, half,
+    groundHeight: gh, effects: effectsStub,
+    playerPos: () => playerPos.clone(), playerFeet: () => new THREE.Vector3(playerPos.x, 0, playerPos.z),
+    playerAlive: () => true, playerDowned: () => playerDownedFlag, playerOnFire: () => playerOnFireFlag,
+    damagePlayer: () => {}, moveCollide,
+    revivePlayer: () => { events2.push('REVIVED'); playerDownedFlag = false; },
+    finishDownedPlayer: (k: any) => { events2.push('EXECUTED_BY_' + k.name); playerDownedFlag = false; },
+    onPlayerKillConfirmed: (v: any, w: string) => events2.push(`PKILL_${v === 'player' ? 'PLAYER' : v.name}_${w}`),
+    onCallout: (k: string) => events2.push('CALLOUT_' + k),
+    throwGrenade: () => {}, onBotFire: () => {},
+    onFeed: (k: string, w: string, v: string) => events2.push(`FEED_${k}_${w}_${v}`),
+    onScore: () => {},
+  } as any, 1);
+  // park everyone far from the test corners so stray AI doesn't interfere
+  for (const b of mgr2.bots) b.updateVisualFrame?.();
+
+  // ---- B1: down a bot -> NOT a kill until confirmed ----
+  const victim = mgr2.bots.find(b => b.team === 'bravo')!;
+  const res1 = victim.takeDamage(9999, false, 'player');
+  assert(res1 === TD_DOWN, 'lethal damage on a fresh bot returns TD_DOWN (not TD_KILLED)');
+  assert(victim.downed && !victim.dead, 'victim enters DOWNED state, still not dead');
+  assert(victim.downedTimer > 0 && victim.downedTimer <= TDM_DOWNED_SECONDS, 'bleed-out clock running');
+
+  // ---- B2: enemy bot executes the downed body ----
+  const enemy = mgr2.bots.find(b => b.team === 'alpha')!;
+  enemy.pos.set(victim.pos.x + 1, victim.pos.y, victim.pos.z); // within 2.6m trigger range
+  enemy.forceExecute({ isPlayer: false, bot: victim });
+  for (let i = 0; i < 60 * 3 && !victim.dead; i++) { mgr2.update(1 / 60); }
+  assert(victim.dead, 'EXECUTE channel completes -> victim confirmed dead');
+  assert(events2.some(e => e.startsWith('FEED_') && e.includes('EXECUTED')), 'feed shows EXECUTED weapon tag');
+
+  // ---- B3: bleed-out when nobody finishes ----
+  const v2 = mgr2.bots.find(b => b.team === 'bravo' && !b.dead && !b.downed)!;
+  v2.pos.set(999, 0, 999); // isolate: no enemy within executor range
+  for (const b of mgr2.bots) if (b !== v2) b.pos.set(-999, 0, -999);
+  v2.takeDamage(9999, false, 'player');
+  let bled = false;
+  for (let i = 0; i < 60 * (TDM_DOWNED_SECONDS + 2) && !bled; i++) { mgr2.update(1 / 60); if (v2.dead) bled = true; }
+  assert(bled, 'unexecuted downed bot bleeds out and dies');
+  assert(events2.some(e => e.includes('BLEED OUT')), 'bleed-out kill credited via feed');
+
+  // ---- B4: ally bot revives the downed PLAYER ----
+  playerDownedFlag = true;
+  // player at origin; put an alpha teammate 3m away, bravo far away
+  const medic = mgr2.bots.find(b => b.team === 'alpha' && !b.dead && !b.downed)!;
+  playerPos.set(0, 1.6, 0);
+  medic.pos.set(3, 0, 0);
+  for (const b of mgr2.bots) if (b !== medic) b.pos.set(60, 0, 60);
+  mgr2.notifyDown('player');
+  assert(!!medic.rescue, 'nearest alpha teammate claims the rescue');
+  let revived = false;
+  for (let i = 0; i < 60 * 8 && !revived; i++) {
+    mgr2.update(1 / 60);
+    if (events2.some(e => e === 'REVIVED')) revived = true;
+  }
+  assert(revived, `teammate bot reaches the player and completes the revive (final state=${medic.state} rescue=${!!medic.rescue})`);
+
+  // ---- B5: player executes a downed enemy via confirmExecution ----
+  const v3 = mgr2.bots.find(b => b.team === 'bravo' && !b.dead && !b.downed)!;
+  v3.pos.set(0, 0, 0); v3.takeDamage(9999, false, 'player');
+  events2.length = 0;
+  v3.confirmExecution('player', 'slow'); // 'player' executor = the human finished them
+  assert(v3.dead, 'player slow-finisher confirms the kill');
+  assert(events2.some(e => e === 'PKILL_' + v3.name + '_FINISHER'), 'funnel credits FINISHER to the player');
+
+  // ---- C1: 3 kills within 30s -> ON FIRE ----
+  assert(TDM_ONFIRE_KILLS === 3, 'streak threshold is 3');
+  const streaker = mgr2.bots.find(b => b.team === 'alpha' && !b.dead && !b.downed)!;
+  for (let k = 0; k < 3; k++) streaker.noteKill();
+  assert(streaker.onFire, '3 quick kills ignite the killer');
+  // ---- C2: when the PLAYER is on fire, bravo bots force-hunt them ----
+  playerOnFireFlag = true;
+  const hunter = mgr2.bots.find(b => b.team === 'bravo' && !b.dead && !b.downed)!;
+  streaker.pos.set(-40, 0, -40); // keep the C1 streaker from out-bountying the player
+  hunter.pos.set(8, 0, 0); // 8m from the burning player, 60m+ from the streaker
+  let sawHunt = false;
+  for (let i = 0; i < 60 * 6 && !sawHunt; i++) {
+    mgr2.update(1 / 60);
+    if (hunter.state === 'PUSH' && (hunter as any).hunting?.isPlayer) sawHunt = true;
+  }
+  assert(sawHunt, 'enemy bot forces a PUSH hunt on the burning player');
+  assert(events2.some(e => e === 'CALLOUT_onfire' || e === 'CALLOUT_hunt'), 'push/hunt callout fired');
+  // ---- C3: killing a burning enemy as the player pays the SHUTDOWN bounty ----
+  streaker.diedOnFire = true;
+  events2.length = 0;
+  mgr2.handleKill('player', streaker, false, 'M4', streaker.diedOnFire);
+  assert(events2.some(e => e.includes('_SHUTDOWN')), 'shutdown credit flows through the funnel');
+
+  console.log('ALL ACCEPTANCE CHECKS PASSED');
 }
 main().catch(e => { console.error('SMOKE FAIL:', e); process.exit(1); });

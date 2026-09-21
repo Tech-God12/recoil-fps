@@ -1473,3 +1473,51 @@ img { display: block; max-width: 100%; }
 .tdm-standing-row.you { background: rgba(79,176,198,0.10); }
 .tdm-standing-row .dim { color: var(--bone-dim); }
 .tdm-standing-row .kd { color: var(--brass); }
+
+/* ============ TDM WOUNDED / EXECUTION + ON FIRE (Part B/C) ============ */
+/* Kill-feed landmark zone tag — "Havoc [M4] Wraith — DOCK A" */
+.feed-zone { color: rgba(255,255,255,0.42); font-size: 9px; margin-left: 6px; letter-spacing: 0.08em; }
+/* 🔥 momentum badge on roster rows + full board */
+.roster-fire { font-style: normal; font-size: 10px; margin-left: 3px; filter: drop-shadow(0 0 4px rgba(255,122,30,0.9)); animation: firePulse 0.9s ease-in-out infinite; }
+@keyframes firePulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.25); opacity: 0.85; } }
+
+/* ---- DOWNED overlay: red-washed screen, bleed-out clock, execution/revive channels ---- */
+.downed-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 6; }
+.downed-vignette { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(120,10,0,0.08) 30%, rgba(120,10,0,0.45) 100%);
+  animation: downedThrob 0.9s ease-in-out infinite; }
+@keyframes downedThrob { 0%,100% { opacity: 0.85; } 50% { opacity: 1; } }
+.downed-title { font-size: 52px; font-weight: 900; letter-spacing: 0.34em; text-indent: 0.34em; color: #E8D9C4;
+  text-shadow: 0 0 26px rgba(200,50,30,0.9), 0 2px 0 rgba(0,0,0,0.6); position: relative; }
+.downed-bar { width: 300px; height: 5px; border-radius: 3px; background: rgba(237,228,211,0.12); overflow: hidden; position: relative; }
+.downed-bar .fill { display: block; height: 100%; background: linear-gradient(90deg, #C8321E, #E05A48); box-shadow: 0 0 10px rgba(200,50,30,0.8); transition: width 0.1s linear; }
+.downed-hint { position: relative; font-size: 10px; letter-spacing: 0.18em; color: rgba(237,228,211,0.75); text-align: center; }
+.downed-threat { position: relative; width: 260px; display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 4px; }
+.downed-threat .lbl { font-size: 10px; font-weight: 900; letter-spacing: 0.28em; color: #E05A48; text-shadow: 0 0 12px rgba(200,50,30,0.8); }
+.downed-threat.ally .lbl { color: #7FC4D4; text-shadow: 0 0 12px rgba(79,176,198,0.8); }
+.downed-threat .bar { width: 100%; height: 4px; border-radius: 2px; background: rgba(237,228,211,0.10); overflow: hidden; }
+.downed-threat .bar .fill { display: block; height: 100%; background: #C8321E; box-shadow: 0 0 8px rgba(200,50,30,0.9); }
+.downed-threat .bar.ally .fill { background: #4FB0C6; box-shadow: 0 0 8px rgba(79,176,198,0.9); }
+
+/* ---- HOLD-X interact prompt (execute / finisher / revive) ---- */
+.interact-prompt { position: absolute; left: 50%; bottom: 26%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; z-index: 5; }
+.interact-prompt .keycap { font-size: 13px; padding: 3px 9px; }
+.interact-prompt .lbl { font-size: 15px; font-weight: 900; letter-spacing: 0.3em; text-indent: 0.3em; color: #7FC4D4; text-shadow: 0 0 14px rgba(79,176,198,0.7); }
+.interact-prompt.danger .lbl { color: #E05A48; text-shadow: 0 0 14px rgba(200,50,30,0.7); }
+.interact-prompt .sub { font-size: 9px; letter-spacing: 0.2em; color: rgba(237,228,211,0.6); }
+.interact-prompt .bar { width: 220px; height: 4px; border-radius: 2px; background: rgba(237,228,211,0.10); overflow: hidden; }
+.interact-prompt .bar .fill { display: block; height: 100%; background: #4FB0C6; box-shadow: 0 0 8px rgba(79,176,198,0.9); }
+.interact-prompt.danger .bar .fill { background: #C8321E; box-shadow: 0 0 8px rgba(200,50,30,0.9); }
+
+/* ---- ON FIRE momentum banner ---- */
+.onfire-banner { position: absolute; left: 50%; top: 15%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; z-index: 5;
+  padding: 6px 22px; border: 1px solid rgba(255,122,30,0.45); border-radius: 3px;
+  background: linear-gradient(180deg, rgba(255,122,30,0.16), rgba(255,122,30,0.05));
+  box-shadow: 0 0 26px rgba(255,122,30,0.35), inset 0 0 18px rgba(255,122,30,0.12);
+  animation: firePulse 0.9s ease-in-out infinite; }
+.onfire-banner .flame { font-size: 20px; filter: drop-shadow(0 0 8px rgba(255,122,30,0.9)); }
+.onfire-banner .lbl { font-size: 20px; font-weight: 900; letter-spacing: 0.34em; text-indent: 0.34em;
+  color: #FFB25E; text-shadow: 0 0 18px rgba(255,122,30,0.95), 0 2px 0 rgba(0,0,0,0.55); }
+.onfire-banner .secs { font-size: 14px; font-weight: 800; color: rgba(255,178,94,0.85); }

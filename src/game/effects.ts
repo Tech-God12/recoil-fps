@@ -181,6 +181,12 @@ export class Effects {
     this.burst(pos, 3, 0xC8B080, 0.7, 0.35, 1.2, 0.05);
   }
 
+  /** ON FIRE momentum: rising flame licks (negative gravity = flames climb). */
+  fireBurst(pos: THREE.Vector3) {
+    this.burst(pos, 6, 0xFF7A1E, 1.6, 0.45, -2.5, 0.09, 0.7);
+    this.burst(pos, 3, 0xFFC24A, 1.1, 0.3, -3, 0.06, 0.5);
+  }
+
   update(dt: number, playerPos: THREE.Vector3) {
     for (let i = 0; i < this.bursts.length; i++) {
       const b = this.bursts[i];

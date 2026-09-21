@@ -174,9 +174,9 @@ export class SpatialAudioEngine {
   }
 
   /** Pitched sub-thump shared by the rifle voices (each caller picks its own register). */
-  private subThump(startHz: number, endHz: number, gain: number, dur: number, type: OscillatorType = 'triangle') {
+  private subThump(startHz: number, endHz: number, gain: number, dur: number, type: OscillatorType = 'triangle', when = 0) {
     const ctx = this.ensure();
-    const t = ctx.currentTime;
+    const t = ctx.currentTime + when;
     const o = ctx.createOscillator();
     o.type = type;
     o.frequency.setValueAtTime(this.rf(startHz, 0.06), t);
@@ -586,6 +586,148 @@ export class SpatialAudioEngine {
     } else {
       this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
     }
+  }
+
+  // ==================== SOUND-TRAP FLOORING (glass / gravel) ====================
+  /** Stepping on a sound-trap patch: same step, 1.8x louder, distinct texture. */
+  footstepTrap(kind: 'glass' | 'gravel', sprint: boolean, crouch = false) {
+    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * 1.8;
+    if (kind === 'gravel') {
+      this.burstDirect({ dur: 0.09, gain: g, freq: 620, q: 0.7, type: 'lowpass' });
+      this.burstDirect({ dur: 0.05, gain: g * 0.7, freq: 2400, q: 1.6, when: 0.02 });
+    } else {
+      this.burstDirect({ dur: 0.05, gain: g * 0.8, freq: 3600, q: 1.2, hp: 1800 });
+      for (let i = 0; i < 3; i++) this.burstDirect({ dur: 0.03, gain: g * 0.5, freq: 4200 + Math.random() * 2600, q: 3, when: 0.03 + i * 0.035 });
+    }
+  }
+
+  // ==================== WOUNDED / EXECUTION SYSTEM ====================
+  /** A target collapsed to the floor — heavy body thud + gear scatter. */
+  bodyDown() {
+    this.burstDirect({ dur: 0.16, gain: 0.5, freq: 300, q: 0.8, type: 'lowpass' });
+    this.burstDirect({ dur: 0.06, gain: 0.25, freq: 900, q: 1.4, when: 0.05 });
+  }
+
+  /** The player hits the deck: dull impact + ringing ears setup. */
+  playerDowned() {
+    this.subThump(120, 40, 0.7, 0.25);
+    this.burstDirect({ dur: 0.3, gain: 0.4, freq: 240, q: 0.7, type: 'lowpass' });
+  }
+
+  /** Heartbeat while bleeding out (engine calls it on a ~0.9s cadence). */
+  heartThump() {
+    this.subThump(70, 38, 0.28, 0.12);
+    this.subThump(60, 34, 0.18, 0.1, 'triangle', 0.16);
+  }
+
+  /** Held execution completes: pistol bark (fast) or knife shing (finisher). */
+  executeHit(style: 'fast' | 'slow') {
+    if (style === 'slow') {
+      this.burstDirect({ dur: 0.28, gain: 0.5, freq: 5200, q: 3, hp: 2600, attack: 0.02 });
+      this.burstDirect({ dur: 0.1, gain: 0.4, freq: 500, q: 0.9, type: 'lowpass', when: 0.05 });
+    } else {
+      this.burstDirect({ dur: 0.035, gain: 0.75, freq: 2400, q: 0.8, hp: 700 });
+      this.subThump(130, 46, 0.5, 0.09);
+    }
+  }
+
+  /** Revive channel completes: soft rising two-tone. */
+  reviveDone() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    [520, 780].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f, t + i * 0.12);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + i * 0.12);
+      g.gain.linearRampToValueAtTime(0.12, t + i * 0.12 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.12 + 0.22);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + i * 0.12); o.stop(t + i * 0.12 + 0.24);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    });
+  }
+
+  /** Momentum ignite: low whoosh with a crackle tail. */
+  fireIgnite() {
+    this.burstDirect({ dur: 0.5, gain: 0.4, freq: 900, q: 0.5, type: 'lowpass', attack: 0.08 });
+    this.burstDirect({ dur: 0.25, gain: 0.25, freq: 3200, q: 1.2, when: 0.05, hp: 1600 });
+  }
+
+  // ==================== DISTANT AMBIENCE (2D, quiet, sparse) ====================
+  private ambientT = 8;
+  /** Engine ticks this every frame; a random distant sound every 12-20s. */
+  ambientTick(dt: number) {
+    this.ambientT -= dt;
+    if (this.ambientT > 0) return;
+    this.ambientT = 12 + Math.random() * 8;
+    const roll = Math.random();
+    if (roll < 0.34) this.dogBark();
+    else if (roll < 0.67) this.windGust();
+    else this.metalCreak();
+  }
+
+  private dogBark() {
+    const ctx = this.ensure();
+    const t0 = ctx.currentTime;
+    const barks = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < barks; i++) {
+      const t = t0 + i * (0.22 + Math.random() * 0.1);
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(340 + Math.random() * 90, t);
+      o.frequency.exponentialRampToValueAtTime(160, t + 0.09);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 700; bp.Q.value = 1.2;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.15, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+      o.connect(bp); bp.connect(g); g.connect(this.master!);
+      o.start(t); o.stop(t + 0.14);
+      o.onended = () => { o.disconnect(); bp.disconnect(); g.disconnect(); };
+    }
+  }
+
+  private windGust() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(400, t);
+    bp.frequency.linearRampToValueAtTime(900, t + 2.4);
+    bp.Q.value = 0.6;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.15, t + 1.4);
+    g.gain.linearRampToValueAtTime(0.0001, t + 3.2);
+    src.connect(bp); bp.connect(g); g.connect(this.master!);
+    src.start(t, Math.random());
+    src.stop(t + 3.3);
+    src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); };
+  }
+
+  private metalCreak() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    const f0 = 180 + Math.random() * 120;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.linearRampToValueAtTime(f0 * (1.2 + Math.random() * 0.3), t + 1.4);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = f0 * 2; bp.Q.value = 8;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.09, t + 0.5);
+    g.gain.linearRampToValueAtTime(0.0001, t + 1.6);
+    o.connect(bp); bp.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + 1.7);
+    o.onended = () => { o.disconnect(); bp.disconnect(); g.disconnect(); };
   }
 
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }

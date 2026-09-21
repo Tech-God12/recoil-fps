@@ -2060,30 +2060,25 @@ img { display: block; max-width: 100%; }
 .arm2-rackhead b { font-size: 10px; letter-spacing: 0.08em; color: var(--brass); font-weight: 700; }
 /* Every gun on screen at once: rows share the rail height evenly, no scroll. */
 .arm2-cards { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
-.arm2-group { display: contents; }
-.arm2-group-h {
-  flex: none; display: flex; align-items: center; gap: 8px;
-  padding: 7px 2px 4px; font-size: 8px; letter-spacing: 0.2em; color: var(--bone-mute);
-}
-.arm2-group-h::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-.arm2-group:first-child .arm2-group-h { padding-top: 0; }
 .arm2-row {
-  flex: 1 1 0; min-height: 0; display: flex; gap: 8px; align-items: center; text-align: left;
-  padding: 3px 8px; margin-bottom: 4px; background: #1E1B16; border: 1px solid var(--line); border-radius: 2px;
+  flex: 1 1 0; min-height: 0; display: flex; gap: 10px; align-items: center; text-align: left;
+  padding: 6px 10px; margin-bottom: 6px; background: #1E1B16; border: 1px solid var(--line); border-radius: 2px;
   cursor: pointer; overflow: hidden; transition: border-color 0.14s, background 0.14s;
 }
+.arm2-row:last-child { margin-bottom: 0; }
 .arm2-row:hover { border-color: rgba(200,155,90,0.35); background: #252119; }
 .arm2-row.sel { border-color: rgba(200,155,90,0.6); background: #2A241C; box-shadow: inset 3px 0 0 var(--brass); }
-.arm2-num { font-size: 10px; font-weight: 700; color: var(--brass); flex: none; }
+.arm2-num { font-size: 11px; font-weight: 700; color: var(--brass); flex: none; }
 .arm2-thumb {
-  width: 62px; height: 31px; object-fit: contain; flex: none;
+  height: clamp(30px, 5vh, 52px); width: auto; aspect-ratio: 2 / 1; max-width: 104px;
+  object-fit: contain; flex: none;
   background: radial-gradient(ellipse 80% 88% at 50% 58%, rgba(237,228,211,0.06), transparent 70%);
   border: 1px solid rgba(237,228,211,0.07); border-radius: 2px;
 }
 span.arm2-thumb { display: inline-block; }
-.arm2-row-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.arm2-name { font-family: var(--display); font-size: 13px; font-weight: 800; letter-spacing: 0.05em; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.arm2-row-sub { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 9px; }
+.arm2-row-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.arm2-name { font-family: var(--display); font-size: 14px; font-weight: 800; letter-spacing: 0.05em; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arm2-row-sub { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 9.5px; }
 .arm2-cls { font-style: normal; color: var(--steel); border: 1px solid rgba(139,147,160,0.3); padding: 1px 5px; font-size: 8px; font-weight: 700; border-radius: 2px; }
 .arm2-fielded { color: var(--olive); font-weight: 700; }
 .arm2-owned { color: var(--bone-mute); font-weight: 500; }

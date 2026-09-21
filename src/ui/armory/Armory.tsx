@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   WEAPON_CATALOG, attachmentById, attachmentsFor, weaponById,
-  type AttachSlot, type AttachmentId, type WeaponClass, type WeaponId,
+  type AttachSlot, type AttachmentId, type WeaponId,
 } from '../../game/economy/catalog';
 import { resolveWeaponStats } from '../../game/economy/stats';
 import {
@@ -30,15 +30,6 @@ const TUTORIAL = [
   { title: 'Hardpoints', body: 'Click a brass pin on the gun or a slot in the panel to open parts.', anchor: 'stage' },
   { title: 'Build it', body: 'Buy to auto-equip. Finishes repaint the whole gun live.', anchor: 'panel' },
 ] as const;
-
-const CLASS_TABS: { id: string; label: string; classes: WeaponClass[] }[] = [
-  { id: 'assault', label: 'ASSAULT RIFLES', classes: ['AR', 'BR'] },
-  { id: 'smg', label: 'SMGS', classes: ['SMG', 'PDW'] },
-  { id: 'sniper', label: 'SNIPER RIFLES', classes: ['SR'] },
-  { id: 'lmg', label: 'LMGS', classes: ['LMG'] },
-  { id: 'shotgun', label: 'SHOTGUNS', classes: ['SG'] },
-  { id: 'sidearm', label: 'SIDEARMS', classes: ['PISTOL'] },
-];
 
 
 
@@ -88,9 +79,9 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
     return resolveWeaponStats(entry.base, mods);
   }, [build, entry]);
   const tags = weaponTags(entry, stats);
-  // The whole rack, grouped by class — every weapon visible, no tabs, no scroll.
+  // The whole rack as one flat list — primaries first, then sidearms. No tabs, no scroll.
   const rail = useMemo(
-    () => CLASS_TABS.flatMap(t => WEAPON_CATALOG.filter(w => t.classes.includes(w.cls))),
+    () => [...WEAPON_CATALOG].sort((a, b) => (a.slot === b.slot ? 0 : a.slot === 'primary' ? -1 : 1)),
     [],
   );
   const level = 13 + profile.missions;
@@ -212,37 +203,28 @@ export default function Armory({ profile, onProfile, onDeploy, onBack, deployHin
         <aside className={`tx-col arm2-rail seq ${tutStep === 0 ? 'tut-ring' : ''}`} style={{ animationDelay: '.06s' }} aria-label="Weapon rack">
           <div className="arm2-rackhead"><span>WEAPON RACK</span><b className="mono">{rail.length} GUNS</b></div>
           <div className="arm2-cards" tabIndex={0} onKeyDown={railKey} aria-label="All weapons">
-            {CLASS_TABS.map(t => {
-              const list = rail.filter(w => t.classes.includes(w.cls));
-              if (!list.length) return null;
+            {rail.map((w, i) => {
+              const isOwned = profile.ownedWeapons.includes(w.id);
+              const isFielded = profile.loadout[w.slot].weapon === w.id;
+              const isSel = w.id === selected;
+              const n = i + 1;
               return (
-                <div key={t.id} className="arm2-group">
-                  <span className="arm2-group-h mono" aria-hidden="true">{t.label}</span>
-                  {list.map(w => {
-                    const isOwned = profile.ownedWeapons.includes(w.id);
-                    const isFielded = profile.loadout[w.slot].weapon === w.id;
-                    const isSel = w.id === selected;
-                    const n = rail.indexOf(w) + 1;
-                    return (
-                      <button
-                        key={w.id} type="button"
-                        className={`arm2-row ${isSel ? 'sel' : ''} ${isOwned ? '' : 'locked'}`}
-                        onClick={() => selectWeapon(w.id)}
-                        aria-pressed={isSel}
-                      >
-                        <span className="arm2-num mono">{n < 10 ? `0${n}` : n}</span>
-                        {thumbs[w.id] ? <img src={thumbs[w.id]} alt="" draggable={false} className="arm2-thumb" /> : <span className="arm2-thumb" />}
-                        <span className="arm2-row-body">
-                          <span className="arm2-name">{w.name}</span>
-                          <span className="arm2-row-sub">
-                            <i className="arm2-cls">{w.cls}</i>
-                            {isFielded ? <b className="arm2-fielded">Equipped</b> : isOwned ? <b className="arm2-owned">Owned</b> : <b className="arm2-price">{txFmt(w.price)}</b>}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <button
+                  key={w.id} type="button"
+                  className={`arm2-row ${isSel ? 'sel' : ''} ${isOwned ? '' : 'locked'}`}
+                  onClick={() => selectWeapon(w.id)}
+                  aria-pressed={isSel}
+                >
+                  <span className="arm2-num mono">{n < 10 ? `0${n}` : n}</span>
+                  {thumbs[w.id] ? <img src={thumbs[w.id]} alt="" draggable={false} className="arm2-thumb" /> : <span className="arm2-thumb" />}
+                  <span className="arm2-row-body">
+                    <span className="arm2-name">{w.name}</span>
+                    <span className="arm2-row-sub">
+                      <i className="arm2-cls">{w.cls}</i>
+                      {isFielded ? <b className="arm2-fielded">Equipped</b> : isOwned ? <b className="arm2-owned">Owned</b> : <b className="arm2-price">{txFmt(w.price)}</b>}
+                    </span>
+                  </span>
+                </button>
               );
             })}
           </div>

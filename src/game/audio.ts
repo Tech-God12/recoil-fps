@@ -577,8 +577,8 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.12, gain: 0.45, freq: 350, q: 0.8 });
   }
 
-  footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085);
+  footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false, volMul = 1) {
+    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * volMul;
     if (surface === 'sand') {
       this.burstDirect({ dur: 0.07, gain: g, freq: 850, q: 0.6 });
     } else if (surface === 'concrete') {
@@ -586,6 +586,13 @@ export class SpatialAudioEngine {
     } else {
       this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
     }
+  }
+
+  playAmbient() {
+    const r = Math.random();
+    if (r < 0.33) this.burstDirect({ dur: 1.2, gain: 0.15, freq: 280, q: 0.6, type: 'lowpass' });
+    else if (r < 0.66) this.burstDirect({ dur: 0.9, gain: 0.13, freq: 850, q: 0.5 });
+    else this.burstDirect({ dur: 0.6, gain: 0.15, freq: 2200, q: 1.2, hp: 800 });
   }
 
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }

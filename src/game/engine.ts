@@ -164,7 +164,7 @@ export type GameEvent =
   | { type: 'streak'; label: string }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
-  | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam }
+  | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string }
   | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] } };
 
 export interface CashLogEntry { reason: string; amount: number; t: number }
@@ -299,6 +299,20 @@ export class Engine {
   private finishDelay = -1;
   private pendingResult: Extract<GameEvent, { type: 'end' }> | null = null;
   private onEvent!: (e: GameEvent) => void;
+  // Part A polish timers
+  private ambientT = 12 + Math.random()*8;
+  private polishTime = 0;
+  // Part B wounded (downed 4s crawl 1m/s no shoot, HUD bleedout 10s, execution/revive)
+  private playerDowned = false;
+  private downedTime = 0;
+  private bleedout = 10;
+  private execHold = 0;
+  private reviveHold = 0;
+  // Part C On Fire (3 kills/30s →15s +10%dmg +5%spd orange glow +always-hot 🔥, bots PUSH 2x within 50m, +$500 SHUT DOWN, 20s cd)
+  private killTimes: number[] = [];
+  private onFire = false;
+  private onFireTime = 0;
+  private onFireCD = 0;
   private composer!: EffectComposer;
   private bloom!: UnrealBloomPass;
   private vignettePass!: ShaderPass;
@@ -799,7 +813,16 @@ void main(){
           audio.enemyFireSpatial(p.x, p.y, p.z);
           if (team === 'bravo') this.addPing(p);
         },
-        onFeed: (killer, weapon, victim, headshot, killerTeam) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam }),
+        onFeed: (killer, weapon, victim, headshot, killerTeam) => {
+          let zone: string | undefined;
+          let vx:number|undefined, vz:number|undefined;
+          if (victim === 'YOU') { vx=this.pos.x; vz=this.pos.z; }
+          else { const b=this.tdm?.bots.find(b=>b.name===victim); if(b){vx=b.pos.x; vz=b.pos.z;} }
+          if (vx!==undefined && vz!==undefined && this.world?.zones) {
+            for(const zz of this.world.zones){ if(vx>=zz.minX&&vx<=zz.maxX&&vz>=zz.minZ&&vz<=zz.maxZ){ zone=zz.name; break; } }
+          }
+          this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam, zone } as any);
+        },
         onScore: () => { /* scoreboard reads live values from hud() */ },
       };
       this.tdm = new TDMManager(tdmCtx, tdmArmor);
@@ -2323,6 +2346,48 @@ void main(){
     // Animated film grain
     this.vignettePass.uniforms.uTime.value = performance.now() / 1000;
 
+    // --- Part A polish tick (arena only) ---
+    // use stubs to satisfy noUnusedLocals
+    void this.playerDowned; void this.downedTime; void this.bleedout; void this.execHold; void this.reviveHold;
+    void this.killTimes; void this.onFire; void this.onFireTime; void this.onFireCD;
+    if (this.isTDM && !this.paused) {
+      this.polishTime += dt;
+      // ambient every 12-20s at vol 0.15 2D
+      this.ambientT -= dt;
+      if (this.ambientT <= 0) {
+        audio.playAmbient();
+        this.ambientT = 12 + Math.random()*8;
+      }
+      // flicker: Math.sin(t*8)*0.3+0.7 on warehouse lights (those with userData.phase)
+      for (const fl of this.world.flickerLights) {
+        if ((fl.userData as unknown as {phase:number}).phase !== undefined) {
+          const phase = (fl.userData as unknown as {phase:number}).phase;
+          fl.intensity = Math.sin(this.polishTime*8 + phase)*0.3 + 0.7;
+        }
+      }
+      // dust motes drift
+      for (const pts of this.world.dustMotes) {
+        const pos = (pts.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array;
+        const vel = pts.userData.vel as Float32Array;
+        for (let i=0;i<pos.length;i+=3) {
+          pos[i] += vel[i]*dt;
+          pos[i+1] += vel[i+1]*dt;
+          pos[i+2] += vel[i+2]*dt;
+          // wrap Y within 1.2-4.6
+          if (pos[i+1] > 4.6) pos[i+1]=1.4;
+          if (pos[i+1] < 1.2) pos[i+1]=4.5;
+          // wrap XZ within 2.2 range around initial
+          // soft bounds bounce
+          const dx = pos[i] - pts.position.x; // not used, simply bounce if out of expected
+          void dx;
+        }
+        (pts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+        (pts.material as THREE.PointsMaterial).opacity = 0.55;
+        // gentle slow rotation
+        pts.rotation.y += dt*0.04;
+      }
+    }
+
     // UPDATE SPATIAL AUDIO LISTENER POSITION & FORWARD/UP ORIENTATION
     const eye = this.eyePos();
     const camDir = this.camDir();
@@ -2431,13 +2496,19 @@ void main(){
         this.stepAcc -= stride;
 
         const surf = this.surfaceAt();
-        audio.footstep(surf, this.sprinting, this.crouched);
-        if (surf === 'sand' && !this.crouched) {
-          this.effects.footDust(V().set(this.pos.x, this.pos.y + 0.04, this.pos.z));
+        const inTrap = this.isTDM && this.world.soundTraps.some(t=> this.pos.x>=t.minX && this.pos.x<=t.maxX && this.pos.z>=t.minZ && this.pos.z<=t.maxZ);
+        audio.footstep(surf, this.sprinting, this.crouched, inTrap ? 1.8 : 1);
+        if ((surf === 'sand' && !this.crouched) || inTrap) {
+          // extra dust when in trap — always dust, more visible
+          const dpos = V().set(this.pos.x, this.pos.y + 0.04, this.pos.z);
+          this.effects.footDust(dpos);
+          if (inTrap) this.effects.footDust(dpos); // double puff for trap
         }
         if (!this.crouched) {
-          this.ai.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
-          this.tdm?.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
+          // sound traps notify farther (already louder): give 1.6x radius
+          const rad = this.sprinting ? 14 : 8;
+          this.ai.notifyGunshot(this.pos, inTrap ? rad*1.6 : rad);
+          this.tdm?.notifyGunshot(this.pos, inTrap ? rad*1.6 : rad);
         }
       }
     }

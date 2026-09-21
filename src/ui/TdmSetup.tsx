@@ -1,19 +1,24 @@
 // Recoil FPS — Warehouse TDM pre-match loadout.
-// Full-screen setup shown between Deploy and the actual drop: pick armor, build
-// your gun on the live viewer (brass-pin hotspots), read the enemy squad's kit.
+// Pick armor, build your gun on the live viewer, read the enemy squad's kit.
 import { useEffect, useMemo, useState } from 'react';
 import {
   WEAPON_CATALOG, attachmentById, attachmentsFor, weaponById,
-  type AttachSlot, type AttachmentId, type WeaponId,
+  type AttachSlot, type AttachmentId, type SlotId, type WeaponId,
 } from '../game/economy/catalog';
 import { resolveWeaponStats } from '../game/economy/stats';
 import {
-  buildForWeapon, buyAttachment, equipAttachment, setLoadoutWeapon, skinFor,
+  buildForWeapon, buyAttachment, equipAttachment, setLoadoutWeapon,
   type PlayerProfile,
 } from '../game/economy/profile';
 import { weaponTexturesReady } from '../game/weapons/finish';
-import GunViewer, { SLOT_LABELS, gunThumbnail } from './armory/GunViewer';
-import { BRAVO_ROSTER, TDM_ARMOR_ICONS, TDM_ARMOR_NAMES, TDM_BASE_HP, TDM_HP_PER_ARMOR, TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, type TDMArmor } from '../game/tdm';
+import GunViewer, { gunThumbnail } from './armory/GunViewer';
+import { BRAVO_ROSTER, TDM_ARMOR_NAMES, TDM_BASE_HP, TDM_HP_PER_ARMOR, TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, type TDMArmor } from '../game/tdm';
+import {
+  ArmorIcon, CALIBER, CLASS_LABEL, HardpointRows, OrangeDeploy, PartsPanel, StatBars,
+  TxBack, TxCheck, TxCoords, TxLock, txFmt, weaponTags,
+} from './tactical';
+import mapArena from '../assets/map-arena.jpg';
+import tdmBackdrop from '../assets/tdm-backdrop.jpg';
 
 interface TdmSetupProps {
   profile: PlayerProfile;
@@ -28,6 +33,7 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 
 export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy, onBack }: TdmSetupProps) {
   const [selected, setSelected] = useState<WeaponId>(profile.loadout.primary.weapon);
+  const [gridTab, setGridTab] = useState<SlotId>(weaponById(profile.loadout.primary.weapon)?.slot ?? 'primary');
   const [menuSlot, setMenuSlot] = useState<AttachSlot | null>(null);
   const [flash, setFlash] = useState<{ slot: AttachSlot; key: number } | null>(null);
   const [flashKey, setFlashKey] = useState(0);
@@ -54,21 +60,23 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
   const say = (text: string, bad = false) => setToast({ text, key: Date.now() + Math.random(), bad });
 
   const entry = weaponById(selected)!;
-  const skin = skinFor(profile, selected);
+  const skin = 'factory' as const;
   const build = useMemo(() => buildForWeapon(profile, selected), [profile, selected]);
   const stats = useMemo(() => {
     const mods = Object.values(build.attachments).map(id => attachmentById(id)?.mods).filter(m => !!m);
     return resolveWeaponStats(entry.base, mods);
   }, [build, entry]);
+  const fielded = profile.loadout[entry.slot].weapon === selected;
+  const owned = profile.ownedWeapons.includes(selected);
+  const tags = weaponTags(entry, stats);
 
-  const primaries = WEAPON_CATALOG.filter(w => w.slot === 'primary');
-  const secondaries = WEAPON_CATALOG.filter(w => w.slot === 'secondary');
+  const gridList = WEAPON_CATALOG.filter(w => w.slot === gridTab);
 
   const pulse = (slot: AttachSlot) => { const key = flashKey + 1; setFlashKey(key); setFlash({ slot, key }); };
 
   const selectWeapon = (id: WeaponId) => {
     const w = weaponById(id)!;
-    if (!profile.ownedWeapons.includes(id)) { say(`${w.name} is locked — unlock it in the Armory`, true); return; }
+    if (!profile.ownedWeapons.includes(id)) { say(`${w.name} is locked — ${txFmt(w.price)} in the Armory`, true); return; }
     setSelected(id);
     setMenuSlot(null);
     if (profile.loadout[w.slot].weapon !== id) {
@@ -103,190 +111,167 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
   const menuParts = menuSlot ? attachmentsFor(selected, menuSlot) : [];
   const ownedParts = profile.ownedAttachments[selected] ?? [];
 
-  const WeaponGrid = ({ list, label }: { list: typeof WEAPON_CATALOG; label: string }) => (
-    <div className="tdm-wgrid-block">
-      <div className="sec-label"><span>{label}</span><span className="mono">{list.length} guns</span></div>
-      <div className="tdm-wgrid">
-        {list.map(w => {
-          const isOwned = profile.ownedWeapons.includes(w.id);
-          const fielded = profile.loadout[w.slot].weapon === w.id;
-          return (
-            <button
-              key={w.id}
-              className={`tdm-wcell ${w.id === selected ? 'sel' : ''} ${isOwned ? '' : 'locked'}`}
-              onClick={() => selectWeapon(w.id)}
-              aria-pressed={w.id === selected}
-            >
-              {thumbs[w.id] ? <img src={thumbs[w.id]} alt="" draggable={false} /> : <span className="tdm-wcell-ph" />}
-              <span className="tdm-wcell-name">{w.short}</span>
-              {fielded && <span className="tdm-wcell-tag">EQUIPPED</span>}
-              {!isOwned && <span className="tdm-wcell-tag lock">LOCKED</span>}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-
   return (
-    <div className="armory-root tdm-root" onKeyDown={e => { if (e.key === 'Escape' && menuSlot) setMenuSlot(null); }}>
-      <div className="armory-glow" aria-hidden="true" />
-      <div className="armory-vignette" aria-hidden="true" />
+    <div className="tx-root tdm2-root" onKeyDown={e => { if (e.key === 'Escape' && menuSlot) setMenuSlot(null); }}>
+      <div className="tdm2-backdrop" aria-hidden="true">
+        <img src={tdmBackdrop} alt="" draggable={false} />
+        <div className="tdm2-backdrop-shade" />
+      </div>
+      <div className="tx-grain" aria-hidden="true" />
 
-      <header className="cmdbar">
-        <button className="cmd-back" onClick={onBack}><span aria-hidden="true">‹</span> Back</button>
-        <div className="tdm-rules-chip mono">3 FRAG + 1 FLASH &nbsp;·&nbsp; 2:30 MATCH &nbsp;·&nbsp; 5s RESPAWN</div>
-        <span className="tdm-title-chip">WAREHOUSE — 5v5 TDM</span>
+      {/* ================= HEADER ================= */}
+      <header className="tx-head seq" style={{ animationDelay: '.02s' }}>
+        <TxBack onClick={onBack} />
+        <div className="tx-title"><b>LOADOUT</b><em>PREPARE FOR DEPLOYMENT</em></div>
+        <div className="tdm2-match">
+          <b>5V5 TEAM DEATHMATCH</b>
+          <em className="mono">WAREHOUSE · 2:30 MATCH · 5s RESPAWN</em>
+        </div>
+        <div className="tdm2-mapchip">
+          <img src={mapArena} alt="" draggable={false} />
+          <span>WAREHOUSE<em className="mono">5V5 TDM</em></span>
+        </div>
       </header>
 
-      <div className="tdm-main">
-        {/* ============ LEFT — ARMOR ============ */}
-        <aside className="armory-rail tdm-left" aria-label="Armor selection">
-          <div className="rail-head">
-            <span className="stencil">Armor</span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--bone-mute)' }}>{TDM_BASE_HP + armor * TDM_HP_PER_ARMOR} HP</span>
-          </div>
-          <div className="tdm-armor-list" role="radiogroup" aria-label="Choose armor">
+      <div className="tdm2-main">
+        {/* ================= LEFT — ARMOR + BRAVO ================= */}
+        <aside className="tx-col tdm2-left seq" style={{ animationDelay: '.06s' }} aria-label="Armor selection">
+          <div className="tx-sec"><span>ARMOR</span><b className="mono">{TDM_BASE_HP + armor * TDM_HP_PER_ARMOR} HP</b></div>
+          <div className="tdm2-armor-list" role="radiogroup" aria-label="Choose armor">
             {([0, 1, 2] as TDMArmor[]).map(a => (
-              <button key={a} className={`tdm-armor ${armor === a ? 'on' : ''}`} onClick={() => onArmor(a)} aria-pressed={armor === a}>
-                <span className="tdm-armor-icon" aria-hidden="true">{TDM_ARMOR_ICONS[a]}</span>
-                <span className="tdm-armor-body">
-                  <b>{TDM_ARMOR_NAMES[a]}</b>
+              <button
+                key={a}
+                type="button"
+                className={`tdm2-armor ${armor === a ? 'on' : ''}`}
+                onClick={() => onArmor(a)}
+                aria-pressed={armor === a}
+              >
+                <span className="tdm2-armor-ico"><ArmorIcon tier={a} /></span>
+                <span className="tdm2-armor-body">
+                  <b>{TDM_ARMOR_NAMES[a].toUpperCase()}</b>
                   <i className="mono">{TDM_BASE_HP + a * TDM_HP_PER_ARMOR} HP</i>
                   <em className="mono">{a === 0 ? 'Fast target · zero plating' : `Head −${pct(TDM_HEAD_REDUCTION[a])} · Body −${pct(TDM_BODY_REDUCTION[a])}`}</em>
                 </span>
+                {armor === a && <span className="tdm2-armor-check"><TxCheck /></span>}
               </button>
             ))}
           </div>
 
-          <div className="rail-head" style={{ marginTop: 14 }}>
-            <span className="stencil">Bravo squad</span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--bone-mute)' }}>enemy kit</span>
-          </div>
-          <div className="tdm-enemy-list" aria-label="Enemy armor preview">
+          <div className="tx-sec" style={{ marginTop: 16 }}><span>BRAVO SQUAD</span><b className="mono dim">ENEMY KIT</b></div>
+          <div className="tdm2-enemy-list" aria-label="Enemy armor preview">
             {BRAVO_ROSTER.map(e => (
-              <div key={e.name} className="tdm-enemy mono">
-                <span className="tdm-enemy-icon" aria-hidden="true">{TDM_ARMOR_ICONS[e.armor]}</span>
+              <div key={e.name} className="tdm2-enemy mono">
+                <i aria-hidden="true" />
                 <b>{e.name}</b>
-                <span className={`tdm-enemy-armor a${e.armor}`}>{TDM_ARMOR_NAMES[e.armor]}</span>
+                <span className={`tdm2-enemy-armor a${e.armor}`}>{TDM_ARMOR_NAMES[e.armor]}</span>
               </div>
             ))}
           </div>
-          <p className="armory-rail-hint mono">Heavier targets need more rounds — aim high</p>
+          <p className="tx-hint mono">HEAVIER TARGETS NEED MORE ROUNDS — AIM HIGH.</p>
         </aside>
 
-        {/* ============ CENTER — GUN + GRIDS ============ */}
-        <section className="armory-stage tdm-stage" aria-label="Weapon preview">
-          <div className="armory-stage-head">
+        {/* ================= CENTER — HERO + VIEWER + GRID ================= */}
+        <section className="tx-col tdm2-center seq" style={{ animationDelay: '.1s' }} aria-label="Weapon preview">
+          <div className="tdm2-hero">
             <div>
               <h2>{entry.name}</h2>
-              <p>{entry.cls} · click a brass pin to fit parts</p>
+              <p className="tdm2-class">{CLASS_LABEL[entry.cls]} · {CALIBER[entry.id].round}</p>
+              <p className="tdm2-blurb">{entry.blurb}</p>
             </div>
-            <div className="armory-stage-tags"><span className="tag-fielded">TDM issue — free</span></div>
+            {fielded ? <span className="tx-tag gold">EQUIPPED</span>
+              : owned ? <span className="tx-tag">IN RACK</span>
+                : <span className="tx-tag lock"><TxLock size={11} /> {txFmt(entry.price)}</span>}
           </div>
 
-          <div className="stage-viewport tdm-viewport">
-            <GunViewer weapon={selected} skin={skin} build={build} activeSlot={menuSlot} flashSlot={flash} onHotspot={openSlot} />
+          <div className="tdm2-stage">
+            <TxCoords lat="33.7731° N" lon="44.4208° E" />
+            <StatBars entry={entry} stats={stats} variant="tdm" />
+            <div className="tdm2-viewer">
+              <GunViewer weapon={selected} skin={skin} build={build} flashSlot={flash} onHotspot={openSlot} />
+              <div className="tdm2-orbit-hint mono" aria-hidden="true">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK THE GUN TO FIT PARTS</div>
+            </div>
+            <div className="tdm2-desc">
+              <b>{tags.join('. ')}.</b>
+              <p>{CALIBER[entry.id].note}</p>
+            </div>
           </div>
 
-          <div className="stage-ribbon mono" aria-label="Key weapon figures">
-            <div><span>DMG</span><b>{stats.damage.toFixed(0)}</b></div>
-            <div><span>RPM</span><b>{stats.rpm}</b></div>
-            <div><span>MAG</span><b>{stats.magSize}</b></div>
-            <div><span>ADS</span><b>{(stats.adsTime * 1000).toFixed(0)}ms</b></div>
+          <div className="tdm2-tabs" role="tablist" aria-label="Weapon slot">
+            {(['primary', 'secondary'] as SlotId[]).map(t => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={gridTab === t}
+                className={`tdm2-tab ${gridTab === t ? 'on' : ''}`}
+                onClick={() => setGridTab(t)}
+              >
+                {t.toUpperCase()}
+              </button>
+            ))}
           </div>
-
-          <div className="tdm-grids">
-            <WeaponGrid list={primaries} label="Primary" />
-            <WeaponGrid list={secondaries} label="Secondary" />
+          <div className="tdm2-grid" role="listbox" aria-label={`${gridTab} weapons`}>
+            {gridList.map(w => {
+              const isOwned = profile.ownedWeapons.includes(w.id);
+              const isFielded = profile.loadout[w.slot].weapon === w.id;
+              const isSel = w.id === selected;
+              return (
+                <button
+                  key={w.id}
+                  type="button"
+                  role="option"
+                  aria-selected={isSel}
+                  className={`tdm2-cell ${isSel ? 'sel' : ''} ${isOwned ? '' : 'locked'}`}
+                  onClick={() => selectWeapon(w.id)}
+                  title={isOwned ? w.name : `${w.name} — ${txFmt(w.price)} in the Armory`}
+                >
+                  {thumbs[w.id] ? <img src={thumbs[w.id]} alt="" draggable={false} /> : <span className="tdm2-cell-ph" />}
+                  <span className="tdm2-cell-name mono">{w.short}</span>
+                  {isFielded && <span className="tdm2-cell-tag">EQUIPPED <TxCheck size={11} /></span>}
+                  {!isOwned && <span className="tdm2-cell-lock"><TxLock size={13} /></span>}
+                </button>
+              );
+            })}
           </div>
         </section>
 
-        {/* ============ RIGHT — PARTS + RULES ============ */}
-        <aside className="armory-panel tdm-right" aria-label="Attachments and rules">
+        {/* ================= RIGHT — HARDPOINTS + RULES ================= */}
+        <aside className="tx-col tdm2-right seq" style={{ animationDelay: '.14s' }} aria-label="Attachments and rules">
           {menuSlot ? (
-            <div className="partmenu" key={menuSlot}>
-              <div className="partmenu-head">
-                <span>{SLOT_LABELS[menuSlot]} — {entry.short}</span>
-                <button className="util-btn" style={{ padding: '6px 10px', fontSize: 11 }} onClick={() => setMenuSlot(null)}>Close</button>
-              </div>
-              {build.attachments[menuSlot] && (
-                <button className="part-strip" onClick={() => unequipSlot(menuSlot)}>
-                  <span>Strip {attachmentById(build.attachments[menuSlot]!)!.name}</span>
-                  <span className="mono">Back to stock</span>
-                </button>
-              )}
-              <div className="partmenu-list">
-                {menuParts.map(part => {
-                  const isOwned = ownedParts.includes(part.id);
-                  const isEquipped = build.attachments[menuSlot] === part.id;
-                  return (
-                    <div key={part.id} className={`pcard ${isEquipped ? 'equipped' : ''}`}>
-                      <div className="pcard-head">
-                        <strong>{part.name}</strong>
-                        <span className="pcard-tier" aria-label={`tier ${part.tier}`}>
-                          {[1, 2, 3].map(i => <i key={i} className={i <= part.tier ? 'on' : ''} />)}
-                        </span>
-                      </div>
-                      <p className="pcard-desc">{part.desc}</p>
-                      <div className="pcard-mods">
-                        {part.pros.map(p => <span key={p} className="pro">+ {p}</span>)}
-                        {part.cons.map(c => <span key={c} className="con">− {c}</span>)}
-                      </div>
-                      {isEquipped ? (
-                        <button className="pcard-btn equipped" onClick={() => unequipSlot(menuSlot)}>Equipped — click to strip</button>
-                      ) : isOwned ? (
-                        <button className="pcard-btn" onClick={() => equipPart(part.id)}>Equip</button>
-                      ) : (
-                        <button className="pcard-btn buy" onClick={() => buyPart(part.id)}>Buy &amp; Equip</button>
-                      )}
-                    </div>
-                  );
-                })}
-                {menuParts.length === 0 && <p className="partmenu-empty mono">No compatible parts for this socket.</p>}
-              </div>
-            </div>
+            <PartsPanel
+              entry={entry} build={build} slot={menuSlot} parts={menuParts} owned={ownedParts}
+              cash={profile.cash} mode="tdm"
+              onEquip={equipPart} onBuy={buyPart} onStrip={() => unequipSlot(menuSlot)} onClose={() => setMenuSlot(null)}
+            />
           ) : (
-            <div className="statpanel">
-              <div className="sec-label"><span>Hardpoints</span><span className="mono">{entry.short}</span></div>
-              <div className="hardpoint-list" aria-label="Equipped attachments">
-                {entry.slots.map(slot => {
-                  const id = build.attachments[slot];
-                  const part = id ? attachmentById(id) : undefined;
-                  return (
-                    <button key={slot} className={`hardpoint ${part ? 'filled' : ''}`} onClick={() => openSlot(slot)}>
-                      <i>{SLOT_LABELS[slot]}</i>
-                      <b>{part ? part.name : 'Stock'}</b>
-                      <span aria-hidden="true">›</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="sec-label" style={{ marginTop: 14 }}><span>Loadout rules</span><span className="mono">TDM</span></div>
-              <div className="tdm-rulebox mono">
+            <>
+              <div className="tx-sec"><span>HARDPOINTS</span><b className="mono">{entry.short}</b></div>
+              <HardpointRows entry={entry} build={build} onOpen={openSlot} />
+              <div className="tx-sec" style={{ marginTop: 16 }}><span>LOADOUT RULES</span><b className="mono dim">TDM</b></div>
+              <div className="tx-rulebox mono">
                 <p>▸ Every combatant spawns with <b>3 frags + 1 flash</b>.</p>
                 <p>▸ TDM ballistics: damage tuned so headshots take <b>3+ hits</b>.</p>
                 <p>▸ Armor cuts head and body damage — check Bravo's kit.</p>
                 <p>▸ Respawn in <b>5s</b> at your protected yard.</p>
                 <p>▸ Most kills at <b>2:30</b> wins the match.</p>
               </div>
-              <p className="statpanel-hint mono">Click a hardpoint or a brass pin to fit parts</p>
-            </div>
+              <p className="tx-hint mono">CLICK A HARDPOINT OR THE GUN TO FIT PARTS</p>
+            </>
           )}
         </aside>
       </div>
 
-      <footer className="tdm-footer">
-        <div className="tdm-footer-sum mono">
-          {TDM_ARMOR_ICONS[armor]} {TDM_ARMOR_NAMES[armor]} armor · {TDM_BASE_HP + armor * TDM_HP_PER_ARMOR} HP
+      {/* ================= FOOTER ================= */}
+      <footer className="tdm2-foot seq" style={{ animationDelay: '.18s' }}>
+        <div className="tdm2-brand">
+          <b>RECOIL</b>
+          <span>DESERT OPERATIONS<br />SINGLE OPERATOR</span>
+        </div>
+        <div className="tdm2-sum mono">
+          {TDM_ARMOR_NAMES[armor].toUpperCase()} ARMOR · {TDM_BASE_HP + armor * TDM_HP_PER_ARMOR} HP
           &nbsp;·&nbsp; 1 {weaponById(profile.loadout.primary.weapon)?.short} · 2 {weaponById(profile.loadout.secondary.weapon)?.short}
         </div>
-        <button className="deploy-btn tdm-deploy" onClick={onDeploy}>
-          <span>Play</span>
-          <span className="hint">Warehouse · 5v5 · 2:30</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="square" /></svg>
-        </button>
+        <OrangeDeploy title="PLAY" hint="WAREHOUSE · 5V5 TDM" onClick={onDeploy} />
       </footer>
 
       {toast && <div key={toast.key} className={`armory-toast mono ${toast.bad ? 'bad' : ''}`} role="status">{toast.text}</div>}

@@ -20,6 +20,35 @@ export const MAPS: { id: MapId; name: string; desc: string }[] = [
 export interface AABB { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
 export interface WindowHole { x: number; y: number; z: number; nx: number; nz: number } // center + outward normal (horizontal)
 
+export interface SoundTrap { minX: number; maxX: number; minZ: number; maxZ: number; kind: 'glass' | 'gravel' }
+export interface MoteField { points: THREE.Points; vel: Float32Array; x: number; z: number; y0: number; y1: number; r: number }
+export interface ArenaFx {
+  /** Flickering work lights: engine drives light.intensity every frame. */
+  flicker: { light: THREE.PointLight; base: number; seed: number }[];
+  /** Slow-drifting dust motes inside the roof light shafts. */
+  motes: MoteField[];
+}
+export interface TDMZone { name: string; minX: number; maxX: number; minZ: number; maxZ: number }
+
+/** Warehouse callout zones — the kill feed reads like a real match
+ * ("Havoc [M4] Wraith — DOCK A"). First match wins, so specific zones
+ * are listed before general ones. */
+export const ARENA_ZONES: TDMZone[] = [
+  { name: 'WEST HALL', minX: -18, maxX: -3, minZ: -11, maxZ: 11 },
+  { name: 'EAST HALL', minX: 3, maxX: 18, minZ: -11, maxZ: 11 },
+  { name: 'MID LINK', minX: -3.5, maxX: 3.5, minZ: -4, maxZ: 4 },
+  { name: 'DOCK A', minX: -22, maxX: 22, minZ: 10.5, maxZ: 27 },
+  { name: 'DOCK B', minX: -22, maxX: 22, minZ: -27, maxZ: -10.5 },
+  { name: 'WEST YARD', minX: -46, maxX: -18, minZ: -46, maxZ: 46 },
+  { name: 'EAST YARD', minX: 18, maxX: 46, minZ: -46, maxZ: 46 },
+  { name: 'ALPHA YARD', minX: -18, maxX: 18, minZ: 27, maxZ: 46 },
+  { name: 'BRAVO YARD', minX: -18, maxX: 18, minZ: -46, maxZ: -27 },
+];
+export function arenaZoneAt(x: number, z: number): string {
+  for (const zn of ARENA_ZONES) if (x >= zn.minX && x <= zn.maxX && z >= zn.minZ && z <= zn.maxZ) return zn.name;
+  return 'YARD';
+}
+
 export interface World {
   group: THREE.Group;
   solids: AABB[];
@@ -40,11 +69,25 @@ export interface World {
   landmarks: { name: string; at: THREE.Vector3 }[];
   overlooks: { name: string; at: THREE.Vector3; approach: THREE.Vector3; route: THREE.Vector3[] }[];
   breakGlass(instanceId: number): THREE.Vector3 | null;
+  /** Warehouse only: footstep-noise patches (glass/gravel). Non-colliding, never in nav. */
+  soundTraps: SoundTrap[];
+  /** Warehouse only: per-frame driven ambience (flicker lights, dust motes). */
+  arenaFx: ArenaFx;
 }
 
 const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3(1, 1, 1);
+
+/** Small procedural canvas texture (arena dressing). Safe under the Node smoke shim. */
+function canvasTexture(size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  draw(c.getContext('2d')!, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materials?: TextureSet): World {
   const group = new THREE.Group();
@@ -62,6 +105,11 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   const windows: WindowHole[] = [];
   const landmarks: World['landmarks'] = [];
   const overlooks: World['overlooks'] = [];
+  const soundTraps: World['soundTraps'] = [];
+  const arenaFx: ArenaFx = { flicker: [], motes: [] };
+  // Non-shadowed dressing batch: decals, litter, trap floors. Merged per material,
+  // never added to occluders (bullets and AI sight lines must pass through).
+  const dressingGeos = new Map<THREE.Material, THREE.BufferGeometry[]>();
   let changed = false;
   const intactGroup = new THREE.Group(), wreckGroup = new THREE.Group();
   const intactSolids: AABB[] = [], wreckSolids: AABB[] = [];
@@ -121,6 +169,15 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     _m4.compose(new THREE.Vector3(x, y, z), _q, _s);
     geo.applyMatrix4(_m4);
     push(geo, m);
+  }
+  /** Decal/dressing geometry: merged into unshadowed meshes that never join the occluders. */
+  function dressing(geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) {
+    _q.setFromEuler(new THREE.Euler(rx, ry, rz));
+    _m4.compose(new THREE.Vector3(x, y, z), _q, _s);
+    geo.applyMatrix4(_m4);
+    let arr = dressingGeos.get(m);
+    if (!arr) { arr = []; dressingGeos.set(m, arr); }
+    arr.push(geo);
   }
   type GroundPatch = { x0:number; x1:number; z0:number; z1:number; y:number; m:THREE.Material; batch:typeof geoByMat };
   let groundPatches: GroundPatch[] = [];
@@ -666,9 +723,16 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       cover(x + (alongX ? w / 2 + 1 : 0), z + (alongX ? 0 : d / 2 + 1));
       cover(x - (alongX ? w / 2 + 1 : 0), z - (alongX ? 0 : d / 2 + 1));
     };
+    // ---- A8 · container colour coding: read your map position from one glance ----
+    // South/alpha half = cool teal & steel blue · north/bravo half = warm orange &
+    // rust · contested middle = neutral grey/white. Uses the existing accent palette.
+    const containerMat = (cx: number, cz: number): THREE.Material =>
+      cz > 10 ? (cx < 0 ? ACC_TURQ : col(0x33556B, 0.8))
+        : cz < -10 ? (cx < 0 ? ACC_TERRA : col(0x7A4A2E, 0.85))
+          : (cx < 0 ? col(0x8E9291, 0.8) : col(0xC6C2B4, 0.85));
     // yards mirror each other exactly: double stack north, single south (and vice versa)
-    container(-30, -13, 0, rusted, true); container(-30, 13, 0, ACC_TURQ);
-    container(30, 13, 0, rusted, true); container(30, -13, 0, ACC_TERRA);
+    container(-30, -13, 0, containerMat(-30, -13), true); container(-30, 13, 0, containerMat(-30, 13));
+    container(30, 13, 0, containerMat(30, 13), true); container(30, -13, 0, containerMat(30, -13));
     // climbable container at each yard's outer edge — stairs land level with the
     // top. dir=+1 climbs from the south (alpha), dir=-1 from the north (bravo),
     // keeping the 180-degree symmetry honest.
@@ -679,8 +743,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
         box(x, h / 2, zTop + dir * i * run, width, h, run + 0.03, M.concrete);
       }
     };
-    container(-38, 2, Math.PI / 2, col(0x33556B, 0.8)); stairsZ(-38, 3.45, 2.6, 2.5, 1);
-    container(38, -2, Math.PI / 2, col(0x7A4A2E, 0.8)); stairsZ(38, -3.45, 2.6, 2.5, -1);
+    container(-38, 2, Math.PI / 2, containerMat(-38, 2)); stairsZ(-38, 3.45, 2.6, 2.5, 1);
+    container(38, -2, Math.PI / 2, containerMat(38, -2)); stairsZ(38, -3.45, 2.6, 2.5, -1);
     overlooks.push(
       { name: 'West yard container', at: new THREE.Vector3(-38, 2.7, 2), approach: new THREE.Vector3(-38, 0, 10), route: [new THREE.Vector3(-38, 2.7, 2)] },
       { name: 'East yard container', at: new THREE.Vector3(38, 2.7, -2), approach: new THREE.Vector3(38, 0, -10), route: [new THREE.Vector3(38, 2.7, -2)] },
@@ -712,6 +776,233 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     shape(new THREE.RingGeometry(4.2, 4.5, 40), col(0xd8ccb2), 0, 0.055, 0, -Math.PI / 2);
     for (const s of [-1, 1]) for (let i = 0; i < 3; i++)
       shape(new THREE.PlaneGeometry(2.2, 0.4), s > 0 ? ACC_TURQ : ACC_TERRA, 0, 0.05, s * (14 + i * 4), -Math.PI / 2, 0, s * Math.PI / 4);
+
+    // =====================================================================
+    // POLISH PASS — readability, dressing and sound design.
+    // Everything here is audio/visual only: the ONLY new colliders are the
+    // four quadrant landmark bases in open corners, so the nav grid, spawn
+    // pads, cover nodes and sightlines all stay exactly as authored.
+    // =====================================================================
+
+    // ---- A1 · sound-trap flooring: flanking trades speed for noise ----
+    const glassTrapTex = canvasTexture(128, (ctx, s) => {
+      ctx.clearRect(0, 0, s, s);
+      ctx.strokeStyle = 'rgba(190,225,240,0.55)';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 9; i++) {
+        const a = i * 0.7 + 0.3, cx = s / 2 + Math.cos(a * 2.3) * 22, cy = s / 2 + Math.sin(a * 1.7) * 20;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        for (let k = 0; k < 3; k++) { const b = a + k * 2.1; ctx.lineTo(cx + Math.cos(b) * (10 + k * 9), cy + Math.sin(b) * (8 + k * 10)); }
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(160,210,230,0.30)';
+      for (let i = 0; i < 14; i++) {
+        const a = i * 2.399, r = 12 + (i * 37) % 44;
+        const x = s / 2 + Math.cos(a) * r, y = s / 2 + Math.sin(a) * r, sz = 4 + (i * 13) % 8;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sz, y + sz * 0.4); ctx.lineTo(x + sz * 0.3, y + sz); ctx.closePath(); ctx.fill();
+      }
+    });
+    const gravelTrapTex = canvasTexture(128, (ctx, s) => {
+      ctx.clearRect(0, 0, s, s);
+      for (let i = 0; i < 90; i++) {
+        const x = (i * 53) % s, y = (i * 31) % s, r = 2 + (i * 7) % 4;
+        const g = 70 + (i * 29) % 60;
+        ctx.fillStyle = `rgba(${g},${g - 8},${g - 18},0.85)`;
+        ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.7, i, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(30,26,20,0.5)';
+      for (let i = 0; i < 26; i++) { const x = (i * 71) % s, y = (i * 43) % s; ctx.beginPath(); ctx.ellipse(x, y, 3, 2, i, 0, Math.PI * 2); ctx.fill(); }
+    });
+    const glassTrapMat = new THREE.MeshBasicMaterial({ map: glassTrapTex, transparent: true, opacity: 0.85, depthWrite: false });
+    const gravelTrapMat = new THREE.MeshBasicMaterial({ map: gravelTrapTex, transparent: true, opacity: 0.95, depthWrite: false });
+    const rubbleMat = col(0x5C564A, 0.95);
+    const trapPatch = (x: number, z: number, kind: 'glass' | 'gravel') => {
+      soundTraps.push({ minX: x - 1.5, maxX: x + 1.5, minZ: z - 1.5, maxZ: z + 1.5, kind });
+      dressing(new THREE.PlaneGeometry(3, 3), kind === 'glass' ? glassTrapMat : gravelTrapMat, x, 0.075, z, -Math.PI / 2, 0, x * 1.7 + z);
+      // physical shards / stones so the patch also reads at eye level
+      for (let i = 0; i < 7; i++) {
+        const a = i * 2.4 + x, r = 0.4 + ((i * 0.37 + Math.abs(z)) % 1.0);
+        const sx = x + Math.cos(a) * r, sz = z + Math.sin(a) * r;
+        if (kind === 'glass') dressing(new THREE.PlaneGeometry(0.15, 0.22), glassTrapMat, sx, 0.035, sz, -Math.PI / 2, 0, i * 1.3);
+        else dressing(new THREE.DodecahedronGeometry(0.05 + (i % 3) * 0.022, 0), rubbleMat, sx, 0.045, sz);
+      }
+    };
+    // outer flank lanes behind the yard containers — the quiet-way-vs-fast-way choice
+    trapPatch(-33.5, 19, 'glass'); trapPatch(33.5, -19, 'glass');
+    trapPatch(-33.5, -19, 'gravel'); trapPatch(33.5, 19, 'gravel');
+
+    // ---- A2 · team-tinted spawn dressing: know your facing instantly ----
+    const tarpTeal = new THREE.MeshStandardMaterial({ color: 0x2C7C8E, emissive: 0x2C7C8E, emissiveIntensity: 0.5, roughness: 0.95, side: THREE.DoubleSide });
+    const tarpRust = new THREE.MeshStandardMaterial({ color: 0x9A4A2E, emissive: 0x9A4A2E, emissiveIntensity: 0.5, roughness: 0.95, side: THREE.DoubleSide });
+    const spawnDressing = (sz: 1 | -1, tarp: THREE.Material, lightHex: number) => {
+      for (const [tx, tz, ry] of [[-9.5, sz * 33.5, 0.35], [10.5, sz * 35.5, -0.3]] as const) {
+        for (const px of [-2.3, 2.3]) box(tx + Math.cos(ry) * px, 1.3, tz - Math.sin(ry) * px, 0.09, 2.6, 0.09, METAL, false);
+        shape(new THREE.PlaneGeometry(4.8, 2.5), tarp, tx, 2.05, tz, sz * 0.12, ry);
+      }
+      const glow = new THREE.PointLight(lightHex, 2.0, 22, 1.6);
+      glow.position.set(0, 5.2, sz * 36);
+      group.add(glow);
+    };
+    spawnDressing(1, tarpTeal, 0x2C7C8E);    // alpha (south): cool teal wash
+    spawnDressing(-1, tarpRust, 0x9A4A2E);   // bravo (north): warm rust wash
+
+    // ---- A3 · one unique landmark per quadrant (heights < 3 m; only bases collide) ----
+    // NW — wrecked van
+    box(-36, 0.82, -27, 4.3, 1.5, 2.0, rusted);
+    shape(new THREE.BoxGeometry(1.5, 1.0, 1.86), rusted, -33.85, 2.02, -27, 0, 0, 0.055);
+    for (const [wx, wz] of [[-37.6, -27.9], [-37.6, -26.1], [-34.4, -27.9], [-34.4, -26.1]] as const)
+      shape(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10), METAL, wx, 0.42, wz, 0, 0, Math.PI / 2);
+    box(-36, 1.6, -27, 4.0, 0.06, 1.86, col(0x39454A, 0.4, 0.55), false); // cracked glass pack
+    box(-36.2, 1.68, -27.3, 0.5, 0.1, 0.5, ACC_TERRA, false);             // roof rack box
+    landmarks.push({ name: 'Wrecked van', at: new THREE.Vector3(-36, 2.1, -27) });
+    // NE — cable spool stack (one lying, one upright)
+    shape(new THREE.CylinderGeometry(1.15, 1.15, 0.85, 16), timber, 36.6, 1.15, 26.4, 0, 0, Math.PI / 2);
+    shape(new THREE.CylinderGeometry(0.34, 0.34, 0.9, 10), METAL, 36.6, 1.15, 26.4, 0, 0, Math.PI / 2);
+    shape(new THREE.CylinderGeometry(1.15, 1.15, 2.2, 16), timber, 35.2, 1.1, 29.2);
+    shape(new THREE.CylinderGeometry(1.35, 1.35, 0.14, 16), timber, 35.2, 0.07, 29.2);
+    shape(new THREE.CylinderGeometry(1.35, 1.35, 0.14, 16), timber, 35.2, 2.13, 29.2);
+    solids.push({ minX: 34.05, maxX: 36.35, minY: 0, maxY: 2.2, minZ: 28.35, maxZ: 30.05 });
+    solids.push({ minX: 35.55, maxX: 37.65, minY: 0, maxY: 2.3, minZ: 25.4, maxZ: 27.4 });
+    landmarks.push({ name: 'Cable spools', at: new THREE.Vector3(36, 1.4, 27.5) });
+    // SW — horizontal fuel tank on saddles
+    shape(new THREE.CylinderGeometry(1.05, 1.05, 3.6, 14), rusted, -36, 1.32, 27, 0, 0, Math.PI / 2);
+    for (const sx of [-1.2, 1.2]) box(-36 + sx, 0.3, 27, 0.35, 0.6, 2.1, METAL);
+    for (const sx of [-1.55, 1.55]) shape(new THREE.TorusGeometry(1.07, 0.06, 6, 18), METAL, -36 + sx, 1.32, 27, 0, 0, Math.PI / 2);
+    shape(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 8), METAL, -36, 2.5, 27, Math.PI / 4);
+    solids.push({ minX: -37.85, maxX: -34.15, minY: 0, maxY: 2.2, minZ: 25.9, maxZ: 28.1 });
+    landmarks.push({ name: 'Fuel tank', at: new THREE.Vector3(-36, 2.2, 27) });
+    // SE — crane base: pad, stub mast and hanging hook
+    box(36, 0.26, -27, 2.3, 0.52, 2.3, concreteM);
+    box(36, 1.74, -27, 0.55, 2.44, 0.55, METAL);
+    box(36, 0.6, -27, 0.8, 0.2, 0.8, ACC_TERRA, false);
+    box(36.35, 2.55, -27, 0.045, 0.8, 0.045, METAL, false);
+    shape(new THREE.TorusGeometry(0.16, 0.05, 8, 14), METAL, 36.35, 2.02, -27, 0.5);
+    landmarks.push({ name: 'Crane base', at: new THREE.Vector3(36, 2.6, -27) });
+
+    // ---- A4 · flickering work lights + dust motes in the roof shafts ----
+    const bulbMat = new THREE.MeshBasicMaterial({ color: 0xFFE2A8 });
+    const shaftMat = new THREE.MeshBasicMaterial({ color: 0xFFE9BE, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const moteMat = new THREE.PointsMaterial({ color: 0xFFF2CC, size: 0.035, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+    for (const [hx, hz] of [[-16.2, 8.2], [16.2, -8.2]] as const) {
+      dressing(new THREE.BoxGeometry(0.5, 0.1, 0.24), METAL, hx, 4.62, hz);
+      dressing(new THREE.SphereGeometry(0.09, 8, 6), bulbMat, hx, 4.5, hz);
+      dressing(new THREE.BoxGeometry(0.03, 0.5, 0.03), METAL, hx, 5.15, hz);
+      dressing(new THREE.ConeGeometry(1.9, 4.6, 12, 1, true), shaftMat, hx, 3.1, hz);
+      const light = new THREE.PointLight(0xFFD9A0, 5, 15, 1.8);
+      light.position.set(hx, 4.35, hz);
+      group.add(light);
+      arenaFx.flicker.push({ light, base: 5, seed: hx * 3.1 + hz });
+      const N = 20, pos = new Float32Array(N * 3), vel = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++) {
+        const a = Math.random() * Math.PI * 2, r = Math.random() * 1.5;
+        pos[i * 3] = hx + Math.cos(a) * r;
+        pos[i * 3 + 1] = 0.6 + Math.random() * 4.2;
+        pos[i * 3 + 2] = hz + Math.sin(a) * r;
+        vel[i * 3] = (Math.random() - 0.5) * 0.12;
+        vel[i * 3 + 1] = -0.05 - Math.random() * 0.12;
+        vel[i * 3 + 2] = (Math.random() - 0.5) * 0.12;
+      }
+      const mg = new THREE.BufferGeometry();
+      mg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const points = new THREE.Points(mg, moteMat);
+      points.frustumCulled = false;
+      group.add(points);
+      arenaFx.motes.push({ points, vel, x: hx, z: hz, y0: 0.5, y1: 4.9, r: 1.6 });
+    }
+
+    // ---- A5 · sparse ground litter — density without snagging (all non-colliding) ----
+    const paperMat = col(0xD8D2C0, 0.9), coneMat = col(0xC75B1E, 0.8), tireMat = col(0x232322, 0.95);
+    for (const [lx, lz] of [[-6.5, 3.2], [7.2, -2.8], [-12.3, 11.5], [13.1, -11.8], [-25.5, 2.5], [26.2, -1.5], [-2.8, 21.5], [3.4, -20.5]] as const)
+      dressing(new THREE.PlaneGeometry(0.3, 0.42), paperMat, lx + ((lx * 7) % 3) / 8, 0.062, lz, -Math.PI / 2, 0, (lx * 3.1 + lz) % Math.PI);
+    for (const [cx2, cz2] of [[-19.5, 8.5], [20.5, -7.5], [-24, -12.5], [24.5, 13.5]] as const) {
+      dressing(new THREE.ConeGeometry(0.17, 0.5, 10), coneMat, cx2, 0.25, cz2);
+      dressing(new THREE.BoxGeometry(0.4, 0.04, 0.4), coneMat, cx2, 0.02, cz2);
+    }
+    for (const [tx2, tz2, n2] of [[-40.5, -8, 2], [40.5, 9, 2], [-40.5, 14, 1], [40.5, -15, 1]] as const)
+      for (let i = 0; i < n2; i++) dressing(new THREE.TorusGeometry(0.36, 0.14, 8, 14), tireMat, tx2, 0.15 + i * 0.29, tz2, Math.PI / 2, 0, i);
+    for (const [px2, pz2] of [[-8, 24], [9, -23], [-30, 24.5], [30, -24.5]] as const)
+      dressing(new THREE.BoxGeometry(1.3, 0.13, 0.9), timber, px2, 0.075, pz2, 0, (px2 + pz2) % 1.2);
+
+    // ---- A7 · faded forklift arrows into mid + tire skids at the corners ----
+    const arrowTex = canvasTexture(128, (ctx, s) => {
+      ctx.clearRect(0, 0, s, s);
+      ctx.fillStyle = 'rgba(232,224,204,0.95)';
+      ctx.beginPath();
+      ctx.moveTo(s / 2, 10); ctx.lineTo(s - 18, 52); ctx.lineTo(s - 34, 52);
+      ctx.lineTo(s - 34, 112); ctx.lineTo(34, 112); ctx.lineTo(34, 52);
+      ctx.lineTo(18, 52); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(40,36,28,0.5)'; ctx.lineWidth = 3; ctx.stroke();
+    });
+    const skidTex = canvasTexture(128, (ctx, s) => {
+      ctx.clearRect(0, 0, s, s);
+      for (const oy of [-16, 16]) {
+        const grad = ctx.createLinearGradient(0, 0, s, 0);
+        grad.addColorStop(0, 'rgba(20,18,15,0)'); grad.addColorStop(0.3, 'rgba(20,18,15,0.85)');
+        grad.addColorStop(0.75, 'rgba(20,18,15,0.7)'); grad.addColorStop(1, 'rgba(20,18,15,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(6, s / 2 + oy - 5, s - 12, 10);
+      }
+    });
+    const arrowMat = new THREE.MeshBasicMaterial({ map: arrowTex, transparent: true, opacity: 0.25, depthWrite: false });
+    const skidMat = new THREE.MeshBasicMaterial({ map: skidTex, transparent: true, opacity: 0.3, depthWrite: false });
+    const arrow = (x: number, z: number, rz: number, s = 1.7) => dressing(new THREE.PlaneGeometry(s, s), arrowMat, x, 0.075, z, -Math.PI / 2, 0, rz);
+    const skid = (x: number, z: number, rz: number) => dressing(new THREE.PlaneGeometry(2.6, 1.3), skidMat, x, 0.07, z, -Math.PI / 2, 0, rz);
+    arrow(-20, 0, -Math.PI / 2); arrow(-10, 0, -Math.PI / 2);          // west cross lane → mid
+    arrow(20, 0, Math.PI / 2); arrow(10, 0, Math.PI / 2);              // east cross lane → mid
+    arrow(-31, 10, -Math.PI / 2, 1.5); arrow(-31, -10, -Math.PI / 2, 1.5);
+    arrow(31, 10, Math.PI / 2, 1.5); arrow(31, -10, Math.PI / 2, 1.5); // yard lanes → mid
+    arrow(-6, 30, 0, 1.5); arrow(6, 30, 0, 1.5);                       // alpha apron → mid
+    arrow(-6, -30, Math.PI, 1.5); arrow(6, -30, Math.PI, 1.5);         // bravo apron → mid
+    skid(-24, 3.6, 0.5); skid(24, -3.6, 0.5); skid(-31, -5.5, -0.4);
+    skid(31, 5.5, -0.4); skid(-12, 6.5, 1.2); skid(12, -6.5, 1.2);
+
+    // ---- A10 · pre-baked bullet holes & scorch — a map that has been fought over ----
+    const holeTex = canvasTexture(64, (ctx, s) => {
+      ctx.clearRect(0, 0, s, s);
+      const g = ctx.createRadialGradient(s / 2, s / 2, 1, s / 2, s / 2, s / 2 - 4);
+      g.addColorStop(0, 'rgba(8,7,6,0.98)'); g.addColorStop(0.35, 'rgba(22,19,16,0.85)');
+      g.addColorStop(0.7, 'rgba(60,54,44,0.4)'); g.addColorStop(1, 'rgba(60,54,44,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(s / 2, s / 2, s / 2 - 2, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(190,180,160,0.35)'; ctx.lineWidth = 1.5;
+      for (let i = 0; i < 5; i++) {
+        const a = i * 1.26 + 0.4;
+        ctx.beginPath(); ctx.moveTo(s / 2 + Math.cos(a) * 9, s / 2 + Math.sin(a) * 9);
+        ctx.lineTo(s / 2 + Math.cos(a) * 17, s / 2 + Math.sin(a) * 17); ctx.stroke();
+      }
+    });
+    const scorchTex = canvasTexture(64, (ctx, s) => {
+      ctx.clearRect(0, 0, s, s);
+      const g = ctx.createRadialGradient(s / 2, s / 2, 2, s / 2, s / 2, s / 2);
+      g.addColorStop(0, 'rgba(12,10,8,0.85)'); g.addColorStop(0.55, 'rgba(25,22,18,0.45)'); g.addColorStop(1, 'rgba(25,22,18,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    });
+    const holeMat = new THREE.MeshBasicMaterial({ map: holeTex, transparent: true, opacity: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    const scorchMat = new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, opacity: 0.35, depthWrite: false });
+    const hole = (x: number, y: number, z: number, ry: number, seed: number) =>
+      dressing(new THREE.PlaneGeometry(0.2, 0.2), holeMat, x + ((seed * 13) % 5 - 2) * 0.04, y, z, 0, ry, (seed * 0.9) % Math.PI);
+    let holeSeed = 0;
+    // around every warehouse roller door, at peek height
+    for (const wx of [-10.5, 10.5]) for (const wz of [-10, 10]) {
+      const out = wz > 0 ? 1 : -1;
+      for (const side of [-1, 1]) for (let k = 0; k < 3; k++) {
+        holeSeed += 1.7;
+        hole(wx + side * (2.95 + k * 0.55), 1.0 + (holeSeed % 3) * 0.22, wz + out * 0.19, out > 0 ? 0 : Math.PI, holeSeed);
+      }
+    }
+    // U-barrier peeks in the spawn lines and the yard cross-lane
+    for (const bx of [-12, 0, 12]) {
+      holeSeed += 1.3; hole(bx - 0.5, 1.2, 24.71, Math.PI, holeSeed);
+      holeSeed += 1.3; hole(bx + 0.5, 1.35, 24.71, Math.PI, holeSeed);
+      holeSeed += 1.3; hole(bx - 0.5, 1.35, -24.71, 0, holeSeed);
+      holeSeed += 1.3; hole(bx + 0.5, 1.2, -24.71, 0, holeSeed);
+    }
+    for (const bx of [-27, 27]) for (const bz of [-9, 9]) {
+      holeSeed += 1.1; hole(bx + (bz > 0 ? 0.5 : -0.5), 1.25, bz + (bz > 0 ? -2.03 : 2.03), bz > 0 ? Math.PI : 0, holeSeed);
+    }
+    for (const [sx2, sz2] of [[-10.5, 12.2], [10.5, -12.2], [0, 5.6], [-26, 12.5], [26, -12.5]] as const)
+      dressing(new THREE.CircleGeometry(0.55 + Math.abs(sx2) % 3 * 0.08, 12), scorchMat, sx2, 0.075, sz2, -Math.PI / 2, 0, sx2 + sz2);
 
     landmarks.push({ name: 'Alpha yard', at: new THREE.Vector3(0, 2, 38) }, { name: 'Bravo yard', at: new THREE.Vector3(0, 2, -38) });
   }
@@ -993,6 +1284,18 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     batch.group.add(mesh);
     if (m !== smokeMaterial) batch.meshes.push(mesh);
   }
+  // Dressing (decals, litter, trap floors): unshadowed, raycast-transparent —
+  // deliberately NOT added to occluders so bullets and AI sightlines pass through.
+  for (const [m, geos] of dressingGeos) {
+    const merged = mergeGeometries(geos, false);
+    if (!merged) continue;
+    for (const g of geos) g.dispose();
+    const mesh = new THREE.Mesh(merged, m);
+    mesh.castShadow = false; mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 1;
+    group.add(mesh);
+  }
 
   // destructible glass — a single InstancedMesh
   let glass: THREE.InstancedMesh | null = null;
@@ -1040,7 +1343,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   for (let i = 0; i < Math.min(40, validCover.length); i++) coverNodes.push(validCover[Math.floor(i * validCover.length / Math.min(40, validCover.length))]);
   scene.add(group);
   group.updateMatrixWorld(true);
-  return { groundHeight, navigationHeight, detonate, get changed() { return changed; }, landmarks, overlooks, group, solids, occluders, coverNodes, playerSpawn, interiors, concrete, wood, half, lightSpots, windows, glass, breakGlass };
+  return { groundHeight, navigationHeight, detonate, get changed() { return changed; }, landmarks, overlooks, group, solids, occluders, coverNodes, playerSpawn, interiors, concrete, wood, half, lightSpots, windows, glass, breakGlass, soundTraps, arenaFx };
 }
 
 export function pointInAABB(x: number, y: number, z: number, b: AABB): boolean {

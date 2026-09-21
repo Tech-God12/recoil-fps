@@ -7,7 +7,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { buildWorld, pointInAABB, type World, type MapId, type AABB } from './world';
+import { buildWorld, pointInAABB, arenaZoneAt, type World, type MapId, type AABB } from './world';
 import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, WEAPON_BUILDERS, type WeaponModel } from './models';
 import { applyBuild } from './attachments';
 import { attachmentById, weaponById, type WeaponId } from './economy/catalog';
@@ -27,7 +27,10 @@ import type { PressureStats } from './systems/reinforcements';
 import {
   TDMManager, TDM_BASE_HP, TDM_HP_PER_ARMOR, TDM_DAMAGE_MUL, TDM_MATCH_SECONDS, TDM_RESPAWN_SECONDS,
   TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, TDM_ARMOR_ICONS,
-  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam,
+  TDM_DOWNED_SECONDS, TDM_REVIVE_SECONDS, TDM_EXECUTE_FAST, TDM_EXECUTE_STYLISH,
+  TDM_EXECUTE_BONUS, TDM_FIRE_KILLS, TDM_FIRE_WINDOW, TDM_FIRE_SECONDS, TDM_FIRE_COOLDOWN,
+  TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL,
+  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam, type TDMFeedKind,
 } from './tdm';
 
 export interface GameSettings {
@@ -142,6 +145,17 @@ export interface TdmHud {
   respawnIn: number;
   maxHp: number;
   roster: TdmRosterEntry[];
+  /** Wounded state: crawling on 0 HP with a bleed-out clock running. */
+  downed: boolean;
+  downedLeft: number;
+  downedMax: number;
+  /** An ally bot is channeling a revive on the downed player. */
+  reviveBy: { name: string; progress: number } | null;
+  /** The player's own hold-X channel (finish/execute a downed enemy, revive an ally). */
+  action: { kind: 'exec' | 'revive'; name: string; progress: number; armed: boolean } | null;
+  /** Momentum: ON FIRE buffs are live and the whole enemy team can see you. */
+  onFire: boolean;
+  onFireLeft: number;
 }
 export interface TdmRosterEntry {
   name: string;
@@ -152,6 +166,8 @@ export interface TdmRosterEntry {
   kills: number;
   deaths: number;
   headshots: number;
+  downed?: boolean;
+  onFire?: boolean;
 }
 
 export type GameEvent =
@@ -164,7 +180,7 @@ export type GameEvent =
   | { type: 'streak'; label: string }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
-  | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam }
+  | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string; kind?: TDMFeedKind }
   | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] } };
 
 export interface CashLogEntry { reason: string; amount: number; t: number }
@@ -293,6 +309,22 @@ export class Engine {
   private tdmRespawnT = 0;
   private tdmPlayerKills = 0;
   private tdmPlayerDeaths = 0;
+  // ---- wounded: downed crawl instead of an instant death ----
+  private downed = false;
+  private downedT = 0;
+  private downedBy: TDMBot | null = null;
+  // ---- momentum "ON FIRE" ----
+  private killTimes: number[] = [];
+  private onFire = false;
+  private onFireT = 0;
+  private fireCooldown = 0;
+  private fireLight: THREE.PointLight | null = null;
+  // ---- hold-X context action (execute / revive) ----
+  private interactT = 0;
+  private interactKind: 'none' | 'exec' | 'revive' = 'none';
+  private interactBot: TDMBot | null = null;
+  // ---- distant world ambience scheduler ----
+  private ambientT = 10;
   private tdmRosterVersion = -1;
   private rosterVersion = -1;
   private started = false;
@@ -525,6 +557,12 @@ export class Engine {
       const pl = new THREE.PointLight(0xFFD9A0, 14, 16, 1.8);
       pl.position.copy(s);
       this.scene.add(pl);
+    }
+    // ON FIRE marker light for the player — pre-added at intensity 0 so the light
+    // count (and therefore every compiled shader program) never changes mid-match.
+    if (this.isTDM) {
+      this.fireLight = new THREE.PointLight(0xFF8A2A, 0, 10, 1.8);
+      this.scene.add(this.fireLight);
     }
     this.effects = new Effects(this.scene);
     await nextFrame();
@@ -784,12 +822,22 @@ void main(){
         effects: this.effects,
         playerPos: () => this.eyePos(),
         playerFeet: () => this.pos.clone(),
-        playerAlive: () => !this.dead,
+        // A downed player reads as "not alive" to the bot AI: bravo stops beelining
+        // and firing at the crawling body — the bleed-out clock does the rest.
+        playerAlive: () => !this.dead && !this.downed,
         damagePlayer: (a, f, killer) => this.damagePlayerTDM(a, f, killer),
         moveCollide: ctx.moveCollide,
         onCallout: (k, p, team) => {
+          if (k === 'onfire' && team === 'alpha') {
+            this.onEvent({ type: 'callout', text: 'Ally is ON FIRE — rampaging!' });
+            return;
+          }
           if (team === 'bravo' && p.distanceTo(this.pos) < 42) {
-            const labels: Record<string, string> = { grenade: 'Frag out!', push: 'They are pushing!', flank: 'Hostiles flanking!', fallback: 'They are falling back!' };
+            const labels: Record<string, string> = {
+              grenade: 'Frag out!', push: 'They are pushing!', flank: 'Hostiles flanking!',
+              fallback: 'They are falling back!', mandown: 'Man down!',
+              onfire: "They're on fire — push him!", pushfire: "He's burning — push him!",
+            };
             this.onEvent({ type: 'callout', text: labels[k] ?? 'Contact!' });
             voice.enemyCallout(k);
           }
@@ -799,8 +847,12 @@ void main(){
           audio.enemyFireSpatial(p.x, p.y, p.z);
           if (team === 'bravo') this.addPing(p);
         },
-        onFeed: (killer, weapon, victim, headshot, killerTeam) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam }),
+        onFeed: (killer, weapon, victim, headshot, killerTeam, zone, kind) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam, zone, kind }),
         onScore: () => { /* scoreboard reads live values from hud() */ },
+        executePlayer: by => this.finishDownedPlayer(by, 'executed'),
+        revivePlayer: (hp, by) => this.revivePlayer(hp, by),
+        playerDowned: () => this.downed,
+        playerOnFire: () => this.onFire,
       };
       this.tdm = new TDMManager(tdmCtx, tdmArmor);
       this.ai = new AIManager(ctx, []); // empty roster: keeps every mission-path callsite alive
@@ -863,10 +915,13 @@ void main(){
 
   // ==================== INPUT HANDLING ====================
   private onKeyDown = (e: KeyboardEvent) => {
-    if (e.repeat || this.paused || this.dead || this.ended || !this.started || document.pointerLockElement !== this.canvas) return;
+    if (e.repeat || this.paused || this.ended || !this.started || document.pointerLockElement !== this.canvas) return;
     if (this.scopeAdjusting) return;
+    // WASD must reach the crawl: register movement keys even while downed/dead,
+    // then gate every weapon/utility action below.
     this.keys.add(e.code);
     if (e.code === 'Space' || e.code === 'KeyX') e.preventDefault();
+    if (this.dead || this.downed) return;
 
     if (e.code === 'KeyR') this.startReload();
     if (e.code === 'Digit1') this.switchWeapon(0);
@@ -944,7 +999,7 @@ void main(){
   };
 
   private onMouseDown = (e: MouseEvent) => {
-    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
+    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.downed || this.scopeAdjusting) return;
     if (e.button === 0) {
       this.triggerHeld = true;
       this.tryFire();
@@ -956,7 +1011,7 @@ void main(){
   };
 
   private onMouseDown2 = (e: MouseEvent) => {
-    if (e.button === 2 && !this.scopeAdjusting && !this.paused && !this.dead && !this.ended && document.pointerLockElement === this.canvas) {
+    if (e.button === 2 && !this.scopeAdjusting && !this.paused && !this.dead && !this.downed && !this.ended && document.pointerLockElement === this.canvas) {
       // ADS toggle mode: MMB click keeps the scope in until the next MMB click.
       const want = this.adsToggle ? !this.rmb : true;
       this.rmb = want;
@@ -1488,7 +1543,8 @@ void main(){
 
   // ==================== AIMED BALLISTICS / RECOIL ====================
   private tryFire() {
-    if (this.paused || this.dead || this.ended || !this.started || this.scopeAdjusting) return;
+    if (this.paused || this.dead || this.downed || this.ended || !this.started || this.scopeAdjusting) return;
+    if (this.interactBot) return; // reviving/executing: hands are full, you are exposed
     if (this.fireCD > 0 || this.reloadT >= 0 || this.switchT >= 0 || this.cooking) return;
     if (this.sprinting || this.sprintToFireDelay > 0) return; // Cannot fire during sprint
     if (this.sliding) return; // Cannot fire during slide
@@ -1576,7 +1632,7 @@ void main(){
       const tdmBot = (h.object.userData.tdmBot as TDMBot | undefined);
       if (tdmBot && !tdmBot.dead && this.isTDM && this.tdm) {
         const part = h.object.userData.part as string;
-        let dmg = d.damage * TDM_DAMAGE_MUL;
+        let dmg = d.damage * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
@@ -1588,12 +1644,8 @@ void main(){
         if (part === 'head') audio.headshotDink();
         const killed = tdmBot.takeDamage(dmg, part === 'head', 'player');
         if (killed) {
-          this.tdmPlayerKills++;
-          this.kills++;
-          this.score += part === 'head' ? 150 : 100;
-          audio.killConfirm();
           if (part === 'head') { this.headshots++; voice.headshot(); }
-          this.tdm.handleKill('player', tdmBot, part === 'head', d.name);
+          this.creditTdmKill(tdmBot, part === 'head', d.name, part === 'head' ? 150 : 100);
           this.onEvent({ type: 'hit', kill: true });
           this.rebuildHittables();
         } else {
@@ -1808,7 +1860,7 @@ void main(){
   /** Masterkey underbarrel shotgun (B): 7-pellet cone with its own 3-shell tube. */
   private fireMasterkey(): void {
     const d = this.def();
-    if (!d.masterkey || this.mkReloadT >= 0 || this.reloadT >= 0 || this.switchT >= 0 || this.dead || this.ended) return;
+    if (!d.masterkey || this.mkReloadT >= 0 || this.reloadT >= 0 || this.switchT >= 0 || this.dead || this.downed || this.ended) return;
     if (this.mkAmmo <= 0) { audio.dryFire(); return; }
     this.mkAmmo--;
     if (this.mkAmmo <= 0) this.mkReloadT = 0;
@@ -1858,7 +1910,7 @@ void main(){
       const mkBot = (h.object.userData.tdmBot as TDMBot | undefined);
       if (mkBot && !mkBot.dead && this.isTDM && this.tdm) {
         const part = h.object.userData.part as string;
-        let dmg = 13 * TDM_DAMAGE_MUL;
+        let dmg = 13 * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > 14) dmg *= 0.4;
@@ -1867,11 +1919,7 @@ void main(){
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         if (mkBot.takeDamage(dmg, part === 'head', 'player')) {
-          this.tdmPlayerKills++;
-          this.kills++;
-          this.score += 100;
-          audio.killConfirm();
-          this.tdm.handleKill('player', mkBot, part === 'head', 'MASTERKEY');
+          this.creditTdmKill(mkBot, part === 'head', 'MASTERKEY', 100);
           anyKill = true;
         }
         continue;
@@ -2030,11 +2078,7 @@ void main(){
             if (killed) {
               if (g.owner) this.tdm.handleKill(g.owner, bot, false, 'FRAG');
               else {
-                this.tdmPlayerKills++;
-                this.kills++;
-                this.score += 100;
-                this.tdm.handleKill('player', bot, false, 'FRAG');
-                audio.killConfirm();
+                this.creditTdmKill(bot, false, 'FRAG', 100);
                 this.onEvent({ type: 'hit', kill: true });
               }
               this.rebuildHittables();
@@ -2197,8 +2241,135 @@ void main(){
   }
 
   /** TDM player damage: armor reduction, then death → 5s respawn (not match end). */
+  /** Confirmed TDM kill credit: score, feed, momentum tracking, shutdown bounty. */
+  private creditTdmKill(bot: TDMBot, headshot: boolean, weapon: string, points = 100) {
+    this.tdmPlayerKills++;
+    this.kills++;
+    this.score += points;
+    const wasFire = bot.onFire;
+    audio.killConfirm();
+    this.tdm?.handleKill('player', bot, headshot, weapon);
+    this.registerFireKill();
+    if (wasFire) this.awardShutdown();
+  }
+
+  /** Momentum: prune the 30 s window; enough kills inside it ignites ON FIRE. */
+  private registerFireKill() {
+    const now = performance.now();
+    this.killTimes.push(now);
+    while (this.killTimes.length && now - this.killTimes[0] > TDM_FIRE_WINDOW * 1000) this.killTimes.shift();
+    if (!this.onFire && this.fireCooldown <= 0 && this.killTimes.length >= TDM_FIRE_KILLS) {
+      this.onFire = true;
+      this.onFireT = TDM_FIRE_SECONDS;
+      this.killTimes = [];
+      audio.onFireIgnite();
+      this.onEvent({ type: 'streak', label: 'ON FIRE' });
+    }
+  }
+
+  /** The bounty is collected: +$500 and the SHUT DOWN banner. */
+  private awardShutdown() {
+    this.earnCash(500, 'shutdown');
+    audio.shutdown();
+    this.onEvent({ type: 'streak', label: 'SHUT DOWN' });
+  }
+
+  private endPlayerFire() {
+    if (this.onFire) {
+      this.onFire = false;
+      this.fireCooldown = TDM_FIRE_COOLDOWN;
+    }
+    this.onFireT = 0;
+    this.killTimes = [];
+  }
+
+  /** Hold-X context action: finish/execute a downed enemy, or revive a downed ally. */
+  private updateInteraction(dt: number) {
+    const holding = this.keys.has('KeyX') && !this.sprinting && this.reloadT < 0 && this.switchT < 0;
+    if (holding) {
+      if (this.interactKind === 'none' || !this.validInteractTarget()) this.acquireInteractTarget();
+      if (this.interactKind !== 'none') {
+        this.interactT += dt;
+        if (this.interactKind === 'revive') {
+          if (this.interactT >= TDM_REVIVE_SECONDS) {
+            const bot = this.interactBot!;
+            this.clearInteraction();
+            bot.revived('player');
+            audio.reviveComplete();
+          }
+        } else if (this.interactT >= TDM_EXECUTE_STYLISH) {
+          const bot = this.interactBot!;
+          this.clearInteraction();
+          this.executeBot(bot, true);
+        }
+      }
+    } else if (this.interactKind !== 'none') {
+      // Release: past the fast mark but before the stylish channel finishes → pistol finish.
+      if (this.interactKind === 'exec' && this.interactT >= TDM_EXECUTE_FAST) {
+        const bot = this.interactBot!;
+        this.clearInteraction();
+        this.executeBot(bot, false);
+      } else this.clearInteraction();
+    }
+  }
+
+  private validInteractTarget(): boolean {
+    return !!this.interactBot && this.interactBot.downed && !this.interactBot.dead && this.interactBot.pos.distanceTo(this.pos) < 2.4;
+  }
+
+  private acquireInteractTarget() {
+    this.clearInteraction();
+    if (!this.tdm) return;
+    let best: TDMBot | null = null;
+    let bd = 2.4;
+    let kind: 'exec' | 'revive' = 'exec';
+    for (const bot of this.tdm.bots) {
+      if (!bot.downed || bot.dead) continue;
+      const d = bot.pos.distanceTo(this.pos);
+      if (d >= bd) continue;
+      bd = d;
+      best = bot;
+      kind = bot.team === 'bravo' ? 'exec' : 'revive';
+    }
+    if (best) { this.interactBot = best; this.interactKind = kind; this.interactT = 0; }
+  }
+
+  private clearInteraction() {
+    this.interactBot = null;
+    this.interactKind = 'none';
+    this.interactT = 0;
+  }
+
+  /** Finishing a downed bot: fast pistol coupe de grace or the +50 stylish blade.
+   * finishDown already confirms + feeds + scores through the manager — this side
+   * only does the engine bookkeeping (stats, momentum, shutdown bounty). */
+  private executeBot(bot: TDMBot, stylish: boolean) {
+    const wasFire = bot.onFire;
+    if (bot.finishDown('player', stylish)) {
+      audio.execute(stylish);
+      if (stylish) this.effects.blood(bot.eyePos());
+      this.tdmPlayerKills++;
+      this.kills++;
+      this.score += stylish ? 100 + TDM_EXECUTE_BONUS : 100;
+      this.registerFireKill();
+      if (wasFire) this.awardShutdown();
+      this.onEvent({ type: 'hit', kill: true });
+      this.rebuildHittables();
+    }
+  }
+
+  /** Is this world position on a marked sound trap (glass shards / loose gravel)? */
+  private soundTrapAt(x: number, z: number): 'glass' | 'gravel' | null {
+    for (const t of this.world.soundTraps) {
+      if (x >= t.minX && x <= t.maxX && z >= t.minZ && z <= t.maxZ) return t.kind;
+    }
+    return null;
+  }
+
   private damagePlayerTDM(amount: number, from: THREE.Vector3, killer: TDMBot | null) {
     if (this.dead || this.ended) return;
+    // While wounded, further hits simply confirm the kill (bleed-out ends it too).
+    if (this.downed) { this.finishDownedPlayer(killer, 'shot'); return; }
     const isHead = amount >= 40; // bot headshot rounds arrive at 44
     const reduced = amount * (1 - (isHead ? TDM_HEAD_REDUCTION[this.tdmArmor] : TDM_BODY_REDUCTION[this.tdmArmor]));
     this.hp -= reduced;
@@ -2208,14 +2379,54 @@ void main(){
     this.onEvent({ type: 'damage', dir: this.dirToScreenDeg(from), amount: reduced });
     if (this.hp <= 0) {
       this.hp = 0;
-      this.dead = true;
-      this.tdmPlayerDead = true;
-      this.tdmPlayerDeaths++;
-      this.tdmRespawnT = TDM_RESPAWN_SECONDS;
-      this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
-      if (this.tdm && killer) this.tdm.handleKill(killer, 'player', false, 'RIFLE');
-      voice.defeat();
+      this.downed = true;
+      this.downedT = TDM_DOWNED_SECONDS;
+      this.downedBy = killer;
+      this.triggerHeld = false; this.rmb = false; this.cooking = false;
+      this.sprinting = false; this.sliding = false; this.crouched = false;
+      this.clearInteraction();
+      audio.downedSting();
+      this.onEvent({ type: 'callout', text: 'YOU ARE DOWN — hold forward to crawl. Allies can revive you.' });
+      // The "down" feed: no score yet — kills only count once confirmed.
+      this.onEvent({ type: 'tdmfeed', killer: killer ? killer.name : '', weapon: 'DOWN', victim: 'YOU', headshot: false, killerTeam: 'bravo', zone: arenaZoneAt(this.pos.x, this.pos.z), kind: 'down' });
+      if (killer) voice.enemyCallout('mandown');
     }
+  }
+
+  /** The downed player was confirmed (executed / shot through); bleed-out passes no kill credit. */
+  private finishDownedPlayer(killer: TDMBot | null, mode: 'shot' | 'executed' | 'bled') {
+    if (this.dead || !this.downed || this.ended) return;
+    const by = killer ?? this.downedBy;
+    this.downed = false;
+    this.downedT = 0;
+    this.downedBy = null;
+    this.dead = true;
+    this.tdmPlayerDead = true;
+    this.tdmPlayerDeaths++;
+    this.tdmRespawnT = TDM_RESPAWN_SECONDS;
+    this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
+    this.clearInteraction();
+    this.endPlayerFire();
+    if (mode === 'executed') audio.execute(true);
+    if (this.tdm && by && mode !== 'bled') {
+      this.tdm.handleKill(by, 'player', false, mode === 'executed' ? 'EXECUTED' : 'RIFLE');
+    } else if (this.tdm) {
+      this.onEvent({ type: 'tdmfeed', killer: '', weapon: 'BLED OUT', victim: 'YOU', headshot: false, killerTeam: 'bravo', zone: arenaZoneAt(this.pos.x, this.pos.z), kind: 'bled' });
+    }
+    voice.defeat();
+  }
+
+  /** An ally bot finished reviving the player. */
+  private revivePlayer(hp: number, by: string) {
+    if (!this.downed || this.dead) return;
+    this.downed = false;
+    this.downedT = 0;
+    this.downedBy = null;
+    this.hp = hp;
+    this.lastDamageT = 0;
+    audio.reviveComplete();
+    this.onEvent({ type: 'callout', text: `${by} revived you — back in the fight.` });
+    this.onEvent({ type: 'tdmfeed', killer: by, weapon: 'REVIVED', victim: 'YOU', headshot: false, killerTeam: 'alpha', zone: arenaZoneAt(this.pos.x, this.pos.z), kind: 'revive' });
   }
 
   /** Redeploy the player at a protected pad with full HP and fresh utility. */
@@ -2223,6 +2434,11 @@ void main(){
     if (!this.tdm || this.ended) return;
     this.tdmPlayerDead = false;
     this.dead = false;
+    this.downed = false;
+    this.downedT = 0;
+    this.downedBy = null;
+    this.endPlayerFire();
+    this.clearInteraction();
     this.hp = TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR;
     this.frags = 3; this.flashes = 1;
     this.pos.copy(this.tdm.getSpawn('alpha'));
@@ -2254,7 +2470,7 @@ void main(){
         alphaScore: this.tdm.alphaScore, bravoScore: this.tdm.bravoScore, playerKills: this.tdmPlayerKills,
         roster: [
           { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots },
-          ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots })),
+          ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots, downed: b.downed, onFire: b.onFire })),
         ],
       },
     };
@@ -2335,7 +2551,7 @@ void main(){
     let wantLean = 0;
     if (k.has('KeyQ')) wantLean -= 1;
     if (k.has('KeyE')) wantLean += 1;
-    if (this.sprinting || this.sliding) wantLean = 0;
+    if (this.sprinting || this.sliding || this.downed) wantLean = 0;
     this.leanTarget = wantLean;
 
     // Exponential smoothing — fast attack, soft landing, no visible steps
@@ -2348,7 +2564,7 @@ void main(){
     // ADS TRANSITION (160ms ease-out)
     if (this.boltCycle>0.3 && this.boltCycle-dt<=0.3) audio.boltRelease();
     this.boltCycle = Math.max(0,this.boltCycle-dt);
-    const wantAds = this.rmb && this.boltCycle <= 0 && !this.sprinting && this.reloadT < 0 && this.switchT < 0 && !this.cooking && !this.sliding;
+    const wantAds = this.rmb && this.boltCycle <= 0 && !this.sprinting && this.reloadT < 0 && this.switchT < 0 && !this.cooking && !this.sliding && !this.downed;
     this.sprintToAdsDelay = Math.max(0, this.sprintToAdsDelay - dt);
     this.sprintToFireDelay = Math.max(0, this.sprintToFireDelay - dt);
 
@@ -2373,7 +2589,7 @@ void main(){
     // Cannot sprint from crouch without standing first
     // Cannot sprint while aiming down sights or while leaning
     this.sprinting = k.has('ShiftLeft') && !this.rmb && iz < 0 && !this.crouched && !this.sliding
-      && this.ads < 0.25 && this.reloadT < 0 && this.switchT < 0 && Math.abs(this.lean) < 0.25 && moving;
+      && this.ads < 0.25 && this.reloadT < 0 && this.switchT < 0 && Math.abs(this.lean) < 0.25 && moving && !this.downed;
 
     if (wasSprinting && !this.sprinting) {
       this.sprintToFireDelay = 0.2; // 200ms sprint-to-fire delay
@@ -2382,13 +2598,15 @@ void main(){
 
     let speed = 0;
     if (!this.sliding && !this.dead) {
-      if (this.sprinting) speed = 6.8;
+      if (this.downed) speed = 1.0; // wounded crawl — slow, deliberate, loud on debris
+      else if (this.sprinting) speed = 6.8;
       else if (this.crouched) speed = 2.8;
       else if (this.ads > 0.5) speed = 2.8;
       else if (Math.abs(this.lean) > 0.3) speed = 3.4;
       else if (moving) speed = 4.2;
     }
     speed *= this.def().moveSpeedMul ?? 1;
+    if (this.onFire) speed *= TDM_FIRE_SPEED_MUL;
 
     // Slide physics: Decelerates from 7.2 m/s to 0 over 0.8s
     if (this.sliding) {
@@ -2418,7 +2636,7 @@ void main(){
     const dxm = this.vx * dt, dzm = this.vz * dt;
     const previousX=this.pos.x,previousZ=this.pos.z;
     // Slim 0.33 capsule slips through doorways instead of snagging on frames
-    this.moveAxis(this.pos, dxm, dzm, 0.33, this.crouched ? 1.2 : 1.75);
+    this.moveAxis(this.pos, dxm, dzm, 0.33, this.downed ? 0.9 : this.crouched ? 1.2 : 1.75);
 
     // Drive pose and footsteps from actual displacement, not input against a wall.
     const travelled=Math.hypot(this.pos.x-previousX,this.pos.z-previousZ);
@@ -2431,9 +2649,17 @@ void main(){
         this.stepAcc -= stride;
 
         const surf = this.surfaceAt();
-        audio.footstep(surf, this.sprinting, this.crouched);
-        if (surf === 'sand' && !this.crouched) {
+        const quiet = this.crouched || this.downed;
+        const trap = this.soundTrapAt(this.pos.x, this.pos.z);
+        if (trap) {
+          // Arena traps: shards / loose gravel ring out ~1.8x louder and kick up dust.
+          audio.footstepTrap(trap, this.sprinting, quiet);
           this.effects.footDust(V().set(this.pos.x, this.pos.y + 0.04, this.pos.z));
+        } else {
+          audio.footstep(surf, this.sprinting, quiet);
+          if (surf === 'sand' && !quiet) {
+            this.effects.footDust(V().set(this.pos.x, this.pos.y + 0.04, this.pos.z));
+          }
         }
         if (!this.crouched) {
           this.ai.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
@@ -2478,7 +2704,7 @@ void main(){
 
     // CROUCH CAMERA HEIGHT: -0.4m from stand height (180ms ease-out)
     this.crouchT = Math.min(1, this.crouchT + dt / 0.18);
-    const targetEye = this.dead ? 0.35 : (this.sliding || this.crouched) ? 1.22 : 1.62;
+    const targetEye = this.downed ? 0.55 : this.dead ? 0.35 : (this.sliding || this.crouched) ? 1.22 : 1.62;
     this.eyeH += (targetEye - this.eyeH) * Math.min(1, dt * 11);
 
     // Static time for AI flush
@@ -2488,8 +2714,55 @@ void main(){
     // Health regen (to 50 HP after 5s; TDM regenerates to 40% of the armored pool)
     this.lastDamageT += dt;
     const regenCap = this.isTDM ? Math.round((TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR) * 0.4) : 50;
-    if (!this.dead && this.lastDamageT > 5 && this.hp < regenCap) {
+    if (!this.dead && !this.downed && this.lastDamageT > 5 && this.hp < regenCap) {
       this.hp = Math.min(regenCap, this.hp + dt * 10);
+    }
+
+    // ==================== WOUNDED / MOMENTUM / INTERACTION / AMBIENCE ====================
+    if (this.downed) {
+      this.downedT -= dt;
+      if (this.downedT <= 0) this.finishDownedPlayer(null, 'bled');
+    }
+    if (this.isTDM && this.tdm && !this.dead && !this.downed) this.updateInteraction(dt);
+    if (this.onFire) {
+      this.onFireT -= dt;
+      if (this.onFireT <= 0) this.endPlayerFire();
+    }
+    this.fireCooldown = Math.max(0, this.fireCooldown - dt);
+    if (this.fireLight) {
+      if (this.onFire && !this.dead) {
+        this.fireLight.position.set(this.pos.x, this.pos.y + 1.2, this.pos.z);
+        this.fireLight.intensity = 5 + Math.sin(performance.now() * 0.02) * 2;
+      } else this.fireLight.intensity = 0;
+    }
+    if (this.started && !this.ended) {
+      this.ambientT -= dt;
+      if (this.ambientT <= 0) {
+        audio.playAmbient();
+        this.ambientT = 12 + Math.random() * 8;
+      }
+    }
+    // Arena dressing: flickering work lights + drifting dust motes (warehouse only)
+    {
+      const fx = this.world.arenaFx;
+      if (fx.flicker.length) {
+        const t = performance.now() / 1000;
+        for (const f of fx.flicker) f.light.intensity = f.base * (0.72 + 0.28 * Math.sin(t * 9 + f.seed) * Math.sin(t * 23 + f.seed * 2));
+        for (const m of fx.motes) {
+          const arr = m.points.geometry.attributes.position.array as Float32Array;
+          for (let i = 0; i < arr.length; i += 3) {
+            arr[i] += m.vel[i] * dt;
+            arr[i + 1] += m.vel[i + 1] * dt;
+            arr[i + 2] += m.vel[i + 2] * dt;
+            const dx = arr[i] - m.x, dz = arr[i + 2] - m.z;
+            if (dx > m.r) arr[i] -= m.r * 2; else if (dx < -m.r) arr[i] += m.r * 2;
+            if (dz > m.r) arr[i + 2] -= m.r * 2; else if (dz < -m.r) arr[i + 2] += m.r * 2;
+            if (arr[i + 1] < m.y0) arr[i + 1] = m.y1;
+            else if (arr[i + 1] > m.y1) arr[i + 1] = m.y0;
+          }
+          m.points.geometry.attributes.position.needsUpdate = true;
+        }
+      }
     }
 
     // Auto weapon fire
@@ -2641,7 +2914,7 @@ void main(){
     // player staring into the BACK of the scope tube model while zoomed.
     const canted = !!d.canted && !!this.keys?.has('KeyT') && (d.scopeMaxPower??1)>1;
     const hideInAds = inAds && !canted && ((d.scopePower??1)>1 || (d.scopePower===undefined && this.adsFovEff()<45));
-    g.visible = !hideInAds;
+    g.visible = !hideInAds && !this.downed;
     this.muzzleFlash.visible = !hideInAds;
     const hip = { x: 0.22, y: -0.19, z: -0.38, ry: 0.035 };
     const opticPart = d.model.attached.optic;
@@ -3092,7 +3365,7 @@ void main(){
           .map(b => ({
             nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H),
             yaw: -b.yaw * 180 / Math.PI,
-            hot: b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK',
+            hot: b.onFire || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK',
           }))
         : this.ai.enemies
           .filter(e => !e.dead)
@@ -3127,9 +3400,21 @@ void main(){
         playerDead: this.tdmPlayerDead,
         respawnIn: Math.max(0, this.tdmRespawnT),
         maxHp: TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR,
+        downed: this.downed,
+        downedLeft: Math.max(0, this.downedT),
+        downedMax: TDM_DOWNED_SECONDS,
+        reviveBy: this.tdm.playerRevive ? { name: this.tdm.playerRevive.by.name, progress: this.tdm.playerRevive.t } : null,
+        action: this.interactKind !== 'none' && this.interactBot ? {
+          kind: this.interactKind,
+          name: this.interactBot.name,
+          progress: this.interactKind === 'exec' ? Math.min(1, this.interactT / TDM_EXECUTE_STYLISH) : Math.min(1, this.interactT / TDM_REVIVE_SECONDS),
+          armed: this.interactKind === 'exec' && this.interactT >= TDM_EXECUTE_FAST,
+        } : null,
+        onFire: this.onFire,
+        onFireLeft: Math.max(0, this.onFireT),
         roster: [
-          { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots },
-          ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots })),
+          { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots, downed: this.downed, onFire: this.onFire },
+          ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots, downed: b.downed, onFire: b.onFire })),
         ],
       } : undefined,
     };

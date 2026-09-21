@@ -107,7 +107,9 @@ async function main() {
     playerAlive: () => true,
     damagePlayer: () => {}, moveCollide,
     onCallout: () => {}, throwGrenade: () => {}, onBotFire: () => {},
-    onFeed: (k: string, w: string, v: string) => console.log(`  FEED ${k} [${w}] ${v}`),
+    executePlayer: () => {}, revivePlayer: () => {},
+    playerDowned: () => false, playerOnFire: () => false,
+    onFeed: (k: string, w: string, v: string, _hs: boolean, _t: string, zone?: string, kind?: string) => console.log(`  FEED ${k} [${w}] ${v}${zone ? ` — ${zone} (${kind})` : ''}`),
     onScore: () => {},
   } as any, 1);
   console.log('TDM OK — bots', mgr.bots.length, 'spawn spread alpha:', mgr.bots.filter(b => b.team === 'alpha').map(b => b.pos.toArray().map(v => +v.toFixed(0)).join(',')).join(' | '));

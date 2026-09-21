@@ -117,6 +117,8 @@ class VoiceManager {
       mandown: ['Man down!', 'We lost one!'],
       fallback: ['Fall back!', 'Pull back!'],
       push: ['Push up!', 'Move in!', 'Take them!'],
+      onfire: ['He is on fire! Push him!', 'Take down the hot one!', 'Focus him, now!'],
+      pushfire: ['He is burning — get him!', 'Push the burning one!'],
     };
     const pool = lines[kind] ?? ['Alert!'];
     const text = pool[Math.floor(Math.random() * pool.length)];

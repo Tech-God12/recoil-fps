@@ -4,16 +4,18 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { getMaterials, type TextureSet } from './textures';
+import { buildArenaWorld } from './tdm/arena';
 
 // Install BVH acceleration globally (huge raycast speed-up for merged meshes)
 (THREE.BufferGeometry.prototype as unknown as { computeBoundsTree: typeof computeBoundsTree }).computeBoundsTree = computeBoundsTree;
 (THREE.BufferGeometry.prototype as unknown as { disposeBoundsTree: typeof disposeBoundsTree }).disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type MapId = 'alrasul' | 'kasbah';
+export type MapId = 'alrasul' | 'kasbah' | 'arena';
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
   { id: 'alrasul', name: 'Sandblast', desc: 'Two bridges. One dry river. A souk under siege in the shadow of the water tower.' },
   { id: 'kasbah', name: 'Town', desc: 'Six trades beneath a stone crown. Break the citadel, then disappear through the west gate.' },
+  { id: 'arena', name: 'Warehouse', desc: 'Twin metal warehouses over a concrete freight yard. 5v5 team deathmatch, 2:30 on the clock.' },
 ];
 
 export interface AABB { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
@@ -46,6 +48,10 @@ const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3(1, 1, 1);
 
 export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materials?: TextureSet): World {
+  // The TDM arena is an authored competitive map with its own builder: flat ground,
+  // a 2 m-exact NavGrid and cover nodes on every obstacle. Everything downstream
+  // (physics, radar, AI, flyover art) consumes it through this same interface.
+  if (mapId === 'arena') return buildArenaWorld(scene, materials);
   const group = new THREE.Group();
   const solids: AABB[] = [];
   const occluders: THREE.Object3D[] = [];

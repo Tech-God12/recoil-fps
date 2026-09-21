@@ -12,7 +12,8 @@ const keys=['sand','plaza','adobeWall','adobeWall2','adobeBrick','concrete','asp
 const fixture=id=>buildWorld(new THREE.Scene(),id,Object.fromEntries(keys.map(k=>[k,new THREE.MeshStandardMaterial()])));
 
 test('Sandblast and Town expand outward without scaling doors and stairs',()=>{
-  assert.deepEqual(MAPS.map(m=>m.name),['Sandblast','Town']);
+  // Warehouse is the arena map: it ships alongside the two campaign sectors.
+  assert.deepEqual(MAPS.map(m=>m.name),['Sandblast','Town','Warehouse']);
   for(const [id,old] of [['alrasul',104],['kasbah',112]]) {
     const w=fixture(id);assert.ok(w.half/old>1.18&&w.half/old<1.22);
     assert.ok(w.interiors.some(b=>Math.abs(b.minX)>old),'new outer buildings, not only larger bounds');

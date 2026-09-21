@@ -3,10 +3,11 @@ import type { GameSettings, HudState } from '../game/engine';
 import { Reticle } from './Settings';
 import MissionObjective from './MissionObjective';
 import ScopeView, { type ScopeControls } from './ScopeView';
+import TdmHud from './TdmHud';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
-  feed: { id: number; text: string; headshot: boolean }[];
+  feed: { id: number; text: string; headshot: boolean; bot?: boolean }[];
   dmgArcs: { id: number; dir: number; opacity: number }[];
   scorePops: { id: number; text: string; headshot: boolean; cash?: boolean }[];
   banner: { id: number; label: string } | null;
@@ -16,15 +17,16 @@ export interface HudFx {
 }
 
 export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx } & ScopeControls) {
-  const lowHp = hud.hp < 35;
-  const vig = hud.hp < 60 ? 1 - hud.hp / 60 : 0;
+  const lowHp = hud.hp < (hud.hpMax || 100) * 0.35;
+  const vig = hud.hp < (hud.hpMax || 100) * 0.6 ? 1 - hud.hp / ((hud.hpMax || 100) * 0.6) : 0;
   const magPct = hud.magSize ? hud.mag / hud.magSize : 0;
   const segs = Math.min(hud.magSize || 30, 30);
   const filled = Math.round(magPct * segs);
   const displayedMag = hud.reloading && hud.reloadStage === 'magOut' ? 0 : hud.mag;
   const fpsColor = hud.fps >= 55 ? 'var(--olive)' : hud.fps >= 35 ? 'var(--brass)' : 'var(--blood)';
   const hpSegs = 10;
-  const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / 100 * hpSegs)));
+  // In Warehouse the bar tracks the armor tier's pool (150 / 180 / 210), not a fixed 100.
+  const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / (hud.hpMax || 100) * hpSegs)));
 
   return (
     <div className="hud-root pointer-events-none select-none">
@@ -40,6 +42,8 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
       {/* flashbang */}
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
       {hud.mission && <MissionObjective mission={hud.mission} />}
+      {/* ============ WAREHOUSE TDM LAYER ============ */}
+      {hud.tdm && <TdmHud tdm={hud.tdm} hp={hud.hp} hpMax={hud.hpMax} />}
 
       {/* ============ THREAT READOUT (slim — no centre ring clutter) ============ */}
       {hud.ads < .3 && hud.nearest && hud.nearest.dist < 30 && (() => {
@@ -88,19 +92,36 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
         <div className="compass-bear hud-chip">{Math.round(hud.bearing).toString().padStart(3, '0')}<span> DEG</span></div>
       </div>
 
-      {/* ============ CASH ============ */}
-      <div className="hud-cash mono" aria-label={`Cash ${hud.cash}`}>
-        <span>$</span>{hud.cash.toLocaleString('en-US')}
-      </div>
+      {/* ============ CASH (missions only — Warehouse TDM pays in kills) ============ */}
+      {!hud.tdm && (
+        <div className="hud-cash mono" aria-label={`Cash ${hud.cash}`}>
+          <span>$</span>{hud.cash.toLocaleString('en-US')}
+        </div>
+      )}
 
       {/* ============ KILL FEED + FPS ============ */}
       <div className="absolute top-14 right-5 flex flex-col items-end gap-1.5">
-        {fx.feed.map(f => (
+        {fx.feed.map(f => f.bot ? (
+          <div key={f.id} className="feed-row feed-bot text-right">
+            <span className="text-white/80">{f.text}</span>
+            {f.headshot && <span className="text-[var(--blood)] font-black ml-1.5 text-[10px] tracking-wider">HS</span>}
+          </div>
+        ) : (
           <div key={f.id} className="feed-row text-right">
             <span className="text-[var(--brass)] font-black">YOU</span>
-            <span className="mono text-[var(--steel)] text-[9px] mx-1.5">{f.text.split('  ')[1]}</span>
-            {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
-            <span className="text-white/90">{f.text.split('  ')[2]}</span>
+            {f.text.startsWith('YOU killed') ? (
+              <>
+                <span className="text-white/60 mx-1.5">killed</span>
+                {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
+                <span className="text-white/90">{f.text.replace('YOU killed ', '')}</span>
+              </>
+            ) : (
+              <>
+                <span className="mono text-[var(--steel)] text-[9px] mx-1.5">{f.text.split('  ')[1]}</span>
+                {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
+                <span className="text-white/90">{f.text.split('  ')[2]}</span>
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -287,7 +308,20 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
       </div>
 
       {/* ============ ONBOARDING STRIP (first seconds of a mission) ============ */}
-      {hud.mission && hud.mission.elapsed < 12 && (
+      {hud.tdm && hud.tdm.timeLeft > hud.tdm.duration - 11 && (
+        <div className="onboard-strip hud-chip" role="status">
+          <span className="onboard-fade" style={{ animationDelay: '7.5s' }}>
+            <span className="keycap">WASD</span> MOVE
+            <i /><span className="keycap">G</span> FRAG
+            <i /><span className="keycap">F</span> FLASH
+            <i /><span className="keycap">1/2</span> SWAP
+            <i /><span className="keycap">RMB</span> SCOPE
+            <i /><span className="keycap">SPACE</span> VAULT
+            <i />ARMOR SOAKS DAMAGE — CHECK THE SCOREBOARD
+          </span>
+        </div>
+      )}
+      {!hud.tdm && hud.mission && hud.mission.elapsed < 12 && (
         <div className="onboard-strip hud-chip" role="status">
           <span className="onboard-fade" style={{ animationDelay: '7.5s' }}>
             <span className="keycap">WASD</span> MOVE
@@ -321,7 +355,7 @@ export default function Hud({ hud, s, fx, ...scopeControls }: { hud: HudState; s
           </div>
           <div className="vitals-stats mt-2">
             <div>ELIMINATIONS <b className="text-white">{hud.kills}</b></div>
-            <div>HOSTILES <b className="h">{hud.enemiesLeft}</b></div>
+            <div>{hud.tdm ? 'BRAVO LIVE' : 'HOSTILES'} <b className="h">{hud.enemiesLeft}</b></div>
             <div>SCORE <b className="cy">{hud.score.toLocaleString('en-US')}</b></div>
           </div>
         </div>

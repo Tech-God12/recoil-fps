@@ -5,6 +5,7 @@ import type { Effects } from './effects';
 import type { AABB } from './world';
 import { PRESSURE_BUDGET, type ReinforcementBatch } from './systems/reinforcements';
 import type { Position } from './systems/mission';
+import { KIT_LURE_BREAK_CHANCE, type KitLure } from './kits';
 
 export type AIState = 'PATROL' | 'ALERT' | 'SEARCH' | 'ENGAGE' | 'SUPPRESS' | 'FLANK' | 'ADVANCE' | 'RETREAT' | 'DEAD';
 export type CalloutKind = 'contact' | 'flank' | 'grenade' | 'mandown' | 'fallback' | 'push';
@@ -235,6 +236,18 @@ export class Enemy {
   private blockedT = 0;
   private personality: number; // 0 cautious .. 1 aggressive
   stunTimer = 0;
+  /**
+   * Field-kit holo-decoy this soldier has locked onto (assigned by the engine). While
+   * set, every "where is the threat" question — sight, aim, cover, flanking, frags —
+   * is answered with the decoy instead of the player, and rounds land on the decoy.
+   */
+  lure: KitLure | null = null;
+
+  /** Current threat eye: the decoy while lured, otherwise the player. */
+  private tEye(): THREE.Vector3 { return this.lure && this.lure.active() ? this.lure.eye.clone() : this.ctx.playerPos(); }
+  /** Current threat feet: the decoy while lured, otherwise the player. */
+  private tFeet(): THREE.Vector3 { return this.lure && this.lure.active() ? this.lure.feet.clone() : this.ctx.playerFeet(); }
+  get lured(): boolean { return !!this.lure && this.lure.active(); }
 
   invalidatePath() { this.path = null; this.repathT = 0; }
 
@@ -254,7 +267,7 @@ export class Enemy {
 
   /** Sight *and* inside effective rifle range. Squads advance before they shoot. */
   private canFire(): boolean {
-    return this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) <= ENGAGE_RANGE;
+    return this.hasLOS && this.pos.distanceTo(this.tFeet()) <= ENGAGE_RANGE;
   }
 
   resetForInsertion(squad: Squad, role: Enemy['role'], at: Position, focus: Position, zone: string | null) {
@@ -272,7 +285,7 @@ export class Enemy {
     this.grenadeCD = 4; this.crouched = false; this.stunTimer = 0;
     this.strafeDir = 0; this.strafeT = 0; this.strafeCD = 0;
     this.path = null; this.repathT = 0; this.stuckT = 0; this.patrolIdx = 0;
-    this.escapeDir = 0; this.escapeT = 0; this.blockedT = 0;
+    this.escapeDir = 0; this.escapeT = 0; this.blockedT = 0; this.lure = null;
     this.walkPhase = 0; this.locomotion = 0; this.shotPose = 0; this.lastX = at[0]; this.lastZ = at[2];
     this.yaw = Math.atan2(at[0] - focus[0], at[2] - focus[2]);
     const g = this.model.group;
@@ -291,10 +304,10 @@ export class Enemy {
   }
 
   checkLOS(): boolean {
-    if (!this.ctx.playerAlive()) return false;
+    if (!this.lured && !this.ctx.playerAlive()) return false;
     // Deployment grace: no acquisition at all until the mission lets hostiles engage.
     if (this.ctx.canAcquire && !this.ctx.canAcquire()) return false;
-    const eye = this.eyePos(); const pp = this.ctx.playerPos();
+    const eye = this.eyePos(); const pp = this.tEye();
     const dist = eye.distanceTo(pp);
     if (dist > 70) return false;
     const dir = tmpV.copy(pp).sub(eye).normalize();
@@ -330,6 +343,8 @@ export class Enemy {
     if (this.dead) return false;
     this.hp -= amount; this.recentDamage += amount;
     this.flinch = isHead ? 0.35 : 0.22;
+    // Getting shot snaps half of the decoy-lured soldiers back onto the real shooter.
+    if (this.lure && Math.random() < KIT_LURE_BREAK_CHANCE) this.lure = null;
     if (this.hp <= 0) { this.die(); return true; }
     this.lastKnown.copy(this.ctx.playerFeet()); this.lastSeenT = 0;
     if (this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') { this.setState('ENGAGE'); this.reactTimer = this.ctx.difficulty.reaction * 0.4; this.squad.alertAll(this.lastKnown); }
@@ -359,7 +374,7 @@ export class Enemy {
   setState(s: AIState) { if (this.state === 'DEAD') return; if (this.state !== s) { this.state = s; this.stateTime = 0; this.path = null; } }
 
   private findCover(preferClose = false): THREE.Vector3 | null {
-    const pp = this.ctx.playerPos(); const pf = this.ctx.playerFeet();
+    const pp = this.tEye(); const pf = this.tFeet();
     let best: THREE.Vector3 | null = null, bestScore = Infinity;
     for (const node of this.ctx.coverNodes) {
       if (Math.abs(node.y - this.pos.y) > 0.5) continue;
@@ -449,23 +464,34 @@ export class Enemy {
     this.model.group.updateMatrixWorld(true);
     const muzzle = this.model.parts.muzzle.getWorldPosition(new THREE.Vector3());
     this.shotPose = 1;
-    const pp = ctx.playerPos();
+    const pp = this.tEye();
     ctx.effects.enemyMuzzle(muzzle);
     ctx.onEnemyFire(muzzle);
     const dist = muzzle.distanceTo(pp);
     const suppressing = this.state === 'SUPPRESS' || !this.hasLOS;
     // accuracy: distance falloff, moving player harder, first rounds of a burst less accurate
     let acc = ctx.difficulty.accuracy * Math.max(0.3, 1 - dist / 75);
-    acc *= 1 - Math.min(0.45, ctx.playerVel() * 0.06);
+    const lure = this.lured ? this.lure : null;
+    if (!lure) acc *= 1 - Math.min(0.45, ctx.playerVel() * 0.06);
     acc *= this.burstIdx === 0 ? 0.55 : this.burstIdx === 1 ? 0.8 : 1;
     if (suppressing) acc *= 0.25;
     this.burstIdx++;
     ray.set(muzzle, tmpV.copy(pp).sub(muzzle).normalize()); ray.far = Math.max(0,dist - 0.2);
     const obstruction = ray.intersectObjects(ctx.occluders,false)[0];
-    if (obstruction) { ctx.effects.tracer(muzzle,obstruction.point,true); return; }
-    if (this.hasLOS && Math.random() < acc && ctx.playerAlive()) {
+    const roll = 7 + Math.floor(Math.random() * 8);
+    if (obstruction) {
+      ctx.effects.tracer(muzzle,obstruction.point,true);
+      // Field-kit barricade plates carry a damage hook: rounds that stop on them count.
+      const kitHit = obstruction.object.userData.kitHit as ((n: number) => void) | undefined;
+      if (kitHit) kitHit(roll);
+      return;
+    }
+    if (lure && this.hasLOS && Math.random() < acc) {
       ctx.effects.tracer(muzzle, pp.clone(), true);
-      ctx.damagePlayer(7 + Math.floor(Math.random() * 8), this.pos);
+      lure.hit(roll);
+    } else if (!lure && this.hasLOS && Math.random() < acc && ctx.playerAlive()) {
+      ctx.effects.tracer(muzzle, pp.clone(), true);
+      ctx.damagePlayer(roll, this.pos);
     } else {
       const miss = (this.hasLOS ? pp : this.lastKnown).clone().add(new THREE.Vector3((Math.random() - .5) * 3, 0.8 + (Math.random() - .3) * 2, (Math.random() - .5) * 3));
       ctx.effects.tracer(muzzle, miss, true);
@@ -501,7 +527,7 @@ export class Enemy {
       const had = this.hasLOS;
       this.hasLOS = this.checkLOS();
       if (this.hasLOS) {
-        this.lastKnown.copy(this.ctx.playerFeet()); this.lastSeenT = 0;
+        this.lastKnown.copy(this.tFeet()); this.lastSeenT = 0;
         if ((this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') && this.reactTimer <= 0) this.reactTimer = this.ctx.difficulty.reaction * (0.7 + Math.random() * 0.6);
         if (!had) this.squad.shareIntel(this.lastKnown);
       }
@@ -515,7 +541,7 @@ export class Enemy {
       }
     }
 
-    const closeContact = this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) < 14;
+    const closeContact = this.hasLOS && this.pos.distanceTo(this.tFeet()) < 14;
     if (closeContact && this.reactTimer <= 0 && this.state !== 'ENGAGE' && this.state !== 'SUPPRESS') {
       this.coverPos = null; this.moveTarget = null; this.flankTarget = null;
       this.setState('ENGAGE'); this.waitTimer = 0;
@@ -556,7 +582,7 @@ export class Enemy {
   }
 
   private doEngage(dt: number, suppress: boolean) {
-    const pf = this.ctx.playerFeet();
+    const pf = this.tFeet();
     const range = this.pos.distanceTo(pf);
     // Spotted you from across the sector: close the distance instead of spraying from
     // the edge of perception. This is what made a fresh deployment feel like the squad
@@ -586,11 +612,11 @@ export class Enemy {
     const atCover = this.pos.distanceTo(this.coverPos) < 0.6;
     if (!atCover) {
       this.goTo(this.coverPos, 3.5, dt); this.crouched = false;
-      if (this.canFire()) { this.faceTarget(this.ctx.playerFeet()); this.burstTimer -= dt; if (this.burstTimer <= 0) { this.fireShot(); this.burstTimer = 0.4; } }
+      if (this.canFire()) { this.faceTarget(this.tFeet()); this.burstTimer -= dt; if (this.burstTimer <= 0) { this.fireShot(); this.burstTimer = 0.4; } }
     }
     else {
       this.crouched = this.hasRealCover && !this.peeking;
-      this.faceTarget(this.hasLOS ? this.ctx.playerFeet() : this.lastKnown);
+      this.faceTarget(this.hasLOS ? this.tFeet() : this.lastKnown);
       if (!this.hasRealCover) { // open ground: strafe
         this.strafeCD -= dt;
         if (this.strafeT > 0) {
@@ -636,7 +662,7 @@ export class Enemy {
   private doFlank(dt: number) {
     this.crouched = false;
     if (!this.flankTarget) {
-      const pp = this.ctx.playerFeet();
+      const pp = this.tFeet();
       const away = tmpV.copy(this.pos).sub(pp).normalize();
       const perp = new THREE.Vector3(-away.z, 0, away.x); if (this.role === 'flankA') perp.negate();
       this.flankTarget = pp.clone().addScaledVector(perp, 16).addScaledVector(away, 4);
@@ -649,7 +675,7 @@ export class Enemy {
   private doRetreat(dt: number) {
     this.crouched = false;
     if (!this.moveTarget) {
-      const away = tmpV.copy(this.pos).sub(this.ctx.playerFeet()).normalize();
+      const away = tmpV.copy(this.pos).sub(this.tFeet()).normalize();
       const far = this.pos.clone().addScaledVector(away, 14);
       const h = this.ctx.half - 4; far.x = Math.max(-h, Math.min(h, far.x)); far.z = Math.max(-h, Math.min(h, far.z));
       this.moveTarget = far; this.coverPos = null;
@@ -660,7 +686,7 @@ export class Enemy {
   private tryGrenade() {
     if (this.grenadeCD > 0 || this.squad.grenadeCD > 0) return;
     if (this.state !== 'ENGAGE' && this.state !== 'SUPPRESS') return;
-    const d = this.pos.distanceTo(this.ctx.playerFeet());
+    const d = this.pos.distanceTo(this.tFeet());
     if (d < 8 || d > 30) return;
     // camping player behind cover, OR player out of sight for a while → flush
     const camping = this.ctx.playerStaticTime() > 3 && !this.hasLOS;

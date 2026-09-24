@@ -4,6 +4,7 @@
 // Lethal hits kill outright and score immediately — no wounded state, no revives.
 // Momentum layer: 3 kills inside 30 s ignites ON FIRE (+damage, +speed) but every enemy hunts you.
 import * as THREE from 'three';
+import { KIT_LURE_BREAK_CHANCE, type KitLure } from './kits';
 import { buildArmoredSoldier, type SoldierModel } from './models';
 import type { Effects } from './effects';
 import type { AABB } from './world';
@@ -67,6 +68,11 @@ export interface TDMContext {
   onFeed(killer: string, weapon: string, victim: string, headshot: boolean, killerTeam: TDMTeam, zone: string): void;
   onScore(): void; // roster / scoreboard changed
   playerOnFire(): boolean;
+  /**
+   * Field kits: the player's holo-decoy a bravo bot at `eye` can see, if any. Bravo
+   * bots prefer a visible decoy over any other target — that is the whole trick.
+   */
+  lureFor?(eye: THREE.Vector3): KitLure | null;
   /** Ranked S&D: the round engine owns life, death and the clock — not the manager. */
   competitive?: boolean;
   /** Ranked S&D: objective orders from the tactical director. */
@@ -139,6 +145,8 @@ interface TargetRef {
   eye: THREE.Vector3;
   isPlayer: boolean;
   bot: TDMBot | null;
+  /** Field-kit holo-decoy: rounds that land go to the decoy, not a body. */
+  lure?: KitLure;
 }
 
 let tdmIds = 0;
@@ -184,6 +192,8 @@ export class TDMBot {
   private losTimer = 0;
   private hasLOS = false;
   private target: TargetRef | null = null;
+  /** Seconds this bot ignores holo-decoys after the player shot it. */
+  lureImmuneT = 0;
   private lastKnown: THREE.Vector3 | null = null;
   private lastSeenT = 999;
   private burstLeft = 0;
@@ -406,6 +416,10 @@ export class TDMBot {
    * Returns true on a killing blow — HP at 0 means dead, immediately. */
   takeDamage(amount: number, isHead: boolean, attacker: TDMBot | 'player', applyArmor = true): boolean {
     if (this.dead) return false;
+    // Field kits: taking the player's fire snaps half of the lured bots out of the
+    // decoy illusion for 3 s (same odds as the mission AI) — shoot a lured target and
+    // it may turn on you.
+    if (attacker === 'player' && Math.random() < KIT_LURE_BREAK_CHANCE) this.lureImmuneT = 3;
     let dmg = amount;
     if (applyArmor) dmg *= 1 - (isHead ? TDM_HEAD_REDUCTION[this.armor] : TDM_BODY_REDUCTION[this.armor]);
     this.hp -= dmg;
@@ -510,12 +524,17 @@ export class TDMBot {
 
   private isFireTarget(t: TargetRef): boolean {
     if (t.bot) return t.bot.onFire;
+    if (t.lure) return false;
     return this.ctx.playerOnFire();
   }
 
   /** Pick the nearest live enemy (bravo bots also hunt the player).
    * An ON FIRE enemy within 50 m overrides everything — the bounty IS the fight. */
   private acquireTarget(): TargetRef | null {
+    if (this.team === 'bravo' && this.ctx.lureFor && this.lureImmuneT <= 0) {
+      const lure = this.ctx.lureFor(this.eyePos());
+      if (lure) return { feet: lure.feet.clone(), eye: lure.eye.clone(), isPlayer: false, bot: null, lure };
+    }
     let fire: TargetRef | null = null;
     let fd = Infinity;
     if (this.team === 'bravo' && this.ctx.playerAlive() && this.ctx.playerOnFire()) {
@@ -676,7 +695,13 @@ export class TDMBot {
     ray.set(muzzle, tmpA.copy(aimAt).sub(muzzle).normalize()); ray.far = Math.max(0, dist - 0.25);
     const wall = ray.intersectObjects(this.ctx.occluders, false)[0];
     const hostile = this.team === 'bravo';
-    if (wall) { this.ctx.effects.tracer(muzzle, wall.point, hostile); return; }
+    if (wall) {
+      this.ctx.effects.tracer(muzzle, wall.point, hostile);
+      // Field-kit barricade plates take the round (ranked gear damage or the TDM roll).
+      const kitHit = wall.object.userData.kitHit as ((n: number) => void) | undefined;
+      if (kitHit) kitHit(gear ? gear.damage : 18 + Math.random() * 6);
+      return;
+    }
     if (gear) {
       // Ranked ballistics: buckshot rolls every pellet, rifles roll once.
       const pellets = Math.max(1, gear.pellets);
@@ -691,7 +716,9 @@ export class TDMBot {
       const headshot = Math.random() < (dist < 16 ? 0.13 : 0.07);
       const falloff = gear.class === 'SHOTGUN' ? (dist < 9 ? 1 : Math.max(0.1, 1 - (dist - 9) / 14)) : (dist > 45 ? 0.85 : 1);
       const raw = (headshot ? gear.headDamage : gear.damage * landed) * falloff;
-      if (target.isPlayer) {
+      if (target.lure) {
+        target.lure.hit(raw);
+      } else if (target.isPlayer) {
         if (this.ctx.playerAlive()) this.ctx.damagePlayer(raw, this.pos, this, headshot);
       } else if (target.bot && !target.bot.dead) {
         this.ctx.effects.blood(aimAt);
@@ -706,7 +733,9 @@ export class TDMBot {
       // 44 head / 18-24 body — tuned against the lighter TDM armor curve so a
       // full-HP player survives roughly 7-9 hits (plus regen between fights)
       const dmg = (headshot ? 44 : 18 + Math.random() * 6) * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
-      if (target.isPlayer) {
+      if (target.lure) {
+        target.lure.hit(dmg);
+      } else if (target.isPlayer) {
         if (this.ctx.playerAlive()) this.ctx.damagePlayer(dmg, this.pos, this);
       } else if (target.bot && !target.bot.dead) {
         this.ctx.effects.blood(aimAt);
@@ -787,6 +816,7 @@ export class TDMBot {
     const leash = order && !order.free ? order : null;
     this.stateTime += dt; this.lastSeenT += dt;
     this.grenadeCD = Math.max(0, this.grenadeCD - dt);
+    this.lureImmuneT = Math.max(0, this.lureImmuneT - dt);
 
     this.losTimer -= dt;
     if (this.losTimer <= 0) {

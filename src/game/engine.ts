@@ -25,6 +25,7 @@ import { recoilImpulse, recoilRecovery } from './recoil';
 import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
+import { KitDirector, isKitId, type KitContext, type KitHud, type KitId } from './kits';
 import { StreakDirector, STREAK_POINTS, type StreakContext, type StreakHud, type StreakId, type StreakTarget } from './streaks';
 import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './ai';
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
@@ -114,6 +115,8 @@ export interface EngineLaunchOptions {
   compBuilds?: Partial<Record<WeaponId, WeaponBuild>>;
   /** Ladder position before the match, so the debrief can show the delta. */
   rankedProfile?: RankedProfile | null;
+  /** Field kit the operator deploys with (missions + TDM; ranked S&D has none). */
+  kit?: KitId;
 }
 
 export interface GameSettings {
@@ -145,6 +148,8 @@ export interface GameSettings {
   crosshairGap: number;     // 0 - 26
   crosshairThickness: number; // 1 - 6
   crosshairDot: boolean;
+  // Field kit picked on the deploy screens (persisted with the other settings)
+  fieldKit: KitId;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -155,6 +160,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   fov: 95,
   difficulty: 'Normal',
   map: 'alrasul',
+  fieldKit: 'recon',
   adaptiveResolution: true,
   resolutionScale: 100,
   shadowQuality: 'low',
@@ -216,6 +222,7 @@ export function sanitizeSettings(input: unknown): GameSettings {
     crosshairGap: number('crosshairGap', DEFAULT_SETTINGS.crosshairGap, 0, 26),
     crosshairThickness: number('crosshairThickness', DEFAULT_SETTINGS.crosshairThickness, 1, 6),
     crosshairDot: boolean('crosshairDot', DEFAULT_SETTINGS.crosshairDot),
+    fieldKit: isKitId(data.fieldKit) ? data.fieldKit : DEFAULT_SETTINGS.fieldKit,
   };
 }
 
@@ -265,6 +272,8 @@ export interface HudState {
   comp?: CompHudView;
   /** Scorestreak rail: progress, armed streaks, live entities, designation mode. */
   streaks?: StreakHud;
+  /** Field kit: ability charge, live gadgets, sonar tags, onboarding prompt. */
+  kit?: KitHud;
 }
 
 /** Warehouse TDM scoreboard payload — present only when the arena map is running. */
@@ -302,6 +311,7 @@ export type GameEvent =
   | { type: 'callout'; text: string }
   | { type: 'streak'; label: string }
   | { type: 'streakmsg'; text: string }
+  | { type: 'kitmsg'; text: string }
   | { type: 'nuke' }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
@@ -433,6 +443,11 @@ export class Engine {
   private missionRuntime!: MissionRuntime;
   // ---- Scorestreaks (UAV / airstrike / sentry / chopper / nuke) ----
   private streaks!: StreakDirector;
+  // ---- Field kits (Recon dart / Bulwark barricade / Phantom decoy) ----
+  // Null in ranked S&D: the round economy is the tactical layer there.
+  private kits: KitDirector | null = null;
+  private kitKillsSeen = 0;
+  private kitLureT = 0;
   private nukeWin = false;
   // ---- Warehouse 5v5 TDM (arena map only) ----
   private isTDM = false;
@@ -1000,6 +1015,7 @@ void main(){
         onFeed: (killer, weapon, victim, headshot, killerTeam, zone) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam, zone }),
         onScore: () => { /* scoreboard reads live values from hud() */ },
         playerOnFire: () => this.onFire,
+        lureFor: eye => this.kits?.lureFor(eye) ?? null,
       };
       this.tdm = new TDMManager(tdmCtx);
       this.ai = new AIManager(ctx, []); // empty roster: keeps every mission-path callsite alive
@@ -1101,6 +1117,7 @@ void main(){
     }
 
     this.streaks = new StreakDirector(this.streakContext());
+    if (!this.isComp) this.kits = new KitDirector(this.kitContext(), options.kit ?? 'recon');
     if (this.weapons.length > 2) this.streaks.keyLabels = { uav: '6', airstrike: '7', sentry: '8', chopper: '9', nuke: '0' };
 
     this.bindInput();
@@ -1143,6 +1160,7 @@ void main(){
       if (streak) { this.streaks.activate(streak); return; }
       // Escape-free abort for designation: tapping the strike key again cancels it.
     }
+    if (e.code === 'KeyZ' && this.kits) { this.kits.activate(); return; }
     if (e.code === 'Digit1') this.switchWeapon(0);
     if (e.code === 'Digit2') this.switchWeapon(1);
     if (e.code === 'Digit3') this.switchWeapon(2);
@@ -2344,6 +2362,10 @@ void main(){
           }
         }
       }
+      // Hostile frags are the counter to a planted barricade or a decoy; the player's
+      // own frags never crack their own kit.
+      // Only hostile frags crack the player's barricade: TDM allies (alpha) never do.
+      if (g.fromAI && g.owner?.team !== 'alpha') this.kits?.blast(g.pos, 7);
       for (const e of this.ai.enemies) {
         if (e.dead) continue;
         const d = e.pos.distanceTo(g.pos);
@@ -2390,6 +2412,101 @@ void main(){
     g.mesh.geometry.dispose();
   }
 
+  // ==================== FIELD KITS ====================
+  /** The kit in hand (null in ranked S&D). */
+  get kitId(): KitId | null { return this.kits?.kit ?? null; }
+
+  /** Pause-menu kit swap. The new kit starts on a full cooldown. */
+  setKit(id: KitId): boolean { return this.kits?.setKit(id) ?? false; }
+
+  /** Per-frame kit upkeep: gadgets, kill refunds and which hostiles a decoy has fooled. */
+  private updateKits(dt: number) {
+    const kits = this.kits;
+    if (!kits) return;
+    kits.update(dt);
+    if (this.kills > this.kitKillsSeen) { kits.onKill(this.kills - this.kitKillsSeen); this.kitKillsSeen = this.kills; }
+    // Mission AI reads its lure from a field (TDM bots ask through their context).
+    // 5 Hz is plenty — the decoy moves at jog speed and brains run staggered anyway.
+    this.kitLureT -= dt;
+    if (this.kitLureT > 0) return;
+    this.kitLureT = 0.2;
+    const any = kits.lures().length > 0;
+    for (const e of this.ai.enemies) {
+      if (e.dead || e.dormant || !any) { e.lure = null; continue; }
+      // Once fooled a soldier stays committed until the decoy dies or a hit snaps him out.
+      if (e.lure && e.lure.active()) continue;
+      e.lure = kits.lureFor(e.eyePos());
+    }
+  }
+
+  private kitHostiles() {
+    const out: { ref: object; pos: THREE.Vector3; alive(): boolean }[] = [];
+    if (this.isTDM && this.tdm) {
+      for (const b of this.tdm.bots) if (!b.dead && b.team === 'bravo') out.push({ ref: b, pos: b.pos, alive: () => !b.dead });
+    } else {
+      for (const e of this.ai.enemies) if (!e.dead && !e.dormant) out.push({ ref: e, pos: e.pos, alive: () => !e.dead });
+    }
+    return out;
+  }
+
+  /** Footprint check for the barricade: inside the map, clear of solids, clear of the player. */
+  private kitCanPlace(box: AABB): boolean {
+    const lim = this.world.half - 2.5;
+    if (box.minX < -lim || box.maxX > lim || box.minZ < -lim || box.maxZ > lim) return false;
+    // The ground under both ends must be within a step of the feet (no bridging a drop).
+    for (const [x, z] of [[box.minX, box.minZ], [box.maxX, box.maxZ]]) {
+      if (Math.abs(this.world.groundHeight(x, z) - box.minY) > 0.6 && Math.abs(this.supportHeight(this._t1.set(x, box.minY, z), 0.1) - box.minY) > 0.6) return false;
+    }
+    const near = this.nearSolids((box.minX + box.maxX) / 2, (box.minZ + box.maxZ) / 2, 2);
+    for (const b of near) {
+      if (b.maxY <= box.minY + 0.35 || b.minY >= box.maxY) continue; // curbs/steps and overheads are fine
+      if (box.minX < b.maxX && box.maxX > b.minX && box.minZ < b.maxZ && box.maxZ > b.minZ) return false;
+    }
+    const r = 0.4; // player capsule + margin
+    if (this.pos.x + r > box.minX && this.pos.x - r < box.maxX && this.pos.z + r > box.minZ && this.pos.z - r < box.maxZ) return false;
+    return true;
+  }
+
+  /** A barricade went up or came down: refresh player collision, bullet
+   *  hittables and both AI nav grids so soldiers path around the wall instead
+   *  of grinding against it. A full NavGrid rebuild measures ~2 ms on the
+   *  largest map and happens at most once per plant/expiry. */
+  private kitSolidsChanged() {
+    this.buildSolidGrid();
+    this.rebuildHittables();
+    const height = this.world.navigationHeight ?? this.world.groundHeight;
+    const fresh = new NavGrid(this.world.solids, this.world.half, height).blocked;
+    if (this.ai?.nav) { this.ai.nav.blocked.set(fresh); this.ai.invalidatePaths(); }
+    if (this.tdm?.nav) this.tdm.nav.blocked.set(fresh);
+  }
+
+  private kitContext(): KitContext {
+    return {
+      scene: this.scene,
+      effects: this.effects,
+      occluders: this.world.occluders,
+      groundHeight: (x, z) => this.world.groundHeight(x, z),
+      playerFeet: () => this.pos.clone(),
+      playerEye: () => this.eyePos().clone(),
+      playerDir: () => this.camDir().clone(),
+      playerAlive: () => !this.dead && !this.ended,
+      hostiles: () => this.kitHostiles(),
+      canPlaceBox: box => this.kitCanPlace(box),
+      addBlocker: box => { this.world.solids.push(box); this.kitSolidsChanged(); },
+      removeBlocker: box => {
+        const i = this.world.solids.indexOf(box);
+        if (i >= 0) this.world.solids.splice(i, 1);
+        this.kitSolidsChanged();
+      },
+      moveCollide: (p, dx, dz, r) => { this.moveAxis(p, dx, dz, r, AI_STAND_HEIGHT); p.y = this.supportHeight(p, r); },
+      alertAt: (p, r) => { this.ai.notifyGunshot(p, r); this.tdm?.notifyGunshot(p, r); },
+      announce: (text, spoken) => {
+        this.onEvent({ type: 'kitmsg', text });
+        if (spoken) voice.announce(spoken);
+      },
+    };
+  }
+
   // ==================== SCORESTREAKS ====================
   /** Every hostile a streak may engage, wrapped so sentry/chopper code is mode-agnostic. */
   private streakTargets(): StreakTarget[] {
@@ -2431,6 +2548,7 @@ void main(){
   /** A streak killed something: score, cash, feed. Deliberately NO streak points — streaks don't chain. */
   private creditStreakKill(name: string, source: StreakId, bot: TDMBot | null) {
     const weapon = Engine.STREAK_WEAPON[source];
+    const killsBefore = this.kills;
     if (this.isTDM && this.tdm && bot) {
       this.creditTdmKill(bot, false, weapon, 100);
       this.onEvent({ type: 'hit', kill: true });
@@ -2441,12 +2559,15 @@ void main(){
       audio.killConfirm();
       this.onEvent({ type: 'kill', name, weapon, headshot: false });
     }
+    // Streak kills don't refund the field kit either: mark them as already seen.
+    this.kitKillsSeen += this.kills - killsBefore;
     this.rebuildHittables();
   }
 
   /** Bomb / shell impact: hurts everyone inside the radius, including the player. */
   private streakBlast(pos: THREE.Vector3, radius: number, maxDamage: number, source: StreakId) {
     const distP = pos.distanceTo(this.eyePos());
+    this.kits?.blast(pos, radius);
     this.effects.explosion(pos);
     if (this.world.glass) {
       const m = new THREE.Matrix4(), p = new THREE.Vector3();
@@ -2778,6 +2899,7 @@ void main(){
     // A nuke ending gets a longer beat so the whiteout and banner land before the debrief.
     this.finishDelay = this.nukeWin ? 3.4 : 1.2;
     this.streaks?.quiet();
+    this.kits?.quiet();
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Match over. Alpha squad takes the yard.');
     else if (outcome === 'draw') voice.objective('Match tied. No side takes the yard.');
@@ -3216,6 +3338,7 @@ void main(){
     };
     this.finishDelay = win ? 0.6 : 0.8;
     this.streaks?.quiet();
+    this.kits?.quiet();
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Extraction complete. Nomad has you.');
     else voice.defeat();
@@ -3537,6 +3660,7 @@ void main(){
     this.updateGrenades(dt);
     this.ai.update(dt);
     this.streaks.update(dt);
+    this.updateKits(dt);
     this.effects.update(dt, this.pos);
     this.composeCamera(dt);
     this.animateViewmodel(dt);
@@ -4089,14 +4213,14 @@ void main(){
         ? compView.foes.map(f => ({ nx: f.nx, nz: f.nz, yaw: f.yaw, hot: f.hot }))
         : this.isTDM && this.tdm
         ? this.tdm.bots
-          .filter(b => !b.dead && b.team === 'bravo' && (uav || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR))
+          .filter(b => !b.dead && b.team === 'bravo' && (uav || this.kits?.isRevealed(b) || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR))
           .map(b => ({
             nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H),
             yaw: -b.yaw * 180 / Math.PI,
             hot: b.onFire || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK',
           }))
         : this.ai.enemies
-          .filter(e => !e.dead && (uav || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR))
+          .filter(e => !e.dead && (uav || this.kits?.isRevealed(e) || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR))
           .map(e => ({
             nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H),
             // Heading (deg) + engagement state let the radar draw directional
@@ -4121,6 +4245,7 @@ void main(){
       canVault: !!this.nearestWindow(),
       // Ranked S&D has no killstreaks: the rail stays dark even if points were banked elsewhere.
       streaks: this.isComp ? undefined : this.streaks.hud(),
+      kit: this.kits?.hud(),
       mission: this.isTDM ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
       tdm: this.isTDM && this.tdm ? {
         alphaScore: this.tdm.alphaScore,
@@ -4171,6 +4296,7 @@ void main(){
     }
     for(const texture of textures) texture.dispose();
     this.streaks?.dispose();
+    this.kits?.dispose();
     this.missionRuntime?.dispose();
     if (this.comp) this.comp.dispose();
     else this.tdm?.dispose();

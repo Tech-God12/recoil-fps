@@ -17,6 +17,8 @@ import {
   ArmorIcon, CALIBER, CLASS_LABEL, HardpointRows, OrangeDeploy, PartsPanel, StatBars,
   TxBack, TxCheck, TxCoords, TxLock, txFmt, weaponTags,
 } from './tactical';
+import { KitPicker } from './Kits';
+import type { KitId } from '../game/kits';
 import mapArena from '../assets/map-arena.jpg';
 import tdmBackdrop from '../assets/tdm-backdrop.jpg';
 
@@ -27,11 +29,14 @@ interface TdmSetupProps {
   onArmor: (a: TDMArmor) => void;
   onDeploy: () => void;
   onBack: () => void;
+  /** Field kit carried into the match (ability on Z). */
+  kit?: KitId;
+  onKit?: (id: KitId) => void;
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
-export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy, onBack }: TdmSetupProps) {
+export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy, onBack, kit, onKit }: TdmSetupProps) {
   const [selected, setSelected] = useState<WeaponId>(profile.loadout.primary.weapon);
   const [gridTab, setGridTab] = useState<SlotId>(weaponById(profile.loadout.primary.weapon)?.slot ?? 'primary');
   const [menuSlot, setMenuSlot] = useState<AttachSlot | null>(null);
@@ -254,6 +259,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
                 <p>▸ Armor cuts head and body damage — check Bravo's kit.</p>
                 <p>▸ Respawn in <b>5s</b> at your protected yard.</p>
                 <p>▸ Most kills at <b>2:30</b> wins the match.</p>
+                <p>▸ Field kit on <b>Z</b>: kills cut <b>20%</b> off its cooldown.</p>
               </div>
               <p className="tx-hint mono">CLICK A HARDPOINT OR THE GUN TO FIT PARTS</p>
             </>
@@ -271,6 +277,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
           {TDM_ARMOR_NAMES[armor].toUpperCase()} ARMOR · {TDM_BASE_HP + armor * TDM_HP_PER_ARMOR} HP
           &nbsp;·&nbsp; 1 {weaponById(profile.loadout.primary.weapon)?.short} · 2 {weaponById(profile.loadout.secondary.weapon)?.short}
         </div>
+        {kit && onKit && <KitPicker value={kit} onChange={onKit} compact />}
         <OrangeDeploy title="PLAY" hint="WAREHOUSE · 5V5 TDM" onClick={onDeploy} />
       </footer>
 

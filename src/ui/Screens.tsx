@@ -6,6 +6,8 @@ import { MAPS, type MapId } from '../game/world';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
 import type { StreakHud } from '../game/streaks';
+import type { KitHud, KitId } from '../game/kits';
+import { KitPauseCard, KitPicker } from './Kits';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
@@ -409,9 +411,11 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, onRanked, initialView, profile }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, onRanked, initialView, profile, onKit }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
   onArmory?: () => void; onArenaSetup?: () => void; onRanked?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
+  /** Field-kit pick on the missions screen. */
+  onKit?: (id: KitId) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
@@ -629,6 +633,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
           ))}
         </ol>
         <div className="msn-cta seq" style={{ animationDelay: `${0.15 + mission.phases.length * 0.05}s` }}>
+          {onKit && <KitPicker value={s.fieldKit} onChange={onKit} />}
           <button className="deploy-btn" onClick={() => onDeploy()}>
             <span>Deploy</span>
             <span className="hint">{mapName} · {mission.phases.length} objectives</span>
@@ -656,6 +661,7 @@ const BOOT_TIPS = [
   'Lean with Q and E, then return to cover before firing.',
   'Reload before crossing an exposed lane.',
   'Manage the magazine; reserve ammunition is not consumed.',
+  'Press Z for your field kit: sonar dart, barricade or holo-decoy.',
 ];
 
 export function BootScreen({ map }: { map?: MapId }) {
@@ -713,8 +719,9 @@ export function BootScreen({ map }: { map?: MapId }) {
 /* ================================================================
    PAUSE — SUSPENDED
    ================================================================ */
-export function PauseMenu({ mission, streaks, onResume, onRestart, onSettings, onQuit }: {
-  mission?: MissionHud; streaks?: StreakHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
+export function PauseMenu({ mission, streaks, kit, onKit, onResume, onRestart, onSettings, onQuit }: {
+  mission?: MissionHud; streaks?: StreakHud; kit?: KitHud; onKit?: (id: KitId) => void;
+  onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
 }) {
   const readout = mission ? objectiveReadout(mission) : undefined;
   return (
@@ -748,6 +755,7 @@ export function PauseMenu({ mission, streaks, onResume, onRestart, onSettings, o
             </div>
           )}
           <p className="pause-note">All mission timers frozen</p>
+          {kit && <KitPauseCard kit={kit} onKit={onKit} />}
           {streaks && (
             <div className="pause-streaks" aria-label="Scorestreaks">
               <div className="pause-streaks-head">

@@ -1074,6 +1074,130 @@ export class SpatialAudioEngine {
     src.onended = () => { [o, og, src, lp, g, ring, rg].forEach(n => n.disconnect()); };
   }
 
+  // ==================== FIELD KITS ====================
+  /** Spatial filtered-noise hit at a world point (kit hardware foley). */
+  private spatialNoise(wx: number, wy: number, wz: number, o: { dur: number; gain: number; freq: number; q?: number; type?: BiquadFilterType; when?: number }) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime + (o.when ?? 0);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    const f = ctx.createBiquadFilter();
+    f.type = o.type ?? 'bandpass'; f.frequency.value = o.freq; f.Q.value = o.q ?? 1;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(o.gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+    src.connect(f); f.connect(g); g.connect(panner);
+    src.start(t, Math.random() * 0.4); src.stop(t + o.dur + 0.02);
+    src.onended = () => { src.disconnect(); f.disconnect(); g.disconnect(); panner.disconnect(); };
+  }
+
+  /** Spatial oscillator sweep at a world point. */
+  private spatialTone(wx: number, wy: number, wz: number, o: { from: number; to: number; dur: number; gain: number; type?: OscillatorType; when?: number }) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime + (o.when ?? 0);
+    const osc = ctx.createOscillator();
+    osc.type = o.type ?? 'sine';
+    osc.frequency.setValueAtTime(o.from, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.to), t + o.dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(o.gain, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+    osc.connect(g); g.connect(panner);
+    osc.start(t); osc.stop(t + o.dur + 0.02);
+    osc.onended = () => { osc.disconnect(); g.disconnect(); panner.disconnect(); };
+  }
+
+  /** Kit charged: two soft rising blips, lower than the streak chime so they never blur. */
+  kitReady() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    [[520, 0], [780, 0.08]].forEach(([f, when]) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + when);
+      g.gain.exponentialRampToValueAtTime(0.2, t + when + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.22);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + when); o.stop(t + when + 0.24);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    });
+  }
+
+  /** Pressed Z on cooldown / refused placement: a dull double tick. */
+  kitDenied() {
+    this.burstDirect({ dur: 0.04, gain: 0.12, freq: 900, q: 3 });
+    this.burstDirect({ dur: 0.04, gain: 0.1, freq: 700, q: 3, when: 0.07 });
+  }
+
+  /** Dart leaves the hand: short air whip. */
+  dartThrow() {
+    this.burstDirect({ dur: 0.16, gain: 0.16, freq: 1800, q: 0.8, attack: 0.03, hp: 900 });
+  }
+
+  /** Dart bites into a surface: tick + tiny metallic ring. */
+  dartStick(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.05, gain: 0.5, freq: 3200, q: 2 });
+    this.spatialTone(wx, wy, wz, { from: 2400, to: 2200, dur: 0.18, gain: 0.12, type: 'triangle' });
+  }
+
+  /** Sonar pulse: descending sine "ping" with a watery tail; the last ping is doubled. */
+  sonarPing(wx: number, wy: number, wz: number, last = false) {
+    this.spatialTone(wx, wy, wz, { from: 1900, to: 1250, dur: 0.55, gain: 0.55 });
+    this.spatialTone(wx, wy, wz, { from: 950, to: 620, dur: 0.7, gain: 0.25, type: 'triangle' });
+    if (last) this.spatialTone(wx, wy, wz, { from: 1900, to: 1250, dur: 0.45, gain: 0.4, when: 0.16 });
+  }
+
+  /** Barricade unfolds: ratchet clacks and a heavy plate thump. */
+  barricadeDeploy(wx: number, wy: number, wz: number) {
+    for (let i = 0; i < 3; i++) this.spatialNoise(wx, wy, wz, { dur: 0.04, gain: 0.45, freq: 2600 - i * 300, q: 4, when: i * 0.06 });
+    this.spatialTone(wx, wy, wz, { from: 130, to: 55, dur: 0.3, gain: 0.7, type: 'triangle', when: 0.2 });
+    this.spatialNoise(wx, wy, wz, { dur: 0.2, gain: 0.35, freq: 400, q: 0.8, when: 0.2 });
+  }
+
+  /** A round spangs off the steel. */
+  barricadeHit(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.05, gain: 0.5, freq: this.rf(4200, 0.2), q: 3 });
+    this.spatialTone(wx, wy, wz, { from: this.rf(1700, 0.2), to: 1300, dur: 0.22, gain: 0.14, type: 'square' });
+  }
+
+  /** Integrity gone: plates crash down. */
+  barricadeBreak(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.5, gain: 0.8, freq: 700, q: 0.6 });
+    this.spatialNoise(wx, wy, wz, { dur: 0.3, gain: 0.5, freq: 2400, q: 1.5, when: 0.08 });
+    this.spatialTone(wx, wy, wz, { from: 90, to: 40, dur: 0.45, gain: 0.8, type: 'triangle' });
+  }
+
+  /** Life expired: the wall folds itself away. */
+  barricadeFold(wx: number, wy: number, wz: number) {
+    for (let i = 0; i < 2; i++) this.spatialNoise(wx, wy, wz, { dur: 0.05, gain: 0.35, freq: 2000 + i * 400, q: 4, when: i * 0.08 });
+    this.spatialTone(wx, wy, wz, { from: 110, to: 60, dur: 0.22, gain: 0.4, type: 'triangle', when: 0.16 });
+  }
+
+  /** Holo-decoy boots: rising digital sweep with a projector buzz. */
+  decoyDeploy(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 300, to: 1600, dur: 0.35, gain: 0.3, type: 'sawtooth' });
+    this.spatialNoise(wx, wy, wz, { dur: 0.3, gain: 0.18, freq: 5200, q: 6 });
+  }
+
+  /**
+   * Decoy blank: a rifle report built the same way as the hostile gun voice, so the AI's
+   * ears and the player's ears both hear "a rifleman", just a touch brighter and dryer.
+   */
+  decoyFire(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.09, gain: 0.85, freq: this.rf(1500), q: 0.7 });
+    this.spatialTone(wx, wy, wz, { from: this.rf(160), to: 60, dur: 0.1, gain: 0.35, type: 'triangle' });
+  }
+
+  /** Decoy destroyed / expired: digital crackle collapse. */
+  decoyPop(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 1400, to: 180, dur: 0.3, gain: 0.3, type: 'square' });
+    for (let i = 0; i < 4; i++) this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.3, freq: 3000 + i * 900, q: 5, when: i * 0.045 });
+  }
+
   private burstDirect(opts: {
     dur: number; gain: number; freq: number; q?: number; type?: BiquadFilterType;
     attack?: number; toEcho?: number; when?: number; hp?: number;

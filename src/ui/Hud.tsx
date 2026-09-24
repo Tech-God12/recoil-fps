@@ -5,6 +5,7 @@ import { Reticle } from './Settings';
 import MissionObjective, { missionClock } from './MissionObjective';
 import { CompHudLayer, CompScoreboard } from './Competitive';
 import ScopeView, { type ScopeControls } from './ScopeView';
+import { KitHint, KitLive, KitMessage, KitSlot } from './Kits';
 import { NukeCountdown, StreakActive, StreakMessage, StreakRail, StrikeDesignator } from './Streaks';
 
 export interface HudFx {
@@ -17,6 +18,7 @@ export interface HudFx {
   flashPow: number;
   missionBanner: { id: number; title: string; index: number } | null;
   streakMsg: { id: number; text: string } | null;
+  kitMsg: { id: number; text: string } | null;
   nukeFlash: number | null;
 }
 
@@ -122,6 +124,10 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       {hud.streaks?.designating && !hud.comp && !hud.tdm?.playerDead && <StrikeDesignator />}
       {hud.streaks?.nukeCountdown !== null && hud.streaks?.nukeCountdown !== undefined && <NukeCountdown t={hud.streaks.nukeCountdown} />}
       {fx.streakMsg && <StreakMessage key={fx.streakMsg.id} text={fx.streakMsg.text} tdm={!!hud.tdm} />}
+
+      {/* ============ FIELD KIT ============ */}
+      {fx.kitMsg && <KitMessage key={fx.kitMsg.id} text={fx.kitMsg.text} />}
+      {hud.kit?.hint && active !== false && !hud.tdm?.playerDead && <KitHint kit={hud.kit} />}
 
       {/* ============ FULL SCOREBOARD (hold Tab) ============ */}
       {hud.tdm && showBoard && <TdmFullBoard tdm={hud.tdm} />}
@@ -473,12 +479,13 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
             <i /><span className="keycap">SPACE</span> VAULT
             <i /><span className="keycap">X</span> ATTACH / BLAST
             <i /><span className="keycap">3-7</span> STREAKS
+            <i /><span className="keycap">Z</span> FIELD KIT
           </span>
         </div>
       )}
 
       {/* ============ VITALS ============ */}
-      <div className="absolute bottom-7 left-8">
+      <div className="absolute bottom-7 left-8 flex items-end gap-3">
         <div className="vitals hud-chip">
           <div className="vitals-head"><span className="live-dot" />VITALS</div>
           <div className="flex items-end gap-3 mt-1">
@@ -500,6 +507,12 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
             <div>SCORE <b className="cy">{hud.score.toLocaleString('en-US')}</b></div>
           </div>
         </div>
+        {hud.kit && (
+          <div className="kit-col">
+            <KitLive kit={hud.kit} />
+            <KitSlot kit={hud.kit} />
+          </div>
+        )}
       </div>
     </div>
   );

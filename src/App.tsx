@@ -29,7 +29,7 @@ const DEFAULT_HUD: HudState = {
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, nukeFlash: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, kitMsg: null, nukeFlash: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
@@ -164,6 +164,10 @@ export default function App() {
         setFx(f => ({ ...f, banner: { id, label: event.label } }));
         later(() => setFx(f => f.banner?.id === id ? { ...f, banner: null } : f), 1600);
         break;
+      case 'kitmsg':
+        setFx(f => ({ ...f, kitMsg: { id, text: event.text } }));
+        later(() => setFx(f => f.kitMsg?.id === id ? { ...f, kitMsg: null } : f), 2800);
+        break;
       case 'streakmsg':
         setFx(f => ({ ...f, streakMsg: { id, text: event.text } }));
         later(() => setFx(f => f.streakMsg?.id === id ? { ...f, streakMsg: null } : f), 3600);
@@ -271,7 +275,7 @@ export default function App() {
         // Ranked deploys with the player's own per-weapon builds and their ladder state.
         mode === 'comp'
           ? { mode: 'comp', compBuilds: profileRef.current.builds, rankedProfile: profileRef.current.ranked }
-          : mode === 'tdm' ? { mode: 'tdm' } : { mode: 'mission' });
+          : mode === 'tdm' ? { mode: 'tdm', kit: settings.fieldKit } : { mode: 'mission', kit: settings.fieldKit });
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -347,7 +351,7 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} onKit={id => set({ fieldKit: id })} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>
@@ -360,7 +364,7 @@ export default function App() {
           </div>
         </aside>
       )}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} kit={hud.kit} onKit={id => { set({ fieldKit: id }); const eng = engineRef.current; if (eng) { eng.setKit(id); setHud(eng.hud()); } }} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
@@ -371,6 +375,8 @@ export default function App() {
           onArmor={setTdmArmor}
           onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
+          kit={settings.fieldKit}
+          onKit={id => set({ fieldKit: id })}
         />
       )}
       {phase === 'ranked-setup' && !launching && (

@@ -4,6 +4,7 @@ import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
 import MissionObjective, { missionClock } from './MissionObjective';
 import ScopeView, { type ScopeControls } from './ScopeView';
+import DefusalHudLayer, { C4Glyph } from './DefusalHud';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
@@ -68,7 +69,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
   // Hold-Tab scoreboard (TDM only). Listens on window so it works regardless
   // of pointer lock; Tab's default focus-move is suppressed while playing.
   const [showBoard, setShowBoard] = useState(false);
-  const isTdm = !!hud.tdm && active !== false;
+  const isTdm = !!(hud.tdm || hud.defusal) && active !== false;
   useEffect(() => {
     if (!isTdm) { setShowBoard(false); return; }
     const down = (e: KeyboardEvent) => { if (e.code === 'Tab') { e.preventDefault(); setShowBoard(true); } };
@@ -84,7 +85,9 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
     };
   }, [isTdm]);
 
-  const maxHp = hud.tdm?.maxHp ?? 100;
+  const maxHp = hud.tdm?.maxHp ?? hud.maxHp ?? 100;
+  const df = hud.defusal;
+  const spectating = !!df?.playerDead;
   const lowHp = hud.hp < maxHp * 0.35;
   const vig = hud.hp < maxHp * 0.6 ? 1 - hud.hp / (maxHp * 0.6) : 0;
   const magPct = hud.magSize ? hud.mag / hud.magSize : 0;
@@ -109,6 +112,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       {/* flashbang */}
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
       {hud.mission && <MissionObjective mission={hud.mission} />}
+      {df && <DefusalHudLayer hud={hud} showBoard={showBoard} />}
 
       {/* ============ FULL SCOREBOARD (hold Tab) ============ */}
       {hud.tdm && showBoard && <TdmFullBoard tdm={hud.tdm} />}
@@ -202,10 +206,12 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         <div className="compass-bear hud-chip">{Math.round(hud.bearing).toString().padStart(3, '0')}<span> DEG</span></div>
       </div>
 
-      {/* ============ CASH ============ */}
-      <div className="hud-cash mono" aria-label={`Cash ${hud.cash}`}>
-        <span>$</span>{hud.cash.toLocaleString('en-US')}
-      </div>
+      {/* ============ CASH (mission wallet; the defusal layer shows round money) ============ */}
+      {!df && (
+        <div className="hud-cash mono" aria-label={`Cash ${hud.cash}`}>
+          <span>$</span>{hud.cash.toLocaleString('en-US')}
+        </div>
+      )}
 
       {/* ============ KILL FEED + FPS ============ */}
       <div className="absolute top-14 right-5 flex flex-col items-end gap-1.5">
@@ -231,7 +237,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
 
       {/* ============ CENTER STACK ============ */}
-      {hud.ads < 0.3 && !hud.sprinting && (
+      {!spectating && hud.ads < 0.3 && !hud.sprinting && (
         <div className="absolute left-1/2 top-1/2" style={{ opacity: 1 - hud.ads / 0.3 }}>
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>
@@ -331,6 +337,15 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
                       style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%`, transform: `rotate(${e.yaw}deg)` }}
                     />
                   ))}
+                  {df && df.radar.sites.map(site => (
+                    <span key={site.id} className="radar-site" style={{ left: `${site.nx * 100}%`, top: `${site.nz * 100}%`, transform: `translate(-50%, -50%) rotate(${hud.bearing}deg)` }}>{site.id}</span>
+                  ))}
+                  {df && df.radar.allies.map((a, i) => (
+                    <span key={`al${i}`} className="radar-ally" style={{ left: `${a.nx * 100}%`, top: `${a.nz * 100}%`, transform: `rotate(${a.yaw}deg)` }} />
+                  ))}
+                  {df?.radar.bomb && (
+                    <span className={`radar-bomb ${df.radar.bomb.planted ? 'planted' : ''}`} style={{ left: `${df.radar.bomb.nx * 100}%`, top: `${df.radar.bomb.nz * 100}%`, transform: `translate(-50%, -50%) rotate(${hud.bearing}deg)` }}><C4Glyph size={11} /></span>
+                  )}
                   {hud.missionMap && (
                     <>
                       <span className={`radar-obj-ring ${hud.missionMap.extract ? 'extract' : ''}`} style={{ left: `${hud.missionMap.nx * 100}%`, top: `${hud.missionMap.nz * 100}%`, width: `${hud.missionMap.ringPct * 2}%`, height: `${hud.missionMap.ringPct * 2}%` }} />
@@ -367,7 +382,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       })()}
 
       {/* ============ AMMO ============ */}
-      <div className="absolute bottom-7 right-8 text-right">
+      {!spectating && <div className="absolute bottom-7 right-8 text-right">
         <div className="weapon-name">{hud.weapon}</div>
         <div className="weapon-card mono" aria-label="Loadout">
           <span className={hud.heldSlot === 'primary' ? 'held' : ''}>1 · {hud.heldSlot === 'primary' ? hud.weapon : hud.secondaryWeapon}</span>
@@ -403,10 +418,11 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         <div className="flex justify-end gap-3 mt-2.5 nade-row">
           <span className={hud.frags > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">G</span>FRAG ×{hud.frags}</span>
           <span className={hud.flashes > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">F</span>FLASH ×{hud.flashes}</span>
+          {df && <span className={df.smokes > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">Z</span>SMOKE ×{df.smokes}</span>}
         </div>
         {hud.cooking && <div className="mt-1.5 cook-warn">◉ COOKING — RELEASE G</div>}
         {!hud.reloading && hud.mag <= 5 && <div className="mt-1.5 text-[10px] tracking-[0.3em] font-black text-[var(--brass)] blink">RELOAD</div>}
-      </div>
+      </div>}
 
       {/* ============ ONBOARDING STRIP (first seconds of a mission) ============ */}
       {hud.mission && hud.mission.elapsed < 12 && (
@@ -425,7 +441,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
 
       {/* ============ VITALS ============ */}
-      <div className="absolute bottom-7 left-8">
+      {!spectating && <div className="absolute bottom-7 left-8">
         <div className="vitals hud-chip">
           <div className="vitals-head"><span className="live-dot" />VITALS</div>
           <div className="flex items-end gap-3 mt-1">
@@ -444,10 +460,10 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           <div className="vitals-stats mt-2">
             <div>ELIMINATIONS <b className="text-white">{hud.kills}</b></div>
             <div>HOSTILES <b className="h">{hud.enemiesLeft}</b></div>
-            <div>SCORE <b className="cy">{hud.score.toLocaleString('en-US')}</b></div>
+            {df ? <div>ROUND <b className="cy">{df.round}/{df.maxRounds}</b></div> : <div>SCORE <b className="cy">{hud.score.toLocaleString('en-US')}</b></div>}
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

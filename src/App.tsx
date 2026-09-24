@@ -2,16 +2,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine, DEFAULT_SETTINGS, type GameEvent, type GameSettings, type HudState } from './game/engine';
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
-import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
+import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results, type DefusalMenuOptions } from './ui/Screens';
+import BuyMenu from './ui/BuyMenu';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
-import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
+import { buildForWeapon, grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
 type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
+const DEFUSAL_KEY = 'recoilfps.defusal.v1';
+function loadDefusalOptions(): DefusalMenuOptions {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DEFUSAL_KEY) ?? '{}');
+    return {
+      side: raw.side === 'attack' || raw.side === 'defend' ? raw.side : 'random',
+      format: raw.format === 'long' ? 'long' : 'short',
+    };
+  } catch { return { side: 'random', format: 'short' }; }
+}
 
 /**
  * Resolves once the browser has painted. Two animation frames, because the first one
@@ -42,7 +53,7 @@ function loadRichProfile(): PlayerProfile {
 function loadSettings(): GameSettings {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    return { ...DEFAULT_SETTINGS, ...raw, map: raw.map === 'kasbah' ? 'kasbah' : raw.map === 'arena' ? 'arena' : 'alrasul' };
+    return { ...DEFAULT_SETTINGS, ...raw, map: raw.map === 'kasbah' ? 'kasbah' : raw.map === 'arena' ? 'arena' : raw.map === 'sirocco' ? 'sirocco' : 'alrasul' };
   } catch { return { ...DEFAULT_SETTINGS }; }
 }
 
@@ -68,6 +79,11 @@ export default function App() {
   // Which MainMenu screen to show when phase returns to 'menu' (so leaving the
   // TDM loadout screen lands back on Arena Mode, not the home screen).
   const [menuView, setMenuView] = useState<'home' | 'arena'>('home');
+  const [defusalOpts, setDefusalOpts] = useState<DefusalMenuOptions>(loadDefusalOptions);
+  // Buy menu (Bomb Defusal): the pointer is released while it is open, which must
+  // NOT be read as "the player paused" by the pointer-lock watcher below.
+  const [buyOpen, setBuyOpen] = useState(false);
+  const buyOpenRef = useRef(false);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -112,6 +128,29 @@ export default function App() {
     engineRef.current?.applySettings(settings);
   }, [settings]);
   const set = useCallback((patch: Partial<GameSettings>) => setSettings(previous => ({ ...previous, ...patch })), []);
+  useEffect(() => {
+    try { localStorage.setItem(DEFUSAL_KEY, JSON.stringify(defusalOpts)); } catch { /* Storage is optional. */ }
+  }, [defusalOpts]);
+
+  const openBuy = useCallback(() => {
+    buyOpenRef.current = true;
+    setBuyOpen(true);
+    engineRef.current?.setBuyMenuOpen(true);
+    if (document.pointerLockElement) document.exitPointerLock();
+  }, []);
+  /** Close the buy menu. `relock` comes from a real gesture (B / click); Esc pauses instead. */
+  const closeBuy = useCallback((relock: boolean) => {
+    buyOpenRef.current = false;
+    setBuyOpen(false);
+    const engine = engineRef.current;
+    engine?.setBuyMenuOpen(false);
+    if (!engine) return;
+    if (relock) {
+      engine.requestLock().catch(() => { engine.setPaused(true); setHud(engine.hud()); changePhase('paused'); setError('Click Resume to capture the mouse again.'); });
+    } else {
+      engine.setPaused(true); setHud(engine.hud()); changePhase('paused');
+    }
+  }, [changePhase]);
 
   const onEvent = useCallback((event: GameEvent) => {
     const id = ++ids.current;
@@ -167,11 +206,15 @@ export default function App() {
         setFx(f => ({ ...f, banner: { id, label: event.label } }));
         later(() => setFx(f => f.banner?.id === id ? { ...f, banner: null } : f), 1600);
         break;
+      case 'buymenu':
+        if (event.open) openBuy();
+        break;
       case 'objective':
         setFx(f => ({ ...f, missionBanner: { id, title: event.phase.title, index: event.index } }));
         later(() => setFx(f => f.missionBanner?.id === id ? { ...f, missionBanner: null } : f), 2600);
         break;
       case 'end': {
+        buyOpenRef.current = false; setBuyOpen(false);
         engineRef.current?.setPaused(true);
         // Debrief payout: run cash × difficulty, plus the grade bonus on a win.
         // (Losses keep 100% of earned cash but forfeit extraction + grade.)
@@ -189,7 +232,7 @@ export default function App() {
         break;
       }
     }
-  }, [changePhase, later, updateProfile]);
+  }, [changePhase, later, updateProfile, openBuy]);
 
   useEffect(() => {
     if (phase !== 'playing') return;
@@ -203,6 +246,8 @@ export default function App() {
     const lockChanged = () => {
       const engine = engineRef.current;
       if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory' || phaseRef.current === 'tdm-setup') return;
+      // Releasing the pointer to shop is not a pause: the round keeps running.
+      if (buyOpenRef.current && document.pointerLockElement !== canvasRef.current) return;
       if (document.pointerLockElement === canvasRef.current) {
         engine.setPaused(false);
         changePhase('playing');
@@ -215,6 +260,7 @@ export default function App() {
     };
     const lockError = () => { engineRef.current?.setPaused(true); if(engineRef.current)setHud(engineRef.current.hud()); changePhase('paused'); setError('Mouse capture was blocked. Select Resume to try again.'); };
     const blur = () => {
+      if (buyOpenRef.current) { buyOpenRef.current = false; setBuyOpen(false); engineRef.current?.setBuyMenuOpen(false); }
       if (phaseRef.current !== 'playing') return;
       engineRef.current?.setPaused(true);
       if(engineRef.current)setHud(engineRef.current.hud());
@@ -263,7 +309,13 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor);
+      // Bomb Defusal fields your own armory builds for every gun you own.
+      const prof = profileRef.current;
+      const defusalLaunch = map === 'sirocco'
+        ? { side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
+        : null;
+      buyOpenRef.current = false; setBuyOpen(false);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, defusalLaunch);
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -303,7 +355,8 @@ export default function App() {
   const quit = () => {
     session.current++; clearTimers(); engineRef.current?.dispose(); engineRef.current = null;
     // Leaving an arena match returns to the Arena Mode screen, not the home menu.
-    setMenuView(settings.map === 'arena' ? 'arena' : 'home');
+    setMenuView(settings.map === 'arena' || settings.map === 'sirocco' ? 'arena' : 'home');
+    buyOpenRef.current = false; setBuyOpen(false);
     changePhase('menu'); setShowSettings(false); setError(''); setFx(emptyFx()); setHud(DEFAULT_HUD);
     if (document.pointerLockElement) document.exitPointerLock();
   };
@@ -329,10 +382,18 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} />}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
+      {phase === 'playing' && buyOpen && hud.defusal && (
+        <BuyMenu
+          df={hud.defusal}
+          owned={profile.ownedWeapons}
+          onBuy={id => { const r = engineRef.current?.buyItem(id) ?? { ok: false }; if (engineRef.current) setHud(engineRef.current.hud()); return r; }}
+          onClose={closeBuy}
+        />
+      )}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} defusal={hud.defusal} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : settings.map === 'sirocco' ? 'SIROCCO · BOMB DEFUSAL' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
         <TdmSetup
           profile={profile}

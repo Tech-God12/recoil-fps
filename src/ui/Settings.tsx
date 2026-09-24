@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import type { GameSettings } from '../game/engine';
 import { DEFAULT_SETTINGS } from '../game/engine';
-import { MAPS } from '../game/world';
+import { MAPS, isMissionMap } from '../game/world';
 import { Panel, SectionTitle, Slider, Toggle, Segmented, ColorPick, CBtn } from './components';
 
 const PRESETS: { id: string; label: string; hint: string; tag: string; v: Partial<GameSettings> }[] = [
@@ -73,7 +73,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <SectionTitle sub="Applies on next deployment">Area of operations</SectionTitle>
                   <div className="grid grid-cols-1 gap-2">
                     {/* Mission maps only — the arena is selected via Arena Mode on the main menu */}
-                    {MAPS.filter(m => m.id !== 'arena').map(m => (
+                    {MAPS.filter(m => isMissionMap(m.id)).map(m => (
                       <button key={m.id} onClick={() => set({ map: m.id })} aria-pressed={s.map === m.id} className={`preset text-left ${s.map === m.id ? 'preset-on' : ''}`}>
                         <div className="text-[13px] font-bold" style={{ fontFamily: 'var(--display)' }}>{m.name}</div>
                         <div className="text-[12px] leading-snug text-[var(--bone-dim)] mt-1">{m.desc}</div>

@@ -312,3 +312,77 @@ export function buildArmoredSoldier(armor: 0 | 1 | 2, tint?: number): SoldierMod
 
   return { group: g, parts: { torso, head, lLeg: left.leg, rLeg: right.leg, lShin: left.shin, rShin: right.shin, muzzle, lArm, rArm, rifle }, hitMeshes };
 }
+
+/* ================= WORLD WEAPON LODs (Bomb Defusal) =================
+ * Bots in the defusal mode carry what they bought, so the silhouette tells
+ * you what you are about to fight: a pistol on eco, an AWM on a long angle.
+ * Cheap merged boxes in the soldier atlas, swapped under the existing rifle
+ * pivot so every TDMBot animation keeps working unchanged.
+ */
+export type WorldWeaponKind = 'rifle' | 'pistol' | 'smg' | 'sniper' | 'shotgun' | 'lmg';
+export function setWorldWeapon(model: SoldierModel, kind: WorldWeaponKind): void {
+  const rifle = model.parts.rifle;
+  for (const c of [...rifle.children]) {
+    if (c === model.parts.muzzle) continue;
+    rifle.remove(c);
+    if (c instanceof THREE.Mesh) c.geometry.dispose();
+  }
+  const { mesh, muzzleZ } = worldWeaponMesh(kind);
+  rifle.add(mesh);
+  model.parts.muzzle.position.set(0, 0.012, muzzleZ);
+}
+
+/** Standalone world gun (also used for weapons dropped on the floor). Muzzle points −z. */
+export function worldWeaponMesh(kind: WorldWeaponKind): { mesh: THREE.Mesh; muzzleZ: number } {
+  const p = new Part();
+  let muzzleZ = -0.56;
+  switch (kind) {
+    case 'pistol':
+      p.box(0.042, 0.065, 0.2, SR.black, 0, 0.012, -0.16);
+      p.box(0.038, 0.11, 0.055, SR.black, 0, -0.06, -0.08);
+      muzzleZ = -0.27;
+      break;
+    case 'smg':
+      p.box(0.05, 0.08, 0.28, SR.black, 0, 0, -0.02);
+      p.box(0.04, 0.13, 0.045, SR.black, 0, -0.1, -0.08);
+      p.cyl(0.012, 0.012, 0.14, 8, SR.black, 0, 0.01, -0.22, Math.PI / 2);
+      p.box(0.035, 0.05, 0.16, SR.black, 0, -0.01, 0.18);
+      muzzleZ = -0.3;
+      break;
+    case 'sniper':
+      p.box(0.058, 0.09, 0.44, SR.black, 0, 0, 0.02);
+      p.cyl(0.013, 0.011, 0.56, 10, SR.black, 0, 0.014, -0.47, Math.PI / 2);
+      p.cyl(0.032, 0.032, 0.28, 10, SR.black, 0, 0.085, -0.04, Math.PI / 2);
+      p.box(0.06, 0.12, 0.26, SR.olive, 0, -0.02, 0.33);
+      p.box(0.04, 0.1, 0.05, SR.black, 0, -0.08, 0.06);
+      muzzleZ = -0.76;
+      break;
+    case 'shotgun':
+      p.box(0.055, 0.085, 0.3, SR.black, 0, 0, 0.02);
+      p.cyl(0.016, 0.016, 0.44, 10, SR.black, 0, 0.015, -0.34, Math.PI / 2);
+      p.cyl(0.014, 0.014, 0.36, 8, SR.black, 0, -0.02, -0.3, Math.PI / 2);
+      p.box(0.05, 0.05, 0.12, SR.olive, 0, -0.025, -0.3);
+      p.box(0.05, 0.1, 0.22, SR.olive, 0, -0.02, 0.27);
+      muzzleZ = -0.58;
+      break;
+    case 'lmg':
+      p.box(0.075, 0.12, 0.4, SR.black, 0, 0, 0.02);
+      p.box(0.1, 0.1, 0.12, SR.olive, -0.06, -0.08, -0.02);
+      p.cyl(0.017, 0.017, 0.36, 10, SR.black, 0, 0.02, -0.36, Math.PI / 2);
+      p.box(0.06, 0.1, 0.22, SR.black, 0, -0.01, 0.3);
+      p.box(0.01, 0.16, 0.01, SR.black, 0.03, -0.08, -0.44);
+      p.box(0.01, 0.16, 0.01, SR.black, -0.03, -0.08, -0.44);
+      muzzleZ = -0.56;
+      break;
+    default:
+      p.box(0.055, 0.09, 0.34, SR.black, 0, 0, 0.02);
+      p.box(0.05, 0.07, 0.20, SR.black, 0, -0.005, -0.24);
+      p.cyl(0.013, 0.013, 0.24, 10, SR.black, 0, 0.012, -0.44, Math.PI / 2);
+      p.box(0.045, 0.14, 0.05, SR.black, 0, -0.10, 0.06);
+      p.box(0.05, 0.09, 0.16, SR.black, 0, -0.005, 0.24);
+      p.box(0.02, 0.03, 0.14, SR.black, 0, 0.06, -0.06);
+  }
+  const mesh = p.mesh(getSoldierMat());
+  mesh.castShadow = false;
+  return { mesh, muzzleZ };
+}

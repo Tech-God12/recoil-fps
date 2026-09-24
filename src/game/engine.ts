@@ -10,7 +10,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { buildWorld, pointInAABB, type World, type MapId, type AABB } from './world';
 import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, WEAPON_BUILDERS, type WeaponModel } from './models';
 import { applyBuild } from './attachments';
-import { attachmentById, weaponById, type WeaponId } from './economy/catalog';
+import { WEAPON_CATALOG, attachmentById, weaponById, type WeaponId } from './economy/catalog';
 import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
 import { REWARDS, difficultyMultiplier, streakAward } from './economy/rewards';
 import { skinById } from './economy/skins';
@@ -29,8 +29,11 @@ import {
   TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, TDM_ARMOR_ICONS,
   TDM_FIRE_KILLS, TDM_FIRE_WINDOW, TDM_FIRE_SECONDS, TDM_FIRE_COOLDOWN,
   TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL,
-  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam,
+  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam, type BotHit,
 } from './tdm';
+import { DefusalMode, type DefusalHud, type DefusalResult } from './defusal/mode';
+import { armorCovers, hitDamage, modScaleFor, type HitPart, type Inventory } from './defusal/shop';
+import type { MatchFormatId, Side } from './defusal/rules';
 
 export interface GameSettings {
   // Gameplay
@@ -132,6 +135,18 @@ export interface HudState {
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
   tdm?: TdmHud;
+  /** Bomb Defusal (Sirocco) — present only in that mode. */
+  defusal?: DefusalHud;
+  /** Dead in a defusal round: whose eyes you are watching through. */
+  spectating?: { name: string; hp: number; weapon: string; team: TDMTeam } | null;
+  maxHp?: number;
+}
+
+/** Launch options for the Bomb Defusal mode. `builds` fields the player's own armory guns. */
+export interface DefusalLaunch {
+  side: Side | 'random';
+  format: MatchFormatId;
+  builds: Partial<Record<WeaponId, WeaponBuild>>;
 }
 
 /** Warehouse TDM scoreboard payload — present only when the arena map is running. */
@@ -171,12 +186,15 @@ export type GameEvent =
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
   | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string }
-  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] } };
+  | { type: 'buymenu'; open: boolean }
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] }; defusal?: DefusalResult };
 
 export interface CashLogEntry { reason: string; amount: number; t: number }
 
 interface WeaponDef {
   name: string;
+  /** Armory catalog id (loadout-built guns). */
+  weaponId?: WeaponId;
   model: WeaponModel;
   auto: boolean;
   rpm: number;
@@ -226,7 +244,7 @@ interface Grenade {
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   fuse: number;
-  kind: 'frag' | 'flash';
+  kind: 'frag' | 'flash' | 'smoke';
   fromAI: boolean;
   /** TDM: which bot lobbed it (credits kills to the right team). */
   owner?: TDMBot;
@@ -299,6 +317,22 @@ export class Engine {
   private tdmRespawnT = 0;
   private tdmPlayerKills = 0;
   private tdmPlayerDeaths = 0;
+  // ---- Bomb Defusal (Sirocco only) ----
+  private isDefusal = false;
+  private defusal: DefusalMode | null = null;
+  private dfBuilds: Partial<Record<WeaponId, WeaponBuild>> = {};
+  private dfWeaponCache = new Map<WeaponId, WeaponDef>();
+  private dfMagMemory = new Map<WeaponDef, number>();
+  private dfLoadoutKey = '';
+  private dfRosterVersion = -1;
+  private dfSpectate = 0;
+  private dfDeathCamT = 0;
+  private dfDeathAt = new THREE.Vector3();
+  private dfKiller: TDMBot | null = null;
+  private dfCamPos = new THREE.Vector3();
+  private dfCamLook = new THREE.Vector3();
+  private dfCamInit = false;
+  private buyMenuOpen = false;
   // ---- momentum "ON FIRE" ----
   private killTimes: number[] = [];
   private onFire = false;
@@ -462,15 +496,17 @@ export class Engine {
    * could even paint. create() stages it across frames and pre-compiles shaders off the
    * blocking path instead.
    */
-  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1): Promise<Engine> {
+  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, defusal: DefusalLaunch | null = null): Promise<Engine> {
     const engine = new Engine(canvas);
-    await engine.init(difficulty, onEvent, mapId, loadout, tdmArmor);
+    await engine.init(difficulty, onEvent, mapId, loadout, tdmArmor, defusal);
     return engine;
   }
 
-  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1) {
+  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, defusalLaunch: DefusalLaunch | null = null) {
     this.onEvent = onEvent;
     this.isTDM = mapId === 'arena';
+    this.isDefusal = mapId === 'sirocco';
+    this.dfBuilds = defusalLaunch?.builds ?? {};
     this.tdmArmor = tdmArmor;
     if (this.isTDM) {
       this.hp = TDM_BASE_HP + tdmArmor * TDM_HP_PER_ARMOR;
@@ -492,22 +528,27 @@ export class Engine {
 
     // Per-map colour grading so the two arenas read instantly different:
     // Sandblast = hot amber desert noon; Town = cooler hazy hill morning.
-    const desert = mapId === 'alrasul';
-    this.scene.background = new THREE.Color(desert ? 0xC3CBD2 : 0xAAB9C4);
-    this.scene.fog = desert
-      ? new THREE.Fog(0xC6B89C, 130, 430)
-      : new THREE.Fog(0xA9B8BE, 95, 340); // closer, bluer haze on the hill town
+    const golden = mapId === 'sirocco';
+    const desert = mapId === 'alrasul' || golden;
+    this.scene.background = new THREE.Color(golden ? 0xE2C79C : desert ? 0xC3CBD2 : 0xAAB9C4);
+    this.scene.fog = golden
+      ? new THREE.Fog(0xD9B98A, 70, 260)          // Sirocco: warm late-afternoon dust haze
+      : desert
+        ? new THREE.Fog(0xC6B89C, 130, 430)
+        : new THREE.Fog(0xA9B8BE, 95, 340); // closer, bluer haze on the hill town
     // strong sky fill so shadowed faces stay readable
     const hemi = new THREE.HemisphereLight(desert ? 0xCFE0EE : 0xC2D4E2, desert ? 0x8C765A : 0x6E7568, desert ? 0.65 : 0.75);
     this.scene.add(hemi);
     // key sun — desert gets a hard warm noon sun, the town a lower cooler morning key
-    const sun = new THREE.DirectionalLight(desert ? 0xFFE4BE : 0xF2E9D8, desert ? 3.0 : 2.5);
-    if (desert) sun.position.set(-65, 52, 40);
+    const sun = new THREE.DirectionalLight(golden ? 0xFFC98E : desert ? 0xFFE4BE : 0xF2E9D8, golden ? 3.2 : desert ? 3.0 : 2.5);
+    if (golden) sun.position.set(-70, 34, 30);   // low golden sun: long shadows down the lanes
+    else if (desert) sun.position.set(-65, 52, 40);
     else sun.position.set(55, 38, -50);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048); // 4x fewer shadow texels than 4096 — big FPS win
-    sun.shadow.camera.left = -80; sun.shadow.camera.right = 80;
-    sun.shadow.camera.top = 80; sun.shadow.camera.bottom = -80;
+    const shadowSpan = golden ? 62 : 80;   // tighter frustum = crisper shadows on the compact map
+    sun.shadow.camera.left = -shadowSpan; sun.shadow.camera.right = shadowSpan;
+    sun.shadow.camera.top = shadowSpan; sun.shadow.camera.bottom = -shadowSpan;
     sun.shadow.camera.far = 240;
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.04;
@@ -714,7 +755,7 @@ void main(){
     this.mags = [30, 30, 8, 5, 40];
     this.reserves = [Infinity, Infinity, Infinity, Infinity, Infinity];
     this.difficultyId = difficulty;
-    if (loadout) this.armLoadout(loadout);
+    if (loadout && !this.isDefusal) this.armLoadout(loadout);
 
     // Muzzle Flash
     const fm = new THREE.MeshBasicMaterial({
@@ -838,6 +879,38 @@ void main(){
       this.buildSolidGrid();
       this.renderer.shadowMap.needsUpdate = true;
       this.rebuildHittables();
+    } else if (this.isDefusal) {
+      // ---- Sirocco Bomb Defusal: the DefusalMode owns rounds, bots, bomb and economy;
+      // the engine keeps the player's body, weapons and camera. ----
+      this.ai = new AIManager(ctx, []);
+      this.defusal = new DefusalMode({
+        scene: this.scene, occluders: this.world.occluders, coverNodes: this.world.coverNodes,
+        solids: this.world.solids, half: this.world.half,
+        groundHeight: (x, z) => (this.world.navigationHeight ?? this.world.groundHeight)(x, z),
+        effects: this.effects, moveCollide: ctx.moveCollide,
+        playerPos: () => this.eyePos(), playerFeet: () => this.pos.clone(), playerAlive: () => !this.dead,
+        playerHp: () => this.hp,
+        playerCanSee: p => this.playerCanSee(p),
+        damagePlayer: (a, f, k, hit) => this.damagePlayerDefusal(a, f, k, hit),
+        throwGrenade: (from, target, owner, kind) => this.spawnGrenade(from, target, true, kind, owner),
+        onBotFire: (p, team) => { audio.enemyFireSpatial(p.x, p.y, p.z); if (team === 'bravo') this.addPing(p); },
+        spawnPlayer: (at, yaw, inv) => this.dfSpawnPlayer(at, yaw, inv),
+        equipPlayer: (inv, focus) => this.dfEquip(inv, focus),
+        bombDetonated: at => this.dfBombBlast(at),
+        onFeed: (killer, weapon, victim, headshot, killerTeam, zone) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam, zone }),
+        onRadio: text => this.onEvent({ type: 'callout', text }),
+        onCallout: text => this.onEvent({ type: 'callout', text }),
+        announce: text => voice.objective(text),
+        onMoney: (amount, reason, total) => this.onEvent({ type: 'cash', amount, reason, total }),
+        earnWallet: (amount, reason) => this.earnCash(amount, reason, true),
+        onMatchEnd: () => this.endDefusalMatch(),
+      }, { side: defusalLaunch?.side ?? 'random', format: defusalLaunch?.format ?? 'short', difficulty });
+      // Pre-build every buyable gun (with the player's armory build) behind the boot
+      // screen so the first purchase of each never hitches and its shaders compile below.
+      for (const w of WEAPON_CATALOG) { this.dfWeapon(w.id); if (w.id === 'awm' || w.id === 'scar_h') await nextFrame(); }
+      this.buildSolidGrid();
+      this.renderer.shadowMap.needsUpdate = true;
+      this.rebuildHittables();
     } else {
     this.ai = new AIManager(ctx, []);
     this.missionRuntime = new MissionRuntime({
@@ -898,6 +971,29 @@ void main(){
     if (e.code === 'Space') e.preventDefault();
     if (this.dead) return;
 
+    // ---- Bomb Defusal bindings (B buy · X pick up · Z smoke · 5 drop bomb · 6/7/8 radio) ----
+    if (this.isDefusal && this.defusal) {
+      const df = this.defusal;
+      if (e.code === 'KeyB' && df.canBuyNow()) { this.keys.clear(); this.onEvent({ type: 'buymenu', open: true }); return; }
+      if (e.code === 'KeyB' && df.match.buyOpen && !this.def().masterkey) { this.onEvent({ type: 'callout', text: 'Buy zone only — head back to spawn to buy.' }); return; }
+      if (e.code === 'KeyX') df.playerInteractTap();
+      if (e.code === 'Digit5') {
+        if (df.playerDropBomb(this.camDir())) { audio.throwWhoosh(); this.onEvent({ type: 'callout', text: 'Bomb dropped for your team.' }); }
+        return;
+      }
+      if (e.code === 'Digit6') { df.radio('A'); return; }
+      if (e.code === 'Digit7') { df.radio('B'); return; }
+      if (e.code === 'Digit8') { df.radio('follow'); return; }
+      const frozen = df.match.phase === 'freeze' || df.movementLocked();
+      if (frozen && (e.code === 'KeyG' || e.code === 'KeyF' || e.code === 'KeyZ' || e.code === 'Space' || e.code === 'KeyC')) return;
+      if (e.code === 'KeyZ' && this.reloadT < 0 && df.consumePlayerGrenade('smoke')) {
+        const dir = this.camDir();
+        this.spawnGrenade(this.throwOrigin(dir), this.eyePos().addScaledVector(dir, 20), false, 'smoke');
+        audio.throwWhoosh();
+        return;
+      }
+    }
+
     if (e.code === 'KeyR') this.startReload();
     if (e.code === 'Digit1') this.switchWeapon(0);
     if (e.code === 'Digit2') this.switchWeapon(1);
@@ -918,6 +1014,7 @@ void main(){
     }
     if (e.code === 'KeyF' && this.flashes > 0 && this.reloadT < 0) {
       this.flashes--;
+      this.defusal?.consumePlayerGrenade('flash');
       const dir = this.camDir();
       this.spawnGrenade(this.throwOrigin(dir), this.eyePos().addScaledVector(dir, 20), false, 'flash');
       audio.throwWhoosh();
@@ -974,6 +1071,8 @@ void main(){
   };
 
   private onMouseDown = (e: MouseEvent) => {
+    // Dead in a defusal round: clicks cycle through the teammates you can spectate.
+    if (this.isDefusal && this.dead && !this.paused && document.pointerLockElement === this.canvas) { this.dfCycleSpectate(e.button === 2 ? -1 : 1); return; }
     if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
     if (e.button === 0) {
       this.triggerHeld = true;
@@ -1087,7 +1186,15 @@ void main(){
     c.width = 4; c.height = 256;
     const ctx = c.getContext('2d')!;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    if (mapId === 'kasbah') {
+    if (mapId === 'sirocco') {
+      // Sirocco late afternoon: dusty steel-blue zenith melting into a burnt-gold horizon.
+      grad.addColorStop(0, '#4F6F93');
+      grad.addColorStop(0.38, '#8EA3B1');
+      grad.addColorStop(0.56, '#D9BE93');
+      grad.addColorStop(0.7, '#EDC48A');
+      grad.addColorStop(0.84, '#F2AE66');
+      grad.addColorStop(1, '#E09A58');
+    } else if (mapId === 'kasbah') {
       // Cool hazy hill-town morning: blue-grey dome, pale horizon, no amber base.
       grad.addColorStop(0, '#3E668F');
       grad.addColorStop(0.4, '#87A6BC');
@@ -1127,6 +1234,7 @@ void main(){
     const sunTex = new THREE.CanvasTexture(sc);
     const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, fog: false, depthWrite: false, transparent: true }));
     if (mapId === 'kasbah') { sunSpr.position.set(200, 150, -180); sunSpr.scale.setScalar(84); } // lower, paler morning sun
+    else if (mapId === 'sirocco') { sunSpr.position.set(-300, 140, 125); sunSpr.scale.setScalar(150); } // big low sun behind A long
     else { sunSpr.position.set(-220, 200, 150); sunSpr.scale.setScalar(110); }
     this.scene.add(sunSpr);
     this.scene.add(this.clouds);
@@ -1519,6 +1627,8 @@ void main(){
   // ==================== AIMED BALLISTICS / RECOIL ====================
   private tryFire() {
     if (this.paused || this.dead || this.ended || !this.started || this.scopeAdjusting) return;
+    // Competitive rules: no shooting in freeze time, while arming/defusing, or with the buy menu up.
+    if (this.defusal && (this.defusal.match.phase === 'freeze' || this.defusal.movementLocked() || this.buyMenuOpen)) return;
     if (this.fireCD > 0 || this.reloadT >= 0 || this.switchT >= 0 || this.cooking) return;
     if (this.sprinting || this.sprintToFireDelay > 0) return; // Cannot fire during sprint
     if (this.sliding) return; // Cannot fire during slide
@@ -1604,6 +1714,32 @@ void main(){
     if (h) {
       if (!d.suppressed) this.effects.tracer(muzzleWorld, h.point);
       const tdmBot = (h.object.userData.tdmBot as TDMBot | undefined);
+      if (tdmBot && !tdmBot.dead && this.isDefusal && this.defusal) {
+        // CS damage model: per-weapon damage (scaled by armory mods), ×4 head,
+        // ×0.75 limbs, and the weapon's armor penetration against kevlar/helmet.
+        const raw = h.object.userData.part as string;
+        const part: HitPart = raw === 'head' ? 'head' : raw === 'limb' ? 'limb' : 'torso';
+        const wid = d.weaponId ?? 'm4a1';
+        const range = h.distance > (d.falloffStart ?? 35) ? (d.falloffMul ?? 0.85) : 1;
+        const dmg = hitDamage(wid, part, tdmBot.armor, modScaleFor(wid, d.damage), range);
+        if (!shotHit) { this.hits++; shotHit = true; }
+        this.effects.blood(h.point);
+        audio.fleshImpact(0);
+        if (part === 'head') audio.headshotDink();
+        if (tdmBot.takeDamage(dmg, part === 'head', 'player', false)) {
+          this.kills++;
+          this.score += part === 'head' ? 150 : 100;
+          if (part === 'head') { this.headshots++; voice.headshot(); }
+          audio.killConfirm();
+          this.defusal.handleKill('player', tdmBot, part === 'head', wid);
+          this.onEvent({ type: 'hit', kill: true });
+          this.rebuildHittables();
+        } else {
+          audio.hitMarker();
+          this.onEvent({ type: 'hit', kill: false });
+        }
+        continue;
+      }
       if (tdmBot && !tdmBot.dead && this.isTDM && this.tdm) {
         const part = h.object.userData.part as string;
         let dmg = d.damage * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
@@ -1731,6 +1867,7 @@ void main(){
     if (!d.suppressed) this.effects.playerFlash(origin.clone().addScaledVector(dir, 1.0));
     this.ai.notifyGunshot(this.pos, d.noiseRadius ?? 65);
     this.tdm?.notifyGunshot(this.pos, d.noiseRadius ?? 65);
+    this.defusal?.notifyGunshot(this.pos, d.noiseRadius ?? 65);
     this.staticTime = 0;
   }
 
@@ -1768,6 +1905,7 @@ void main(){
     applySkin(model.group, skinById(build.skin ?? 'factory'));
     return {
       name: entry.name.toUpperCase(),
+      weaponId: id,
       model,
       auto: stats.auto, rpm: stats.rpm, damage: stats.damage,
       headMul: stats.headMul, limbMul: stats.limbMul,
@@ -1794,10 +1932,11 @@ void main(){
   }
 
   /** Cash ledger: every paid event flows through here so HUD toasts and the debrief agree. */
-  private earnCash(amount: number, reason: string): void {
+  private earnCash(amount: number, reason: string, silent = false): void {
     this.cashEarned += amount;
     this.cashLog.push({ reason, amount, t: (performance.now() - this.runStartT) / 1000 });
-    this.onEvent({ type: 'cash', amount, reason, total: this.cashEarned });
+    // Defusal pays the wallet quietly: the "+$" pops belong to the in-match economy.
+    if (!silent) this.onEvent({ type: 'cash', amount, reason, total: this.cashEarned });
   }
 
   private cantedActive(): boolean { return !!this.def().canted && this.keys.has('KeyT') && (this.def().scopeMaxPower??1)>1; }
@@ -1882,6 +2021,21 @@ void main(){
       }
       this.effects.tracer(mw, h.point);
       const mkBot = (h.object.userData.tdmBot as TDMBot | undefined);
+      if (mkBot && !mkBot.dead && this.isDefusal && this.defusal) {
+        const raw = h.object.userData.part as string;
+        const part: HitPart = raw === 'head' ? 'head' : raw === 'limb' ? 'limb' : 'torso';
+        const dmg = hitDamage('spas12', part, mkBot.armor, 0.5, h.distance > 14 ? 0.4 : 1);
+        this.hits++;
+        anyHit = true;
+        this.effects.blood(h.point);
+        audio.fleshImpact(0);
+        if (mkBot.takeDamage(dmg, part === 'head', 'player', false)) {
+          this.kills++;
+          this.defusal.handleKill('player', mkBot, part === 'head', 'MASTERKEY');
+          anyKill = true;
+        }
+        continue;
+      }
       if (mkBot && !mkBot.dead && this.isTDM && this.tdm) {
         const part = h.object.userData.part as string;
         let dmg = 13 * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
@@ -1930,6 +2084,7 @@ void main(){
     if (anyKill) { this.onEvent({ type: 'hit', kill: true }); this.rebuildHittables(); }
     this.ai.notifyGunshot(this.pos, 70);
     this.tdm?.notifyGunshot(this.pos, 70);
+    this.defusal?.notifyGunshot(this.pos, 70);
   }
 
   private rebuildHittables() {
@@ -1939,6 +2094,7 @@ void main(){
       if (!e.dead) this.hittables.push(...e.model.hitMeshes);
     }
     if (this.isTDM && this.tdm) this.hittables.push(...this.tdm.getHittables());
+    if (this.defusal) this.hittables.push(...this.defusal.getHittables());
   }
 
   // ==================== GRENADE SYSTEM ====================
@@ -1952,10 +2108,10 @@ void main(){
     return v;
   }
 
-  private spawnGrenade(from: THREE.Vector3, target: THREE.Vector3, fromAI: boolean, kind: 'frag' | 'flash' = 'frag', owner?: TDMBot) {
+  private spawnGrenade(from: THREE.Vector3, target: THREE.Vector3, fromAI: boolean, kind: 'frag' | 'flash' | 'smoke' = 'frag', owner?: TDMBot) {
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 10, 8),
-      new THREE.MeshStandardMaterial({ color: kind === 'frag' ? 0x243224 : 0x2A2A38, roughness: 0.5, metalness: 0.6 })
+      kind === 'smoke' ? new THREE.CylinderGeometry(0.05, 0.05, 0.16, 10) : new THREE.SphereGeometry(0.08, 10, 8),
+      new THREE.MeshStandardMaterial({ color: kind === 'frag' ? 0x243224 : kind === 'smoke' ? 0x55605A : 0x2A2A38, roughness: 0.5, metalness: 0.6 })
     );
     mesh.castShadow = true;
     mesh.position.copy(from);
@@ -1964,7 +2120,7 @@ void main(){
       mesh,
       pos: from.clone(),
       vel: this.grenadeLaunchVel(from, target),
-      fuse: fromAI ? 3.2 : (kind === 'flash' ? 1.8 : Math.max(0.3, 4 - this.cookT)),
+      fuse: kind === 'smoke' ? 1.8 : fromAI ? (kind === 'flash' ? 1.5 : 3.2) : (kind === 'flash' ? 1.8 : Math.max(0.3, 4 - this.cookT)),
       kind,
       fromAI,
       owner,
@@ -1994,6 +2150,7 @@ void main(){
     if (!this.cooking) return;
     this.cooking = false;
     this.frags--;
+    this.defusal?.consumePlayerGrenade('frag');
     this.arcPreview.visible = false;
     // Overhand throw: velocity follows the camera's pitch, so looking up lofts it
     // into an arc and looking down throws it flat/low. This reads as a real throw.
@@ -2017,6 +2174,12 @@ void main(){
 
   private explode(g: Grenade) {
     const distP = g.pos.distanceTo(this.eyePos());
+    if (g.kind === 'smoke') {
+      this.defusal?.spawnSmoke(g.pos);
+      this.scene.remove(g.mesh);
+      g.mesh.geometry.dispose();
+      return;
+    }
     if (g.kind === 'frag') {
       this.effects.explosion(g.pos);
       // blast wave blows out nearby windows
@@ -2031,12 +2194,37 @@ void main(){
       // FULL POSITION-ACCURATE HRTF SPATIAL AUDIO
       audio.explosionSpatial(g.pos.x, g.pos.y, g.pos.z, distP);
       this.shake = Math.max(this.shake, Math.min(1.1, 9 / Math.max(2.5, distP)));
-      if (distP < 6.5) {
+      if (this.isDefusal && distP < 7 && (!g.owner || g.owner.team === 'bravo')) {
+        // HE: 95 at the core, nothing past 7 m; kevlar soaks 40% (applied in damagePlayerDefusal).
+        const dmg = distP < 2.5 ? 95 : THREE.MathUtils.lerp(95, 0, (distP - 2.5) / 4.5);
+        this.damagePlayerDefusal(dmg, g.pos, g.owner ?? null, { head: false, part: 'torso', armorRatio: 0.6, weapon: 'FRAG' });
+      } else if (distP < 6.5 && !this.isDefusal) {
         const dmg = distP < 3.2 ? 95 : THREE.MathUtils.lerp(95, 20, (distP - 3.2) / 3.3);
         if (this.isTDM) {
           // grenades from your own team never hurt you in the arena
           if (!g.owner || g.owner.team === 'bravo') this.damagePlayerTDM(dmg, g.pos, g.owner ?? null);
         } else this.damagePlayer(dmg, g.pos);
+      }
+      if (this.isDefusal && this.defusal) {
+        for (const bot of this.defusal.bots) {
+          if (bot.dead) continue;
+          if (g.owner && g.owner.team === bot.team) continue;          // no team damage
+          if (!g.owner && !g.fromAI && bot.team === 'alpha') continue; // your frag spares allies
+          const d = bot.pos.distanceTo(g.pos);
+          if (d >= 7) continue;
+          let dmg = d < 2.5 ? 95 : THREE.MathUtils.lerp(95, 0, (d - 2.5) / 4.5);
+          if (bot.armor >= 1) dmg *= 0.6;
+          if (bot.takeDamage(dmg, false, g.owner ?? 'player', false)) {
+            if (g.owner) this.defusal.handleKill(g.owner, bot, false, 'FRAG');
+            else {
+              this.kills++;
+              audio.killConfirm();
+              this.defusal.handleKill('player', bot, false, 'FRAG');
+              this.onEvent({ type: 'hit', kill: true });
+            }
+            this.rebuildHittables();
+          }
+        }
       }
       // TDM: splash resolves against every bot on both teams, with armor applied
       if (this.isTDM && this.tdm) {
@@ -2088,8 +2276,19 @@ void main(){
         const toG = g.pos.clone().sub(this.eyePos()).normalize();
         const facing = this.camDir().dot(toG);
         if (facing > -0.1) {
-          const power = Math.min(1, (1 - distP / 16) * (0.4 + facing * 0.6) + 0.25);
-          this.onEvent({ type: 'flash', power });
+          let power = Math.min(1, (1 - distP / 16) * (0.4 + facing * 0.6) + 0.25);
+          // defusal: a flash has to actually reach your eyes, and teammates' flashes are thrown away from you
+          const blocked = this.isDefusal && this.segmentBlocked(this.eyePos(), g.pos);
+          if (this.isDefusal && g.owner?.team === 'alpha') power *= 0.5;
+          if (!blocked) this.onEvent({ type: 'flash', power });
+        }
+      }
+      if (this.isDefusal && this.defusal) {
+        for (const bot of this.defusal.bots) {
+          if (bot.dead) continue;
+          const eye = bot.eyePos();
+          const dist = eye.distanceTo(g.pos);
+          if (dist < 13 && !this.segmentBlocked(eye, g.pos)) bot.applyStun(dist < 6 ? 3.2 : 2.2);
         }
       }
       for (const e of this.ai.enemies) {
@@ -2336,9 +2535,221 @@ void main(){
     else voice.defeat();
   }
 
+  // ==================== BOMB DEFUSAL — player lifecycle ====================
+  /** Occlusion-only segment test against world geometry (flashes, spotting). */
+  private segmentBlocked(a: THREE.Vector3, b: THREE.Vector3): boolean {
+    const dir = b.clone().sub(a);
+    const dist = dir.length();
+    if (dist < 0.05) return false;
+    dir.normalize();
+    this.raycaster.set(a, dir);
+    this.raycaster.far = dist - 0.15;
+    const hit = this.raycaster.intersectObjects(this.world.occluders, false).length > 0;
+    this.raycaster.far = 300;
+    return hit;
+  }
+
+  /** Can the player actually see this point (view cone + walls + smoke)? Drives the radar. */
+  private playerCanSee(p: THREE.Vector3): boolean {
+    if (this.dead) return false;
+    const eye = this.eyePos();
+    const dir = p.clone().sub(eye);
+    const dist = dir.length();
+    if (dist > 90) return false;
+    dir.normalize();
+    if (this.camDir().dot(dir) < 0.42) return false;
+    if (this.segmentBlocked(eye, p)) return false;
+    return !this.defusal?.sightBlocked(eye, p);
+  }
+
+  /** Bot/grenade/C4 → player. Armor is applied here with the weapon's own penetration. */
+  private damagePlayerDefusal(amount: number, from: THREE.Vector3, killer: TDMBot | null, hit?: BotHit) {
+    if (this.dead || this.ended || !this.defusal) return;
+    const inv = this.defusal.player.inv;
+    let dmg = amount;
+    if (hit && armorCovers(hit.part, inv.armor)) dmg *= hit.armorRatio;
+    const dealt = Math.min(dmg, this.hp);
+    this.hp -= dmg;
+    this.lastDamageT = 0;
+    if (killer) this.defusal.recordPlayerDamage(killer, dealt);
+    this.shake = Math.max(this.shake, Math.min(0.7, dmg / 35));
+    audio.playerHurt();
+    this.onEvent({ type: 'damage', dir: this.dirToScreenDeg(from), amount: dmg });
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.dead = true;
+      this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
+      this.sprinting = false; this.sliding = false; this.crouched = false;
+      this.reloadT = -1; this.reloadStages = []; this.currentReloadStage = 'idle';
+      this.dfDeathCamT = 2.2;
+      this.dfDeathAt.copy(this.eyePos());
+      this.dfKiller = killer;
+      this.dfCamInit = false;
+      this.dfSpectate = 0;
+      this.defusal.playerKilled(killer, !!hit?.head, hit?.weapon ?? 'RIFLE');
+    }
+  }
+
+  /** Round start: teleport, heal, full mags, re-arm from the round inventory. */
+  private dfSpawnPlayer(at: THREE.Vector3, yaw: number, inv: Inventory) {
+    this.dead = false;
+    this.hp = 100;
+    this.pos.copy(at); this.lastPos.copy(at);
+    this.vel.set(0, 0, 0); this.vx = 0; this.vz = 0;
+    this.yaw = yaw; this.pitch = 0; this.recoilP = 0; this.recoilY = 0;
+    this.crouched = false; this.sliding = false; this.sprinting = false; this.cooking = false;
+    this.lean = 0; this.leanTarget = 0; this.ads = 0; this.rmb = false; this.triggerHeld = false;
+    this.lastDamageT = 99; this.shake = 0;
+    this.dfDeathCamT = 0; this.dfKiller = null; this.dfCamInit = false;
+    for (const g of this.grenades) { this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
+    this.grenades = [];
+    this.dfMagMemory.clear();
+    this.dfLoadoutKey = '';
+    this.dfEquip(inv, 'primary');
+    for (let i = 0; i < this.weapons.length; i++) this.mags[i] = this.weapons[i].magSize;
+  }
+
+  /** Field whatever the inventory holds; guns you keep hold their magazine count. */
+  private dfEquip(inv: Inventory, focus?: 'primary' | 'secondary') {
+    this.frags = inv.frags; this.flashes = inv.flashes;
+    const key = `${inv.primary ?? '-'}|${inv.secondary}`;
+    if (key !== this.dfLoadoutKey) {
+      this.weapons.forEach((w, i) => this.dfMagMemory.set(w, this.mags[i]));
+      const prim = inv.primary ? this.dfWeapon(inv.primary) : null;
+      const sec = this.dfWeapon(inv.secondary);
+      for (const w of this.weapons) w.model.group.visible = false;
+      this.weapons = prim ? [prim, sec] : [sec];
+      this.mags = this.weapons.map(w => this.dfMagMemory.get(w) ?? w.magSize);
+      this.reserves = this.weapons.map(() => Infinity);
+      this.reloadT = -1; this.reloadStages = []; this.currentReloadStage = 'idle'; this.switchT = -1;
+      this.shotIdx = 0; this.mkAmmo = 3; this.mkReloadT = -1;
+      this.dfLoadoutKey = key;
+      if (!focus) focus = prim ? 'primary' : 'secondary';
+    }
+    if (focus) {
+      const idx = focus === 'primary' ? 0 : this.weapons.length - 1;
+      this.cur = idx;
+      this.lastCur = this.weapons.length > 1 ? 1 - idx : 0;
+    }
+    this.cur = Math.min(this.cur, this.weapons.length - 1);
+    this.weapons.forEach((w, i) => { w.model.group.visible = i === this.cur; });
+  }
+
+  /** One cached viewmodel per gun — your armory build when you own it, factory otherwise. */
+  private dfWeapon(id: WeaponId): WeaponDef {
+    const cached = this.dfWeaponCache.get(id);
+    if (cached) return cached;
+    const def = this.buildLoadoutWeapon(this.dfBuilds[id] ?? { weapon: id, attachments: {}, skin: 'factory' });
+    def.model.group.visible = false;
+    this.vmScene.add(def.model.group);
+    this.dfWeaponCache.set(id, def);
+    return def;
+  }
+
+  /** The C4 goes off: a ring of blasts, a hard shake, a white-out when close. */
+  private dfBombBlast(at: THREE.Vector3) {
+    const dist = this.eyePos().distanceTo(at);
+    this.effects.explosion(at);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      this.effects.explosion(at.clone().add(new THREE.Vector3(Math.cos(a) * 2.6, 0.5 + (i % 2) * 1.4, Math.sin(a) * 2.6)));
+    }
+    audio.c4Explosion(at.x, at.y, at.z, dist);
+    this.shake = Math.max(this.shake, Math.min(1.4, 30 / Math.max(3, dist)));
+    if (dist < 45) this.onEvent({ type: 'flash', power: Math.min(0.85, (1 - dist / 45) * 1.1) });
+    if (!this.dead && dist < 30) {
+      const armor = this.defusal?.player.inv.armor ?? 0;
+      const dmg = dist < 12 ? 500 : THREE.MathUtils.lerp(120, 0, (dist - 12) / 18) * (armor ? 0.7 : 1);
+      this.damagePlayerDefusal(dmg, at, null, { head: false, part: 'limb', armorRatio: 1, weapon: 'C4' });
+    }
+  }
+
+  private dfCycleSpectate(dir: number) {
+    const list = this.defusal?.spectateList() ?? [];
+    if (!list.length) return;
+    this.dfDeathCamT = 0;
+    this.dfSpectate = (this.dfSpectate + dir + list.length * 4) % list.length;
+    this.dfCamInit = false;
+  }
+
+  private dfSpectateTarget(): TDMBot | null {
+    if (!this.isDefusal || !this.dead || this.dfDeathCamT > 0) return null;
+    const list = this.defusal?.spectateList() ?? [];
+    return list.length ? list[this.dfSpectate % list.length] : null;
+  }
+
+  /** Dead in a round: a short death cam on your killer, then an over-the-shoulder chase cam. */
+  private composeSpectatorCamera(dt: number) {
+    const target = this.dfSpectateTarget();
+    let wantPos: THREE.Vector3, wantLook: THREE.Vector3;
+    if (!target) {
+      const rise = Math.min(1, 1 - Math.max(0, this.dfDeathCamT) / 2.2);
+      wantPos = this.dfDeathAt.clone().add(new THREE.Vector3(0, 0.3 + rise * 1.8, 0));
+      wantLook = this.dfKiller && !this.dfKiller.dead
+        ? this.dfKiller.eyePos()
+        : this.dfDeathAt.clone().add(new THREE.Vector3(-Math.sin(this.yaw) * 4, -1.2, -Math.cos(this.yaw) * 4));
+    } else {
+      const eye = target.eyePos();
+      const yaw = target.model.group.rotation.y;
+      const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+      const back = new THREE.Vector3(eye.x - fx * 2.5 - fz * 0.55, eye.y + 0.42, eye.z - fz * 2.5 + fx * 0.55);
+      const dir = back.clone().sub(eye);
+      const len = dir.length();
+      dir.normalize();
+      this.raycaster.set(eye, dir);
+      this.raycaster.far = len;
+      const hit = this.raycaster.intersectObjects(this.world.occluders, false)[0];
+      this.raycaster.far = 300;
+      wantPos = hit ? eye.clone().addScaledVector(dir, Math.max(0.25, hit.distance - 0.25)) : back;
+      wantLook = eye.clone().add(new THREE.Vector3(fx * 7, -0.25, fz * 7));
+    }
+    if (!this.dfCamInit) { this.dfCamPos.copy(wantPos); this.dfCamLook.copy(wantLook); this.dfCamInit = true; }
+    const k = 1 - Math.exp(-dt * 8);
+    this.dfCamPos.lerp(wantPos, k);
+    this.dfCamLook.lerp(wantLook, k);
+    this.camera.position.copy(this.dfCamPos);
+    this.camera.lookAt(this.dfCamLook);
+    this.camera.fov += (this.fovSetting - this.camera.fov) * k;
+    this.camera.updateProjectionMatrix();
+  }
+
+  private endDefusalMatch() {
+    if (this.ended || !this.defusal) return;
+    this.ended = true;
+    const res = this.defusal.result();
+    const win = res.winner === 'alpha';
+    if (win) this.score += 1000;
+    const mission: MissionReport = {
+      id: 'defusal-sirocco', name: 'Sirocco Bomb Defusal', map: 'sirocco',
+      status: win ? 'complete' : 'failed', duration: (performance.now() - this.runStartT) / 1000, phases: [],
+    };
+    const pressure: PressureStats = { totalSpawned: 10, peakLive: 10, retired: 0, pending: 0, candidateChecks: 0, sightChecks: 0, deferred: 0 };
+    this.pendingResult = {
+      type: 'end', win, kills: this.defusal.player.kills, score: this.score, shots: this.shots, hits: this.hits,
+      headshots: this.headshots, timeSec: mission.duration, cash: this.cashEarned, cashLog: [...this.cashLog],
+      difficultyMul: difficultyMultiplier(this.difficultyId), mission, pressure, defusal: res,
+    };
+    this.finishDelay = 4.2;
+    this.triggerHeld = false; this.rmb = false; this.keys.clear();
+    voice.objective(win ? 'Match won. Outstanding work, operator.' : res.winner === 'draw' ? 'Match drawn.' : 'Match lost.');
+  }
+
+  // ---- Buy menu API (the React overlay drives these) ----
+  setBuyMenuOpen(open: boolean) {
+    this.buyMenuOpen = open;
+    this.keys.clear(); this.triggerHeld = false; this.rmb = false;
+  }
+  buyItem(id: string): { ok: boolean; reason?: string } {
+    if (!this.defusal) return { ok: false, reason: 'No buy menu in this mode' };
+    const r = this.defusal.buy(id);
+    if (r.ok) audio.buyClick(); else audio.buyDenied();
+    return r;
+  }
+
   private endMatch(win: boolean) {
     if (this.ended) return;
     if (this.isTDM) { this.endTDMMatch(); return; }
+    if (this.isDefusal) { this.endDefusalMatch(); return; }
     if (win && this.missionRuntime.mission.status !== 'complete') return;
     this.ended = true;
     if (!win) this.missionRuntime.mission.fail();
@@ -2396,9 +2807,10 @@ void main(){
     this.vignettePass.uniforms.uTime.value = performance.now() / 1000;
 
     // UPDATE SPATIAL AUDIO LISTENER POSITION & FORWARD/UP ORIENTATION
-    const eye = this.eyePos();
+    const eye = this.isDefusal && this.dead ? this.camera.position.clone() : this.eyePos();
     const camDir = this.camDir();
     audio.updateListener(eye.x, eye.y, eye.z, camDir.x, camDir.y, camDir.z, 0, 1, 0);
+    if (this.dfDeathCamT > 0) this.dfDeathCamT -= dt;
 
     // ==================== BUTTERY LEAN Q/E SYSTEM ====================
     // Q = Lean Left (-1), E = Lean Right (+1)
@@ -2435,10 +2847,14 @@ void main(){
     // ==================== MOVEMENT SPEED & SPRINT DELAYS ====================
     // WALK: 4.2 m/s. SPRINT: 6.8 m/s. CROUCH: 2.8 m/s. ADS: 2.8 m/s. LEAN: 3.4 m/s.
     let ix = 0, iz = 0;
-    if (k.has('KeyW')) iz -= 1;
-    if (k.has('KeyS')) iz += 1;
-    if (k.has('KeyA')) ix -= 1;
-    if (k.has('KeyD')) ix += 1;
+    // Freeze time and arming/defusing lock your feet (CS rules).
+    const locked = !!this.defusal?.movementLocked() || this.buyMenuOpen;
+    if (!locked) {
+      if (k.has('KeyW')) iz -= 1;
+      if (k.has('KeyS')) iz += 1;
+      if (k.has('KeyA')) ix -= 1;
+      if (k.has('KeyD')) ix += 1;
+    }
     const moving = ix !== 0 || iz !== 0;
 
     const wasSprinting = this.sprinting;
@@ -2519,6 +2935,7 @@ void main(){
         if (!this.crouched) {
           this.ai.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
           this.tdm?.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
+          if (this.sprinting) this.defusal?.notifyGunshot(this.pos, 12);
         }
       }
     }
@@ -2569,7 +2986,7 @@ void main(){
     // Health regen (to 50 HP after 5s; TDM regenerates to 40% of the armored pool)
     this.lastDamageT += dt;
     const regenCap = this.isTDM ? Math.round((TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR) * 0.4) : 50;
-    if (!this.dead && this.lastDamageT > 5 && this.hp < regenCap) {
+    if (!this.isDefusal && !this.dead && this.lastDamageT > 5 && this.hp < regenCap) {
       this.hp = Math.min(regenCap, this.hp + dt * 10);
     }
 
@@ -2687,6 +3104,12 @@ void main(){
         this.tdmRosterVersion = this.tdm.rosterVersion;
         this.rebuildHittables();
       }
+    } else if (this.isDefusal && this.defusal) {
+      this.defusal.update(dt, { interact: this.keys.has('KeyX') && !this.dead && this.reloadT < 0 && !this.cooking });
+      if (this.defusal.rosterVersion !== this.dfRosterVersion) {
+        this.dfRosterVersion = this.defusal.rosterVersion;
+        this.rebuildHittables();
+      }
     } else {
       this.missionRuntime.update(dt, this.keys.has('KeyX') && this.reloadT < 0 && !this.cooking && !this.sprinting);
     }
@@ -2698,7 +3121,7 @@ void main(){
 
   // ==================== CAMERA POSITION & LEAN ====================
   private composeCamera(dt: number) {
-    void dt;
+    if (this.isDefusal && this.dead) { this.composeSpectatorCamera(dt); return; }
     const eye = this.eyePos();
     eye.y -= this.landDip;
 
@@ -3009,6 +3432,7 @@ void main(){
     }
     // Overlay the viewmodel as a clean second pass (depth-relative, clip-safe)
     this.renderer.autoClear = false;
+    if (this.isDefusal && this.dead) return; // spectating: no hands on screen
     this.renderer.clearDepth();
     this.renderer.render(this.vmScene, this.vmCamera);
   }
@@ -3022,6 +3446,12 @@ void main(){
     if (this.isTDM) {
       this.onEvent({ type: 'callout', text: 'Warehouse TDM — most kills at 2:30 wins.' });
       voice.objective('Weapons free. Take the yard.');
+      return;
+    }
+    if (this.isDefusal && this.defusal) {
+      const side = this.defusal.playerSide === 'attack' ? 'Attackers' : 'Defenders';
+      this.onEvent({ type: 'callout', text: `Sirocco — you start on ${side}. B to buy · 6/7 call A/B · 8 follow me.` });
+      voice.objective(this.defusal.playerSide === 'attack' ? 'Plant the bomb on A or B.' : 'Defend both bomb sites.');
       return;
     }
     this.missionRuntime.start();
@@ -3179,8 +3609,12 @@ void main(){
       weapon: this.def().name,
       masterkey: this.def().masterkey ? { shells: this.mkAmmo, reloading: this.mkReloadT >= 0 } : undefined,
       cash: this.cashEarned,
-      secondaryWeapon: (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0] : this.weapons[this.cur === 2 ? 0 : 2])?.name ?? '',
-      heldSlot: (this.weapons.length === 2 ? this.cur === 0 : this.cur !== 2) ? 'primary' : 'secondary',
+      secondaryWeapon: this.isDefusal
+        ? (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0].name : '')
+        : (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0] : this.weapons[this.cur === 2 ? 0 : 2])?.name ?? '',
+      heldSlot: this.isDefusal
+        ? (this.weapons.length === 2 && this.cur === 0 ? 'primary' : 'secondary')
+        : (this.weapons.length === 2 ? this.cur === 0 : this.cur !== 2) ? 'primary' : 'secondary',
       bipodDeployed: this.bipodDeployed(),
       reticle: this.cantedActive() ? 'none' : this.def().reticle ?? (this.cur===3 ? 'sniper' : 'none'),
       zoomFov: this.adsFovEff(),
@@ -3197,8 +3631,16 @@ void main(){
       flashes: this.flashes,
       bearing: ((-this.yaw * 180 / Math.PI) % 360 + 360) % 360,
       kills: this.isTDM ? this.tdmPlayerKills : this.kills,
+      maxHp: this.isDefusal ? 100 : undefined,
+      defusal: this.defusal?.hud(),
+      spectating: (() => {
+        const t = this.dfSpectateTarget();
+        if (!t || !this.defusal) return this.isDefusal && this.dead ? null : undefined;
+        return { name: t.name, hp: Math.max(0, Math.round(t.hp)), weapon: t.weapon?.name ?? '', team: t.team };
+      })(),
       score: this.score,
-      enemiesLeft: this.isTDM && this.tdm ? this.tdm.aliveCount('bravo') : this.ai.aliveCount(),
+      enemiesLeft: this.isTDM && this.tdm ? this.tdm.aliveCount('bravo')
+        : this.defusal ? this.defusal.players.filter(c => c.team === 'bravo' && c.alive).length : this.ai.aliveCount(),
       cooking: this.cooking,
       sprinting: this.sprinting,
       ads: this.ads,
@@ -3209,7 +3651,10 @@ void main(){
       // Accurate map data (consumed by the HUD tactical radar)
       mapImage: this.mapImage,
       playerMap: { nx: (this.pos.x + H) / (2 * H), nz: (this.pos.z + H) / (2 * H) },
-      enemiesMap: this.isTDM && this.tdm
+      enemiesMap: this.defusal
+        // competitive radar: only enemies you or a teammate can actually see
+        ? this.defusal.spottedEnemies().map(b => ({ nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H), yaw: -b.yaw * 180 / Math.PI, hot: true }))
+        : this.isTDM && this.tdm
         ? this.tdm.bots
           .filter(b => !b.dead && b.team === 'bravo')
           .map(b => ({
@@ -3227,7 +3672,7 @@ void main(){
             hot: e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE',
           })),
       missionMap: (() => {
-        if (this.isTDM) return undefined;
+        if (this.isTDM || this.isDefusal) return undefined;
         const phase = this.missionRuntime.mission.current;
         if (!phase) return undefined;
         return {
@@ -3241,7 +3686,7 @@ void main(){
       magSize: this.def().magSize,
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
-      mission: this.isTDM ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
+      mission: this.isTDM || this.isDefusal ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
       tdm: this.isTDM && this.tdm ? {
         alphaScore: this.tdm.alphaScore,
         bravoScore: this.tdm.bravoScore,
@@ -3291,6 +3736,7 @@ void main(){
     for(const texture of textures) texture.dispose();
     this.missionRuntime?.dispose();
     this.tdm?.dispose();
+    this.defusal?.dispose();
     this.ai.dispose();
     this.composer.dispose();
     this.bloom.dispose();

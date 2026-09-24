@@ -712,6 +712,96 @@ export class SpatialAudioEngine {
     }
   }
 
+  // ==================== BOMB DEFUSAL ====================
+  /** One oscillator note straight to the master bus (UI stingers, keypad). */
+  private tone(freq: number, dur: number, gain: number, type: OscillatorType = 'sine', when = 0, glideTo?: number) {
+    const ctx = this.ensure();
+    const t = ctx.currentTime + when;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + dur + 0.02);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+  }
+
+  /** Planted C4 chirp from the bomb itself. Carries much further than gunfire. */
+  c4Beep(wx: number, wy: number, wz: number, urgency: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    panner.refDistance = 4; panner.rolloffFactor = 0.8;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.setValueAtTime(2500 + urgency * 900, t);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 2900; bp.Q.value = 2.5;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.3, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.085);
+    o.connect(bp); bp.connect(g); g.connect(panner);
+    o.start(t); o.stop(t + 0.1);
+    o.onended = () => { o.disconnect(); bp.disconnect(); g.disconnect(); };
+  }
+  /** Keypad digit while arming. */
+  c4Key(i: number) { this.tone(880 + (i % 4) * 190, 0.07, 0.12, 'square'); }
+  /** Armed: the unmistakable double chirp. */
+  c4Armed() { this.tone(1760, 0.09, 0.16, 'square'); this.tone(2350, 0.14, 0.16, 'square', 0.1); }
+  /** Rising whine in the last second. */
+  c4Whine(wx: number, wy: number, wz: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    panner.refDistance = 5; panner.rolloffFactor = 0.7;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(600, t);
+    o.frequency.exponentialRampToValueAtTime(3200, t + 1.0);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.05, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.95);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.05);
+    o.connect(g); g.connect(panner);
+    o.start(t); o.stop(t + 1.1);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+  }
+  /** The C4 blast: stacked sub drop, debris wash and a long rolling tail. */
+  c4Explosion(wx: number, wy: number, wz: number, dist: number) {
+    this.explosionSpatial(wx, wy, wz, dist);
+    const a = Math.max(0.25, 1 - dist / 90);
+    this.subThump(70, 16, 1.5 * a, 1.8, 'sine');
+    this.burstDirect({ dur: 2.6, gain: 0.8 * a, freq: 260, q: 0.5, type: 'lowpass', attack: 0.01, toEcho: 0.6 });
+    this.burstDirect({ dur: 0.9, gain: 0.5 * a, freq: 1400, q: 0.7, when: 0.05 });
+  }
+  defuseTick() { this.burstDirect({ dur: 0.03, gain: 0.18, freq: 3400, q: 4 }); }
+  defused() { this.tone(1320, 0.12, 0.14, 'triangle'); this.tone(990, 0.12, 0.14, 'triangle', 0.12); this.tone(660, 0.3, 0.16, 'triangle', 0.24); }
+  smokePop(wx: number, wy: number, wz: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(3000, t); lp.frequency.exponentialRampToValueAtTime(500, t + 2.4);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.5, t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
+    src.connect(lp); lp.connect(g); g.connect(panner);
+    src.start(t, Math.random() * 0.3); src.stop(t + 2.7);
+    src.onended = () => { src.disconnect(); lp.disconnect(); g.disconnect(); };
+  }
+  buyClick() { this.burstDirect({ dur: 0.03, gain: 0.3, freq: 3600, q: 3 }); this.tone(1500, 0.06, 0.08, 'triangle', 0.02); }
+  buyDenied() { this.tone(180, 0.16, 0.14, 'square'); }
+  pickup() { this.burstDirect({ dur: 0.04, gain: 0.3, freq: 2200, q: 2 }); this.burstDirect({ dur: 0.05, gain: 0.25, freq: 900, q: 1.5, when: 0.05 }); }
+  roundStartStinger() { this.tone(392, 0.18, 0.12, 'sawtooth'); this.tone(523, 0.32, 0.12, 'sawtooth', 0.16); }
+  roundWinStinger() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.28, 0.11, 'triangle', i * 0.09)); }
+  roundLoseStinger() { [440, 349, 294].forEach((f, i) => this.tone(f, 0.34, 0.11, 'sawtooth', i * 0.14)); }
+
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }
   throwWhoosh() { this.ensure(); this.burstDirect({ dur: 0.16, gain: 0.2, freq: 950, q: 0.5, attack: 0.04 }); }
 

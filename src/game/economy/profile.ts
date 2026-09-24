@@ -280,6 +280,20 @@ export function setLoadoutWeapon(p: PlayerProfile, slot: SlotId, weapon: string)
   return { ok: true, value: next };
 }
 
+export function developmentCashGrant(hash: string, enabled: boolean): number {
+  if (!enabled) return 0;
+  const match = hash.match(/#cash=(\d+)/);
+  if (!match) return 0;
+  const amount = Number(match[1]);
+  return Number.isFinite(amount) ? Math.min(999_999, Math.max(0, Math.floor(amount))) : 999_999;
+}
+
+export function resetCurrentCash(p: PlayerProfile): PlayerProfile {
+  const next = clone(p);
+  next.cash = 0;
+  return next;
+}
+
 export function grantCash(p: PlayerProfile, amount: number, _reason: string): PlayerProfile {
   const next = clone(p);
   const v = Math.round(amount);

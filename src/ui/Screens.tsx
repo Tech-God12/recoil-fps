@@ -23,6 +23,7 @@ import { TxBack, TxCoords, TxLock } from './tactical';
 import MapFlyover from './MapFlyover';
 import { gunThumbnail } from './armory/GunViewer';
 import { weaponTexturesReady } from '../game/weapons/finish';
+import type { TDMOutcome } from '../game/tdm';
 
 export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapArena };
 
@@ -39,7 +40,7 @@ export interface Results {
   cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
   comp?: CompDebrief;
   tdm?: {
-    alphaScore: number; bravoScore: number; playerKills: number;
+    alphaScore: number; bravoScore: number; playerKills: number; outcome: TDMOutcome;
     roster: { name: string; team: 'alpha' | 'bravo'; dead: boolean; armorIcon: string; you?: boolean; kills: number; deaths: number; headshots: number }[];
   };
 }
@@ -648,25 +649,23 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
    and a clean progress rail. Replaces the old cramped briefing plate
    (the objective list already lives on the missions screen).
    ================================================================ */
-const BOOT_LINES = [
-  'Uplink handshake',
-  'Grid sync — satellites 3/3',
-  'Zeroing optics',
-  'Loading ballistics tables',
-  'Arming weapons',
-  'Insertion corridor clear',
+const BOOT_TIPS = [
+  'Use hard cover to break hostile line of sight.',
+  'Hold G to cook a frag; release to throw it.',
+  'Press X inside the objective ring to interact.',
+  'Lean with Q and E, then return to cover before firing.',
+  'Reload before crossing an exposed lane.',
+  'Manage the magazine; reserve ammunition is not consumed.',
 ];
 
 export function BootScreen({ map }: { map?: MapId }) {
-  const [line, setLine] = useState(0);
-  const [pct, setPct] = useState(0);
+  const [tipIndex, setTipIndex] = useState(0);
   const isTdm = map === 'arena';
   const mission = isTdm ? null : getMission(map ?? 'alrasul');
   const mapName = MAPS.find(m => m.id === (map ?? 'alrasul'))?.name ?? '';
   useEffect(() => {
-    const l = window.setInterval(() => setLine(i => Math.min(BOOT_LINES.length - 1, i + 1)), 700);
-    const p = window.setInterval(() => setPct(v => Math.min(94, v + 2 + Math.floor(Math.random() * 5))), 125);
-    return () => { window.clearInterval(l); window.clearInterval(p); };
+    const timer = window.setInterval(() => setTipIndex(index => (index + 1) % BOOT_TIPS.length), 3600);
+    return () => window.clearInterval(timer);
   }, []);
   // Voiceover: brief the operator while the world builds. The Deploy click is the
   // user gesture, so speech is already unlocked when this mounts.
@@ -683,7 +682,7 @@ export function BootScreen({ map }: { map?: MapId }) {
     // finish over the first seconds in-game (mission radio interrupts it anyway).
   }, [mission]);
   return (
-    <div className="boot-root boot-cine" role="status" aria-live="polite">
+    <div className="boot-root boot-cine" aria-busy="true">
       <div className="boot-cine-art" style={{ backgroundImage: `url(${MAP_ART[map ?? 'alrasul']})` }} aria-hidden="true" />
       <div className="boot-cine-shade" aria-hidden="true" />
       <div className="boot-cine-grid" aria-hidden="true" />
@@ -694,16 +693,16 @@ export function BootScreen({ map }: { map?: MapId }) {
       </div>
 
       <div className="boot-cine-bottom">
-        <div className="boot-feed mono" aria-hidden="true">
-          {BOOT_LINES.slice(0, line + 1).map((l, i) => (
-            <span key={l} className={i === line ? 'cur' : ''}>▸ {l}</span>
-          ))}
+        <div className="boot-feed mono" role="status" aria-live="polite" aria-atomic="true">
+          <span key={tipIndex} className="cur">Tip — {BOOT_TIPS[tipIndex]}</span>
         </div>
         <div className="boot-cine-railwrap">
-          <div className="boot-bar" aria-hidden="true"><span className="boot-bar__fill" style={{ width: `${pct}%` }} /></div>
+          <div className="boot-bar" role="progressbar" aria-label="Preparing match" aria-valuetext="Loading">
+            <span className="boot-bar__fill boot-bar__indeterminate" aria-hidden="true" />
+          </div>
           <div className="boot-cine-railmeta mono">
             <span>{mission ? `${mission.phases[0].title} · ${mission.phases[0].location}` : '5v5 · 2:30 · most kills wins'}</span>
-            <span className="tabular">{String(pct).padStart(3, '0')}%</span>
+            <span>Loading world…</span>
           </div>
         </div>
       </div>
@@ -779,7 +778,7 @@ export type ResultsWallet = { before: number; after: number; gradeBonus: number;
 
 const CASH_REASONS: Record<string, string> = {
   kill: 'Eliminations', headshot: 'Headshots', grenade: 'Grenade kills',
-  streak: 'Streak bonuses', phase: 'Phases secured', extraction: 'Extraction',
+  streak: 'Streak bonuses', shutdown: 'Momentum stopped', draw: 'Match draw', phase: 'Phases secured', extraction: 'Extraction',
 };
 
 export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
@@ -788,6 +787,8 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   const accuracy = r.shots ? Math.round(r.hits / r.shots * 100) : 0;
   const completed = r.mission.phases.filter(p => p.complete).length;
   const { grade, tint } = gradeFor(r);
+  const isDraw = r.tdm?.outcome === 'draw';
+  const hasWon = r.tdm ? r.tdm.outcome === 'win' : r.win;
   const cashRows: { label: string; detail: string; total: number }[] = [];
   for (const reason of Object.keys(CASH_REASONS)) {
     const entries = r.cashLog.filter(e => e.reason === reason);
@@ -819,14 +820,14 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
     );
   }
   return (
-    <main className={`results-root ${r.win ? '' : 'lose'}`}>
+    <main className={`results-root ${isDraw ? 'draw' : hasWon ? '' : 'lose'}`}>
       <div className="results-wrap">
         <div className="results-header">
-          <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
+          <div className="stamp"><span className="stamp-grade" style={{ color: isDraw ? '#C9A15A' : tint }}>{isDraw ? '=' : grade}</span></div>
           <div className="results-titleblock">
-            <div className="stamp-label">Grade {grade}</div>
+            <div className="stamp-label">{isDraw ? 'Match draw' : `Grade ${grade}`}</div>
             <h2 className="results-title">{tdm
-              ? (r.win ? 'Victory — Alpha squad' : tdm.alphaScore === tdm.bravoScore ? 'Draw' : 'Defeat — Bravo squad')
+              ? (tdm.outcome === 'draw' ? 'Draw' : tdm.outcome === 'win' ? 'Victory — Alpha squad' : 'Defeat — Bravo squad')
               : (r.win ? 'Extraction complete' : 'Mission failed')}</h2>
             <p className="results-sub">{tdm
               ? `Warehouse TDM — final score ALPHA ${tdm.alphaScore} : ${tdm.bravoScore} BRAVO. You dropped ${tdm.playerKills} of Alpha's ${tdm.alphaScore}.`
@@ -935,7 +936,13 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
         </p>
 
         <div className="results-actions">
-          {r.win ? (
+          {isDraw ? (
+            <>
+              <button className="btn btn-primary" style={{ padding: '12px 20px' }} onClick={onRedeploy}><span>Rematch</span><Arrow /></button>
+              <button className="btn btn-ghost" onClick={onArmory}>Open armory</button>
+              <button className="btn btn-ghost" onClick={onMenu}>Return to base</button>
+            </>
+          ) : hasWon ? (
             <>
               <button className="btn btn-primary" style={{ padding: '12px 20px' }} onClick={onArmory}><span>Open armory</span><Arrow /></button>
               <button className="btn btn-ghost" onClick={onRedeploy}>Redeploy</button>

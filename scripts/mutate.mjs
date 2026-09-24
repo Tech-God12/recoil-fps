@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 process.chdir(root);
 const tests = ['tests/mission.test.js', 'tests/mission-defense.test.js', 'tests/reinforcements.test.js', 'tests/mission-integration.test.js', 'tests/armory-economy.test.js', 'tests/armory-models.test.js'];
-function run() {
-  const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...tests], { cwd: root, encoding: 'utf8', timeout: 60000 });
+function run(testFiles = tests) {
+  const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...testFiles], { cwd: root, encoding: 'utf8', timeout: 60000 });
   if (result.error) throw result.error;
   return result;
 }
@@ -47,14 +47,27 @@ const mutations = [
   { name: 'spawn search budget removed', file: pressure, from: 'candidateChecks: 8', to: 'candidateChecks: 64' },
   { name: 'phase pressure policies ignored', file: pressure, from: 'target: Math.min(PRESSURE_BUDGET.liveCap, Math.max(0, policy.target))', to: 'target: 0' },
   { name: 'offscreen actors retired too early', file: pressure, from: 'retireAfter: 20', to: 'retireAfter: 0' },
-  { name: 'fixed frame-zero roster restored', file: 'src/game/engine.ts', from: 'this.ai = new AIManager(ctx, []);', to: 'this.ai = new AIManager(ctx, this.world.squadSpawns);' },
+  { name: 'fixed frame-zero roster restored', file: 'src/game/engine.ts', from: 'this.ai = new AIManager(ctx, []);\n    this.missionRuntime = new MissionRuntime({', to: 'this.ai = new AIManager(ctx, this.world.squadSpawns);\n    this.missionRuntime = new MissionRuntime({' },
   { name: 'AI simulation timers double-count a tick', file: 'src/game/ai.ts', from: 'this.stateTime += dt; this.lastSeenT += dt; this.coverAge += dt;', to: 'this.stateTime += dt * 2; this.lastSeenT += dt; this.coverAge += dt;' },
   { name: 'recycled actors keep old objective credit IDs', file: 'src/game/ai.ts', from: 'this.id = enemyCounter++;', to: 'this.id = this.id;' },
   { name: 'mission marker geometry exceeds budget', file: 'src/game/systems/mission-markers.ts', from: 'new THREE.RingGeometry(0.98, 1, 48)', to: 'new THREE.RingGeometry(0.98, 1, 512)' },
   { name: 'per-kill cash constant drifted', file: 'src/game/economy/rewards.ts', from: '{ kill: 100, headshot:', to: '{ kill: 101, headshot:' },
   { name: 'magazine multiplier applied before flat addition', file: 'src/game/economy/stats.ts', from: 'const magGrown = base.magSize + add(m => m.magAdd);', to: 'const magGrown = base.magSize * mul(m => m.magMul) + add(m => m.magAdd);' },
-  { name: 'suppressor quiets 1% less', file: 'src/game/economy/catalog.ts', from: 'mods: { noiseRadiusMul: 0.3, damageMul: 0.92,', to: 'mods: { noiseRadiusMul: 0.31, damageMul: 0.92,' },
-];
+  { name: 'suppressor effective noise drifts 1%', file: 'src/game/economy/stats.ts', from: 'noiseRadius: Math.max(4, base.noiseRadius * mul(m => m.noiseRadiusMul)),', to: 'noiseRadius: Math.max(4, base.noiseRadius * mul(m => m.noiseRadiusMul) * 1.01),' },
+ ];
+
+const defenseMutations = new Set([
+  'relay never takes hostile damage', 'overrun relay cannot fail',
+  'relay clock secretly requires player inside', 'relay drains beyond completion deadline',
+]);
+const mutationTests = mutation => {
+  if (mutation.file === mission) return [defenseMutations.has(mutation.name) ? 'tests/mission-defense.test.js' : 'tests/mission.test.js'];
+  if (mutation.file === pressure) return ['tests/reinforcements.test.js'];
+  if (mutation.file === 'src/game/engine.ts' || mutation.file === 'src/game/ai.ts' || mutation.file === 'src/game/systems/mission-markers.ts') {
+    return ['tests/mission-integration.test.js'];
+  }
+  return ['tests/armory-economy.test.js'];
+};
 
 for (const mutation of mutations) {
   const original = readFileSync(mutation.file, 'utf8');
@@ -62,7 +75,7 @@ for (const mutation of mutations) {
   let result;
   try {
     writeFileSync(mutation.file, original.replace(mutation.from, mutation.to));
-    result = run();
+    result = run(mutationTests(mutation));
   } finally {
     writeFileSync(mutation.file, original);
   }

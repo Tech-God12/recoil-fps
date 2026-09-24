@@ -69,7 +69,10 @@ test('every catalog attachment has a builder that produces finite meshes', () =>
     }
     let meshes = 0;
     obj.traverse(o => { if (o.isMesh) meshes++; });
-    assert.ok(meshes >= 1 && meshes <= 6, `${part.id}: ${meshes} meshes`);
+    const drawLimits = { opt_2x: 7, opt_3x: 7, opt_4x: 9, opt_ak_4x: 9, opt_6x: 10, opt_8x: 10 };
+    const drawLimit = drawLimits[part.id] ?? 6;
+    assert.ok(meshes >= 1 && meshes <= drawLimit, `${part.id}: ${meshes} meshes`);
+    if (drawLimits[part.id]) assert.equal(meshes, drawLimit, `${part.id} detail budget stays fixed`);
     finiteGroup(obj);
   }
 });
@@ -205,14 +208,16 @@ test('magazines swap the reload handle and restore it on detach', () => {
   assert.equal(model.mag, stock);
 });
 
-test('stk_none strips the stock and the bipod ships folding legs', () => {
+test('the lightweight stock retains the factory silhouette and the bipod ships folding legs', () => {
   const model = WEAPON_BUILDERS.m4a1();
   attach(model, attachmentById('stk_none'), 'm4a1');
-  assert.ok(model.removable.stock.every(o => o.visible === false), 'stock meshes must hide');
+  assert.equal(model.attached.stock.userData.keepFactoryStock, true);
+  assert.ok(model.removable.stock.every(o => o.visible), 'the lightweight kit keeps the host stock');
   detach(model, 'stock');
-  assert.ok(model.removable.stock.every(o => o.visible === true));
-  attach(model, attachmentById('ub_bipod'), 'm4a1');
-  assert.equal(model.attached.underbarrel.userData.legs.length, 2);
+  assert.ok(model.removable.stock.every(o => o.visible));
+  const support = WEAPON_BUILDERS.m249();
+  assert.equal(attach(support, attachmentById('ub_bipod'), 'm249'), true);
+  assert.equal(support.attached.underbarrel.userData.legs.length, 2);
 });
 
 test('reciprocating slides, pump forend and belt cover exist as anim targets', () => {

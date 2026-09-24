@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 process.chdir(root);
-const tests = ['tests/mission.test.js', 'tests/mission-defense.test.js', 'tests/reinforcements.test.js', 'tests/mission-integration.test.js', 'tests/armory-economy.test.js', 'tests/armory-models.test.js'];
+const tests = ['tests/mission.test.js', 'tests/mission-defense.test.js', 'tests/reinforcements.test.js', 'tests/mission-integration.test.js', 'tests/armory-economy.test.js', 'tests/armory-models.test.js', 'tests/defusal-rules.test.js', 'tests/defusal-shop.test.js', 'tests/defusal-mode.test.js'];
 function run(testFiles = tests) {
   const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...testFiles], { cwd: root, encoding: 'utf8', timeout: 60000 });
   if (result.error) throw result.error;
@@ -54,7 +54,18 @@ const mutations = [
   { name: 'per-kill cash constant drifted', file: 'src/game/economy/rewards.ts', from: '{ kill: 100, headshot:', to: '{ kill: 101, headshot:' },
   { name: 'magazine multiplier applied before flat addition', file: 'src/game/economy/stats.ts', from: 'const magGrown = base.magSize + add(m => m.magAdd);', to: 'const magGrown = base.magSize * mul(m => m.magMul) + add(m => m.magAdd);' },
   { name: 'suppressor effective noise drifts 1%', file: 'src/game/economy/stats.ts', from: 'noiseRadius: Math.max(4, base.noiseRadius * mul(m => m.noiseRadiusMul)),', to: 'noiseRadius: Math.max(4, base.noiseRadius * mul(m => m.noiseRadiusMul) * 1.01),' },
- ];
+  // ---- Bomb Defusal: economy, round rules and damage model ----
+  { name: 'pistol-round loser paid the first loss tier', file: 'src/game/defusal/rules.ts', from: 'startingLosses: 1,', to: 'startingLosses: 0,' },
+  { name: 'a single win wipes the loss streak', file: 'src/game/defusal/rules.ts', from: 'this.losses[winner] = Math.max(0, this.losses[winner] - 1);', to: 'this.losses[winner] = 0;' },
+  { name: 'attackers paid for hiding out the clock', file: 'src/game/defusal/rules.ts', from: "if (p.reason === 'time' && p.side === 'attack' && p.alive) return 0;", to: 'if (false) return 0;' },
+  { name: 'plant bonus paid to defenders too', file: 'src/game/defusal/rules.ts', from: "(p.side === 'attack' && p.planted ? ECONOMY.plantTeamBonus : 0)", to: '(p.planted ? ECONOMY.plantTeamBonus : 0)' },
+  { name: 'halftime forgets to swap sides', file: 'src/game/defusal/rules.ts', from: 'this.alphaSide = flip(this.alphaSide);', to: 'this.alphaSide = this.alphaSide;' },
+  { name: 'money cap removed', file: 'src/game/defusal/rules.ts', from: 'return Math.max(0, Math.min(ECONOMY.max, Math.round(amount)));', to: 'return Math.max(0, Math.round(amount));' },
+  { name: 'helmets stop nothing', file: 'src/game/defusal/shop.ts', from: "if (part === 'head') return armor >= 2;", to: "if (part === 'head') return false;" },
+  { name: 'attackers can buy defuse kits', file: 'src/game/defusal/shop.ts', from: "price: 400, kind: 'kit', side: 'defend',", to: "price: 400, kind: 'kit'," },
+  { name: 'killing the attackers ends a planted round', file: 'src/game/defusal/mode.ts', from: "else if (atk === 0 && this.bomb.state !== 'planted') this.endRound('defend', 'elimination');", to: "else if (atk === 0) this.endRound('defend', 'elimination');" },
+  { name: 'defuse kit ignored', file: 'src/game/defusal/mode.ts', from: 'if (b.defuseT >= (c.inv.kit ? TIMING.defuseKit : TIMING.defuse)) this.defuseBomb(c);', to: 'if (b.defuseT >= TIMING.defuseKit) this.defuseBomb(c);' },
+];
 
 const defenseMutations = new Set([
   'relay never takes hostile damage', 'overrun relay cannot fail',
@@ -66,6 +77,9 @@ const mutationTests = mutation => {
   if (mutation.file === 'src/game/engine.ts' || mutation.file === 'src/game/ai.ts' || mutation.file === 'src/game/systems/mission-markers.ts') {
     return ['tests/mission-integration.test.js'];
   }
+  if (mutation.file === 'src/game/defusal/rules.ts') return ['tests/defusal-rules.test.js'];
+  if (mutation.file === 'src/game/defusal/shop.ts') return ['tests/defusal-shop.test.js'];
+  if (mutation.file === 'src/game/defusal/mode.ts') return ['tests/defusal-mode.test.js'];
   return ['tests/armory-economy.test.js'];
 };
 

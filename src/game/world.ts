@@ -4,18 +4,22 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { getMaterials, type TextureSet } from './textures';
+import { buildSirocco } from './maps/sirocco-build';
 
 // Install BVH acceleration globally (huge raycast speed-up for merged meshes)
 (THREE.BufferGeometry.prototype as unknown as { computeBoundsTree: typeof computeBoundsTree }).computeBoundsTree = computeBoundsTree;
 (THREE.BufferGeometry.prototype as unknown as { disposeBoundsTree: typeof disposeBoundsTree }).disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type MapId = 'alrasul' | 'kasbah' | 'arena';
+export type MapId = 'alrasul' | 'kasbah' | 'arena' | 'sirocco';
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
   { id: 'alrasul', name: 'Sandblast', desc: 'Two bridges. One dry river. A souk under siege in the shadow of the water tower.' },
   { id: 'kasbah', name: 'Town', desc: 'Six trades beneath a stone crown. Break the citadel, then disappear through the west gate.' },
   { id: 'arena', name: 'Warehouse', desc: '5v5 team deathmatch. Twin steel warehouses, container yards and barricade lines. Most kills in 2:30 wins.' },
+  { id: 'sirocco', name: 'Sirocco', desc: '5v5 bomb defusal. A desert town of three lanes — A long, mid and the B tunnels — around two bomb sites. First to 7 rounds.' },
 ];
+/** Story maps with a mission runtime (theater select, settings map picker). */
+export const isMissionMap = (id: MapId): id is 'alrasul' | 'kasbah' => id === 'alrasul' || id === 'kasbah';
 
 export interface AABB { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
 export interface WindowHole { x: number; y: number; z: number; nx: number; nz: number } // center + outward normal (horizontal)
@@ -581,8 +585,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   }
 
   const playerSpawn = new THREE.Vector3();
-  const half = mapId === 'alrasul' ? 124 : mapId === 'arena' ? 46 : 134;
-  if (mapId !== 'arena') {
+  const half = mapId === 'alrasul' ? 124 : mapId === 'arena' ? 46 : mapId === 'sirocco' ? 44 : 134;
+  if (isMissionMap(mapId)) {
   terrain(520, half + 12);
   perimeter(half);
   for (const side of [-1,1]) {
@@ -1005,6 +1009,17 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       dressing(new THREE.CircleGeometry(0.55 + Math.abs(sx2) % 3 * 0.08, 12), scorchMat, sx2, 0.075, sz2, -Math.PI / 2, 0, sx2 + sz2);
 
     landmarks.push({ name: 'Alpha yard', at: new THREE.Vector3(0, 2, 38) }, { name: 'Bravo yard', at: new THREE.Vector3(0, 2, -38) });
+  }
+
+  // =====================================================================
+  // SIROCCO — 5v5 Bomb Defusal (layout: maps/sirocco.ts, geometry: maps/sirocco-build.ts)
+  // =====================================================================
+  if (mapId === 'sirocco') {
+    buildSirocco({
+      M, col, METAL, GLOW, FROND, ACC_TURQ, ACC_TERRA, FABRIC,
+      box, shape, dressing, ground, cover, palm, lamp, banner, sandbags, terrain,
+      group, solids, interiors, concrete, lightSpots, landmarks, soundTraps, arenaFx, playerSpawn,
+    });
   }
 
   if (mapId === 'alrasul') {

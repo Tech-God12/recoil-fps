@@ -88,8 +88,18 @@ test('the engine rejects victory before extraction, irrespective of enemy count'
   assert.equal(engine.ended, false);
   const source = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /aliveCount\(\)\s*===\s*0\)\s*this\.endMatch/);
-  assert.equal((source.match(/this\.ai = new AIManager\(ctx, \[\]\);/g) ?? []).length, 2, 'both modes start with empty AI rosters');
-  assert.match(source, /this\.ai = new AIManager\(ctx, \[\]\);\s*this\.missionRuntime = new MissionRuntime/, 'story insertion remains mission-driven');
+  const setup = source.slice(source.indexOf('if (this.isTDM) {\n      // ---- Warehouse'), source.indexOf('    this.streaks = new StreakDirector'));
+  const compStart = setup.indexOf('} else if (this.isComp) {');
+  const missionStart = setup.indexOf('} else {', compStart);
+  assert.ok(compStart > 0 && missionStart > compStart, 'all three modes have distinct setup branches');
+  for (const [mode, branch] of [
+    ['TDM', setup.slice(0, compStart)],
+    ['ranked', setup.slice(compStart, missionStart)],
+    ['story', setup.slice(missionStart)],
+  ]) {
+    assert.equal((branch.match(/this\.ai = new AIManager\(ctx, \[\]\);/g) ?? []).length, 1, `${mode} starts with an empty mission-AI roster`);
+  }
+  assert.match(setup.slice(missionStart), /this\.ai = new AIManager\(ctx, \[\]\);\s*this\.missionRuntime = new MissionRuntime/, 'story insertion remains mission-driven');
   assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 4, 'only the explicitly reworked MP changes its recoil pattern');
 });
 

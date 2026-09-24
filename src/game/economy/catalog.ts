@@ -99,7 +99,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'sniper', boltAction: true, scoped: true,
   },
   {
-    id: 'mp7', name: 'MP', short: 'MP', cls: 'PDW', slot: 'secondary',
+    id: 'mp7', name: 'MP7', short: 'MP7', cls: 'PDW', slot: 'secondary',
     price: 1200, starter: false,
     blurb: 'Pocket firestorm. 900 RPM of 4.6mm riding your secondary slot — a machine pistol for when the primary runs dry.',
     base: base({ pattern: [[0.85, 0.12], [0.95, -0.18], [1.05, 0.2], [1.12, -0.24], [1.18, 0.22]], auto: true, rpm: 900, damage: 24, headMul: 2.2, limbMul: 0.8, magSize: 40, reserve: 200, hipSpread: 0.011, adsFov: 60, tacReload: 1.9, emptyReload: 2.3, adsTime: 0.18, noiseRadius: 55 }),
@@ -147,6 +147,20 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'lmg', beltFed: true, bloom: { perShot: 0.0006, max: 0.012, decay: 0.03 },
   },
 ];
+
+/** Authored cartridge labels shared by the armory, mode setup, and live ammo readout. */
+export const CALIBER: Record<WeaponId, { round: string; note: string }> = {
+  m4a1: { round: '5.56×45 NATO', note: 'Balanced performance, high rate of fire, and exceptional modularity. The trusted choice for operators worldwide.' },
+  ak47: { round: '7.62×39MM', note: 'Heavy intermediate cartridge. Punches through cover and brush like they owe it money.' },
+  m1911: { round: '.45 ACP', note: 'Big, slow, authoritative. Eight rounds that end arguments.' },
+  awm: { round: '.338 LAPUA', note: 'Long-range magnum. Flat, fast, and final — if you can stand the sway.' },
+  mp7: { round: '4.6×30MM', note: 'Armor-piercing PDW round. Small case, vicious cycle rate.' },
+  vector: { round: '.45 ACP', note: 'Pistol-caliber thumper in a fire hose of a gun. Manage the climb.' },
+  spas12: { round: '12 GAUGE', note: 'Eight pellets per trigger pull. Devastating inside a doorway.' },
+  scar_h: { round: '7.62×51MM', note: 'Full-power battle rifle round. Two taps solve most problems.' },
+  deagle: { round: '.50 AE', note: 'Hand-cannon magnum. Loud, proud, and wrist-breaking.' },
+  m249: { round: '5.56×45 BELT', note: 'Linked suppression. One hundred rounds before the long reload.' },
+};
 
 export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
   {

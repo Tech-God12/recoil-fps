@@ -9,6 +9,7 @@ import type { Effects } from './effects';
 import type { AABB } from './world';
 import { arenaZoneAt } from './world';
 import { NavGrid } from './ai';
+import { SpawnProtection } from './systems/spawn-protection';
 import { COMP_BASE_HP, applyCompetitiveDamage } from './competitive/rules';
 import type { BotGear, CompOrder } from './competitive/tactics';
 
@@ -91,6 +92,14 @@ export const BRAVO_ROSTER: { name: string; armor: TDMArmor }[] = [
 
 const ALPHA_SPAWNS: [number, number][] = [[0, 34], [-12, 37], [12, 37], [-4, 40], [4, 40]];
 const BRAVO_SPAWNS: [number, number][] = ALPHA_SPAWNS.map(([x, z]) => [-x, -z]);
+// Within 30 m an exposed spawn is already inside the rifle engagement band.
+export const SPAWN_SIGHT_RANGE = 30;
+// A nearby enemy can reach a hidden landing before the player has turned around.
+export const SPAWN_CLOSE_RANGE = 8;
+// Two 0.36 m player capsules plus a little space for movement on frame one.
+const SPAWN_BODY_CLEARANCE = 1.5;
+// One pad choice plus one inner-yard escape per pad bounds the search to ten per life.
+const SPAWN_CANDIDATES_PER_PAD = 2;
 /** Contested waypoints: the warehouse doors and interiors, both container yards,
  * and the mid lanes. Kept in sync with the arena layout in world.ts (half 46). */
 const MID_POINTS: [number, number][] = [
@@ -123,10 +132,11 @@ function getFireGlowTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 64;
   const ctx = c.getContext('2d')!;
+  // Neutral alpha mask can be tinted teal for grace or orange for ON FIRE.
   const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255,190,90,0.95)');
-  g.addColorStop(0.4, 'rgba(255,120,30,0.55)');
-  g.addColorStop(1, 'rgba(255,90,20,0)');
+  g.addColorStop(0, 'rgba(255,255,255,0.95)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
   fireGlowTex = new THREE.CanvasTexture(c);
@@ -161,6 +171,7 @@ export class TDMBot {
   deaths = 0;
   headshots = 0;
   respawnT = -1;
+  readonly spawnShield = new SpawnProtection();
   deadAge = 0;
   stunTimer = 0;
   /** 0 cautious .. 1 aggressive. >0.58 = pusher, 0.35–0.75 may flank, else holder. */
@@ -278,7 +289,8 @@ export class TDMBot {
 
   eyePos() { return tmpB.set(this.pos.x, this.pos.y + 1.62 - (this.crouched ? 0.4 : 0), this.pos.z).clone(); }
 
-  respawn(at: THREE.Vector3) {
+  respawn(at: THREE.Vector3, exposed = false) {
+    this.spawnShield.grant(!this.ctx.competitive && exposed);
     this.pos.copy(at);
     this.hp = this.maxHp;
     this.frags = 3; this.flashes = 1;
@@ -405,7 +417,7 @@ export class TDMBot {
    * protects against bot fire and grenades, not only the player's bullets.
    * Returns true on a killing blow — HP at 0 means dead, immediately. */
   takeDamage(amount: number, isHead: boolean, attacker: TDMBot | 'player', applyArmor = true): boolean {
-    if (this.dead) return false;
+    if (this.dead || this.spawnShield.active) return false;
     let dmg = amount;
     if (applyArmor) dmg *= 1 - (isHead ? TDM_HEAD_REDUCTION[this.armor] : TDM_BODY_REDUCTION[this.armor]);
     this.hp -= dmg;
@@ -422,6 +434,7 @@ export class TDMBot {
   }
 
   private die() {
+    this.spawnShield.cancel();
     this.state = 'DEAD';
     if (this.onFire) this.endFire();
     this.deathT = 0;
@@ -651,6 +664,7 @@ export class TDMBot {
   }
 
   private fireShot(target: TargetRef) {
+    this.spawnShield.cancel(); // The attacker forfeits protection before the shot can resolve.
     this.model.group.updateMatrixWorld(true);
     const muzzle = this.model.parts.muzzle.getWorldPosition(new THREE.Vector3());
     this.shotPose = 1;
@@ -709,6 +723,7 @@ export class TDMBot {
       if (target.isPlayer) {
         if (this.ctx.playerAlive()) this.ctx.damagePlayer(dmg, this.pos, this);
       } else if (target.bot && !target.bot.dead) {
+        if (target.bot.spawnShield.active) return; // Tracer stops, but no fake blood/kill on a protected body.
         this.ctx.effects.blood(aimAt);
         const killed = target.bot.takeDamage(dmg, headshot, this);
         if (killed) this.mgr.handleKill(this, target.bot, headshot, 'RIFLE');
@@ -727,6 +742,7 @@ export class TDMBot {
     if (dist > 18) chance *= 1.5;
     if (Math.random() > chance) { this.grenadeCD = 0.8; return; }
     this.frags--;
+    this.spawnShield.cancel(); // Throwing from cover is an attack, not a free protected action.
     this.grenadeCD = 10 + Math.random() * 7;
     this.ctx.onCallout('grenade', this.pos, this.team);
     const at = (this.hasLOS ? target.feet : (this.lastKnown ?? target.feet)).clone();
@@ -992,6 +1008,18 @@ export class TDMBot {
   }
 
   updateVisualFrame(dt: number) {
+    this.spawnShield.tick(dt);
+    // Reuse the existing pooled glow: opponents can identify a protected spawn
+    // without a new mesh/draw allocation, and it vanishes the frame the bot fires.
+    if (this.fireGlow && !this.onFire) {
+      this.fireGlow.visible = !this.dead && this.spawnShield.active;
+      if (this.fireGlow.visible) {
+        this.fireGlow.position.set(this.pos.x, this.pos.y + 1.25, this.pos.z);
+        this.fireGlow.scale.set(1.7, 1.7, 1);
+        this.fireGlow.material.color.setHex(0x73C9DB);
+        this.fireGlow.material.opacity = 0.8;
+      }
+    }
     if (this.allyMarker) {
       this.allyMarker.visible = !this.dead;
       // gentle bob so the chevron reads as a marker, not level geometry
@@ -1003,6 +1031,8 @@ export class TDMBot {
       const t = performance.now() * 0.001;
       if (this.fireGlow) {
         this.fireGlow.visible = true;
+        this.fireGlow.material.color.setHex(0xFFA040);
+        this.fireGlow.material.opacity = 1;
         this.fireGlow.position.set(this.pos.x, this.pos.y + 1.25 + Math.sin(t * 9) * 0.08, this.pos.z);
         const s = 1.6 + Math.sin(t * 13) * 0.18;
         this.fireGlow.scale.set(s, s, 1);
@@ -1070,6 +1100,13 @@ export class TDMBot {
   }
 }
 
+export interface SpawnDecision {
+  position: THREE.Vector3;
+  exposed: boolean;
+  visibleThreats: number;
+  nearestEnemy: number;
+}
+
 export class TDMManager {
   bots: TDMBot[] = [];
   alphaScore = 0;
@@ -1079,6 +1116,7 @@ export class TDMManager {
   nav: NavGrid;
   private ctx: TDMContext;
   private tick = 0;
+  private readonly spawnRay = new THREE.Raycaster();
 
   constructor(ctx: TDMContext) {
     this.ctx = ctx;
@@ -1093,32 +1131,93 @@ export class TDMManager {
     }
   }
 
-  /** Team spawn: one of five authored pads with a ±2–4 m scatter, preferring the
-   * pad farthest from any living enemy so respawns never land inside a fight. */
-  getSpawn(team: TDMTeam): THREE.Vector3 {
+  /** Bounded, mirrored spawn search. Wall sightlines outrank distance, but no
+   * candidate may start inside a solid or another living player's capsule. */
+  getSpawnDecision(team: TDMTeam, forPlayer = false): SpawnDecision {
     const pads = team === 'alpha' ? ALPHA_SPAWNS : BRAVO_SPAWNS;
-    let best: THREE.Vector3 | null = null, bestD = -1;
-    for (const [px, pz] of pads) {
-      const jitterA = Math.random() * Math.PI * 2, jitterR = 2 + Math.random() * 2;
-      const p = new THREE.Vector3(px + Math.cos(jitterA) * jitterR, 0, pz + Math.sin(jitterA) * jitterR * 0.5);
-      const h = this.ctx.half - 3;
-      p.x = THREE.MathUtils.clamp(p.x, -h, h);
-      p.z = THREE.MathUtils.clamp(p.z, -h, h);
-      const [cx, cz] = this.nav.nearestFree(this.nav.toCell(p.x), this.nav.toCell(p.z));
-      p.set(this.nav.toWorld(cx), 0, this.nav.toWorld(cz));
-      let nearest = Infinity;
-      for (const b of this.bots) {
-        if (b.dead || b.team === team) continue;
-        nearest = Math.min(nearest, b.pos.distanceTo(p));
+    const player = !forPlayer && this.ctx.playerAlive() ? this.ctx.playerFeet() : null;
+    const occupants = this.bots.filter(b => !b.dead).map(b => ({ pos: b.pos, hostile: b.team !== team }));
+    if (player) occupants.push({ pos: player, hostile: team !== 'alpha' });
+    const inset = this.ctx.half - 3; // Full capsule room at the boundary.
+    const visited = new Set<string>();
+    // Mutable holder: the candidate callback updates both rankings across cells.
+    const choices: { best: { decision: SpawnDecision; score: number } | null;
+      crowded: { decision: SpawnDecision; score: number } | null } = { best: null, crowded: null };
+
+    const consider = (cx: number, cz: number) => {
+      const key = `${cx},${cz}`;
+      if (visited.has(key)) return;
+      visited.add(key);
+      if (!this.nav.free(cx, cz)) return;
+      const p = new THREE.Vector3(this.nav.toWorld(cx), 0, this.nav.toWorld(cz));
+      if (Math.abs(p.x) > inset || Math.abs(p.z) > inset) return;
+      p.y = this.ctx.groundHeight(p.x, p.z);
+      if (this.ctx.solids.some(b => b.minY < p.y + 1.7 && b.maxY > p.y + 0.55
+        && p.x + 0.36 > b.minX && p.x - 0.36 < b.maxX
+        && p.z + 0.36 > b.minZ && p.z - 0.36 < b.maxZ)) return; // No frame-zero wall penetration.
+      const eye = new THREE.Vector3(p.x, p.y + 1.62, p.z);
+      let nearestEnemy = Infinity, nearestBody = Infinity, visibleThreats = 0;
+      for (const other of occupants) {
+        const distance = Math.hypot(p.x - other.pos.x, p.z - other.pos.z);
+        nearestBody = Math.min(nearestBody, distance);
+        if (!other.hostile) continue;
+        nearestEnemy = Math.min(nearestEnemy, distance);
+        if (distance > SPAWN_SIGHT_RANGE) continue;
+        const from = new THREE.Vector3(other.pos.x, other.pos.y + 1.62, other.pos.z);
+        const delta = eye.clone().sub(from);
+        const sightDistance = delta.length();
+        this.spawnRay.set(from, delta.normalize());
+        this.spawnRay.far = Math.max(0, sightDistance - 0.3); // Stop short of the landing capsule, not behind it.
+        if (!this.spawnRay.intersectObjects(this.ctx.occluders, false).length) visibleThreats++;
       }
-      if (team === 'bravo' && this.ctx.playerAlive()) nearest = Math.min(nearest, this.ctx.playerFeet().distanceTo(p));
-      // Cap so pads tie when no enemy is near — the random term then spreads the
-      // squad across all five pads instead of stacking everyone on the first.
-      const d = Math.min(nearest, 60) + Math.random() * 12;
-      if (d > bestD) { bestD = d; best = p; }
+      const exposed = visibleThreats > 0 || nearestEnemy < SPAWN_CLOSE_RANGE;
+      // Separation outranks cover inside 8 m: a hidden enemy one step away
+      // can still rush you before you turn. Prefer unseen-far, visible-far,
+      // unseen-close, then visible-close; the exposed tiers receive grace.
+      const tier = nearestEnemy < SPAWN_CLOSE_RANGE ? (visibleThreats ? 3 : 2)
+        : visibleThreats ? 1 : 0;
+      const score = tier * 100 + visibleThreats * 5 - Math.min(nearestEnemy, 60)
+        - Math.min(nearestBody, 12) * 0.1; // Tiny spacing tie-break prevents friendly pileups.
+      const choice = { decision: { position: p, exposed, visibleThreats, nearestEnemy }, score };
+      if (nearestBody < SPAWN_BODY_CLEARANCE) {
+        if (!choices.crowded || score < choices.crowded.score) choices.crowded = choice;
+      } else if (!choices.best || score < choices.best.score) choices.best = choice;
+    };
+
+    for (const [px, pz] of pads) for (let attempt = 0; attempt < SPAWN_CANDIDATES_PER_PAD; attempt++) {
+      // An occupied apron needs an *inner-yard* option >8 m from a pad camper.
+      // Normal spawns check exactly ten cells: near 2–4 m or inward 8–10 m per pad.
+      const angle = Math.random() * Math.PI * 2;
+      const inner = attempt === 1;
+      const radius = inner ? 8 + Math.random() * 2 : 2 + Math.random() * 2;
+      const x = THREE.MathUtils.clamp(px + Math.cos(angle) * (inner ? 3 : radius), -inset, inset);
+      const z = THREE.MathUtils.clamp(pz + (inner ? (team === 'alpha' ? -radius : radius) + Math.sin(angle) * 1.1
+        : Math.sin(angle) * radius * 0.5), -inset, inset);
+      const [cx, cz] = this.nav.nearestFree(this.nav.toCell(x), this.nav.toCell(z));
+      consider(cx, cz);
     }
-    return best!;
+    if (!choices.best && choices.crowded) {
+      // Only on a fully occupied set: search at most 48 *different* neighbouring
+      // 2 m nav cells before accepting body overlap. This keeps respawn bounded
+      // and finds clearance even when every primary position has a camper on it.
+      const at = choices.crowded.decision.position;
+      const cx = this.nav.toCell(at.x), cz = this.nav.toCell(at.z);
+      for (let ring = 1; ring <= 3; ring++) {
+        for (let dx = -ring; dx <= ring; dx++) for (let dz = -ring; dz <= ring; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) === ring) consider(cx + dx, cz + dz);
+        }
+      }
+    }
+    if (choices.best) return choices.best.decision;
+    // A genuinely saturated/invalid map still advances the respawn clock, but
+    // remains explicitly exposed; never label an overlapping position safe.
+    if (choices.crowded) return { ...choices.crowded.decision, exposed: true };
+    return { position: new THREE.Vector3(pads[0][0], this.ctx.groundHeight(...pads[0]), pads[0][1]),
+      exposed: true, visibleThreats: 0, nearestEnemy: 0 };
   }
+
+  /** Kept for callers that only need a landing (initial deployment / old tests). */
+  getSpawn(team: TDMTeam): THREE.Vector3 { return this.getSpawnDecision(team).position; }
 
   handleKill(killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string) {
     const killerTeam: TDMTeam = killer === 'player' ? 'alpha' : killer.team;
@@ -1193,7 +1292,8 @@ export class TDMManager {
       if (b.dead && b.respawnT > 0) {
         b.respawnT -= dt;
         if (b.respawnT <= 0 && this.timeLeft > 3) {
-          b.respawn(this.getSpawn(b.team));
+          const landing = this.getSpawnDecision(b.team);
+          b.respawn(landing.position, landing.exposed);
           this.rosterVersion++;
         }
       }
@@ -1202,6 +1302,7 @@ export class TDMManager {
 
   dispose() {
     for (const b of this.bots) {
+      b.spawnShield.cancel();
       b.disposeMarker();
       b.model.group.removeFromParent();
       b.model.group.traverse(object => { if (object instanceof THREE.Mesh) object.geometry.dispose(); });

@@ -189,6 +189,14 @@ export class SpatialAudioEngine {
     o.onended = () => { o.disconnect(); og.disconnect(); };
   }
 
+  /** One dry casing landing per real shot. 18 ms at 0.07 gain sits below the
+   * receiver clicks (0.16–0.30); 0.18–0.26 s puts it after the report. Web Audio
+   * scheduling freezes with the suspended context, unlike a wall-clock timeout. */
+  casingTick(delay = 0.18) {
+    this.burstDirect({ dur: 0.018, gain: 0.07, freq: this.rf(4100, 0.12), q: 2.4, hp: 2200,
+      when: delay + Math.random() * 0.08 });
+  }
+
   // M416 5.56: bright, tight, FAST — all attack, short tail. The "sewing machine".
   fireM4() {
     this.burstDirect({ dur: 0.028, gain: 1.0, freq: this.rf(3900), q: 0.7, hp: 1100 });

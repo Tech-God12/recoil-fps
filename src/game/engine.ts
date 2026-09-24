@@ -28,6 +28,7 @@ import { voice } from './voice';
 import { StreakDirector, STREAK_POINTS, type StreakContext, type StreakHud, type StreakId, type StreakTarget } from './streaks';
 import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './ai';
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
+import { SpawnProtection } from './systems/spawn-protection';
 import type { MissionReport, MissionPhase } from './systems/mission';
 import type { PressureStats } from './systems/reinforcements';
 import {
@@ -223,6 +224,7 @@ export interface HudState {
   hp: number;
   mag: number;
   weapon: string;
+  weaponId: WeaponId;
   reloading: boolean;
   reloadStage: 'idle' | 'magOut' | 'magIn' | 'ready';
   frags: number;
@@ -275,6 +277,8 @@ export interface TdmHud {
   playerKills: number;
   playerDead: boolean;
   respawnIn: number;
+  /** Simulation seconds of emergency spawn protection; zero on an ordinary safe spawn. */
+  spawnShield: number;
   maxHp: number;
   roster: TdmRosterEntry[];
   /** Momentum: ON FIRE buffs are live and the whole enemy team can see you. */
@@ -295,7 +299,7 @@ export interface TdmRosterEntry {
 
 export type GameEvent =
   | { type: 'graphics'; text: string }
-  | { type: 'hit'; kill: boolean }
+  | { type: 'hit'; kill: boolean; headshot?: boolean }
   | { type: 'kill'; name: string; weapon: string; headshot: boolean }
   | { type: 'damage'; dir: number; amount: number }
   | { type: 'flash'; power: number }
@@ -306,11 +310,12 @@ export type GameEvent =
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
   | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string }
-  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; outcome: TDMOutcome; roster: TdmRosterEntry[] } };
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; outcome: TDMOutcome; roster: TdmRosterEntry[] }; comp?: CompDebrief };
 
 export interface CashLogEntry { reason: string; amount: number; t: number }
 
 interface WeaponDef {
+  id: WeaponId; // Identity survives renames, custom builds and ranked purchases.
   name: string;
   model: WeaponModel;
   auto: boolean;
@@ -440,6 +445,7 @@ export class Engine {
   private tdmArmor: TDMArmor = 1;
   private tdmPlayerDead = false;
   private tdmRespawnT = 0;
+  private readonly spawnShield = new SpawnProtection();
   private tdmPlayerKills = 0;
   private tdmPlayerDeaths = 0;
   // ---- OPERATION BLACKOUT: ranked Search & Destroy (arena map) ----
@@ -773,7 +779,7 @@ void main(){
     this.vmLight = new THREE.PointLight(0xFFC070, 0, 4);
     this.vmScene.add(this.vmLight);
 
-    // Weapons: 1. M416, 2. AK-47, 3. 1911, 4. AWM, 5. MP
+    // Weapons: 1. M416, 2. AK-47, 3. 1911, 4. AWM, 5. MP7
     await nextFrame();
     const m4 = buildM4();
     const ak = buildAK47();
@@ -788,7 +794,7 @@ void main(){
 
     this.weapons = [
       {
-        name: 'M416',
+        id: 'm4a1', name: 'M416',
         model: m4,
         auto: true,
         rpm: 780,
@@ -805,7 +811,7 @@ void main(){
         emptyReload: 2.7,
       },
       {
-        name: 'AK-47',
+        id: 'ak47', name: 'AK-47',
         model: ak,
         auto: true,
         rpm: 600,
@@ -822,7 +828,7 @@ void main(){
         emptyReload: 3.0,
       },
       {
-        name: '1911',
+        id: 'm1911', name: '1911',
         model: m1911,
         auto: false,
         rpm: 420,
@@ -839,7 +845,7 @@ void main(){
         emptyReload: 1.8,
       },
       {
-        name: 'AWM',
+        id: 'awm', name: 'AWM',
         model: awm,
         auto: false,
         rpm: 48,
@@ -856,7 +862,7 @@ void main(){
         emptyReload: 2.7,
       },
       {
-        name: 'MP',
+        id: 'mp7', name: 'MP7',
         model: mp7,
         auto: true,
         rpm: 900,
@@ -874,8 +880,8 @@ void main(){
       },
     ];
     // Catalog recoil replaces the neutral constructor patterns before input can fire.
-    this.weapons.forEach((weapon,index)=>{
-      const entry=weaponById((['m4a1','ak47','m1911','awm','mp7'] as WeaponId[])[index])!;
+    this.weapons.forEach(weapon=>{
+      const entry=weaponById(weapon.id)!;
       weapon.pattern=entry.base.pattern.map(p=>[...p] as [number,number]);
       weapon.recoilBase=weapon.recoilMul=entry.base.recoilMul;
       weapon.adsSpread=entry.base.adsSpread;
@@ -1003,8 +1009,10 @@ void main(){
       };
       this.tdm = new TDMManager(tdmCtx);
       this.ai = new AIManager(ctx, []); // empty roster: keeps every mission-path callsite alive
-      this.pos.copy(this.tdm.getSpawn('alpha'));
-      this.yaw = Math.atan2(this.pos.x - 0, this.pos.z - 0);
+      const landing = this.tdm.getSpawnDecision('alpha', true);
+      this.pos.copy(landing.position);
+      this.spawnShield.grant(landing.exposed);
+      this.yaw = Math.atan2(this.pos.x, this.pos.z);
       this.buildSolidGrid();
       this.renderer.shadowMap.needsUpdate = true;
       this.rebuildHittables();
@@ -1140,7 +1148,12 @@ void main(){
     if (e.code === 'KeyR') this.startReload();
     {
       const streak = this.streakForKey(e.code);
-      if (streak) { this.streaks.activate(streak); return; }
+      if (streak) {
+        // Calling in armed support or starting a strike designation is an
+        // offensive action too; an unavailable streak does not cost protection.
+        this.spawnShield.spendOn(() => this.streaks.activate(streak));
+        return;
+      }
       // Escape-free abort for designation: tapping the strike key again cancels it.
     }
     if (e.code === 'Digit1') this.switchWeapon(0);
@@ -1237,7 +1250,10 @@ void main(){
       return;
     }
     if (e.button === 0) {
-      if (this.streaks.designating) { this.streaks.confirmStrike(); return; }
+      if (this.streaks.designating) {
+        this.spawnShield.spendOn(() => this.streaks.confirmStrike());
+        return;
+      }
       this.triggerHeld = true;
       this.tryFire();
     }
@@ -1796,6 +1812,7 @@ void main(){
       return;
     }
     this.mags[this.cur]--;
+    this.spawnShield.cancel(); // Only a real round cancels the exposed-spawn grace, not a dry click.
     this.fireCD = 60 / d.rpm;
     this.shots++;
     if (d.boltAction ?? this.cur === 3) { this.boltCycle = 1.25; this.rmb = false; }
@@ -1868,6 +1885,9 @@ void main(){
       if (!d.suppressed) this.effects.tracer(muzzleWorld, h.point);
       const tdmBot = (h.object.userData.tdmBot as TDMBot | undefined);
       if (tdmBot && !tdmBot.dead && (this.isTDM || this.isComp) && this.tdm) {
+        // Protected bodies still stop bullets, but are not a hit: no fake blood,
+        // hitmarker, accuracy credit or headshot audio for an immune target.
+        if (this.isTDM && tdmBot.spawnShield.active) continue;
         const part = h.object.userData.part as string;
         const ranked = this.isComp && !!this.comp;
         let dmg = ranked ? d.damage : d.damage * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
@@ -1901,7 +1921,7 @@ void main(){
           this.rebuildHittables();
         } else {
           audio.hitMarker();
-          this.onEvent({ type: 'hit', kill: false });
+          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head' });
         }
         continue;
       }
@@ -1960,7 +1980,7 @@ void main(){
           this.rebuildHittables();
         } else {
           audio.hitMarker();
-          this.onEvent({ type: 'hit', kill: false });
+          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head' });
         }
       } else {
         const n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : dir.clone().negate();
@@ -2000,6 +2020,8 @@ void main(){
       else if (tag === 'deagle') audio.fireDeagle();
       else audio.fireSMG();
     }
+    // Pump/bolt guns eject on their action, not at the muzzle flash.
+    audio.casingTick(d.boltAction || this.cur === 3 ? 0.95 : d.pumpShotgun ? 0.36 : 0.18);
 
     const mf = this.muzzleFlash.material as THREE.MeshBasicMaterial;
     mf.opacity = 1;
@@ -2045,7 +2067,7 @@ void main(){
     });
     applySkin(model.group, skinById(build.skin ?? 'factory'));
     return {
-      name: entry.name.toUpperCase(),
+      id: entry.id, name: entry.name.toUpperCase(),
       model,
       auto: stats.auto, rpm: stats.rpm, damage: stats.damage,
       headMul: stats.headMul, limbMul: stats.limbMul,
@@ -2115,8 +2137,10 @@ void main(){
     if (!d.masterkey || this.mkReloadT >= 0 || this.reloadT >= 0 || this.switchT >= 0 || this.dead || this.ended) return;
     if (this.mkAmmo <= 0) { audio.dryFire(); return; }
     this.mkAmmo--;
+    this.spawnShield.cancel();
     if (this.mkAmmo <= 0) this.mkReloadT = 0;
     audio.fireShotgun();
+    audio.casingTick(0.36); // Masterkey shell lands after the manual pump.
     this.shots++;
     const mf = this.muzzleFlash.material as THREE.MeshBasicMaterial;
     mf.opacity = 1;
@@ -2134,6 +2158,7 @@ void main(){
     const me = this.camera.matrix.elements;
     let anyHit = false;
     let anyKill = false;
+    let anyHead = false;
     for (let i = 0; i < 7; i++) {
       const dir = new THREE.Vector3(
         base.x + (Math.random() - 0.5) * 0.09 * (d.spreadX ?? 1),
@@ -2161,6 +2186,7 @@ void main(){
       this.effects.tracer(mw, h.point);
       const mkBot = (h.object.userData.tdmBot as TDMBot | undefined);
       if (mkBot && !mkBot.dead && (this.isTDM || this.isComp) && this.tdm) {
+        if (this.isTDM && mkBot.spawnShield.active) continue;
         const part = h.object.userData.part as string;
         let dmg = 13 * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
         if (part === 'head') dmg *= d.headMul;
@@ -2168,6 +2194,7 @@ void main(){
         if (h.distance > 14) dmg *= 0.4;
         this.hits++;
         anyHit = true;
+        anyHead ||= part === 'head';
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         if (mkBot.takeDamage(dmg, part === 'head', 'player')) {
@@ -2185,9 +2212,10 @@ void main(){
       if (h.distance > 14) dmg *= 0.4;
       this.hits++;
       anyHit = true;
+      const isHead = part === 'head';
+      anyHead ||= isHead;
       this.effects.blood(h.point);
       audio.fleshImpact(0);
-      const isHead = part === 'head';
       if (enemy.takeDamage(dmg, isHead)) {
         this.kills++;
         this.score += 100;
@@ -2204,7 +2232,7 @@ void main(){
       }
     }
     this.raycaster.far = 300;
-    if (anyHit && !anyKill) { audio.hitMarker(); this.onEvent({ type: 'hit', kill: false }); }
+    if (anyHit && !anyKill) { audio.hitMarker(); this.onEvent({ type: 'hit', kill: false, headshot: anyHead }); }
     if (anyKill) { this.onEvent({ type: 'hit', kill: true }); this.rebuildHittables(); }
     this.ai.notifyGunshot(this.pos, 70);
     this.tdm?.notifyGunshot(this.pos, 70);
@@ -2231,6 +2259,7 @@ void main(){
   }
 
   private spawnGrenade(from: THREE.Vector3, target: THREE.Vector3, fromAI: boolean, kind: 'frag' | 'flash' = 'frag', owner?: TDMBot) {
+    if (!fromAI) this.spawnShield.cancel(); // A flash throw is offensive too.
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.08, 10, 8),
       new THREE.MeshStandardMaterial({ color: kind === 'frag' ? 0x243224 : 0x2A2A38, roughness: 0.5, metalness: 0.6 })
@@ -2272,6 +2301,7 @@ void main(){
     if (!this.cooking) return;
     this.cooking = false;
     this.frags--;
+    this.spawnShield.cancel(); // Frag release, not pin-pull, forfeits protection.
     this.arcPreview.visible = false;
     // Overhand throw: velocity follows the camera's pitch, so looking up lofts it
     // into an arc and looking down throws it flat/low. This reads as a real throw.
@@ -2708,7 +2738,7 @@ void main(){
   }
 
   private damagePlayerTDM(amount: number, from: THREE.Vector3, killer: TDMBot | null) {
-    if (this.dead || this.ended) return;
+    if (this.dead || this.ended || this.spawnShield.active) return;
     const isHead = amount >= 40; // bot headshot rounds arrive at 44
     const reduced = amount * (1 - (isHead ? TDM_HEAD_REDUCTION[this.tdmArmor] : TDM_BODY_REDUCTION[this.tdmArmor]));
     this.hp -= reduced;
@@ -2720,6 +2750,7 @@ void main(){
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;
+      this.spawnShield.cancel();
       this.tdmPlayerDead = true;
       this.tdmPlayerDeaths++;
       this.tdmRespawnT = TDM_RESPAWN_SECONDS;
@@ -2735,12 +2766,14 @@ void main(){
   /** Redeploy the player at a protected pad with full HP and fresh utility. */
   private tdmRespawnPlayer() {
     if (!this.tdm || this.ended) return;
+    const landing = this.tdm.getSpawnDecision('alpha', true);
+    this.spawnShield.grant(landing.exposed);
     this.tdmPlayerDead = false;
     this.dead = false;
     this.endPlayerFire();
     this.hp = TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR;
     this.frags = 3; this.flashes = 1;
-    this.pos.copy(this.tdm.getSpawn('alpha'));
+    this.pos.copy(landing.position);
     this.vel.set(0, 0, 0); this.vx = 0; this.vz = 0;
     this.yaw = Math.atan2(this.pos.x, this.pos.z); // face mid
     this.pitch = 0;
@@ -3136,6 +3169,7 @@ void main(){
       mission, pressure,
       tdm: {
         alphaScore: m.score.alpha, bravoScore: m.score.bravo, playerKills: actor?.kills ?? 0,
+        outcome: m.draw ? 'draw' : win ? 'win' : 'loss',
         roster: [
           { name: 'YOU', team: playerTeam, dead: this.dead, armorIcon: armorIcon(this.compArmor, this.compHelmet), you: true, kills: actor?.kills ?? 0, deaths: actor?.deaths ?? 0, headshots: actor?.headshots ?? 0 },
           ...this.comp.manager.bots.map(b => ({
@@ -3253,6 +3287,7 @@ void main(){
   };
 
   private update(dt: number) {
+    this.spawnShield.tick(dt); // frame() skips update while paused or hidden, so grace never burns in a menu.
     this.clouds.rotation.y += dt * 0.0012;
     const k = this.keys;
 
@@ -3911,15 +3946,21 @@ void main(){
     // otherwise this slider only resized the canvas buffer while the whole
     // post-processed scene kept rendering at the stale cached resolution.
     const cap = s.resolutionScale / 100;
-    this.adaptiveEnabled = s.adaptiveResolution ?? true;
-    this.userPR = cap * Math.min(window.devicePixelRatio || 1,1.25);
-    this.adaptStep = 0;
-    this.dynPR = this.userPR * ADAPT_STEPS[0];
-    this.adaptLow = 0; this.adaptHigh = 0; this.adaptLockUntil = 0; this.adaptSamples.length = 0;
-    this.syncPixelRatio();
+    const enabled = s.adaptiveResolution ?? true;
+    const userPR = cap * Math.min(window.devicePixelRatio || 1, 1.25);
+    const resolutionChanged = Math.abs(this.userPR - userPR) > 0.0001 || this.adaptiveEnabled !== enabled || this.appliedPR < 0;
+    this.adaptiveEnabled = enabled;
+    this.userPR = userPR;
+    if (resolutionChanged) {
+      this.adaptStep = 0;
+      this.dynPR = userPR * ADAPT_STEPS[0];
+      this.adaptLow = 0; this.adaptHigh = 0; this.adaptLockUntil = 0; this.adaptSamples.length = 0;
+      this.syncPixelRatio();
+    }
 
-    // Shadows
-    const shadowSize = s.shadowQuality === 'off' ? 0 : s.shadowQuality === 'low' ? 1024 : s.shadowQuality === 'medium' ? 2048 : 4096;
+    // High keeps detail over Medium (2048) without High's old 4096² / 16.8m texels;
+    // 3072² uses 43.75% fewer shadow samples at the same world-space coverage.
+    const shadowSize = s.shadowQuality === 'off' ? 0 : s.shadowQuality === 'low' ? 1024 : s.shadowQuality === 'medium' ? 2048 : 3072;
     this.renderer.shadowMap.enabled = shadowSize > 0;
     if (this.sunLight) {
       this.sunLight.castShadow = shadowSize > 0;
@@ -4049,6 +4090,7 @@ void main(){
       hp: Math.round(this.hp),
       mag: this.mags[this.cur],
       weapon: this.def().name,
+      weaponId: this.def().id,
       masterkey: this.def().masterkey ? { shells: this.mkAmmo, reloading: this.mkReloadT >= 0 } : undefined,
       cash: this.cashEarned,
       secondaryWeapon: (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0] : this.weapons[this.cur === 2 ? 0 : 2])?.name ?? '',
@@ -4129,6 +4171,7 @@ void main(){
         playerKills: this.tdmPlayerKills,
         playerDead: this.tdmPlayerDead,
         respawnIn: Math.max(0, this.tdmRespawnT),
+        spawnShield: this.spawnShield.remaining,
         maxHp: TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR,
         onFire: this.onFire,
         onFireLeft: Math.max(0, this.onFireT),
@@ -4143,6 +4186,7 @@ void main(){
 
   dispose() {
     this.disposed = true;
+    this.spawnShield.cancel();
     this.pendingResult = null;
     // Leaving a mission must not leave wind or queued radio lines playing behind the menu.
     voice.cancel();

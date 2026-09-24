@@ -3,7 +3,10 @@ import { Engine, DEFAULT_SETTINGS, sanitizeSettings, type GameEvent, type GameSe
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
+import { RankedSetup } from './ui/Competitive';
+import { rankFor } from './game/economy/rank';
 import Armory from './ui/armory/Armory';
+import { armoryLaunchMode } from './ui/session-routing';
 import TdmSetup from './ui/TdmSetup';
 import { developmentCashGrant, grantCash, loadProfile, resetCurrentCash, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { settleResult } from './game/economy/settlement';
@@ -23,7 +26,7 @@ const afterPaint = () => new Promise<void>(resolve => {
   requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
 });
 const DEFAULT_HUD: HudState = {
-  hp: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
+  hp: 100, mag: 30, magSize: 30, weapon: 'M416', weaponId: 'm4a1', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
@@ -44,6 +47,7 @@ export default function App() {
   const engineRef = useRef<Engine | null>(null);
   const phaseRef = useRef<Phase>('menu');
   const session = useRef(0);
+  const resultHandled = useRef(false);
   const ids = useRef(0);
   const timers = useRef(new Set<number>());
   const [phase, setPhase] = useState<Phase>('menu');
@@ -117,7 +121,7 @@ export default function App() {
         setError(event.text); changePhase('paused');
         break;
       case 'hit':
-        setFx(f => ({ ...f, hitmark: { id, kill: event.kill } }));
+        setFx(f => ({ ...f, hitmark: { id, kill: event.kill, headshot: event.headshot === true } }));
         // Hitmarkers must never linger: clear after the flash unless a newer one replaced it.
         later(() => setFx(f => f.hitmark?.id === id ? { ...f, hitmark: null } : f), event.kill ? 450 : 260);
         break;
@@ -177,6 +181,8 @@ export default function App() {
         later(() => setFx(f => f.missionBanner?.id === id ? { ...f, missionBanner: null } : f), 2600);
         break;
       case 'end': {
+        if (resultHandled.current) break; // Duplicate end events must not pay or rate a second time.
+        resultHandled.current = true;
         engineRef.current?.setPaused(true);
         const settled = settleResult(profileRef.current, event);
         updateProfile(settled.profile);
@@ -200,7 +206,7 @@ export default function App() {
   useEffect(() => {
     const lockChanged = () => {
       const engine = engineRef.current;
-      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory' || phaseRef.current === 'tdm-setup') return;
+      if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory' || phaseRef.current === 'tdm-setup' || phaseRef.current === 'ranked-setup') return;
       if (document.pointerLockElement === canvasRef.current) {
         engine.setPaused(false);
         changePhase('playing');
@@ -256,10 +262,11 @@ export default function App() {
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
     const epoch = ++session.current;
     clearTimers();
+    resultHandled.current = false;
     setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
     // The boot screen must be the ONLY thing on screen — leaving the loadout
     // phase mounted produced the "loading + loadout at the same time" overlap.
-    if (phaseRef.current === 'tdm-setup') changePhase('menu');
+    if (phaseRef.current === 'tdm-setup' || phaseRef.current === 'ranked-setup') changePhase('menu');
     engineRef.current?.dispose(); engineRef.current = null;
     // Let React commit and the browser actually paint the boot screen before any of the
     // heavy mission build starts. Without this the deploy click blocked the main thread
@@ -311,7 +318,7 @@ export default function App() {
   const quit = () => {
     session.current++; clearTimers(); engineRef.current?.dispose(); engineRef.current = null;
     // Leaving an arena match returns to the Arena Mode screen, not the home menu.
-    setMenuView(settings.map === 'arena' ? 'arena' : 'home');
+    setMenuView(hud.comp ? 'home' : settings.map === 'arena' ? 'arena' : 'home');
     changePhase('menu'); setShowSettings(false); setError(''); setFx(emptyFx()); setHud(DEFAULT_HUD);
     if (document.pointerLockElement) document.exitPointerLock();
   };
@@ -326,6 +333,7 @@ export default function App() {
   const armoryBack = () => {
     changePhase(armoryFrom === 'results' && results ? 'results' : 'menu');
   };
+  const armoryMode = armoryLaunchMode(armoryFrom, results, settings.map);
   const fullscreen = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -347,7 +355,7 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} onRanked={() => { setMenuView('home'); changePhase('ranked-setup'); }} initialView={menuView} profile={profile} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>
@@ -360,9 +368,12 @@ export default function App() {
           </div>
         </aside>
       )}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
-      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} streaks={hud.comp ? undefined : hud.streaks} onResume={resume} onRestart={() => { void (hud.comp ? deployRanked() : hud.tdm ? launch('arena', 'tdm') : deploy()); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void (results.comp ? deployRanked() : results.tdm ? launch('arena', 'tdm') : deploy()); }} onMenu={quit} onArmory={() => openArmory('results')} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile}
+        onDeploy={() => { void (armoryMode === 'comp' ? deployRanked() : armoryMode === 'tdm' ? launch('arena', 'tdm') : deploy()); }}
+        onBack={armoryBack}
+        deployHint={armoryMode === 'comp' ? 'BLACKOUT · RANKED SEARCH & DESTROY' : armoryMode === 'tdm' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
         <TdmSetup
           profile={profile}

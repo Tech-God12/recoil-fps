@@ -810,7 +810,8 @@ img { display: block; max-width: 100%; }
 
 .reload-ring { animation: reloadDash 0.9s linear infinite; }
 @keyframes reloadDash { from { stroke-dashoffset: 163; } to { stroke-dashoffset: 0; } }
-.hm, .hm-kill { position: absolute; left: 50%; top: 50%; animation: hmFade 260ms ease-out forwards; }
+.hm, .hm-head, .hm-kill { position: absolute; left: 50%; top: 50%; animation: hmFade 260ms ease-out forwards; }
+.hm-head-core { position: absolute; width: 6px; height: 6px; left: -3px; top: -3px; border: 1.5px solid #F1C36A; transform: rotate(45deg); box-shadow: 0 0 8px #F1C36A; }
 .hm-kill { animation: hmKillFade 450ms ease-out forwards; }
 @keyframes hmFade { 0% { opacity: 1; transform: scale(1.12); } 55% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(0.94); } }
 @keyframes hmKillFade { 0% { opacity: 1; transform: scale(1.3); } 30% { opacity: 1; transform: scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: scale(0.92); } }
@@ -922,6 +923,7 @@ img { display: block; max-width: 100%; }
 
 /* ammo */
 .weapon-name { font-family: var(--display); font-weight: 800; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bone); }
+.weapon-round { display: inline-block; margin-left: 7px; padding: 2px 4px; border: 1px solid var(--line); color: var(--bone-dim); font-size: 9px; font-weight: 500; letter-spacing: .04em; vertical-align: middle; }
 .weapon-card { display: flex; gap: 6px; margin-top: 4px; font-size: 10px; }
 .weapon-card span { padding: 3px 7px; border: 1px solid var(--line); border-radius: 3px; background: rgba(0,0,0,0.2); color: var(--bone-mute); }
 .weapon-card .held { color: var(--bone); background: var(--ink-2); border-color: var(--line-strong); }
@@ -939,6 +941,13 @@ img { display: block; max-width: 100%; }
 @keyframes blink { 50% { opacity: 0.25; } }
 .onboard-strip { position: absolute; left: 50%; top: 78px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--hud-chip); border: 1px solid rgba(237,228,211,0.08); border-radius: 3px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; color: var(--bone-dim); }
 .onboard-strip i { width: 2px; height: 2px; border-radius: 50%; background: var(--bone-mute); }
+.onboard-tdm { top: 148px; border-color: rgba(79,176,198,.4); white-space: nowrap; }
+.onboard-tdm > span:first-child { color: #A4DDEA; font-weight: 700; }
+@media (max-width: 650px) {
+  /* Four control chips need two rows on a phone; never clip behind the viewport. */
+  .onboard-tdm { width: calc(100vw - 24px); max-width: 480px; justify-content: center; flex-wrap: wrap; gap: 4px 8px; padding: 7px 8px; white-space: normal; text-align: center; }
+  .onboard-tdm i { display: none; }
+}
 
 /* vitals */
 .vitals { padding: 12px 14px; min-width: 200px; }
@@ -1362,6 +1371,9 @@ img { display: block; max-width: 100%; }
 .tdm-deploy { min-width: 300px; }
 
 /* ---------- in-match scoreboard ---------- */
+.tdm-spawn-shield { position: absolute; top: 108px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; overflow: hidden; padding: 6px 10px 9px; border: 1px solid #73c9db; background: rgba(8,30,36,.9); color: #b9f1f6; font: 700 10px var(--mono); letter-spacing: .1em; white-space: nowrap; pointer-events: none; box-shadow: 0 0 15px rgba(65,190,212,.25); }
+.tdm-spawn-shield b { font-size: 12px; color: white; }
+.tdm-spawn-shield i { position: absolute; bottom: 0; left: 0; height: 2px; background: #73c9db; }
 .tdm-scoreboard { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none; }
 .tdm-score-row { display: flex; align-items: stretch; gap: 1px; border: 1px solid var(--line-strong); border-radius: 3px; overflow: hidden; background: rgba(10,9,7,0.72); backdrop-filter: blur(3px); }
 .tdm-score-team { display: flex; align-items: center; gap: 8px; padding: 4px 12px; font-family: var(--display); }

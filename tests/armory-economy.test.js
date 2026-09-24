@@ -231,7 +231,7 @@ test('catalog uses full real-steel display names with stable ids and shorts', ()
   const names = {
     m4a1: ['M416', 'M416'], ak47: ['AK-47', 'AK-47'],
     m1911: ['1911', '1911'], awm: ['AWM', 'AWM'],
-    mp7: ['MP', 'MP'], vector: ['Vector', 'Vector'],
+    mp7: ['MP7', 'MP7'], vector: ['Vector', 'Vector'], // Display only; save id remains mp7.
     spas12: ['SPAS', 'SPAS'], scar_h: ['SCAR', 'SCAR'],
     deagle: ['Deagle', 'Deagle'], m249: ['M249', 'M249'],
   };

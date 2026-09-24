@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import {
   attachmentById,
   type AttachSlot, type AttachmentCatalogEntry, type AttachmentId,
-  type WeaponCatalogEntry, type WeaponClass, type WeaponId,
+  type WeaponCatalogEntry, type WeaponClass,
 } from '../game/economy/catalog';
 import type { ResolvedWeaponStats } from '../game/economy/stats';
 import type { WeaponBuild } from '../game/economy/loadout';
@@ -94,18 +94,8 @@ export const CLASS_LABEL: Record<WeaponClass, string> = {
   SR: 'SNIPER RIFLE', SG: 'SHOTGUN', LMG: 'LIGHT MACHINE GUN', PISTOL: 'SIDEARM',
 };
 
-export const CALIBER: Record<WeaponId, { round: string; note: string }> = {
-  m4a1: { round: '5.56×45 NATO', note: 'Balanced performance, high rate of fire, and exceptional modularity. The trusted choice for operators worldwide.' },
-  ak47: { round: '7.62×39MM', note: 'Heavy intermediate cartridge. Punches through cover and brush like they owe it money.' },
-  m1911: { round: '.45 ACP', note: 'Big, slow, authoritative. Eight rounds that end arguments.' },
-  awm: { round: '.338 LAPUA', note: 'Long-range magnum. Flat, fast, and final — if you can stand the sway.' },
-  mp7: { round: '4.6×30MM', note: 'Armor-piercing PDW round. Small case, vicious cycle rate.' },
-  vector: { round: '.45 ACP', note: 'Pistol-caliber thumper in a fire hose of a gun. Manage the climb.' },
-  spas12: { round: '12 GAUGE', note: 'Eight pellets per trigger pull. Devastating inside a doorway.' },
-  scar_h: { round: '7.62×51MM', note: 'Full-power battle rifle round. Two taps solve most problems.' },
-  deagle: { round: '.50 AE', note: 'Hand-cannon magnum. Loud, proud, and wrist-breaking.' },
-  m249: { round: '5.56×45 BELT', note: 'Linked suppression. One hundred rounds before the long reload.' },
-};
+// Keep the armory and arena setup's existing import path while sharing the data with the HUD.
+export { CALIBER } from '../game/economy/catalog';
 
 const clampN = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 

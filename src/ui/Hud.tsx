@@ -5,10 +5,13 @@ import { Reticle } from './Settings';
 import MissionObjective, { missionClock } from './MissionObjective';
 import { CompHudLayer, CompScoreboard } from './Competitive';
 import ScopeView, { type ScopeControls } from './ScopeView';
+import { EXPOSED_SPAWN_SHIELD_SECONDS } from '../game/systems/spawn-protection';
+import { CALIBER } from '../game/economy/catalog';
+import { TDM_MATCH_SECONDS } from '../game/tdm';
 import { NukeCountdown, StreakActive, StreakMessage, StreakRail, StrikeDesignator } from './Streaks';
 
 export interface HudFx {
-  hitmark: { id: number; kill: boolean } | null;
+  hitmark: { id: number; kill: boolean; headshot?: boolean } | null;
   feed: { id: number; text: string; headshot: boolean; tdm?: { killer: string; weapon: string; victim: string; killerTeam: 'alpha' | 'bravo'; zone?: string } }[];
   dmgArcs: { id: number; dir: number; opacity: number }[];
   scorePops: { id: number; text: string; headshot: boolean; cash?: boolean }[];
@@ -98,6 +101,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
   const fpsColor = hud.fps >= 55 ? 'var(--olive)' : hud.fps >= 35 ? 'var(--brass)' : 'var(--blood)';
   const hpSegs = 10;
   const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / maxHp * hpSegs)));
+  const headHit = !!fx.hitmark?.headshot && !fx.hitmark.kill;
 
   return (
     <div className="hud-root pointer-events-none select-none">
@@ -153,6 +157,15 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
               ))}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* A short, honest HUD signal for the exposed-only redeploy shield. */}
+      {hud.tdm && !hud.comp && !hud.tdm.playerDead && hud.tdm.spawnShield > 0 && (
+        <div className="tdm-spawn-shield" role="status" aria-label="Spawn shield active; firing or throwing cancels it">
+          <span>◆ SPAWN SHIELD</span>
+          <b aria-hidden="true">{hud.tdm.spawnShield.toFixed(1)}s</b>
+          <i aria-hidden="true" style={{ width: `${hud.tdm.spawnShield / EXPOSED_SPAWN_SHIELD_SECONDS * 100}%` }} />
         </div>
       )}
 
@@ -256,15 +269,17 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       <ScopeView hud={hud} active={active} {...scopeControls} />
 
       {fx.hitmark && (
-        <div key={fx.hitmark.id} className={`absolute left-1/2 top-1/2 ${fx.hitmark.kill ? 'hm-kill' : 'hm'}`}>
+        <div key={fx.hitmark.id} role="img" aria-label={fx.hitmark.kill ? 'Kill confirmed' : headHit ? 'Headshot hit' : 'Hit'}
+          className={`absolute left-1/2 top-1/2 ${fx.hitmark.kill ? 'hm-kill' : headHit ? 'hm-head' : 'hm'}`}>
           {[45, -45, 135, -135].map(r => (
             <span key={r} style={{
-              position: 'absolute', width: 2, height: fx.hitmark!.kill ? 14 : 10, left: -1, top: fx.hitmark!.kill ? -7 : -5,
-              background: fx.hitmark!.kill ? '#C8321E' : '#fff',
-              boxShadow: fx.hitmark!.kill ? '0 0 10px #C8321E' : '0 0 4px rgba(255,255,255,.8)',
-              transform: `rotate(${r}deg) translateY(${fx.hitmark!.kill ? -13 : -11}px)`,
+              position: 'absolute', width: 2, height: fx.hitmark!.kill ? 14 : headHit ? 12 : 10, left: -1, top: fx.hitmark!.kill ? -7 : headHit ? -6 : -5,
+              background: fx.hitmark!.kill ? '#C8321E' : headHit ? '#F1C36A' : '#fff',
+              boxShadow: fx.hitmark!.kill ? '0 0 10px #C8321E' : headHit ? '0 0 7px #F1C36A' : '0 0 4px rgba(255,255,255,.8)',
+              transform: `rotate(${r}deg) translateY(${fx.hitmark!.kill ? -13 : headHit ? -14 : -11}px)`,
             }} />
           ))}
+          {headHit && <span className="hm-head-core" aria-hidden="true" />}
         </div>
       )}
 
@@ -420,7 +435,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
 
       {/* ============ AMMO ============ */}
       <div className="absolute bottom-7 right-8 text-right">
-        <div className="weapon-name">{hud.weapon}</div>
+        <div className="weapon-name">{hud.weapon} <span className="weapon-round mono">{CALIBER[hud.weaponId]?.round}</span></div>
         <div className="weapon-card mono" aria-label="Loadout">
           <span className={hud.heldSlot === 'primary' ? 'held' : ''}>1 · {hud.heldSlot === 'primary' ? hud.weapon : hud.secondaryWeapon}</span>
           {hud.secondaryWeapon && (
@@ -474,6 +489,16 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
             <i /><span className="keycap">X</span> ATTACH / BLAST
             <i /><span className="keycap">3-7</span> STREAKS
           </span>
+        </div>
+      )}
+
+      {/* First eight sim seconds: one readable goal/controls cue, no mission overlay. */}
+      {hud.tdm && !hud.comp && !hud.tdm.playerDead && hud.tdm.timeLeft > TDM_MATCH_SECONDS - 8 && (
+        <div className="onboard-strip onboard-tdm hud-chip" role="status">
+          <span>5V5 · MOST KILLS AT 2:30 WINS</span>
+          <i /><span><span className="keycap">TAB</span> SCOREBOARD</span>
+          <i /><span><span className="keycap">G</span> FRAG</span>
+          <i /><span><span className="keycap">6–0</span> STREAKS</span>
         </div>
       )}
 

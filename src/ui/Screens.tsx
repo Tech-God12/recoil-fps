@@ -49,6 +49,11 @@ const Arrow = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="square" /></svg>
 );
 
+/** Keyboard selection follows the rendered list, not a stale count from the old four-action menu. */
+export function wrapMenuSelection(index: number, step: number, count: number): number {
+  return (index + step + count) % count;
+}
+
 /* ---------- tactical-home glyphs (inline, no extra assets) ---------- */
 const CoinIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="none" stroke="#C9A15A" strokeWidth="1.4" /><circle cx="6" cy="6" r="1.6" fill="#C9A15A" /></svg>
@@ -151,8 +156,8 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
       if (e.code === 'Tab') { e.preventDefault(); setProfileOpen(o => !o); return; }
       if (e.code === 'Escape') { setProfileOpen(false); return; }
       if (profileOpen) return;
-      if (e.code === 'KeyW' || e.code === 'ArrowUp') { e.preventDefault(); setSel(s => (s + 3) % 4); }
-      else if (e.code === 'KeyS' || e.code === 'ArrowDown') { e.preventDefault(); setSel(s => (s + 1) % 4); }
+      if (e.code === 'KeyW' || e.code === 'ArrowUp') { e.preventDefault(); setSel(s => wrapMenuSelection(s, -1, items.length)); }
+      else if (e.code === 'KeyS' || e.code === 'ArrowDown') { e.preventDefault(); setSel(s => wrapMenuSelection(s, 1, items.length)); }
       else if (e.code === 'KeyA' || e.code === 'ArrowLeft') { setIntel(v => (v + 3) % 4); }
       else if (e.code === 'KeyD' || e.code === 'ArrowRight') { setIntel(v => (v + 1) % 4); }
       else if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); activate(sel); }
@@ -789,6 +794,8 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   const { grade, tint } = gradeFor(r);
   const isDraw = r.tdm?.outcome === 'draw';
   const hasWon = r.tdm ? r.tdm.outcome === 'win' : r.win;
+  const matchStamp = isDraw ? '=' : hasWon ? 'W' : 'L';
+  const matchTint = isDraw ? '#C9A15A' : hasWon ? '#7FC4D4' : '#C8321E';
   const cashRows: { label: string; detail: string; total: number }[] = [];
   for (const reason of Object.keys(CASH_REASONS)) {
     const entries = r.cashLog.filter(e => e.reason === reason);
@@ -802,9 +809,9 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
       <main className={`results-root ${r.win ? '' : 'lose'}`}>
         <div className="results-wrap">
           <div className="results-header">
-            <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
+            <div className="stamp"><span className="stamp-grade" style={{ color: matchTint }}>{matchStamp}</span></div>
             <div className="results-titleblock">
-              <div className="stamp-label">BLACKOUT REPORT</div>
+              <div className="stamp-label">RANKED RESULT · BLACKOUT</div>
               <h1>OPERATION BLACKOUT</h1>
               <p className="mono">RANKED SEARCH &amp; DESTROY · WAREHOUSE COMPLEX · {missionClock(r.timeSec)}</p>
             </div>
@@ -823,9 +830,9 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
     <main className={`results-root ${isDraw ? 'draw' : hasWon ? '' : 'lose'}`}>
       <div className="results-wrap">
         <div className="results-header">
-          <div className="stamp"><span className="stamp-grade" style={{ color: isDraw ? '#C9A15A' : tint }}>{isDraw ? '=' : grade}</span></div>
+          <div className="stamp"><span className="stamp-grade" style={{ color: tdm ? matchTint : tint }}>{tdm ? matchStamp : grade}</span></div>
           <div className="results-titleblock">
-            <div className="stamp-label">{isDraw ? 'Match draw' : `Grade ${grade}`}</div>
+            <div className="stamp-label">{tdm ? (isDraw ? 'Match draw' : 'Match result') : `Grade ${grade}`}</div>
             <h2 className="results-title">{tdm
               ? (tdm.outcome === 'draw' ? 'Draw' : tdm.outcome === 'win' ? 'Victory — Alpha squad' : 'Defeat — Bravo squad')
               : (r.win ? 'Extraction complete' : 'Mission failed')}</h2>
@@ -901,7 +908,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
           </div>
           {wallet.gradeBonus > 0 && (
             <div className="cash-row">
-              <span className="cash-row-label">Grade bonus <small>{grade}</small></span>
+              <span className="cash-row-label">{tdm ? 'Match performance bonus' : 'Grade bonus'} <small>{tdm ? 'score-based' : grade}</small></span>
               <span className="cash-row-val mono">+${wallet.gradeBonus.toLocaleString('en-US')}</span>
             </div>
           )}

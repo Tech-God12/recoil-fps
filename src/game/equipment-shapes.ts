@@ -144,7 +144,7 @@ function grip(ctx:AttachContext,kind:'vertical'|'half'|'thumb'|'light'|'pump') {
 }
 
 function compactRail(ctx:AttachContext,light:boolean,pistol:boolean) {
-  const p=new THREE.Group(),b=new GunBuilder(),h=pistol?.010:.016;
+  const p=new THREE.Group(),b=new GunBuilder(),h=pistol?.009:.0125;
   b.name('host matched rail shoe').box(pistol?.020:.022,.005,pistol?.026:.032,WM.darkSteel,0,.001,0);
   if(light){
     b.name('pistol light body').box(.021,.015,.028,WM.dark,0,.010,0);

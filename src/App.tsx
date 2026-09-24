@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Engine, DEFAULT_SETTINGS, type GameEvent, type GameSettings, type HudState } from './game/engine';
+import { Engine, sanitizeSettings, type GameEvent, type GameSettings, type HudState } from './game/engine';
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results, type DefusalMenuOptions } from './ui/Screens';
 import BuyMenu from './ui/BuyMenu';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
-import { buildForWeapon, grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
-import { gradeBonus, gradeFor } from './game/economy/rewards';
+import { buildForWeapon, developmentCashGrant, grantCash, loadProfile, resetCurrentCash, saveProfile, type PlayerProfile } from './game/economy/profile';
+import { settleResult } from './game/economy/settlement';
+import { rankFor } from './game/economy/rank';
+import { RankedSetup } from './ui/Competitive';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'ranked-setup';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
+const LEGACY_WALLET_NOTICE_THRESHOLD = 9_000_000;
 const DEFUSAL_KEY = 'recoilfps.defusal.v1';
 function loadDefusalOptions(): DefusalMenuOptions {
   try {
@@ -39,22 +42,13 @@ const DEFAULT_HUD: HudState = {
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, nukeFlash: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
-/** Testing economy: bottomless wallet so every gun and attachment can be trialled. */
-const DEV_WALLET = 9_999_999;
-function loadRichProfile(): PlayerProfile {
-  const p = loadProfile();
-  return p.cash < DEV_WALLET ? grantCash(p, DEV_WALLET - p.cash, 'DEV') : p;
-}
-
 function loadSettings(): GameSettings {
-  try {
-    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    return { ...DEFAULT_SETTINGS, ...raw, map: raw.map === 'kasbah' ? 'kasbah' : raw.map === 'arena' ? 'arena' : raw.map === 'sirocco' ? 'sirocco' : 'alrasul' };
-  } catch { return { ...DEFAULT_SETTINGS }; }
+  const s = sanitizeSettings(localStorage.getItem(SETTINGS_KEY));
+  return { ...s, map: s.map === 'kasbah' || s.map === 'arena' || s.map === 'sirocco' ? s.map : 'alrasul' };
 }
 
 export default function App() {
@@ -73,7 +67,9 @@ export default function App() {
   const [results, setResults] = useState<Results | null>(null);
   const [wallet, setWallet] = useState<ResultsWallet | null>(null);
   const [fx, setFx] = useState<HudFx>(emptyFx);
-  const [profile, setProfile] = useState<PlayerProfile>(loadRichProfile);
+  const [profile, setProfile] = useState<PlayerProfile>(loadProfile);
+  const [showLegacyWalletNotice, setShowLegacyWalletNotice] = useState(false);
+  const legacyWalletNoticeDismissed = useRef(false);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
   const [tdmArmor, setTdmArmor] = useState<TDMArmor>(1);
   // Which MainMenu screen to show when phase returns to 'menu' (so leaving the
@@ -98,16 +94,18 @@ export default function App() {
     saveProfile(next);
   }, []);
 
-  // Hidden balance-testing affordance: #cash=50000 on the menu grants it once per pageload.
+  // The balance grant remains an explicit development-only test affordance.
   useEffect(() => {
-    const m = window.location.hash.match(/#cash=(\d+)/);
-    if (!m) return;
-    const amt = Math.min(999999, parseInt(m[1], 10));
+    const amount = developmentCashGrant(window.location.hash, import.meta.env.DEV);
+    if (!amount) return;
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    if (amt > 0) {
-      updateProfile(grantCash(profileRef.current, amt, 'DEV'));
-    }
+    updateProfile(grantCash(profileRef.current, amount, 'DEV'));
   }, [updateProfile]);
+  useEffect(() => {
+    if (profile.cash >= LEGACY_WALLET_NOTICE_THRESHOLD && !legacyWalletNoticeDismissed.current) {
+      setShowLegacyWalletNotice(true);
+    }
+  }, [profile.cash]);
 
   const later = useCallback((fn: () => void, delay: number) => {
     const epoch = session.current;
@@ -127,7 +125,7 @@ export default function App() {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* Storage is optional. */ }
     engineRef.current?.applySettings(settings);
   }, [settings]);
-  const set = useCallback((patch: Partial<GameSettings>) => setSettings(previous => ({ ...previous, ...patch })), []);
+  const set = useCallback((patch: Partial<GameSettings>) => setSettings(previous => sanitizeSettings({ ...previous, ...patch })), []);
   useEffect(() => {
     try { localStorage.setItem(DEFUSAL_KEY, JSON.stringify(defusalOpts)); } catch { /* Storage is optional. */ }
   }, [defusalOpts]);
@@ -151,7 +149,6 @@ export default function App() {
       engine.setPaused(true); setHud(engine.hud()); changePhase('paused');
     }
   }, [changePhase]);
-
   const onEvent = useCallback((event: GameEvent) => {
     const id = ++ids.current;
     switch (event.type) {
@@ -206,6 +203,14 @@ export default function App() {
         setFx(f => ({ ...f, banner: { id, label: event.label } }));
         later(() => setFx(f => f.banner?.id === id ? { ...f, banner: null } : f), 1600);
         break;
+      case 'streakmsg':
+        setFx(f => ({ ...f, streakMsg: { id, text: event.text } }));
+        later(() => setFx(f => f.streakMsg?.id === id ? { ...f, streakMsg: null } : f), 3600);
+        break;
+      case 'nuke':
+        setFx(f => ({ ...f, nukeFlash: id }));
+        later(() => setFx(f => f.nukeFlash === id ? { ...f, nukeFlash: null } : f), 5200);
+        break;
       case 'buymenu':
         if (event.open) openBuy();
         break;
@@ -216,16 +221,9 @@ export default function App() {
       case 'end': {
         buyOpenRef.current = false; setBuyOpen(false);
         engineRef.current?.setPaused(true);
-        // Debrief payout: run cash × difficulty, plus the grade bonus on a win.
-        // (Losses keep 100% of earned cash but forfeit extraction + grade.)
-        const gb = event.win ? gradeBonus(gradeFor(event).grade) : 0;
-        const earned = Math.round(event.cash * event.difficultyMul) + gb;
-        const before = profileRef.current;
-        const next = grantCash(before, earned, 'MISSION');
-        next.missions += 1;
-        next.kills += event.kills;
-        updateProfile(next);
-        setWallet({ before: before.cash, after: next.cash, gradeBonus: gb, earned });
+        const settled = settleResult(profileRef.current, event);
+        updateProfile(settled.profile);
+        setWallet(settled.wallet);
         changePhase('results');
         setResults({ ...event });
         if (document.pointerLockElement) document.exitPointerLock();
@@ -289,10 +287,16 @@ export default function App() {
    * `mapOverride` beats the (possibly not-yet-committed) settings state so
    * "Play" in Arena Mode can never race the map selection. */
   const deploy = async (mapOverride?: GameSettings['map']) => {
-    await launch(mapOverride);
+    await launch(mapOverride, 'mission');
   };
 
-  const launch = async (mapOverride?: GameSettings['map']) => {
+  /** OPERATION BLACKOUT: always the warehouse, always ranked. */
+  const deployRanked = async () => {
+    if (settings.map !== 'arena') set({ map: 'arena' });
+    await launch('arena', 'comp');
+  };
+
+  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' | 'comp' | 'defusal' = 'mission') => {
     if (!canvasRef.current || launching) return;
     const map = mapOverride ?? settings.map;
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
@@ -309,13 +313,15 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      // Bomb Defusal fields your own armory builds for every gun you own.
+      // Bomb Defusal fields your own armory builds; ranked deploys the ladder state.
       const prof = profileRef.current;
-      const defusalLaunch = map === 'sirocco'
-        ? { side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
-        : null;
+      const launchOptions = map === 'sirocco'
+        ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
+        : mode === 'comp'
+          ? { mode: 'comp' as const, compBuilds: prof.builds, rankedProfile: prof.ranked }
+          : mode === 'tdm' ? { mode: 'tdm' as const } : { mode: 'mission' as const };
       buyOpenRef.current = false; setBuyOpen(false);
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, defusalLaunch);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, launchOptions);
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -377,12 +383,34 @@ export default function App() {
       else await document.documentElement.requestFullscreen();
     } catch { setError('Fullscreen is unavailable. You can continue in this window.'); }
   };
+  const keepLegacyWallet = () => {
+    legacyWalletNoticeDismissed.current = true;
+    setShowLegacyWalletNotice(false);
+  };
+  const resetLegacyWallet = () => {
+    if (!window.confirm('Set current cash to $0? Weapon ownership and lifetime earnings will be kept.')) return;
+    legacyWalletNoticeDismissed.current = true;
+    setShowLegacyWalletNotice(false);
+    updateProfile(resetCurrentCash(profileRef.current));
+  };
 
   return (
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
+      {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
+        <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
+          <div>
+            <strong id="legacy-wallet-title">Saved cash preserved · ${profile.cash.toLocaleString('en-US')}</strong>
+            <p>If this balance came from an older test build, you may clear current cash. Purchases and lifetime earnings stay.</p>
+          </div>
+          <div className="legacy-wallet-actions">
+            <button onClick={keepLegacyWallet}>Keep balance</button>
+            <button className="reset" onClick={resetLegacyWallet}>Reset current cash</button>
+          </div>
+        </aside>
+      )}
       {phase === 'playing' && buyOpen && hud.defusal && (
         <BuyMenu
           df={hud.defusal}
@@ -400,8 +428,17 @@ export default function App() {
           onProfile={updateProfile}
           armor={tdmArmor}
           onArmor={setTdmArmor}
-          onDeploy={() => { void launch('arena'); }}
+          onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
+        />
+      )}
+      {phase === 'ranked-setup' && !launching && (
+        <RankedSetup
+          rank={rankFor(profile.ranked.rating, profile.ranked)}
+          rating={profile.ranked.rating}
+          record={profile.ranked}
+          onDeploy={() => { void deployRanked(); }}
+          onBack={() => { setMenuView('home'); changePhase('menu'); }}
         />
       )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}

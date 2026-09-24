@@ -292,7 +292,7 @@ export class DefusalMode implements BotSquad {
       groundHeight: ctx.groundHeight, effects: ctx.effects, moveCollide: ctx.moveCollide,
       playerPos: ctx.playerPos, playerFeet: ctx.playerFeet,
       playerAlive: () => ctx.playerAlive() && this.player.alive,
-      damagePlayer: (a, f, k, hit) => ctx.damagePlayer(a, f, k, hit),
+      damagePlayer: (a, f, k, hit) => ctx.damagePlayer(a, f, k, hit as BotHit | undefined),
       onCallout: (kind, pos, team) => this.botCallout(kind, pos, team),
       throwGrenade: (from, target, owner) => ctx.throwGrenade(from, target, owner, 'frag'),
       onBotFire: (p, team) => { ctx.onBotFire(p, team); this.hearGunfire(p, team); },
@@ -805,7 +805,7 @@ export class DefusalMode implements BotSquad {
   /** Bot gunfire: enemies holding an angle within earshot turn to face the fight. */
   private hearGunfire(p: THREE.Vector3, team: TDMTeam) {
     for (const c of this.players) {
-      if (!c.bot || !c.alive || c.team === team || c.bot.seesEnemy) continue;
+      if (!c.bot || !c.alive || c.team === team || c.bot.seesEnemy()) continue;
       if (c.bot.pos.distanceTo(p) > 26) continue;
       const plan = this.plans.get(c.bot);
       if (plan && (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'retakeStage')) { plan.lookAt = p.clone(); plan.lookT = this.roundTime + 1.6; }
@@ -820,7 +820,7 @@ export class DefusalMode implements BotSquad {
     }
     if (this.playerSide === 'attack') { const s = this.siteNear(pos, true); if (s) this.threat[s] += 0.35; }
     for (const c of this.players) {
-      if (!c.bot || !c.alive || c.team !== 'bravo' || c.bot.seesEnemy || c.bot.pos.distanceTo(pos) > Math.min(radius, 30)) continue;
+      if (!c.bot || !c.alive || c.team !== 'bravo' || c.bot.seesEnemy() || c.bot.pos.distanceTo(pos) > Math.min(radius, 30)) continue;
       const plan = this.plans.get(c.bot);
       if (plan && (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'retakeStage')) { plan.lookAt = pos.clone(); plan.lookT = this.roundTime + 1.6; }
     }
@@ -1032,7 +1032,7 @@ export class DefusalMode implements BotSquad {
     this.spotted.clear();
     for (const c of this.players) {
       if (!c.bot || !c.alive || c.team !== 'bravo') continue;
-      const seen = this.players.some(a => a.team === 'alpha' && a.alive && a.bot && a.bot.seesEnemy && a.bot.targetBot === c.bot)
+      const seen = this.players.some(a => a.team === 'alpha' && a.alive && a.bot && a.bot.seesEnemy() && a.bot.targetBot === c.bot)
         || (this.player.alive && this.ctx.playerCanSee(c.bot.eyePos()));
       if (seen) this.spotted.add(c.bot);
     }
@@ -1252,7 +1252,7 @@ export class DefusalMode implements BotSquad {
 
     // ---- intel: what the defenders see ----
     for (const c of this.players) {
-      if (!c.bot || !c.alive || this.sideOf(c) !== 'defend' || !c.bot.seesEnemy) continue;
+      if (!c.bot || !c.alive || this.sideOf(c) !== 'defend' || !c.bot.seesEnemy()) continue;
       const tf = c.bot.targetFeet;
       if (!tf) continue;
       const site = this.siteNear(tf);
@@ -1263,7 +1263,7 @@ export class DefusalMode implements BotSquad {
     }
     // ally callouts for the player's team
     for (const c of this.players) {
-      if (c.team !== 'alpha' || !c.bot || !c.alive || !c.bot.seesEnemy) continue;
+      if (c.team !== 'alpha' || !c.bot || !c.alive || !c.bot.seesEnemy()) continue;
       const tf = c.bot.targetFeet;
       if (!tf) continue;
       const zone = siroccoZoneAt(tf.x, tf.z);
@@ -1273,7 +1273,7 @@ export class DefusalMode implements BotSquad {
     // ---- eco scavenging: gunless bots grab a nearby dropped primary early on ----
     if (live && this.roundTime < 40 && this.drops.length) {
       for (const c of this.players) {
-        if (!c.bot || !c.alive || c.inv.primary || c.bot.seesEnemy) continue;
+        if (!c.bot || !c.alive || c.inv.primary || c.bot.seesEnemy()) continue;
         const plan = this.plans.get(c.bot);
         if (!plan || plan.task === 'loot' || plan.task === 'plant' || plan.task === 'getbomb' || plan.task === 'follow') continue;
         const d = this.drops.find(x => shopItem(x.weapon)?.kind === 'primary' && d2(c.bot!.pos, x.pos.x, x.pos.z) < 10);
@@ -1500,7 +1500,7 @@ export class DefusalMode implements BotSquad {
     if (this.bomb.defuser === c && this.bomb.defuseT > 0) {
       const t = c.inv.kit ? TIMING.defuseKit : TIMING.defuse;
       const spare = this.match.clock - (t - this.bomb.defuseT);
-      if (bot.seesEnemy && bot.sinceSeen < 0.3 && spare > 4 && this.rng() < 0.03) {
+      if (bot.seesEnemy() && bot.sinceSeen < 0.3 && spare > 4 && this.rng() < 0.03) {
         this.bomb.defuser = null; this.bomb.defuseT = 0;
         if (plan) plan.t = this.roundTime + 3;
         return false;

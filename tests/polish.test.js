@@ -11,8 +11,9 @@ const {getMission}=await import('../src/game/systems/mission.ts');
 const keys=['sand','plaza','adobeWall','adobeWall2','adobeBrick','concrete','asphalt','wood','rustedMetal','sandbag','tileFloor','plaster','whitewash','stoneBlock','firedBrick','packedEarth','corrugatedMetal','roughTimber','terracePavers','cobbleLane','wadiBed','signage'];
 const fixture=id=>buildWorld(new THREE.Scene(),id,Object.fromEntries(keys.map(k=>[k,new THREE.MeshStandardMaterial()])));
 
-test('Sandblast and Town expand outward without scaling doors and stairs',()=>{
-  assert.deepEqual(MAPS.map(m=>m.name),['Sandblast','Town']);
+test('story maps expand outward without scaling doors and stairs while Warehouse stays selectable',()=>{
+  assert.deepEqual(MAPS.filter(m=>m.id!=='arena').map(m=>m.name),['Sandblast','Town','Sirocco']);
+  assert.equal(MAPS.find(m=>m.id==='arena')?.name,'Warehouse');
   for(const [id,old] of [['alrasul',104],['kasbah',112]]) {
     const w=fixture(id);assert.ok(w.half/old>1.18&&w.half/old<1.22);
     assert.ok(w.interiors.some(b=>Math.abs(b.minX)>old),'new outer buildings, not only larger bounds');

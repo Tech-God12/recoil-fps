@@ -15,11 +15,17 @@ import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
 import { REWARDS, difficultyMultiplier, streakAward } from './economy/rewards';
 import { skinById } from './economy/skins';
 import { sanitizeBuild, type Loadout, type WeaponBuild } from './economy/loadout';
+import {
+  COMP_BASE_HP, COMP_BOMB_FUSE, COMP_SITES,
+  applyCompetitiveDamage, type CompSiteId, type CompTeam,
+} from './competitive/rules';
+import type { RankView } from './economy/rank';
 import { clampScopePower, magnificationFov } from './economy/optics';
 import { recoilImpulse, recoilRecovery } from './recoil';
 import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
+import { StreakDirector, STREAK_POINTS, type StreakContext, type StreakHud, type StreakId, type StreakTarget } from './streaks';
 import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './ai';
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
 import type { MissionReport, MissionPhase } from './systems/mission';
@@ -28,12 +34,94 @@ import {
   TDMManager, TDM_BASE_HP, TDM_HP_PER_ARMOR, TDM_DAMAGE_MUL, TDM_MATCH_SECONDS, TDM_RESPAWN_SECONDS,
   TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, TDM_ARMOR_ICONS,
   TDM_FIRE_KILLS, TDM_FIRE_WINDOW, TDM_FIRE_SECONDS, TDM_FIRE_COOLDOWN,
-  TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL,
-  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam, type BotHit,
+  TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL, TDM_SHUTDOWN_CASH, TDM_DRAW_CASH, tdmOutcome,
+  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam, type TDMOutcome, type BotHit,
 } from './tdm';
 import { DefusalMode, type DefusalHud, type DefusalResult } from './defusal/mode';
 import { armorCovers, hitDamage, modScaleFor, type HitPart, type Inventory } from './defusal/shop';
 import type { MatchFormatId, Side } from './defusal/rules';
+import {
+  CompetitiveRunner, PLAYER_ID,
+  type CompHud, type CompUiEvent, type PlayerBridge, type PlayerKit,
+} from './competitive/match';
+import { DEFAULT_RANKED, rankFor, ratingDelta, type RankedProfile } from './economy/rank';
+
+/**
+ * OPERATION BLACKOUT — competitive view of the ranked match state. The rules-side
+ * payload comes from the match runner; the rack, cursor and radar dots are folded
+ * in here so the HUD renders one object per poll.
+ */
+export interface CompRackView {
+  id: string;
+  name: string;
+  short: string;
+  price: number;
+  category: string;
+  tier: number;
+  blurb: string;
+  stat: string;
+  key: string;
+  slot: string;
+  affordable: boolean;
+  legal: boolean;
+}
+
+export interface CompRadarDot {
+  id: string;
+  nx: number;
+  nz: number;
+  yaw: number;
+  alive: boolean;
+  hot: boolean;
+}
+
+export interface CompHudView extends CompHud {
+  /** The buy rack is open (freezetime, or re-opened with B mid-round). */
+  buyOpen: boolean;
+  buyCursor: number;
+  rack: CompRackView[];
+  mates: CompRadarDot[];
+  foes: CompRadarDot[];
+  bombMap: { nx: number; nz: number } | null;
+  siteRings: { id: CompSiteId; nx: number; nz: number; rPct: number; active: boolean; planted: boolean }[];
+  /** The attacking squad's current target — drives the radar objective chevron. */
+  targetSite: CompSiteId;
+  /** Ranked ladder: tier + progress after this match. */
+  rank: RankView;
+  /** Rating change banked from the finished match (0 while it is still live). */
+  ratingChange: number;
+}
+
+/** OPERATION BLACKOUT debrief: the match, and what it did to the ladder. */
+export interface CompDebrief {
+  win: boolean;
+  draw: boolean;
+  score: { alpha: number; bravo: number };
+  rounds: number;
+  history: CompTeam[];
+  kills: number; deaths: number; headshots: number; plants: number; defuses: number; mvps: number;
+  adr: number;
+  ratingBefore: number; ratingAfter: number; delta: number;
+  breakdown: { outcome: number; performance: number; margin: number };
+  placement: boolean;
+  rankBefore: string; rankAfter: string;
+  progressBefore: number; progressAfter: number;
+  /** Ladder state to persist — the app writes this straight into the profile. */
+  next: RankedProfile;
+}
+
+export interface EngineLaunchOptions {
+  /** 'mission' | 'tdm' | 'comp' — defaults keep every existing call site honest. */
+  mode?: 'mission' | 'tdm' | 'comp' | 'defusal';
+  /** Per-weapon armory builds so a ranked buy uses the player's own attachments. */
+  compBuilds?: Partial<Record<WeaponId, WeaponBuild>>;
+  /** Ladder position before the match, so the debrief can show the delta. */
+  rankedProfile?: RankedProfile | null;
+  /** Bomb Defusal (Sirocco): side, half-length format and the player's armory builds. */
+  side?: Side | 'random';
+  format?: MatchFormatId;
+  builds?: Partial<Record<WeaponId, WeaponBuild>>;
+}
 
 export interface GameSettings {
   // Gameplay
@@ -50,9 +138,9 @@ export interface GameSettings {
   shadowQuality: 'off' | 'low' | 'medium' | 'high';
   bloom: boolean;
   bloomStrength: number;    // 0 - 100
-  vignette: number;         // 0 - 100
+  vignette: number;         // 0 - 70
   filmGrain: number;        // 0 - 100
-  brightness: number;       // 80 - 160 (exposure %)
+  brightness: number;       // 80 - 170 (exposure %)
   cameraShake: number;      // 0 - 100
   showFps: boolean;
   // Audio
@@ -60,9 +148,9 @@ export interface GameSettings {
   voices: boolean;
   // Crosshair
   crosshairColor: string;
-  crosshairSize: number;    // 4 - 20
-  crosshairGap: number;     // 0 - 24
-  crosshairThickness: number; // 1 - 5
+  crosshairSize: number;    // 3 - 24
+  crosshairGap: number;     // 0 - 26
+  crosshairThickness: number; // 1 - 6
   crosshairDot: boolean;
 }
 
@@ -92,6 +180,51 @@ export const DEFAULT_SETTINGS: GameSettings = {
   crosshairThickness: 2,
   crosshairDot: true,
 };
+
+/** Validate persisted and live patches before they reach input, audio or the renderer. */
+export function sanitizeSettings(input: unknown): GameSettings {
+  let raw = input;
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw) as unknown; } catch { raw = {}; }
+  }
+  const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const number = (key: string, fallback: number, min: number, max: number): number => {
+    const value = data[key];
+    return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+  };
+  const boolean = (key: string, fallback: boolean): boolean => typeof data[key] === 'boolean' ? data[key] as boolean : fallback;
+  const choice = <T extends string>(key: string, options: readonly T[], fallback: T): T => {
+    const value = data[key];
+    return typeof value === 'string' && (options as readonly string[]).includes(value) ? value as T : fallback;
+  };
+  const color = data.crosshairColor;
+  return {
+    sensitivity: number('sensitivity', DEFAULT_SETTINGS.sensitivity, 0.5, 10),
+    adsSensitivity: number('adsSensitivity', DEFAULT_SETTINGS.adsSensitivity, 0.2, 1.5),
+    invertY: boolean('invertY', DEFAULT_SETTINGS.invertY),
+    adsToggle: boolean('adsToggle', DEFAULT_SETTINGS.adsToggle),
+    fov: number('fov', DEFAULT_SETTINGS.fov, 70, 120),
+    difficulty: choice('difficulty', ['Easy', 'Normal', 'Hard'], DEFAULT_SETTINGS.difficulty),
+    map: choice('map', ['alrasul', 'kasbah', 'arena', 'sirocco'], DEFAULT_SETTINGS.map),
+    adaptiveResolution: boolean('adaptiveResolution', DEFAULT_SETTINGS.adaptiveResolution),
+    resolutionScale: number('resolutionScale', DEFAULT_SETTINGS.resolutionScale, 50, 100),
+    shadowQuality: choice('shadowQuality', ['off', 'low', 'medium', 'high'], DEFAULT_SETTINGS.shadowQuality),
+    bloom: boolean('bloom', DEFAULT_SETTINGS.bloom),
+    bloomStrength: number('bloomStrength', DEFAULT_SETTINGS.bloomStrength, 0, 100),
+    vignette: number('vignette', DEFAULT_SETTINGS.vignette, 0, 70),
+    filmGrain: number('filmGrain', DEFAULT_SETTINGS.filmGrain, 0, 100),
+    brightness: number('brightness', DEFAULT_SETTINGS.brightness, 80, 170),
+    cameraShake: number('cameraShake', DEFAULT_SETTINGS.cameraShake, 0, 100),
+    showFps: boolean('showFps', DEFAULT_SETTINGS.showFps),
+    masterVolume: number('masterVolume', DEFAULT_SETTINGS.masterVolume, 0, 100),
+    voices: boolean('voices', DEFAULT_SETTINGS.voices),
+    crosshairColor: typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color : DEFAULT_SETTINGS.crosshairColor,
+    crosshairSize: number('crosshairSize', DEFAULT_SETTINGS.crosshairSize, 3, 24),
+    crosshairGap: number('crosshairGap', DEFAULT_SETTINGS.crosshairGap, 0, 26),
+    crosshairThickness: number('crosshairThickness', DEFAULT_SETTINGS.crosshairThickness, 1, 6),
+    crosshairDot: boolean('crosshairDot', DEFAULT_SETTINGS.crosshairDot),
+  };
+}
 
 export interface HudState {
   hp: number;
@@ -138,6 +271,9 @@ export interface HudState {
   /** Bomb Defusal (Sirocco) — present only in that mode. */
   defusal?: DefusalHud;
   /** Dead in a defusal round: whose eyes you are watching through. */
+  comp?: CompHudView;
+  /** Scorestreak rail: progress, armed streaks, live entities, designation mode. */
+  streaks?: StreakHud;
   spectating?: { name: string; hp: number; weapon: string; team: TDMTeam } | null;
   maxHp?: number;
 }
@@ -183,11 +319,13 @@ export type GameEvent =
   | { type: 'flash'; power: number }
   | { type: 'callout'; text: string }
   | { type: 'streak'; label: string }
+  | { type: 'streakmsg'; text: string }
+  | { type: 'nuke' }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
   | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string }
   | { type: 'buymenu'; open: boolean }
-  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] }; defusal?: DefusalResult };
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; outcome: TDMOutcome; roster: TdmRosterEntry[] }; defusal?: DefusalResult; comp?: CompDebrief };
 
 export interface CashLogEntry { reason: string; amount: number; t: number }
 
@@ -246,6 +384,9 @@ interface Grenade {
   fuse: number;
   kind: 'frag' | 'flash' | 'smoke';
   fromAI: boolean;
+  /** FX only: the charge detonation reuses this pipeline for glass, debris and audio
+   *  while the ranked blast model owns every point of damage. */
+  fxOnly?: boolean;
   /** TDM: which bot lobbed it (credits kills to the right team). */
   owner?: TDMBot;
 }
@@ -269,6 +410,8 @@ function nextFrame(): Promise<void> {
  * player shoots first — you do not get to fire into a crowd and still be "unseen".
  */
 const OPENING_GRACE = 8;
+/** Hostiles inside this range always show on the radar; beyond it they must be engaging or UAV-painted. */
+const RADAR_NEAR = 22;
 /** Capsule heights used for AI movement. The crouch height is what lets a squad duck
  *  under a bridge deck instead of jamming on its underside. */
 const AI_STAND_HEIGHT = 1.7;
@@ -309,6 +452,9 @@ export class Engine {
   private effects!: Effects;
   private ai!: AIManager;
   private missionRuntime!: MissionRuntime;
+  // ---- Scorestreaks (UAV / airstrike / sentry / chopper / nuke) ----
+  private streaks!: StreakDirector;
+  private nukeWin = false;
   // ---- Warehouse 5v5 TDM (arena map only) ----
   private isTDM = false;
   private tdm: TDMManager | null = null;
@@ -333,6 +479,23 @@ export class Engine {
   private dfCamLook = new THREE.Vector3();
   private dfCamInit = false;
   private buyMenuOpen = false;
+  private isComp = false;
+  private comp: CompetitiveRunner | null = null;
+  private compBuilds: Partial<Record<WeaponId, WeaponBuild>> = {};
+  private compArmor = 0;
+  private compHelmet = false;
+  private compFrozen = true;
+  private compBuyOpen = false;
+  private compBuyCursor = 0;
+  private compBuyAccX = 0;
+  private compBuyAccY = 0;
+  private compSpectate: string | null = null;
+  private compRanked: RankedProfile = structuredClone(DEFAULT_RANKED);
+  private compRatingChange = 0;
+  private compRoundBeepT = 0;
+  private compMatchT = 0;
+  private compKitWeapons: (WeaponId | null)[] = [];
+  private compDebrief: CompDebrief | null = null;
   // ---- momentum "ON FIRE" ----
   private killTimes: number[] = [];
   private onFire = false;
@@ -496,19 +659,31 @@ export class Engine {
    * could even paint. create() stages it across frames and pre-compiles shaders off the
    * blocking path instead.
    */
-  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, defusal: DefusalLaunch | null = null): Promise<Engine> {
+  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, options: EngineLaunchOptions & Partial<DefusalLaunch> = {}): Promise<Engine> {
     const engine = new Engine(canvas);
-    await engine.init(difficulty, onEvent, mapId, loadout, tdmArmor, defusal);
+    await engine.init(difficulty, onEvent, mapId, loadout, tdmArmor, options);
     return engine;
   }
 
-  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, defusalLaunch: DefusalLaunch | null = null) {
+  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, options: EngineLaunchOptions & Partial<DefusalLaunch> = {}) {
     this.onEvent = onEvent;
-    this.isTDM = mapId === 'arena';
-    this.isDefusal = mapId === 'sirocco';
+    // Sirocco Bomb Defusal arrives through the same launch object as ranked/TDM.
+    const defusalLaunch: DefusalLaunch | null = options.mode === 'defusal'
+      ? { side: options.side ?? 'random', format: options.format ?? 'short', builds: options.builds ?? {} }
+      : null;
+    this.isComp = options.mode === 'comp';
+    this.isDefusal = !!defusalLaunch || mapId === 'sirocco';
     this.dfBuilds = defusalLaunch?.builds ?? {};
+    this.isTDM = !this.isComp && !this.isDefusal && mapId === 'arena';
     this.tdmArmor = tdmArmor;
-    if (this.isTDM) {
+    this.compBuilds = options.compBuilds ?? {};
+    this.compRanked = options.rankedProfile ? { ...options.rankedProfile } : structuredClone(DEFAULT_RANKED);
+    if (this.isComp) {
+      // Ranked runs on the shared 100 HP pool: armour is a consumable the buy menu
+      // refills, exactly like the competitive rules describe it.
+      this.hp = COMP_BASE_HP;
+      this.frags = 0; this.flashes = 0;
+    } else if (this.isTDM) {
       this.hp = TDM_BASE_HP + tdmArmor * TDM_HP_PER_ARMOR;
       this.frags = 3; this.flashes = 1;
     }
@@ -671,7 +846,7 @@ void main(){
         reserve: 150,
         hipSpread: 0.008,
         adsSpread: 0.000,
-        pattern: weaponById('m4a1')!.base.pattern.map(p=>[...p] as [number,number]),
+        pattern: [[0, 0]],
         adsFov: 56,
         tacReload: 2.1,
         emptyReload: 2.7,
@@ -688,7 +863,7 @@ void main(){
         reserve: 120,
         hipSpread: 0.010,
         adsSpread: 0.000,
-        pattern: weaponById('ak47')!.base.pattern.map(p=>[...p] as [number,number]),
+        pattern: [[0, 0]],
         adsFov: 58,
         tacReload: 2.4,
         emptyReload: 3.0,
@@ -705,7 +880,7 @@ void main(){
         reserve: 48,
         hipSpread: 0.006,
         adsSpread: 0.000,
-        pattern: weaponById('m1911')!.base.pattern.map(p=>[...p] as [number,number]),
+        pattern: [[0, 0]],
         adsFov: 64,
         tacReload: 1.5,
         emptyReload: 1.8,
@@ -722,7 +897,7 @@ void main(){
         reserve: 25,
         hipSpread: 0.045,
         adsSpread: 0.000,
-        pattern: weaponById('awm')!.base.pattern.map(p=>[...p] as [number,number]),
+        pattern: [[0, 0]],
         adsFov: 22,
         tacReload: 2.25,
         emptyReload: 2.7,
@@ -745,6 +920,7 @@ void main(){
         emptyReload: 2.3,
       },
     ];
+    // Catalog recoil replaces the neutral constructor patterns before input can fire.
     this.weapons.forEach((weapon,index)=>{
       const entry=weaponById((['m4a1','ak47','m1911','awm','mp7'] as WeaponId[])[index])!;
       weapon.pattern=entry.base.pattern.map(p=>[...p] as [number,number]);
@@ -908,6 +1084,59 @@ void main(){
       // Pre-build every buyable gun (with the player's armory build) behind the boot
       // screen so the first purchase of each never hitches and its shaders compile below.
       for (const w of WEAPON_CATALOG) { this.dfWeapon(w.id); if (w.id === 'awm' || w.id === 'scar_h') await nextFrame(); }
+      // ---- OPERATION BLACKOUT: ranked Search & Destroy. The match runner owns the
+      // round engine, the bot director and both squads; the engine only supplies
+      // the world, the player bridge and the input it takes to plant a charge. ----
+      const compCtx: TDMContext = {
+        scene: this.scene,
+        occluders: this.world.occluders,
+        coverNodes: this.world.coverNodes,
+        solids: this.world.solids,
+        half: this.world.half,
+        groundHeight: (x, z) => (this.world.navigationHeight ?? this.world.groundHeight)(x, z),
+        effects: this.effects,
+        playerPos: () => this.eyePos(),
+        playerFeet: () => this.pos.clone(),
+        playerAlive: () => !this.dead,
+        damagePlayer: (a, f, killer, isHead) => this.damagePlayerComp(a, f, killer, isHead === true),
+        moveCollide: ctx.moveCollide,
+        onCallout: (k, p, team) => {
+          // Squad radio for the player's own team, contact barks for the other side.
+          if (p.distanceTo(this.pos) > 48) return;
+          const labels: Record<string, string> = {
+            grenade: 'Frag out!', push: 'They are pushing!', flank: 'Hostiles flanking!',
+            fallback: 'They are falling back!', retake: 'Retaking the site!',
+          };
+          void team;
+          this.onEvent({ type: 'callout', text: labels[k] ?? 'Contact!' });
+        },
+        throwGrenade: (from, target, owner) => this.spawnGrenade(from, target, true, 'frag', owner),
+        onBotFire: (p, team) => {
+          audio.enemyFireSpatial(p.x, p.y, p.z);
+          // Only hostile fire is painted on the radar, and the player's side flips at the half.
+          const mine = this.comp?.match.of(PLAYER_ID)?.team ?? 'alpha';
+          if (team !== mine && p.distanceTo(this.pos) < 55) this.addPing(p);
+        },
+        onFeed: (killer, weapon, victim, headshot, killerTeam, zone) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam, zone }),
+        onScore: () => { /* the HUD reads live values from hud() */ },
+        playerOnFire: () => false,
+      };
+      this.comp = new CompetitiveRunner({
+        scene: this.scene,
+        world: this.world,
+        ctx: compCtx,
+        player: this.compPlayerBridge(),
+        emit: event => this.onCompUiEvent(event),
+        random: Math.random,
+        buildFor: (id: WeaponId) => this.compBuilds[id] ?? null,
+      });
+      // The runner's manager is the one true roster: keep this.tdm pointing at it so
+      // hittables, gunshot hearing and the radar keep working unchanged.
+      this.tdm = this.comp.manager;
+      this.ai = new AIManager(ctx, []); // empty roster: keeps every mission-path callsite alive
+      this.comp.start();
+      this.compApplyKit(this.comp.currentKit());
+      this.compBuyOpen = true;
       this.buildSolidGrid();
       this.renderer.shadowMap.needsUpdate = true;
       this.rebuildHittables();
@@ -923,7 +1152,7 @@ void main(){
         if (text !== this.missionRuntime.mission.current.brief) this.onEvent({ type: 'callout', text });
       },
       resupply: () => { this.hp = 100; this.frags = 5; this.flashes = 2; },
-      scoreBonus: pts => { this.score += pts; this.earnCash(REWARDS.phase, 'phase'); },
+      scoreBonus: pts => { this.score += pts; this.earnCash(REWARDS.phase, 'phase'); this.streaks?.addPoints(STREAK_POINTS.objective); },
       detonate: at => {
         // Use the existing blast resolution for damage, glass, particles and spatial audio.
         this.explode({ mesh: this.missionRuntime.markers.cache, pos: at, vel: new THREE.Vector3(), fuse: 0, kind: 'frag', fromAI: false });
@@ -945,6 +1174,9 @@ void main(){
     this.yaw = Math.atan2(this.pos.x - first[0], this.pos.z - first[2]);
     this.rebuildHittables();
     }
+
+    this.streaks = new StreakDirector(this.streakContext());
+    if (this.weapons.length > 2) this.streaks.keyLabels = { uav: '6', airstrike: '7', sentry: '8', chopper: '9', nuke: '0' };
 
     this.bindInput();
     this.resize();
@@ -993,8 +1225,21 @@ void main(){
         return;
       }
     }
+    // Ranked buy phase: the rack owns the number row and B, so shopping never
+    // fights the weapon-switch bindings.
+    if (this.isComp && this.compBuyOpen) {
+      if (e.code === 'KeyB') { this.compBuyOpen = false; return; }
+      const digit = /^Digit([1-9])$/.exec(e.code);
+      if (digit) { this.compBuyAt(parseInt(digit[1], 10) - 1); return; }
+      if (e.code === 'KeyR' || e.code === 'KeyG') { /* no shooting in the buy phase */ }
+    }
 
     if (e.code === 'KeyR') this.startReload();
+    {
+      const streak = this.streakForKey(e.code);
+      if (streak) { this.streaks.activate(streak); return; }
+      // Escape-free abort for designation: tapping the strike key again cancels it.
+    }
     if (e.code === 'Digit1') this.switchWeapon(0);
     if (e.code === 'Digit2') this.switchWeapon(1);
     if (e.code === 'Digit3') this.switchWeapon(2);
@@ -1062,7 +1307,16 @@ void main(){
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
+    if (document.pointerLockElement !== this.canvas || this.paused || this.scopeAdjusting) return;
+    // Ranked buy phase: the locked pointer steers a cursor over the rack instead of
+    // the camera, which is exactly how a console shooter handles a buy menu.
+    if (this.isComp && this.compBuyOpen) { this.compCursorStep(e.movementX, e.movementY); return; }
+    if (this.dead && !this.isComp) return;
+    if (this.dead && this.isComp) {
+      this.yaw -= e.movementX * this.mouseSens;
+      this.pitch = Math.max(-1.2, Math.min(1.2, this.pitch - (this.invertY ? -e.movementY : e.movementY) * this.mouseSens));
+      return;
+    }
     const zoomSensitivity = Math.tan(this.adsFovEff()*Math.PI/360)/Math.tan(this.fovSetting*Math.PI/360);
     const sens = this.mouseSens * (this.ads > 0.5 ? this.adsSensMul * Math.max(.12,zoomSensitivity) : 1);
     this.yaw -= e.movementX * sens;
@@ -1073,8 +1327,21 @@ void main(){
   private onMouseDown = (e: MouseEvent) => {
     // Dead in a defusal round: clicks cycle through the teammates you can spectate.
     if (this.isDefusal && this.dead && !this.paused && document.pointerLockElement === this.canvas) { this.dfCycleSpectate(e.button === 2 ? -1 : 1); return; }
+    if (this.isComp && this.compBuyOpen) {
+      if (e.button === 0) this.compBuyAt(this.compBuyCursor);
+      return;
+    }
+    if (this.isComp && this.compBuyOpen) {
+      if (e.button === 0) this.compBuyAt(this.compBuyCursor);
+      return;
+    }
+    if (this.dead) {
+      if (this.isComp && e.button === 0) this.compCycleSpectate();
+      return;
+    }
     if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
     if (e.button === 0) {
+      if (this.streaks.designating) { this.streaks.confirmStrike(); return; }
       this.triggerHeld = true;
       this.tryFire();
     }
@@ -1085,6 +1352,7 @@ void main(){
   };
 
   private onMouseDown2 = (e: MouseEvent) => {
+    if (e.button === 2 && this.streaks?.designating) { this.streaks.cancelDesignation(); this.onEvent({ type: 'streakmsg', text: 'STRIKE ABORTED — PACKAGE HELD' }); return; }
     if (e.button === 2 && !this.scopeAdjusting && !this.paused && !this.dead && !this.ended && document.pointerLockElement === this.canvas) {
       // ADS toggle mode: MMB click keeps the scope in until the next MMB click.
       const want = this.adsToggle ? !this.rmb : true;
@@ -1740,22 +2008,36 @@ void main(){
         }
         continue;
       }
-      if (tdmBot && !tdmBot.dead && this.isTDM && this.tdm) {
+      if (tdmBot && !tdmBot.dead && (this.isTDM || this.isComp) && this.tdm) {
         const part = h.object.userData.part as string;
-        let dmg = d.damage * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
+        const ranked = this.isComp && !!this.comp;
+        let dmg = ranked ? d.damage : d.damage * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
-        // TTK floor: no weapon may two-tap the 150 HP base pool (3+ headshots always)
-        dmg = Math.min(dmg, 74);
+        // TTK floor: no weapon may two-tap the 150 HP TDM pool (3+ headshots always).
+        // Ranked plays by its own armour maths, so the floor stays out of it.
+        if (!ranked) dmg = Math.min(dmg, 74);
         if (!shotHit) { this.hits++; shotHit = true; }
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         if (part === 'head') audio.headshotDink();
-        const killed = tdmBot.takeDamage(dmg, part === 'head', 'player');
+        let killed: boolean;
+        if (ranked) {
+          const res = tdmBot.applyRankedDamage(dmg, part === 'head', d.boltAction === true, 'player');
+          this.comp?.notifyDamage(tdmBot.name, res.taken);
+          killed = res.killed;
+        } else {
+          killed = tdmBot.takeDamage(dmg, part === 'head', 'player');
+        }
         if (killed) {
           if (part === 'head') { this.headshots++; voice.headshot(); }
-          this.creditTdmKill(tdmBot, part === 'head', d.name, part === 'head' ? 150 : 100);
+          if (ranked) this.tdm.handleKill('player', tdmBot, part === 'head', d.name);
+          else {
+            this.creditTdmKill(tdmBot, part === 'head', d.name, part === 'head' ? 150 : 100);
+            // Streaks are an arena reward: ranked rounds have no killstreaks.
+            this.streaks.addPoints(part === 'head' ? STREAK_POINTS.headshot : STREAK_POINTS.kill);
+          }
           this.onEvent({ type: 'hit', kill: true });
           this.rebuildHittables();
         } else {
@@ -1783,6 +2065,7 @@ void main(){
           // Matches the HUD score popups exactly: 100 per elimination, 150 for a headshot.
           this.score += part === 'head' ? 150 : 100;
           this.earnCash(part === 'head' ? REWARDS.headshot : REWARDS.kill, part === 'head' ? 'headshot' : 'kill');
+          this.streaks.addPoints(part === 'head' ? STREAK_POINTS.headshot : STREAK_POINTS.kill);
           audio.killConfirm();
           const isHead = part === 'head';
           if (isHead) {
@@ -2036,7 +2319,7 @@ void main(){
         }
         continue;
       }
-      if (mkBot && !mkBot.dead && this.isTDM && this.tdm) {
+      if (mkBot && !mkBot.dead && (this.isTDM || this.isComp) && this.tdm) {
         const part = h.object.userData.part as string;
         let dmg = 13 * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
         if (part === 'head') dmg *= d.headMul;
@@ -2180,17 +2463,18 @@ void main(){
       g.mesh.geometry.dispose();
       return;
     }
+    if (g.fxOnly) {
+      // The ranked charge: blow the windows out, shake the camera and let the
+      // spatial blast ring out, but leave health and kill credit to the rules.
+      this.effects.explosion(g.pos);
+      this.blowOutGlass(g.pos);
+      audio.explosionSpatial(g.pos.x, g.pos.y, g.pos.z, distP);
+      this.shake = Math.max(this.shake, Math.min(1.1, 9 / Math.max(2.5, distP)));
+      return;
+    }
     if (g.kind === 'frag') {
       this.effects.explosion(g.pos);
-      // blast wave blows out nearby windows
-      if (this.world.glass) {
-        const m = new THREE.Matrix4(), p = new THREE.Vector3();
-        for (let i = 0; i < this.world.glass.count; i++) {
-          this.world.glass.getMatrixAt(i, m); p.setFromMatrixPosition(m);
-          if (p.distanceTo(g.pos) < 9) { const c = this.world.breakGlass(i); if (c) this.effects.glassShatter(c); }
-        }
-        audio.glassBreakSpatial(g.pos.x, g.pos.y + 1, g.pos.z);
-      }
+      this.blowOutGlass(g.pos);
       // FULL POSITION-ACCURATE HRTF SPATIAL AUDIO
       audio.explosionSpatial(g.pos.x, g.pos.y, g.pos.z, distP);
       this.shake = Math.max(this.shake, Math.min(1.1, 9 / Math.max(2.5, distP)));
@@ -2200,7 +2484,9 @@ void main(){
         this.damagePlayerDefusal(dmg, g.pos, g.owner ?? null, { head: false, part: 'torso', armorRatio: 0.6, weapon: 'FRAG' });
       } else if (distP < 6.5 && !this.isDefusal) {
         const dmg = distP < 3.2 ? 95 : THREE.MathUtils.lerp(95, 20, (distP - 3.2) / 3.3);
-        if (this.isTDM) {
+        if (this.isComp) {
+          this.damagePlayerComp(dmg, g.pos, g.owner ?? null, false, 'FRAG');
+        } else if (this.isTDM) {
           // grenades from your own team never hurt you in the arena
           if (!g.owner || g.owner.team === 'bravo') this.damagePlayerTDM(dmg, g.pos, g.owner ?? null);
         } else this.damagePlayer(dmg, g.pos);
@@ -2227,7 +2513,8 @@ void main(){
         }
       }
       // TDM: splash resolves against every bot on both teams, with armor applied
-      if (this.isTDM && this.tdm) {
+      // TDM/ranked: splash resolves against every bot on both teams, with armor applied
+      if ((this.isTDM || this.isComp) && this.tdm) {
         for (const bot of this.tdm.bots) {
           if (bot.dead) continue;
           if (g.owner && g.owner.team === bot.team) continue;          // no team kills
@@ -2236,11 +2523,14 @@ void main(){
           if (d < 7) {
             // scaled for the bigger TDM health pools — a close frag finishes fights
             const dmg = (d < 3.5 ? 170 : THREE.MathUtils.lerp(140, 35, (d - 3.5) / 3.5));
-            const killed = bot.takeDamage(dmg, false, g.owner ?? 'player');
+            const killed = this.isComp
+              ? bot.applyRankedDamage(dmg, false, false, g.owner ?? 'player').killed
+              : bot.takeDamage(dmg, false, g.owner ?? 'player');
             if (killed) {
               if (g.owner) this.tdm.handleKill(g.owner, bot, false, 'FRAG');
               else {
                 this.creditTdmKill(bot, false, 'FRAG', 100);
+                this.streaks.addPoints(STREAK_POINTS.kill);
                 this.onEvent({ type: 'hit', kill: true });
               }
               this.rebuildHittables();
@@ -2258,6 +2548,7 @@ void main(){
             this.kills++;
             this.score += 100;
             this.earnCash(REWARDS.grenadeKill, 'grenade');
+            this.streaks.addPoints(STREAK_POINTS.kill);
             if (this.kills === 1) voice.firstBlood();
             if (this.kills % 3 === 0) {
               this.frags = Math.min(5, this.frags + 1);
@@ -2302,6 +2593,152 @@ void main(){
     }
     this.scene.remove(g.mesh);
     g.mesh.geometry.dispose();
+  }
+
+  // ==================== SCORESTREAKS ====================
+  /** Every hostile a streak may engage, wrapped so sentry/chopper code is mode-agnostic. */
+  private streakTargets(): StreakTarget[] {
+    const out: StreakTarget[] = [];
+    if (this.isTDM && this.tdm) {
+      for (const bot of this.tdm.bots) {
+        if (bot.dead || bot.team !== 'bravo') continue;
+        out.push({
+          pos: bot.pos,
+          alive: () => !bot.dead,
+          damage: (amount, source) => {
+            if (bot.dead) return false;
+            const killed = bot.takeDamage(amount, false, 'player');
+            if (killed) { this.creditStreakKill(bot.name, source, bot); }
+            return killed;
+          },
+        });
+      }
+    } else {
+      for (const e of this.ai.enemies) {
+        if (e.dead || e.dormant) continue;
+        out.push({
+          pos: e.pos,
+          alive: () => !e.dead,
+          damage: (amount, source) => {
+            if (e.dead) return false;
+            const killed = e.takeDamage(amount, false);
+            if (killed) this.creditStreakKill(e.name, source, null);
+            return killed;
+          },
+        });
+      }
+    }
+    return out;
+  }
+
+  private static readonly STREAK_WEAPON: Record<StreakId, string> = { uav: 'UAV', airstrike: 'AIRSTRIKE', sentry: 'SENTRY', chopper: 'GUNSHIP', nuke: 'NUKE' };
+
+  /** A streak killed something: score, cash, feed. Deliberately NO streak points — streaks don't chain. */
+  private creditStreakKill(name: string, source: StreakId, bot: TDMBot | null) {
+    const weapon = Engine.STREAK_WEAPON[source];
+    if (this.isTDM && this.tdm && bot) {
+      this.creditTdmKill(bot, false, weapon, 100);
+      this.onEvent({ type: 'hit', kill: true });
+    } else {
+      this.kills++;
+      this.score += 100;
+      this.earnCash(REWARDS.kill, 'kill');
+      audio.killConfirm();
+      this.onEvent({ type: 'kill', name, weapon, headshot: false });
+    }
+    this.rebuildHittables();
+  }
+
+  /** Bomb / shell impact: hurts everyone inside the radius, including the player. */
+  private streakBlast(pos: THREE.Vector3, radius: number, maxDamage: number, source: StreakId) {
+    const distP = pos.distanceTo(this.eyePos());
+    this.effects.explosion(pos);
+    if (this.world.glass) {
+      const m = new THREE.Matrix4(), p = new THREE.Vector3();
+      for (let i = 0; i < this.world.glass.count; i++) {
+        this.world.glass.getMatrixAt(i, m); p.setFromMatrixPosition(m);
+        if (p.distanceTo(pos) < radius + 2) { const c = this.world.breakGlass(i); if (c) this.effects.glassShatter(c); }
+      }
+    }
+    audio.explosionSpatial(pos.x, pos.y, pos.z, distP);
+    this.shake = Math.max(this.shake, Math.min(1.4, 14 / Math.max(2.5, distP)));
+    if (distP < radius && !this.dead) {
+      const dmg = THREE.MathUtils.lerp(maxDamage * 0.6, 15, distP / radius);
+      if (this.isTDM) this.damagePlayerTDM(dmg, pos, null); else this.damagePlayer(dmg, pos);
+    }
+    for (const t of this.streakTargets()) {
+      if (!t.alive()) continue;
+      const d = t.pos.distanceTo(pos);
+      if (d < radius) t.damage(d < radius * 0.4 ? maxDamage : THREE.MathUtils.lerp(maxDamage, 35, (d - radius * 0.4) / (radius * 0.6)), source);
+    }
+  }
+
+  /** World point under the crosshair (ground or building), for strike designation. */
+  private streakAimPoint(): THREE.Vector3 | null {
+    const origin = this.camera.position.clone();
+    const dir = this.camDir();
+    this.raycaster.set(origin, dir);
+    this.raycaster.far = 220;
+    const hits = this.raycaster.intersectObjects(this.world.occluders, false);
+    if (hits.length) return hits[0].point.clone();
+    // No building hit: intersect the ground plane at the local terrain height
+    if (dir.y >= -0.02) return null;
+    const t = (this.pos.y - origin.y) / dir.y;
+    const p = origin.addScaledVector(dir, t);
+    const lim = this.world.half - 2;
+    if (Math.abs(p.x) > lim || Math.abs(p.z) > lim) return null;
+    p.y = this.world.groundHeight(p.x, p.z);
+    return p;
+  }
+
+  private streakContext(): StreakContext {
+    return {
+      scene: this.scene,
+      effects: this.effects,
+      occluders: this.world.occluders,
+      half: this.world.half,
+      isTDM: this.isTDM,
+      groundHeight: (x, z) => this.world.groundHeight(x, z),
+      playerFeet: () => this.pos.clone(),
+      playerEye: () => this.eyePos(),
+      playerDir: () => this.camDir(),
+      playerAlive: () => !this.dead && !this.ended,
+      targets: () => this.streakTargets(),
+      blast: (pos, radius, maxDamage, source) => this.streakBlast(pos, radius, maxDamage, source),
+      aimPoint: () => this.streakAimPoint(),
+      canPlace: p => !this.pointInSolid(this._t1.set(p.x, p.y + 0.5, p.z), 0.55),
+      announce: (text, spoken) => {
+        this.onEvent({ type: 'streakmsg', text });
+        if (spoken) voice.announce(spoken);
+      },
+      shake: a => { this.shake = Math.max(this.shake, a); },
+      onNuke: () => this.resolveNuke(),
+    };
+  }
+
+  /** The nuke lands: everything hostile dies. In the arena that is the match. */
+  private resolveNuke() {
+    this.onEvent({ type: 'nuke' });
+    for (const t of this.streakTargets()) if (t.alive()) t.damage(99999, 'nuke');
+    if (this.isTDM && this.tdm) {
+      this.nukeWin = true;
+      this.onEvent({ type: 'streak', label: 'TACTICAL NUKE' });
+      voice.announce('Tactical nuke detonated. Game over.');
+      this.endTDMMatch();
+    } else {
+      this.onEvent({ type: 'streak', label: 'TACTICAL NUKE' });
+      voice.announce('Tactical nuke detonated. Sector cleared.');
+    }
+  }
+
+  /** Streak hotkeys: 3-7 with an armory loadout (two guns), 6-9/0 in the legacy five-gun kit. */
+  private streakForKey(code: string): StreakId | null {
+    const order: StreakId[] = ['uav', 'airstrike', 'sentry', 'chopper', 'nuke'];
+    const codes = this.weapons.length <= 2
+      ? ['Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7']
+      : ['Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
+    const i = codes.indexOf(code);
+    return i >= 0 ? order[i] : null;
   }
 
   private updateGrenades(dt: number) {
@@ -2398,6 +2835,17 @@ void main(){
   private lastGrenadeDist?: number;
   private lastGrenadeAngle?: number;
 
+  /** Blast wave blows out every window inside nine metres. */
+  private blowOutGlass(pos: THREE.Vector3) {
+    if (!this.world.glass) return;
+    const m = new THREE.Matrix4(), p = new THREE.Vector3();
+    for (let i = 0; i < this.world.glass.count; i++) {
+      this.world.glass.getMatrixAt(i, m); p.setFromMatrixPosition(m);
+      if (p.distanceTo(pos) < 9) { const c = this.world.breakGlass(i); if (c) this.effects.glassShatter(c); }
+    }
+    audio.glassBreakSpatial(pos.x, pos.y + 1, pos.z);
+  }
+
   private damagePlayer(amount: number, from: THREE.Vector3) {
     if (this.dead) return;
     this.hp -= amount;
@@ -2442,7 +2890,7 @@ void main(){
 
   /** The bounty is collected: +$500 and the SHUT DOWN banner. */
   private awardShutdown() {
-    this.earnCash(500, 'shutdown');
+    this.earnCash(TDM_SHUTDOWN_CASH, 'shutdown');
     audio.shutdown();
     this.onEvent({ type: 'streak', label: 'SHUT DOWN' });
   }
@@ -2483,6 +2931,7 @@ void main(){
       this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
       this.sprinting = false; this.sliding = false; this.crouched = false;
       this.endPlayerFire();
+      this.streaks.onPlayerDeath();
       if (this.tdm && killer) this.tdm.handleKill(killer, 'player', isHead, 'RIFLE');
       voice.defeat();
     }
@@ -2508,11 +2957,13 @@ void main(){
   private endTDMMatch() {
     if (this.ended || !this.tdm) return;
     this.ended = true;
-    const win = this.tdm.alphaScore > this.tdm.bravoScore;
+    const outcome = tdmOutcome(this.tdm.alphaScore, this.tdm.bravoScore);
+    const win = outcome === 'win';
     if (win) this.score += 500; // match victory bonus
+    if (outcome === 'draw') this.earnCash(TDM_DRAW_CASH, 'draw');
     const mission: MissionReport = {
       id: 'tdm-warehouse', name: 'Warehouse TDM', map: 'arena',
-      status: win ? 'complete' : 'failed', duration: TDM_MATCH_SECONDS - this.tdm.timeLeft,
+      status: outcome === 'loss' ? 'failed' : 'complete', duration: TDM_MATCH_SECONDS - this.tdm.timeLeft,
       phases: [],
     };
     const pressure: PressureStats = { totalSpawned: 10, peakLive: 10, retired: 0, pending: 0, candidateChecks: 0, sightChecks: 0, deferred: 0 };
@@ -2522,16 +2973,19 @@ void main(){
       cash: this.cashEarned, cashLog: [...this.cashLog], difficultyMul: difficultyMultiplier(this.difficultyId),
       mission, pressure,
       tdm: {
-        alphaScore: this.tdm.alphaScore, bravoScore: this.tdm.bravoScore, playerKills: this.tdmPlayerKills,
+        alphaScore: this.tdm.alphaScore, bravoScore: this.tdm.bravoScore, playerKills: this.tdmPlayerKills, outcome,
         roster: [
           { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots },
           ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots, onFire: b.onFire })),
         ],
       },
     };
-    this.finishDelay = 1.2;
+    // A nuke ending gets a longer beat so the whiteout and banner land before the debrief.
+    this.finishDelay = this.nukeWin ? 3.4 : 1.2;
+    this.streaks?.quiet();
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Match over. Alpha squad takes the yard.');
+    else if (outcome === 'draw') voice.objective('Match tied. No side takes the yard.');
     else voice.defeat();
   }
 
@@ -2746,8 +3200,425 @@ void main(){
     return r;
   }
 
+  /**
+   * The player as the match runner sees them. Everything that carries across a
+   * round boundary — armour, the kit, the charge — is read and written through
+   * here, so the rules stay the single source of truth for ranked state.
+   */
+  private compPlayerBridge(): PlayerBridge {
+    return {
+      armor: () => this.compArmor,
+      helmet: () => this.compHelmet,
+      setArmor: (armor, helmet) => { this.compArmor = Math.max(0, Math.min(100, Math.round(armor))); this.compHelmet = helmet; },
+      alive: () => !this.dead,
+      position: () => ({ x: this.pos.x, y: this.eyePos().y, z: this.pos.z }),
+      spawn: (x, z, yaw) => this.compSpawn(x, z, yaw),
+      applyKit: kit => this.compApplyKit(kit),
+      setFrozen: frozen => {
+        this.compFrozen = frozen;
+        if (!frozen) return;
+        this.keys.clear();
+        this.triggerHeld = false; this.rmb = false; this.cooking = false;
+        this.sprinting = false; this.sliding = false;
+      },
+      damage: (amount, from, weapon) => this.damagePlayerComp(
+        amount, new THREE.Vector3(from.x, from.y, from.z), null, false, weapon),
+    };
+  }
+
+  /** Fresh ranked round: full health on a spawn pad, magazines topped up. */
+  private compSpawn(x: number, z: number, yaw: number): void {
+    this.dead = false;
+    this.hp = COMP_BASE_HP;
+    this.pos.set(x, this.world.groundHeight(x, z), z);
+    this.vel.set(0, 0, 0); this.vx = 0; this.vz = 0;
+    this.yaw = yaw; this.pitch = 0;
+    this.lean = 0; this.leanTarget = 0;
+    this.sprinting = false; this.sliding = false; this.crouched = false;
+    this.triggerHeld = false; this.rmb = false; this.cooking = false;
+    this.reloadT = -1; this.reloadStages = []; this.currentReloadStage = 'idle';
+    this.switchT = -1;
+    this.compSpectate = null;
+    if (this.comp) this.comp.spectateId = null;
+    for (let i = 0; i < this.weapons.length; i++) this.mags[i] = this.weapons[i].magSize;
+  }
+
+  /** Rebuild the viewmodel from the kit the rules say the player owns. */
+  private compApplyKit(kit: PlayerKit): void {
+    this.compArmor = Math.max(0, Math.min(100, Math.round(kit.armor)));
+    this.compHelmet = kit.helmet;
+    this.frags = kit.frags;
+    this.flashes = kit.flashes;
+    const wanted: (WeaponId | null)[] = [kit.primary, kit.secondary];
+    const same = this.compKitWeapons.length === wanted.length
+      && wanted.every((w, i) => this.compKitWeapons[i] === w);
+    if (!same) {
+      for (const w of this.weapons) this.vmScene.remove(w.model.group);
+      const builds: WeaponBuild[] = [];
+      if (kit.primary) builds.push(this.compBuilds[kit.primary] ?? { weapon: kit.primary, attachments: {} });
+      builds.push(this.compBuilds[kit.secondary] ?? { weapon: kit.secondary, attachments: {} });
+      this.weapons = builds.map(b => this.buildLoadoutWeapon(sanitizeBuild(b)));
+      for (const w of this.weapons) this.vmScene.add(w.model.group);
+      this.weapons.forEach((w, i) => { w.model.group.visible = i === 0; });
+      this.mags = this.weapons.map(w => w.magSize);
+      this.reserves = this.weapons.map(() => Infinity);
+      this.cur = 0;
+      this.lastCur = this.weapons.length > 1 ? 1 : 0;
+      this.shotIdx = 0; this.shotResetT = 0;
+      this.compKitWeapons = wanted;
+      this.rebuildHittables();
+      return;
+    }
+    // Same guns: a buy only refills them, which is what the rack promises.
+    for (let i = 0; i < this.weapons.length; i++) this.mags[i] = this.weapons[i].magSize;
+    this.reloadT = -1; this.reloadStages = []; this.currentReloadStage = 'idle';
+  }
+
+  /**
+   * Ranked player damage: the same armour model the bots use, so a fight reads
+   * identically on both sides of the barrel.
+   */
+  private damagePlayerComp(amount: number, from: THREE.Vector3, killer: TDMBot | null, isHead: boolean, weapon?: string): void {
+    if (this.dead || this.ended || !this.comp) return;
+    if (this.comp.isFrozen) return; // freezetime is not a shooting gallery
+    const pierce = killer?.gear?.class === 'SNIPER';
+    const result = applyCompetitiveDamage(this.hp, this.compArmor, this.compHelmet, amount, isHead, pierce);
+    const taken = Math.max(0, this.hp - result.hp);
+    this.hp = result.hp;
+    this.compArmor = result.armor;
+    this.lastDamageT = 0;
+    this.shake = Math.max(this.shake, Math.min(0.7, taken / 35));
+    audio.playerHurt();
+    this.onEvent({ type: 'damage', dir: this.dirToScreenDeg(from), amount: taken });
+    this.comp.notifyDamage(PLAYER_ID, taken);
+    if (this.hp <= 0) this.compPlayerDown(killer, isHead, weapon ?? killer?.gear?.name ?? 'RIFLE');
+  }
+
+  private compPlayerDown(killer: TDMBot | null, isHead: boolean, weapon: string): void {
+    if (this.dead) return;
+    this.hp = 0;
+    this.dead = true;
+    this.triggerHeld = false; this.rmb = false; this.cooking = false;
+    this.keys.clear();
+    this.sprinting = false; this.sliding = false; this.crouched = false;
+    this.endPlayerFire();
+    this.comp?.playerReleaseAction();
+    this.comp?.reportPlayerDeath(killer, isHead, weapon);
+    this.compSpectate = null;
+    voice.defeat();
+  }
+
+  /** Death in ranked is not a respawn: it is a camera on the squad until the round ends. */
+  private compSpectateStep(): void {
+    const runner = this.comp;
+    if (!runner || this.ended) return;
+    const mates = runner.manager.bots.filter(b => !b.dead && b.team === (runner.match.of(PLAYER_ID)?.team ?? 'alpha'));
+    if (!mates.length) return;
+    let target = mates.find(b => b.name === runner.spectateId);
+    if (!target) {
+      target = mates[0];
+      runner.spectateId = target.name;
+    }
+    this.compSpectate = target.name;
+    this.pos.copy(target.pos);
+    this.pos.y += 1.62;
+    this.yaw = target.yaw;
+    this.pitch = 0;
+    this.vx = 0; this.vz = 0; this.vel.set(0, 0, 0);
+  }
+
+  /** Next squadmate's shoulder — bound to the fire button while spectating. */
+  private compCycleSpectate(): void {
+    const runner = this.comp;
+    if (!runner) return;
+    const mates = runner.manager.bots.filter(b => !b.dead && b.team === (runner.match.of(PLAYER_ID)?.team ?? 'alpha'));
+    if (!mates.length) return;
+    const current = this.compSpectate ?? runner.spectateId;
+    const index = mates.findIndex(b => b.name === current);
+    this.compSpectate = mates[(index + 1) % mates.length].name;
+    runner.spectateId = this.compSpectate;
+  }
+
+  private onCompUiEvent(event: CompUiEvent): void {
+    switch (event.type) {
+      case 'callout':
+      case 'feed':
+        this.onEvent({ type: 'callout', text: event.text });
+        break;
+      case 'banner':
+        this.onEvent({ type: 'streak', label: event.title });
+        if (event.sub) this.onEvent({ type: 'callout', text: event.sub });
+        break;
+      case 'round-end':
+        voice.objective(event.text);
+        break;
+      case 'match-end':
+        voice.objective(event.text);
+        break;
+      case 'sound':
+        this.playCompCue(event.cue, event.at);
+        break;
+    }
+  }
+
+  private playCompCue(cue: Extract<CompUiEvent, { type: 'sound' }>['cue'], at?: { x: number; y: number; z: number }): void {
+    switch (cue) {
+      case 'plant':
+        audio.pinPull();
+        break;
+      case 'defuse':
+        audio.magIn();
+        break;
+      case 'planted':
+        voice.objective('Charge planted. Hold the site.');
+        audio.chargePlanted();
+        break;
+      case 'defused':
+        voice.objective('Charge defused.');
+        audio.chargeDefused();
+        break;
+      case 'round-win':
+        audio.killConfirm();
+        break;
+      case 'round-loss':
+        audio.radioCallout('mandown');
+        break;
+      case 'match-win':
+        audio.killConfirm();
+        break;
+      case 'match-loss':
+        audio.shutdown();
+        break;
+      case 'buy':
+        audio.magIn();
+        break;
+      case 'deny':
+        audio.dryFire();
+        break;
+      case 'beep':
+        audio.bombBeep(1);
+        break;
+      case 'detonate': {
+        if (!at) break;
+        const pos = new THREE.Vector3(at.x, at.y, at.z);
+        // Reuse the frag pipeline: glass, debris, scorch and spatial audio.
+        this.explode({ mesh: this.compBlastAnchor(), pos, vel: new THREE.Vector3(), fuse: 0, kind: 'frag', fromAI: false, fxOnly: true });
+        this.buildSolidGrid();
+        break;
+      }
+    }
+  }
+
+  /**
+   * Anchor handed to explode() so the charge blast reuses the frag FX pipeline
+   * (glass, debris, scorch, spatial audio). Never added to the scene, and rebuilt
+   * per detonation because explode() disposes the geometry it is given.
+   */
+  private compBlastAnchor(): THREE.Mesh {
+    return new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ visible: false }));
+  }
+
+  /** Rack the player is looking at this frame, in rules order. */
+  private compRack(): CompRackView[] {
+    if (!this.comp) return [];
+    return this.comp.match.purchaseOptions(PLAYER_ID).map(({ item, affordable, legal }) => ({
+      id: item.id, name: item.name, short: item.short, price: item.price,
+      category: item.category, tier: item.tier, blurb: item.blurb, stat: item.stat,
+      key: item.key, slot: item.slot ?? '', affordable, legal,
+    }));
+  }
+
+  private compBuyAt(index: number): void {
+    const rack = this.compRack();
+    const entry = rack[index];
+    if (!entry || !this.comp) return;
+    if (!entry.legal || !entry.affordable) { audio.dryFire(); return; }
+    this.comp.playerBuy(entry.id);
+    this.compApplyKit(this.comp.currentKit());
+  }
+
+  /** Mouse-driven buy cursor: the rack is a five-wide grid, like a console FPS. */
+  private compCursorStep(dx: number, dy: number): void {
+    const rack = this.compRack();
+    const cols = 5;
+    const rows = Math.max(1, Math.ceil(rack.length / cols));
+    this.compBuyAccX += dx;
+    this.compBuyAccY += dy;
+    const stepX = Math.trunc(this.compBuyAccX / 26);
+    const stepY = Math.trunc(this.compBuyAccY / 26);
+    if (!stepX && !stepY) return;
+    this.compBuyAccX -= stepX * 26;
+    this.compBuyAccY -= stepY * 26;
+    let col = this.compBuyCursor % cols;
+    let row = Math.floor(this.compBuyCursor / cols);
+    col = Math.max(0, Math.min(cols - 1, col + stepX));
+    row = Math.max(0, Math.min(rows - 1, row + stepY));
+    this.compBuyCursor = Math.min(rack.length - 1, row * cols + col);
+  }
+
+  private compUpdate(dt: number): void {
+    const runner = this.comp;
+    if (!runner) return;
+    this.compMatchT += dt;
+    runner.update(dt);
+
+    const phase = runner.match.phase;
+    const buying = phase === 'buy' && !this.ended;
+    if (buying !== this.compBuyOpen) {
+      this.compBuyOpen = buying;
+      if (buying) { this.compBuyCursor = 0; this.compBuyAccX = 0; this.compBuyAccY = 0; }
+    }
+    // Buy-phase purchases change the kit without a round rolling over.
+    if (buying) this.compApplyKit(runner.currentKit());
+
+    // The charge is the clock: the beep rate is the only timer the player needs.
+    const bomb = runner.match.bomb;
+    if (bomb.state === 'planted') {
+      const fuseFrac = Math.max(0, Math.min(1, bomb.fuse / COMP_BOMB_FUSE));
+      const interval = 0.16 + fuseFrac * 0.95;
+      this.compRoundBeepT -= dt;
+      if (this.compRoundBeepT <= 0) {
+        this.compRoundBeepT = interval;
+        const dist = Math.hypot(this.pos.x - bomb.x, this.pos.z - bomb.z);
+        if (dist < 34) audio.bombBeep(1 - fuseFrac);
+      }
+    } else {
+      this.compRoundBeepT = 0;
+    }
+
+    // KeyX is the objective key in ranked just like it is in the missions.
+    if (!this.dead && !this.compBuyOpen && phase === 'live'
+      && this.keys.has('KeyX') && this.reloadT < 0 && !this.cooking && !this.sprinting) {
+      runner.playerHoldAction(dt);
+    } else {
+      runner.playerReleaseAction();
+    }
+    if (!this.dead && phase === 'live') runner.playerTryPickup();
+
+    if (this.dead && !this.ended) this.compSpectateStep();
+    for (let i = 0; i < this.weapons.length; i++) this.weapons[i].model.group.visible = !this.dead && i === this.cur;
+
+    if (phase === 'matchEnd' && !this.ended) this.endCompMatch();
+  }
+
+  private endCompMatch(): void {
+    if (this.ended || !this.comp) return;
+    this.ended = true;
+    const m = this.comp.match;
+    const playerTeam: CompTeam = m.of(PLAYER_ID)?.team ?? 'alpha';
+    const foeTeam: CompTeam = playerTeam === 'alpha' ? 'bravo' : 'alpha';
+    const actor = m.of(PLAYER_ID);
+    const win = m.winner === playerTeam;
+    const before = rankFor(this.compRanked.rating, this.compRanked);
+    const result = ratingDelta({
+      win, draw: m.draw,
+      roundsFor: m.score[playerTeam], roundsAgainst: m.score[foeTeam],
+      kills: actor?.kills ?? 0, deaths: actor?.deaths ?? 0, headshots: actor?.headshots ?? 0,
+      plants: actor?.plants ?? 0, defuses: actor?.defuses ?? 0, mvp: actor?.mvps ?? 0,
+      current: this.compRanked,
+    });
+    this.compRanked = result.next;
+    this.compRatingChange = result.delta;
+    const after = rankFor(result.next.rating, result.next);
+
+    // Ranked pays the wallet too: the mode has to feed the armory or it is a dead end.
+    const roundsPlayed = Math.max(1, m.history.length);
+    this.earnCash(160 + roundsPlayed * 22 + (win ? 420 : 140) + Math.max(0, actor?.kills ?? 0) * 12, 'BLACKOUT');
+    this.compDebrief = {
+      win, draw: m.draw,
+      score: { alpha: m.score.alpha, bravo: m.score.bravo },
+      rounds: m.history.length, history: [...m.history],
+      kills: actor?.kills ?? 0, deaths: actor?.deaths ?? 0, headshots: actor?.headshots ?? 0,
+      plants: actor?.plants ?? 0, defuses: actor?.defuses ?? 0, mvps: actor?.mvps ?? 0,
+      adr: Math.round((actor?.damage ?? 0) / Math.max(1, actor?.roundsPlayed ?? 1)),
+      ratingBefore: result.next.rating - result.delta,
+      ratingAfter: result.next.rating, delta: result.delta, breakdown: result.breakdown,
+      placement: result.placements,
+      rankBefore: before.label, rankAfter: after.label,
+      progressBefore: before.tierProgress, progressAfter: after.tierProgress,
+      next: result.next,
+    };
+    const mission: MissionReport = {
+      id: 'blackout-ranked', name: 'Operation Blackout', map: 'arena',
+      status: win ? 'complete' : 'failed', duration: this.compMatchT, phases: [],
+    };
+    const pressure: PressureStats = { totalSpawned: 10, peakLive: 10, retired: 0, pending: 0, candidateChecks: 0, sightChecks: 0, deferred: 0 };
+    const armorIcon = (pool: number, helmet: boolean): string => TDM_ARMOR_ICONS[helmet || pool > 60 ? 2 : pool > 0 ? 1 : 0];
+    const outcome = tdmOutcome(m.score.alpha, m.score.bravo);
+    if (outcome === 'draw') this.earnCash(TDM_DRAW_CASH, 'draw');
+    if (outcome === 'win') this.earnCash(TDM_SHUTDOWN_CASH, 'shutdown');
+    this.pendingResult = {
+      type: 'end', win, kills: actor?.kills ?? 0, score: this.score, shots: this.shots, hits: this.hits,
+      headshots: actor?.headshots ?? 0, timeSec: this.compMatchT,
+      cash: this.cashEarned, cashLog: [...this.cashLog], difficultyMul: difficultyMultiplier(this.difficultyId),
+      mission, pressure,
+      tdm: {
+        alphaScore: m.score.alpha, bravoScore: m.score.bravo, playerKills: actor?.kills ?? 0, outcome,
+        roster: [
+          { name: 'YOU', team: playerTeam, dead: this.dead, armorIcon: armorIcon(this.compArmor, this.compHelmet), you: true, kills: actor?.kills ?? 0, deaths: actor?.deaths ?? 0, headshots: actor?.headshots ?? 0 },
+          ...this.comp.manager.bots.map(b => ({
+            name: b.name, team: b.team, dead: b.dead,
+            armorIcon: armorIcon(b.armorPool, b.helmet),
+            kills: b.kills, deaths: b.deaths, headshots: b.headshots, onFire: false,
+          })),
+        ],
+      },
+      comp: this.compDebrief,
+    };
+    this.finishDelay = 1.6;
+    this.triggerHeld = false; this.rmb = false; this.keys.clear();
+    if (win) voice.objective('Blackout secured. Squad wipes the site clean.');
+    else if (m.draw) voice.objective('Blackout ends level. Nobody takes the ladder.');
+    else voice.defeat();
+  }
+
+  /** Everything the ranked HUD needs, folded into one object for the poll. */
+  private compHudView(): CompHudView | undefined {
+    const runner = this.comp;
+    if (!runner) return undefined;
+    const hud = runner.hud();
+    const H = this.world.half;
+    const norm = (x: number, z: number) => ({ nx: (x + H) / (2 * H), nz: (z + H) / (2 * H) });
+    const playerTeam = runner.match.of(PLAYER_ID)?.team ?? 'alpha';
+    const mates: CompRadarDot[] = [];
+    const foes: CompRadarDot[] = [];
+    for (const bot of runner.manager.bots) {
+      const dot: CompRadarDot = {
+        id: bot.name,
+        ...norm(bot.pos.x, bot.pos.z),
+        yaw: -bot.yaw * 180 / Math.PI,
+        alive: !bot.dead,
+        hot: !bot.dead && (bot.state === 'ENGAGE' || bot.state === 'PUSH' || bot.state === 'FLANK'),
+      };
+      (bot.team === playerTeam ? mates : foes).push(dot);
+    }
+    const bomb = runner.match.bomb;
+    return {
+      ...hud,
+      buyOpen: this.compBuyOpen,
+      buyCursor: this.compBuyCursor,
+      rack: this.compRack(),
+      mates,
+      foes,
+      bombMap: bomb.state === 'planted' || bomb.state === 'dropped' ? norm(bomb.x, bomb.z) : null,
+      siteRings: (Object.keys(COMP_SITES) as CompSiteId[]).map(id => {
+        const site = COMP_SITES[id];
+        return {
+          id, ...norm(site.x, site.z),
+          rPct: (site.radius / (2 * H)) * 100,
+          active: runner.director.targetSite === id && runner.match.side[playerTeam] === 'attack',
+          planted: bomb.state === 'planted' && bomb.site === id,
+        };
+      }),
+      targetSite: runner.director.targetSite,
+      rank: rankFor(this.compRanked.rating, this.compRanked),
+      ratingChange: this.ended ? this.compRatingChange : 0,
+    };
+  }
+
   private endMatch(win: boolean) {
     if (this.ended) return;
+    if (this.isComp) return; // ranked rounds resolve in compUpdate; death is a spectate camera
     if (this.isTDM) { this.endTDMMatch(); return; }
     if (this.isDefusal) { this.endDefusalMatch(); return; }
     if (win && this.missionRuntime.mission.status !== 'complete') return;
@@ -2763,6 +3634,7 @@ void main(){
       mission, pressure: this.missionRuntime.pressure.stats(),
     };
     this.finishDelay = win ? 0.6 : 0.8;
+    this.streaks?.quiet();
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Extraction complete. Nomad has you.');
     else voice.defeat();
@@ -2855,6 +3727,8 @@ void main(){
       if (k.has('KeyA')) ix -= 1;
       if (k.has('KeyD')) ix += 1;
     }
+    // Ranked freezetime: the buy menu is up and nobody walks off the spawn.
+    if (this.isComp && (this.compFrozen || this.compBuyOpen) && !this.dead) { ix = 0; iz = 0; k.delete('ShiftLeft'); }
     const moving = ix !== 0 || iz !== 0;
 
     const wasSprinting = this.sprinting;
@@ -3087,11 +3961,14 @@ void main(){
 
     this.updateGrenades(dt);
     this.ai.update(dt);
+    this.streaks.update(dt);
     this.effects.update(dt, this.pos);
     this.composeCamera(dt);
     this.animateViewmodel(dt);
     this.camera.updateMatrixWorld(true);
-    if (this.isTDM && this.tdm) {
+    if (this.isComp) {
+      this.compUpdate(dt);
+    } else if (this.isTDM && this.tdm) {
       this.tdm.update(dt);
       // player respawn cooldown
       if (this.tdmPlayerDead && !this.ended) {
@@ -3588,6 +4465,8 @@ void main(){
 
   hud(): HudState {
     const H = this.world.half;
+    const compView = this.isComp ? this.compHudView() : undefined;
+    const uav = this.streaks.uavActive;
     // Proximity indicator: closest living hostile — screen-relative bearing + range
     let nearest: HudState['nearest'];
     let nd = Infinity;
@@ -3596,9 +4475,10 @@ void main(){
       const d = e.pos.distanceTo(this.pos);
       if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(e.pos), dist: d, above: e.pos.y - this.pos.y }; }
     }
-    if (this.isTDM && this.tdm) {
+    if ((this.isTDM || this.isComp) && this.tdm) {
+      const playerTeam = this.comp?.match.of(PLAYER_ID)?.team ?? 'alpha';
       for (const b of this.tdm.bots) {
-        if (b.dead || b.team !== 'bravo') continue;
+        if (b.dead || b.team === playerTeam) continue;
         const d = b.pos.distanceTo(this.pos);
         if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(b.pos), dist: d, above: b.pos.y - this.pos.y }; }
       }
@@ -3639,8 +4519,9 @@ void main(){
         return { name: t.name, hp: Math.max(0, Math.round(t.hp)), weapon: t.weapon?.name ?? '', team: t.team };
       })(),
       score: this.score,
-      enemiesLeft: this.isTDM && this.tdm ? this.tdm.aliveCount('bravo')
-        : this.defusal ? this.defusal.players.filter(c => c.team === 'bravo' && c.alive).length : this.ai.aliveCount(),
+      enemiesLeft: this.defusal ? this.defusal.players.filter(c => c.team === 'bravo' && c.alive).length
+        : this.isComp && this.comp ? this.comp.match.aliveIds(this.comp.match.teamOf(PLAYER_ID) === 'alpha' ? 'bravo' : 'alpha').length
+        : this.isTDM && this.tdm ? this.tdm.aliveCount('bravo') : this.ai.aliveCount(),
       cooking: this.cooking,
       sprinting: this.sprinting,
       ads: this.ads,
@@ -3654,16 +4535,18 @@ void main(){
       enemiesMap: this.defusal
         // competitive radar: only enemies you or a teammate can actually see
         ? this.defusal.spottedEnemies().map(b => ({ nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H), yaw: -b.yaw * 180 / Math.PI, hot: true }))
+        : compView
+        ? compView.foes.map(f => ({ nx: f.nx, nz: f.nz, yaw: f.yaw, hot: f.hot }))
         : this.isTDM && this.tdm
         ? this.tdm.bots
-          .filter(b => !b.dead && b.team === 'bravo')
+          .filter(b => !b.dead && b.team === 'bravo' && (uav || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR))
           .map(b => ({
             nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H),
             yaw: -b.yaw * 180 / Math.PI,
             hot: b.onFire || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK',
           }))
         : this.ai.enemies
-          .filter(e => !e.dead)
+          .filter(e => !e.dead && (uav || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR))
           .map(e => ({
             nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H),
             // Heading (deg) + engagement state let the radar draw directional
@@ -3686,7 +4569,8 @@ void main(){
       magSize: this.def().magSize,
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
-      mission: this.isTDM || this.isDefusal ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
+      streaks: this.isComp ? undefined : this.streaks.hud(),
+      mission: this.isTDM || this.isDefusal || this.isComp ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
       tdm: this.isTDM && this.tdm ? {
         alphaScore: this.tdm.alphaScore,
         bravoScore: this.tdm.bravoScore,
@@ -3702,6 +4586,7 @@ void main(){
           ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots, onFire: b.onFire })),
         ],
       } : undefined,
+      comp: compView,
     };
   }
 
@@ -3734,8 +4619,10 @@ void main(){
       material.dispose();
     }
     for(const texture of textures) texture.dispose();
+    this.streaks?.dispose();
     this.missionRuntime?.dispose();
-    this.tdm?.dispose();
+    if (this.comp) this.comp.dispose();
+    else this.tdm?.dispose();
     this.defusal?.dispose();
     this.ai.dispose();
     this.composer.dispose();

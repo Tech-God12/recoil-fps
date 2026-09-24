@@ -492,6 +492,14 @@ img { display: block; max-width: 100%; }
   display: block; height: 100%; background: var(--brass); width: 0%;
   transition: width 120ms linear;
 }
+.boot-bar__indeterminate {
+  width: 34%; transform: translateX(-120%);
+  animation: bootSweep 1.55s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes bootSweep {
+  0% { transform: translateX(-120%); }
+  70%, 100% { transform: translateX(320%); }
+}
 .boot-pct {
   margin-top: 8px; font-family: var(--mono); font-size: 11px; color: var(--bone-mute);
   font-variant-numeric: tabular-nums;
@@ -1110,6 +1118,7 @@ img { display: block; max-width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .seq { animation: none !important; }
+  .boot-bar__indeterminate { transform: translateX(100%); }
 }
 
 /* legacy kills — ensure no neon left */
@@ -2598,3 +2607,23 @@ span.arm2-thumb { display: inline-block; }
   .df-top { transform: translateX(-50%) scale(0.85); transform-origin: top center; }
 }
 .df-onboard { top: auto; bottom: 132px; }
+.legacy-wallet-notice {
+  position: absolute; z-index: 100; left: 50%; bottom: 48px; transform: translateX(-50%);
+  width: min(640px, calc(100vw - 28px)); display: flex; align-items: center; justify-content: space-between;
+  gap: 18px; padding: 14px 16px; color: var(--bone); background: rgba(20,19,16,0.97);
+  border: 1px solid rgba(200,155,90,0.48); box-shadow: 0 12px 36px rgba(0,0,0,0.42);
+}
+.legacy-wallet-notice strong { display: block; font: 700 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.legacy-wallet-notice p { margin-top: 5px; color: var(--bone-dim); font: 12px/1.45 var(--body); }
+.legacy-wallet-actions { display: flex; flex: none; gap: 7px; }
+.legacy-wallet-actions button {
+  min-height: 34px; padding: 0 10px; color: var(--bone); background: var(--ink-2);
+  border: 1px solid var(--line); font: 700 9px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+}
+.legacy-wallet-actions button:hover, .legacy-wallet-actions button:focus-visible { border-color: var(--brass); }
+.legacy-wallet-actions button.reset { color: #E6BA74; border-color: rgba(200,155,90,0.4); }
+.legacy-wallet-actions button.reset:hover, .legacy-wallet-actions button.reset:focus-visible { background: rgba(200,155,90,0.12); }
+@media (max-width: 700px) {
+  .legacy-wallet-notice { bottom: 14px; align-items: stretch; flex-direction: column; gap: 10px; }
+  .legacy-wallet-actions button { flex: 1; }
+}

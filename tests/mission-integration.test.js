@@ -88,7 +88,8 @@ test('the engine rejects victory before extraction, irrespective of enemy count'
   assert.equal(engine.ended, false);
   const source = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /aliveCount\(\)\s*===\s*0\)\s*this\.endMatch/);
-  assert.match(source, /new AIManager\(ctx, \[\]\)/, 'the engine must not reintroduce its legacy fixed roster');
+  assert.equal((source.match(/this\.ai = new AIManager\(ctx, \[\]\);/g) ?? []).length, 4, 'every mode (story, TDM, ranked, defusal) starts with an empty AI roster');
+  assert.match(source, /this\.ai = new AIManager\(ctx, \[\]\);\s*this\.missionRuntime = new MissionRuntime/, 'story insertion remains mission-driven');
   assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 4, 'only the explicitly reworked MP changes its recoil pattern');
 });
 
@@ -146,13 +147,20 @@ test('SSR output exposes the mission verbs, actual objective progress, and a nor
   // Maps are deliberately NOT shown until the player enters Missions.
   const menu = renderToStaticMarkup(React.createElement(MainMenu, { s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {} }));
   assert.ok(menu.includes('RECOIL'));
-  assert.ok(menu.includes('Missions'));
-  assert.ok(menu.includes('Loadout'));
-  assert.ok(menu.includes('Settings'));
+  assert.match(menu, /MISSIONS/i);
+  assert.match(menu, /LOADOUT/i);
+  assert.match(menu, /SETTINGS/i);
   assert.ok(!menu.includes('Sandblast'), 'map selection must not leak onto the home menu');
   assert.ok(!menu.includes('21 HOSTILES'));
   // The cinematic boot screen names the operation and its first objective.
   const boot = renderToStaticMarkup(React.createElement(BootScreen, { map: 'alrasul' }));
   assert.ok(boot.includes(mission.definition.name), 'boot screen names the operation');
   assert.ok(boot.includes(mission.definition.phases[0].title), 'boot screen shows the opening objective');
+  assert.match(boot, /Tip — Use hard cover/);
+  assert.match(boot, /role="progressbar"/);
+  assert.match(boot, /Loading world/);
+  assert.doesNotMatch(boot, /%|Uplink handshake|Arming weapons/, 'loading UI must not invent percentage or completed work');
+  const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+  const reducedMotion = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.match(reducedMotion, /\.boot-bar__indeterminate\s*\{\s*transform:\s*translateX\(100%\)/);
 });

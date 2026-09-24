@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
-import type { CashLogEntry, GameSettings } from '../game/engine';
+import type { CashLogEntry, CompDebrief, GameSettings } from '../game/engine';
 import { weaponById } from '../game/economy/catalog';
 import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
 import { MAPS, isMissionMap, type MapId } from '../game/world';
@@ -7,11 +7,13 @@ import type { DefusalHud, DefusalResult } from '../game/defusal/mode';
 import { WEAPON_CATALOG } from '../game/economy/catalog';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
+import type { StreakHud } from '../game/streaks';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
 import CashCounter from './armory/CashCounter';
 import { gradeFor } from '../game/economy/rewards';
+import { CompDebriefPanel } from './Competitive';
 import { voice } from '../game/voice';
 import mapAlrasul from '../assets/map-alrasul.jpg';
 import mapKasbah from '../assets/map-kasbah.jpg';
@@ -24,6 +26,7 @@ import { TxBack, TxCoords, TxLock } from './tactical';
 import MapFlyover from './MapFlyover';
 import { gunThumbnail } from './armory/GunViewer';
 import { weaponTexturesReady } from '../game/weapons/finish';
+import type { TDMOutcome } from '../game/tdm';
 
 export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapArena, sirocco: mapSirocco };
 
@@ -41,8 +44,9 @@ export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
   mission: MissionReport; pressure: PressureStats;
   cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
+  comp?: CompDebrief;
   tdm?: {
-    alphaScore: number; bravoScore: number; playerKills: number;
+    alphaScore: number; bravoScore: number; playerKills: number; outcome: TDMOutcome;
     roster: { name: string; team: 'alpha' | 'bravo'; dead: boolean; armorIcon: string; you?: boolean; kills: number; deaths: number; headshots: number }[];
   };
   defusal?: DefusalResult;
@@ -92,9 +96,9 @@ const INTEL_TABS = [
    Right: wallet + operator chip, intel tabs, loadout card, motto.
    Fully interactive: mouse + WASD/arrows + Enter + Tab profile.
    ================================================================ */
-function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings }: {
+function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings, onRanked }: {
   prof: PlayerProfile; primaryName: string; secondaryName: string;
-  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void;
+  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void; onRanked?: () => void;
 }) {
   const [sel, setSel] = useState(0);
   const [intel, setIntel] = useState(2);
@@ -143,10 +147,11 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
     { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 · BOMB DEFUSAL · TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'loadout', idx: '03', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
-    { id: 'settings', idx: '04', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
+    { id: 'ranked', idx: '03', title: 'OPERATION BLACKOUT', sub: 'RANKED SEARCH & DESTROY', action: () => onRanked?.() },
+    { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
+    { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
   ];
-  const activate = useCallback((i: number) => { items[i]?.action(); }, [onSelect, onArmory, onSettings]);
+  const activate = useCallback((i: number) => { items[i]?.action(); }, [items]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -482,9 +487,9 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, defusal, onDefusal }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, defusal, onDefusal, onRanked }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; onArenaSetup?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
+  onArmory?: () => void; onArenaSetup?: () => void; onRanked?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
   defusal?: DefusalMenuOptions; onDefusal?: (o: DefusalMenuOptions) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
@@ -531,6 +536,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onSelect={v => setView(v)}
         onArmory={() => onArmory?.()}
         onSettings={onSettings}
+        onRanked={onRanked}
       />
     );
   }
@@ -724,25 +730,23 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
    and a clean progress rail. Replaces the old cramped briefing plate
    (the objective list already lives on the missions screen).
    ================================================================ */
-const BOOT_LINES = [
-  'Uplink handshake',
-  'Grid sync — satellites 3/3',
-  'Zeroing optics',
-  'Loading ballistics tables',
-  'Arming weapons',
-  'Insertion corridor clear',
+const BOOT_TIPS = [
+  'Use hard cover to break hostile line of sight.',
+  'Hold G to cook a frag; release to throw it.',
+  'Press X inside the objective ring to interact.',
+  'Lean with Q and E, then return to cover before firing.',
+  'Reload before crossing an exposed lane.',
+  'Manage the magazine; reserve ammunition is not consumed.',
 ];
 
 export function BootScreen({ map }: { map?: MapId }) {
-  const [line, setLine] = useState(0);
-  const [pct, setPct] = useState(0);
+  const [tipIndex, setTipIndex] = useState(0);
   const isDefusal = map === 'sirocco';
   const mission = map && !isMissionMap(map) ? null : getMission(map && isMissionMap(map) ? map : 'alrasul');
   const mapName = MAPS.find(m => m.id === (map ?? 'alrasul'))?.name ?? '';
   useEffect(() => {
-    const l = window.setInterval(() => setLine(i => Math.min(BOOT_LINES.length - 1, i + 1)), 700);
-    const p = window.setInterval(() => setPct(v => Math.min(94, v + 2 + Math.floor(Math.random() * 5))), 125);
-    return () => { window.clearInterval(l); window.clearInterval(p); };
+    const timer = window.setInterval(() => setTipIndex(index => (index + 1) % BOOT_TIPS.length), 3600);
+    return () => window.clearInterval(timer);
   }, []);
   // Voiceover: brief the operator while the world builds. The Deploy click is the
   // user gesture, so speech is already unlocked when this mounts.
@@ -761,7 +765,7 @@ export function BootScreen({ map }: { map?: MapId }) {
     // finish over the first seconds in-game (mission radio interrupts it anyway).
   }, [mission, isDefusal]);
   return (
-    <div className="boot-root boot-cine" role="status" aria-live="polite">
+    <div className="boot-root boot-cine" aria-busy="true">
       <div className="boot-cine-art" style={{ backgroundImage: `url(${MAP_ART[map ?? 'alrasul']})` }} aria-hidden="true" />
       <div className="boot-cine-shade" aria-hidden="true" />
       <div className="boot-cine-grid" aria-hidden="true" />
@@ -772,16 +776,16 @@ export function BootScreen({ map }: { map?: MapId }) {
       </div>
 
       <div className="boot-cine-bottom">
-        <div className="boot-feed mono" aria-hidden="true">
-          {BOOT_LINES.slice(0, line + 1).map((l, i) => (
-            <span key={l} className={i === line ? 'cur' : ''}>▸ {l}</span>
-          ))}
+        <div className="boot-feed mono" role="status" aria-live="polite" aria-atomic="true">
+          <span key={tipIndex} className="cur">Tip — {BOOT_TIPS[tipIndex]}</span>
         </div>
         <div className="boot-cine-railwrap">
-          <div className="boot-bar" aria-hidden="true"><span className="boot-bar__fill" style={{ width: `${pct}%` }} /></div>
+          <div className="boot-bar" role="progressbar" aria-label="Preparing match" aria-valuetext="Loading">
+            <span className="boot-bar__fill boot-bar__indeterminate" aria-hidden="true" />
+          </div>
           <div className="boot-cine-railmeta mono">
-            <span>{mission ? `${mission.phases[0].title} · ${mission.phases[0].location}` : isDefusal ? 'Plant on A or B · defuse · buy every round' : '5v5 · 2:30 · most kills wins'}</span>
-            <span className="tabular">{String(pct).padStart(3, '0')}%</span>
+            <span>{mission ? `${mission.phases[0].title} · ${mission.phases[0].location}` : isDefusal ? 'Plant on A or B · defuse · buy every round' : 'Loading world…'}</span>
+            <span>Loading world…</span>
           </div>
         </div>
       </div>
@@ -792,8 +796,8 @@ export function BootScreen({ map }: { map?: MapId }) {
 /* ================================================================
    PAUSE — SUSPENDED
    ================================================================ */
-export function PauseMenu({ mission, defusal, onResume, onRestart, onSettings, onQuit }: {
-  mission?: MissionHud; defusal?: DefusalHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
+export function PauseMenu({ mission, defusal, streaks, onResume, onRestart, onSettings, onQuit }: {
+  mission?: MissionHud; defusal?: DefusalHud; streaks?: StreakHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
 }) {
   const readout = mission ? objectiveReadout(mission) : undefined;
   if (defusal) {
@@ -863,6 +867,23 @@ export function PauseMenu({ mission, defusal, onResume, onRestart, onSettings, o
             </div>
           )}
           <p className="pause-note">All mission timers frozen</p>
+          {streaks && (
+            <div className="pause-streaks" aria-label="Scorestreaks">
+              <div className="pause-streaks-head">
+                <span>Scorestreaks</span>
+                <span className="tabular">{streaks.points} pts this life</span>
+              </div>
+              {streaks.ladder.map(l => (
+                <div key={l.id} className={`pause-streak-row ${l.ready ? 'ready' : ''} ${l.claimed && !l.ready ? 'claimed' : ''}`}>
+                  <span className="keycap">{l.key}</span>
+                  <span className="psr-name">{l.name}</span>
+                  <span className="psr-cost tabular">{l.cost}</span>
+                  <span className="psr-state">{l.active ? 'LIVE' : l.ready ? 'READY' : l.claimed ? 'USED' : ''}</span>
+                </div>
+              ))}
+              <p className="pause-streaks-foot">Kills 100 · headshots 150 · objectives 250. Streak kills never chain. Progress resets on death; armed streaks are kept.</p>
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -887,6 +908,8 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   const accuracy = r.shots ? Math.round(r.hits / r.shots * 100) : 0;
   const completed = r.mission.phases.filter(p => p.complete).length;
   const { grade, tint } = gradeFor(r);
+  const isDraw = r.tdm?.outcome === 'draw';
+  const hasWon = r.tdm ? r.tdm.outcome === 'win' : r.win;
   const cashRows: { label: string; detail: string; total: number }[] = [];
   for (const reason of Object.keys(CASH_REASONS)) {
     const entries = r.cashLog.filter(e => e.reason === reason);
@@ -897,15 +920,37 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   const tdm = r.tdm;
   const df = r.defusal;
   const dfTitle = df ? `${df.winner === 'alpha' ? 'Victory' : df.winner === 'draw' ? 'Draw' : 'Defeat'} ${df.alphaScore} — ${df.bravoScore}` : '';
+  if (r.comp) {
+    return (
+      <main className={`results-root ${r.win ? '' : 'lose'}`}>
+        <div className="results-wrap">
+          <div className="results-header">
+            <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
+            <div className="results-titleblock">
+              <div className="stamp-label">BLACKOUT REPORT</div>
+              <h1>OPERATION BLACKOUT</h1>
+              <p className="mono">RANKED SEARCH &amp; DESTROY · WAREHOUSE COMPLEX · {missionClock(r.timeSec)}</p>
+            </div>
+          </div>
+          <CompDebriefPanel report={r.comp} />
+          <div className="results-actions">
+            <button className="deploy-btn" onClick={onRedeploy}>RE-QUEUE</button>
+            <button className="menu-secondary-btn" onClick={onArmory}>ARMORY (+${Math.round(wallet.earned)})</button>
+            <button className="menu-secondary-btn" onClick={onMenu}>BACK TO MENU</button>
+          </div>
+        </div>
+      </main>
+    );
+  }
   return (
-    <main className={`results-root ${r.win || df?.winner === 'draw' ? '' : 'lose'}`}>
+    <main className={`results-root ${r.win || df?.winner === 'draw' || tdm?.outcome === 'draw' ? '' : 'lose'}`}>
       <div className="results-wrap">
         <div className="results-header">
-          <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
+          <div className="stamp"><span className="stamp-grade" style={{ color: isDraw ? '#C9A15A' : tint }}>{isDraw ? '=' : grade}</span></div>
           <div className="results-titleblock">
-            <div className="stamp-label">Grade {grade}</div>
+            <div className="stamp-label">{isDraw ? 'Match draw' : `Grade ${grade}`}</div>
             <h2 className="results-title">{df ? dfTitle : tdm
-              ? (r.win ? 'Victory — Alpha squad' : tdm.alphaScore === tdm.bravoScore ? 'Draw' : 'Defeat — Bravo squad')
+              ? (tdm.outcome === 'draw' ? 'Draw' : tdm.outcome === 'win' ? 'Victory — Alpha squad' : 'Defeat — Bravo squad')
               : (r.win ? 'Extraction complete' : 'Mission failed')}</h2>
             <p className="results-sub">{df
               ? `Sirocco bomb defusal — you started on ${df.startSide === 'attack' ? 'attack' : 'defense'} · ${df.rounds} rounds · ${df.plants} plant${df.plants === 1 ? '' : 's'} · ${df.defuses} defuse${df.defuses === 1 ? '' : 's'} · ${df.mvps} MVP${df.mvps === 1 ? '' : 's'}.`
@@ -1053,7 +1098,13 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
         </p>
 
         <div className="results-actions">
-          {r.win ? (
+          {isDraw ? (
+            <>
+              <button className="btn btn-primary" style={{ padding: '12px 20px' }} onClick={onRedeploy}><span>Rematch</span><Arrow /></button>
+              <button className="btn btn-ghost" onClick={onArmory}>Open armory</button>
+              <button className="btn btn-ghost" onClick={onMenu}>Return to base</button>
+            </>
+          ) : hasWon ? (
             <>
               <button className="btn btn-primary" style={{ padding: '12px 20px' }} onClick={onArmory}><span>Open armory</span><Arrow /></button>
               <button className="btn btn-ghost" onClick={onRedeploy}>Redeploy</button>

@@ -6,6 +6,7 @@ import {
 } from './catalog';
 import { emptyBuild, repairLoadout, migrateAttachmentId, type Loadout, type WeaponBuild } from './loadout';
 import { DEFAULT_SKIN, isKnownSkin, type SkinId } from './skins';
+import { DEFAULT_RANKED, RATING_CEILING, RATING_FLOOR, type RankedProfile } from './rank';
 
 export type { Loadout, WeaponBuild } from './loadout';
 
@@ -21,6 +22,8 @@ export interface PlayerProfile {
   loadout: Loadout;
   skins: Partial<Record<WeaponId, SkinId>>;
   seenArmoryTutorial: boolean;
+  /** OPERATION BLACKOUT ladder: rating, peak, placements, streaks. */
+  ranked: RankedProfile;
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -46,6 +49,7 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   },
   skins: {},
   seenArmoryTutorial: false,
+  ranked: structuredClone(DEFAULT_RANKED),
 };
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
@@ -133,10 +137,32 @@ export function migrateProfile(raw: unknown): PlayerProfile {
       loadout,
       skins,
       seenArmoryTutorial: d.seenArmoryTutorial === true,
+      ranked: readRanked(d.ranked),
     };
   } catch {
     return fresh();
   }
+}
+
+/** Ladder state survives reloads; a corrupt blob resets to the placement rank. */
+function readRanked(raw: unknown): RankedProfile {
+  const fresh = (): RankedProfile => structuredClone(DEFAULT_RANKED);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fresh();
+  const r = raw as Record<string, unknown>;
+  const rating = typeof r.rating === 'number' && Number.isFinite(r.rating) ? r.rating : DEFAULT_RANKED.rating;
+  const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  return {
+    rating: Math.max(RATING_FLOOR, Math.min(RATING_CEILING, Math.round(rating))),
+    peak: Math.max(RATING_FLOOR, Math.min(RATING_CEILING, Math.round(
+      typeof r.peak === 'number' && Number.isFinite(r.peak) ? Math.max(r.peak, rating) : rating,
+    ))),
+    wins: count(r.wins),
+    losses: count(r.losses),
+    draws: count(r.draws),
+    matches: count(r.matches),
+    placements: Math.min(5, count(r.placements)),
+    streak: typeof r.streak === 'number' && Number.isFinite(r.streak) ? Math.trunc(r.streak) : 0,
+  };
 }
 
 export function loadProfile(storage?: Store): PlayerProfile {
@@ -252,6 +278,20 @@ export function setLoadoutWeapon(p: PlayerProfile, slot: SlotId, weapon: string)
     : emptyBuild(entry.id);
   next.loadout[slot] = skin ? { ...base, skin } : base;
   return { ok: true, value: next };
+}
+
+export function developmentCashGrant(hash: string, enabled: boolean): number {
+  if (!enabled) return 0;
+  const match = hash.match(/#cash=(\d+)/);
+  if (!match) return 0;
+  const amount = Number(match[1]);
+  return Number.isFinite(amount) ? Math.min(999_999, Math.max(0, Math.floor(amount))) : 999_999;
+}
+
+export function resetCurrentCash(p: PlayerProfile): PlayerProfile {
+  const next = clone(p);
+  next.cash = 0;
+  return next;
 }
 
 export function grantCash(p: PlayerProfile, amount: number, _reason: string): PlayerProfile {

@@ -4,6 +4,7 @@ import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
 import MissionObjective, { missionClock } from './MissionObjective';
 import ScopeView, { type ScopeControls } from './ScopeView';
+import { NukeCountdown, StreakActive, StreakMessage, StreakRail, StrikeDesignator } from './Streaks';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
@@ -14,6 +15,8 @@ export interface HudFx {
   callout: { id: number; text: string } | null;
   flashPow: number;
   missionBanner: { id: number; title: string; index: number } | null;
+  streakMsg: { id: number; text: string } | null;
+  nukeFlash: number | null;
 }
 
 /* ================================================================
@@ -108,7 +111,16 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
       {/* flashbang */}
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
+      {/* tactical nuke whiteout */}
+      {fx.nukeFlash !== null && <div key={fx.nukeFlash} className="sk-nuke-flash" />}
       {hud.mission && <MissionObjective mission={hud.mission} />}
+
+      {/* ============ SCORESTREAKS ============ */}
+      {hud.streaks && active !== false && !hud.tdm?.playerDead && <StreakRail st={hud.streaks} />}
+      {hud.streaks && <StreakActive st={hud.streaks} />}
+      {hud.streaks?.designating && !hud.tdm?.playerDead && <StrikeDesignator />}
+      {hud.streaks?.nukeCountdown !== null && hud.streaks?.nukeCountdown !== undefined && <NukeCountdown t={hud.streaks.nukeCountdown} />}
+      {fx.streakMsg && <StreakMessage key={fx.streakMsg.id} text={fx.streakMsg.text} tdm={!!hud.tdm} />}
 
       {/* ============ FULL SCOREBOARD (hold Tab) ============ */}
       {hud.tdm && showBoard && <TdmFullBoard tdm={hud.tdm} />}
@@ -231,7 +243,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
 
       {/* ============ CENTER STACK ============ */}
-      {hud.ads < 0.3 && !hud.sprinting && (
+      {hud.ads < 0.3 && !hud.sprinting && !hud.streaks?.designating && (
         <div className="absolute left-1/2 top-1/2" style={{ opacity: 1 - hud.ads / 0.3 }}>
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>
@@ -354,13 +366,14 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
               <span className="radar-sweep" />
               <span className="radar-player" />
               <span className="radar-frame" />
+              {hud.streaks?.uav && <><span className="radar-uav-sweep" aria-hidden="true" /><span className="radar-uav-tag">UAV</span></>}
               <span className="radar-tick t0" /><span className="radar-tick t45" /><span className="radar-tick t90" /><span className="radar-tick t135" />
             </div>
             {/* Instrument footer: live bearing, objective range, contact count */}
             <div className="radar-meta mono" aria-hidden="true">
               <span className="radar-meta-brg tabular">{String(Math.round(hud.bearing)).padStart(3, '0')}°</span>
               {objChip && <span className={`radar-meta-obj ${objChip.extract ? 'extract' : ''}`}>{objChip.extract ? 'EXFIL' : 'OBJ'} {Math.round(objChip.dist)}m</span>}
-              <span className={`radar-meta-hostiles ${hot > 0 ? 'hot' : ''}`}>{hud.enemiesMap.length > 0 ? `${hud.enemiesMap.length} HOSTILE${hud.enemiesMap.length > 1 ? 'S' : ''}` : 'CLEAR'}</span>
+              <span className={`radar-meta-hostiles ${hot > 0 ? 'hot' : ''} ${hud.streaks?.uav ? 'uav' : ''}`}>{hud.enemiesMap.length > 0 ? `${hud.enemiesMap.length} ${hud.streaks?.uav ? 'PAINTED' : 'CONTACT' + (hud.enemiesMap.length > 1 ? 'S' : '')}` : 'NO CONTACT'}</span>
             </div>
           </div>
         );
@@ -420,6 +433,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
             <i /><span className="keycap">Q·E</span> HOLD LEAN
             <i /><span className="keycap">SPACE</span> VAULT
             <i /><span className="keycap">X</span> ATTACH / BLAST
+            <i /><span className="keycap">3-7</span> STREAKS
           </span>
         </div>
       )}

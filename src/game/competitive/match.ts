@@ -59,7 +59,7 @@ export interface PlayerKit {
 export type CompUiEvent =
   | { type: 'feed'; text: string; tone: 'alpha' | 'bravo' | 'neutral' }
   | { type: 'banner'; title: string; sub: string }
-  | { type: 'sound'; cue: 'plant' | 'defuse' | 'planted' | 'defused' | 'round-win' | 'round-loss' | 'match-win' | 'match-loss' | 'beep' | 'buy' | 'deny' | 'detonate' }
+  | { type: 'sound'; cue: 'plant' | 'defuse' | 'planted' | 'defused' | 'round-win' | 'round-loss' | 'match-win' | 'match-loss' | 'beep' | 'buy' | 'deny' | 'detonate'; at?: { x: number; y: number; z: number } }
   | { type: 'callout'; text: string }
   | { type: 'round-end'; winner: CompTeam; reason: CompWinReason; text: string }
   | { type: 'match-end'; winner: CompTeam | null; draw: boolean; text: string };
@@ -403,6 +403,37 @@ export class CompetitiveRunner {
     if (victimId === PLAYER_ID) this.spectateId = null;
   }
 
+  /** The player's kit exactly as the rules have it — used to rebuild the viewmodel. */
+  currentKit(): PlayerKit {
+    const actor = this.match.of(PLAYER_ID);
+    return {
+      primary: actor?.primary ?? null,
+      secondary: actor?.secondary ?? 'm1911',
+      armor: actor?.armor ?? 0,
+      helmet: actor?.helmet ?? false,
+      kit: actor?.kit ?? false,
+      frags: actor?.frags ?? 0,
+      flashes: actor?.flashes ?? 0,
+    };
+  }
+
+  /**
+   * Public kill funnel: the engine resolves player ↔ bot fights itself (its own
+   * ballistics), so it reports the outcome here instead of the bot brains doing it.
+   */
+  reportKill(killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string): void {
+    this.onKill(killer, victim, headshot, weapon);
+  }
+
+  /** The engine resolves the player's death itself (blast or gunfire). */
+  reportPlayerDeath(killer: TDMBot | null, headshot: boolean, weapon: string): void {
+    this.match.notifyKill(killer ? killer.name : null, PLAYER_ID, weapon, headshot);
+    if (this.spectateId === null) {
+      const mates = this.manager.bots.filter(b => !b.dead && b.team === (this.match.of(PLAYER_ID)?.team ?? 'alpha'));
+      this.spectateId = mates[0]?.name ?? null;
+    }
+  }
+
   /** Damage bookkeeping for the ADR column (the engine calls this on every hit). */
   notifyDamage(victimId: string, amount: number): void {
     this.match.notifyDamage(victimId, amount);
@@ -470,7 +501,7 @@ export class CompetitiveRunner {
     this.detonated = true;
     const site = this.match.bomb.site ?? 'A';
     const pos = SHELL.set(this.match.bomb.x, this.world.groundHeight(this.match.bomb.x, this.match.bomb.z) + 0.5, this.match.bomb.z);
-    this.emit({ type: 'sound', cue: 'detonate' });
+    this.emit({ type: 'sound', cue: 'detonate', at: { x: pos.x, y: pos.y, z: pos.z } });
     this.emit({ type: 'callout', text: `CHARGE DETONATED — ${site} DECK` });
     for (const bot of this.manager.bots) {
       if (bot.dead) continue;
@@ -569,7 +600,9 @@ export class CompetitiveRunner {
     const playerSide = this.match.side[playerTeam];
     const attackTeam = this.match.teamOnSide('attack');
     const pos = this.player.position();
-    const site = siteAt(pos.x, pos.z);
+    // The call is the site the player is standing on if they are already there, and
+    // otherwise the one the squad is executing on: attackers never read a blank objective.
+    const site = siteAt(pos.x, pos.z) ?? (playerSide === 'attack' ? this.director.targetSite : null);
     const bombDist = Math.hypot(pos.x - this.match.bomb.x, pos.z - this.match.bomb.z);
     let prompt: CompHud['prompt'] = null;
     if (actor?.alive && this.match.phase === 'live') {

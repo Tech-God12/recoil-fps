@@ -9,7 +9,7 @@ import type { Effects } from './effects';
 import type { AABB } from './world';
 import { arenaZoneAt } from './world';
 import { NavGrid } from './ai';
-import { applyCompetitiveDamage } from './competitive/rules';
+import { COMP_BASE_HP, applyCompetitiveDamage } from './competitive/rules';
 import type { BotGear, CompOrder } from './competitive/tactics';
 
 export type TDMTeam = 'alpha' | 'bravo';
@@ -17,8 +17,6 @@ export type TDMArmor = 0 | 1 | 2;
 export type TDMBotState = 'PATROL' | 'ENGAGE' | 'FLANK' | 'PUSH' | 'COVER' | 'DEAD';
 
 export const TDM_MATCH_SECONDS = 150;
-/** Ranked Search & Destroy health: one life per round, no momentum layer. */
-export const COMP_BASE_HP = 100;
 export const TDM_RESPAWN_SECONDS = 5;
 export const TDM_BASE_HP = 150;
 export const TDM_HP_PER_ARMOR = 20;

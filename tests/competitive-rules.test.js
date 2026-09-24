@@ -14,11 +14,10 @@ const {
   CompetitiveMatch, COMP_START_MONEY, COMP_WIN_REWARD, COMP_LOSS_REWARDS, COMP_BUY_SECONDS,
   COMP_ROUND_SECONDS, COMP_BOMB_FUSE, COMP_PLANT_SECONDS, COMP_DEFUSE_SECONDS, COMP_DEFUSE_KIT_SECONDS,
   COMP_ROUND_END_SECONDS, COMP_PLANT_REWARD, COMP_DEFUSE_REWARD, COMP_MAX_MONEY, COMP_HALFTIME_ROUNDS,
-  COMP_OVERTIME_START_MONEY, COMP_PICKUP_RADIUS, COMP_DEFUSE_RADIUS, COMP_SITES,
+  COMP_OVERTIME_START_MONEY, COMP_PICKUP_RADIUS, COMP_SITES,
   applyCompetitiveDamage, killReward, siteAt, otherTeam, otherSide,
 } = rules;
 
-let uid = 0;
 /** Five-a-side roster with deterministic ids, mirroring the live team shape. */
 function roster() {
   const make = (team, prefix) => Array.from({ length: 5 }, (_, i) => ({

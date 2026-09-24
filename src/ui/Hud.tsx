@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
 import MissionObjective, { missionClock } from './MissionObjective';
+import { CompHudLayer, CompScoreboard } from './Competitive';
 import ScopeView, { type ScopeControls } from './ScopeView';
 
 export interface HudFx {
@@ -68,7 +69,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
   // Hold-Tab scoreboard (TDM only). Listens on window so it works regardless
   // of pointer lock; Tab's default focus-move is suppressed while playing.
   const [showBoard, setShowBoard] = useState(false);
-  const isTdm = !!hud.tdm && active !== false;
+  const isTdm = (!!hud.tdm || !!hud.comp) && active !== false;
   useEffect(() => {
     if (!isTdm) { setShowBoard(false); return; }
     const down = (e: KeyboardEvent) => { if (e.code === 'Tab') { e.preventDefault(); setShowBoard(true); } };
@@ -112,9 +113,13 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
 
       {/* ============ FULL SCOREBOARD (hold Tab) ============ */}
       {hud.tdm && showBoard && <TdmFullBoard tdm={hud.tdm} />}
+      {hud.comp && showBoard && <CompScoreboard comp={hud.comp} />}
+
+      {/* ============ OPERATION BLACKOUT ============ */}
+      {hud.comp && <CompHudLayer comp={hud.comp} />}
 
       {/* ============ WAREHOUSE TDM SCOREBOARD ============ */}
-      {hud.tdm && (
+      {hud.tdm && !hud.comp && (
         <div className="tdm-scoreboard" aria-label="Match score">
           <div className="tdm-score-row">
             <div className="tdm-score-team alpha"><span className="lbl">ALPHA</span><span className="num">{hud.tdm.alphaScore}</span></div>
@@ -309,6 +314,20 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         const hot = hud.enemiesMap.filter(e => e.hot).length;
         // Objective bearing chevron on the dish rim + straight-line distance readout.
         let objChip: { deg: number; dist: number; extract: boolean } | null = null;
+        const compObj = hud.comp
+          ? (hud.comp.bomb.state === 'planted' || hud.comp.bomb.state === 'dropped')
+            ? hud.comp.bombMap
+            : hud.comp.siteRings.find(s => s.id === hud.comp!.targetSite) ?? null
+          : null;
+        if (compObj) {
+          const dx = (compObj.nx - hud.playerMap.nx) * hud.worldHalf * 2;
+          const dz = (compObj.nz - hud.playerMap.nz) * hud.worldHalf * 2;
+          objChip = {
+            deg: Math.atan2(dx, -dz) * 180 / Math.PI - hud.bearing,
+            dist: Math.hypot(dx, dz),
+            extract: hud.comp!.bomb.state === 'planted',
+          };
+        }
         if (hud.missionMap) {
           const dx = (hud.missionMap.nx - hud.playerMap.nx) * hud.worldHalf * 2;
           const dz = (hud.missionMap.nz - hud.playerMap.nz) * hud.worldHalf * 2;
@@ -331,6 +350,26 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
                       style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%`, transform: `rotate(${e.yaw}deg)` }}
                     />
                   ))}
+                  {/* OPERATION BLACKOUT: bomb sites, the charge and the squad */}
+                  {hud.comp && (
+                    <>
+                      {hud.comp.siteRings.map(s => (
+                        <span
+                          key={s.id}
+                          className={`radar-site ${s.active ? 'active' : ''} ${s.planted ? 'planted' : ''}`}
+                          style={{ left: `${s.nx * 100}%`, top: `${s.nz * 100}%`, width: `${s.rPct * 2}%`, height: `${s.rPct * 2}%` }}
+                        ><i>{s.id}</i></span>
+                      ))}
+                      {hud.comp.bombMap && <span className="radar-bomb" style={{ left: `${hud.comp.bombMap.nx * 100}%`, top: `${hud.comp.bombMap.nz * 100}%` }} />}
+                      {hud.comp.mates.map(m => (
+                        <span
+                          key={m.id}
+                          className={`radar-mate ${m.alive ? '' : 'down'}`}
+                          style={{ left: `${m.nx * 100}%`, top: `${m.nz * 100}%` }}
+                        />
+                      ))}
+                    </>
+                  )}
                   {hud.missionMap && (
                     <>
                       <span className={`radar-obj-ring ${hud.missionMap.extract ? 'extract' : ''}`} style={{ left: `${hud.missionMap.nx * 100}%`, top: `${hud.missionMap.nz * 100}%`, width: `${hud.missionMap.ringPct * 2}%`, height: `${hud.missionMap.ringPct * 2}%` }} />

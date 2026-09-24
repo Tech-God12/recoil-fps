@@ -5,12 +5,14 @@ import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
+import { RankedSetup } from './ui/Competitive';
+import { rankFor } from './game/economy/rank';
 import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'ranked-setup';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
 /**
@@ -183,6 +185,11 @@ export default function App() {
         next.kills += event.kills;
         updateProfile(next);
         setWallet({ before: before.cash, after: next.cash, gradeBonus: gb, earned });
+        // Ranked matches bank the ladder result — the next queue starts from here.
+        if (event.comp) {
+          next.ranked = event.comp.next;
+          updateProfile(next);
+        }
         changePhase('results');
         setResults({ ...event });
         if (document.pointerLockElement) document.exitPointerLock();
@@ -243,10 +250,16 @@ export default function App() {
    * `mapOverride` beats the (possibly not-yet-committed) settings state so
    * "Play" in Arena Mode can never race the map selection. */
   const deploy = async (mapOverride?: GameSettings['map']) => {
-    await launch(mapOverride);
+    await launch(mapOverride, 'mission');
   };
 
-  const launch = async (mapOverride?: GameSettings['map']) => {
+  /** OPERATION BLACKOUT: always the warehouse, always ranked. */
+  const deployRanked = async () => {
+    if (settings.map !== 'arena') set({ map: 'arena' });
+    await launch('arena', 'comp');
+  };
+
+  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' | 'comp' = 'mission') => {
     if (!canvasRef.current || launching) return;
     const map = mapOverride ?? settings.map;
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
@@ -263,7 +276,11 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor,
+        // Ranked deploys with the player's own per-weapon builds and their ladder state.
+        mode === 'comp'
+          ? { mode: 'comp', compBuilds: profileRef.current.builds, rankedProfile: profileRef.current.ranked }
+          : mode === 'tdm' ? { mode: 'tdm' } : { mode: 'mission' });
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -329,7 +346,7 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} onRanked={() => { setMenuView('home'); changePhase('ranked-setup'); }} initialView={menuView} profile={profile} />}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
@@ -339,8 +356,17 @@ export default function App() {
           onProfile={updateProfile}
           armor={tdmArmor}
           onArmor={setTdmArmor}
-          onDeploy={() => { void launch('arena'); }}
+          onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
+        />
+      )}
+      {phase === 'ranked-setup' && !launching && (
+        <RankedSetup
+          rank={rankFor(profile.ranked.rating, profile.ranked)}
+          rating={profile.ranked.rating}
+          record={profile.ranked}
+          onDeploy={() => { void deployRanked(); }}
+          onBack={() => { setMenuView('home'); changePhase('menu'); }}
         />
       )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}

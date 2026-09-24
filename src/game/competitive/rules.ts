@@ -62,6 +62,9 @@ export const COMP_DEFUSE_RADIUS = 1.6;
 export const COMP_BLAST_RADIUS = 14;
 export const COMP_BLAST_DAMAGE = 500;
 
+/** Ranked S&D health pool: one life per round, and armour is consumable. */
+export const COMP_BASE_HP = 100;
+
 export const COMP_TEAM_NAMES: Record<CompTeam, string> = { alpha: 'ALPHA', bravo: 'BRAVO' };
 export const COMP_SIDE_NAMES: Record<CompSide, string> = { attack: 'ATTACK', defend: 'DEFEND' };
 /** Bomb sites on the Warehouse arena — the twin halls, one per side. */
@@ -101,13 +104,17 @@ export function applyCompetitiveDamage(
   hp: number, armor: number, helmet: boolean, amount: number, isHead: boolean, pierce = false,
 ): CompDamageResult {
   if (amount <= 0) return { hp, armor, taken: 0, absorbed: 0 };
-  let protection = isHead ? (helmet ? 0.40 : 0) : 0.45;
+  // Tuned to the weapon table: an AK needs four body rounds through a fresh
+  // plate and only three through bare skin, while a helmet turns a rifle
+  // headshot into a wound you can still win the round with.
+  let protection = isHead ? (helmet ? 0.40 : 0) : 0.25;
   if (pierce) protection *= 0.2;
   let taken = amount, absorbed = 0;
   if (armor > 0 && protection > 0) {
     const wanted = amount * protection;
-    // Wear is deliberately steeper than protection: a plate survives ~4 rifle
-    // rounds, so armor matters most in the first exchange of a round.
+    // Wear is deliberately steeper than protection: a plate survives roughly a
+    // full rifle magazine, so armour matters most in the first exchange of a round
+    // and a long fight ends with both operators exposed.
     const wear = wanted * 1.6;
     const used = Math.min(armor, wear);
     const share = wear > 0 ? used / wear : 0;

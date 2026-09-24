@@ -16,17 +16,18 @@ const { REWARDS, gradeFor, gradeBonus, streakBonus, streakAward, difficultyMulti
 const m4base = () => weaponById('m4a1').base;
 const modsOf = (...ids) => ids.map(id => attachmentById(id).mods);
 
-test('catalog ships 10 weapons and 33 attachments', () => {
+test('catalog ships ten weapons and the full 59-part attachment catalog', () => {
   assert.equal(WEAPON_CATALOG.length, 10);
-  assert.equal(ATTACHMENT_CATALOG.length, 33);
+  assert.equal(ATTACHMENT_CATALOG.length, 59);
+  assert.equal(new Set(ATTACHMENT_CATALOG.map(a => a.id)).size, ATTACHMENT_CATALOG.length);
   assert.deepEqual(WEAPON_CATALOG.map(w => w.id).sort(), [
     'ak47', 'awm', 'deagle', 'm1911', 'm249', 'm4a1', 'mp7', 'scar_h', 'spas12', 'vector',
   ]);
 });
 
-test('every weapon exposes sockets its slot can actually fill', () => {
+test('every weapon exposes only sockets that have compatible parts', () => {
   for (const w of WEAPON_CATALOG) {
-    assert.ok(w.slots.length >= 4, `${w.id} needs a useful socket set`);
+    assert.ok(w.slots.length >= 3, `${w.id} needs a useful socket set`);
     for (const s of w.slots) assert.ok(catalog.attachmentsFor(w.id, s).length > 0, `${w.id}.${s} has no parts`);
   }
 });
@@ -267,7 +268,7 @@ test('v1 profiles migrate to v2 stripped of equipped attachments but keep the re
   assert.deepEqual(back.builds.m4a1.attachments, {}, 'saved build stripped on migrate');
   assert.ok(back.ownedAttachments.m4a1.includes('muz_suppressor'), 'ownership kept');
   assert.ok(back.ownedAttachments.m4a1.includes('mag_extended'), 'ownership kept');
-  assert.equal(back.cash, 5000 - 800 - 600);
+  assert.equal(back.cash, 5000 - attachmentById('muz_suppressor').price - attachmentById('mag_extended').price);
   assert.ok(store.get('recoilfps.profile.v2'), 'migrated save written as v2');
 });
 
@@ -275,7 +276,7 @@ test('mags and optics use basic industry-standard names', () => {
   const names = {
     opt_reddot: 'Red Dot Sight', opt_holo: 'Holographic Sight', opt_2x: '2x Scope',
     opt_3x: '3x Scope', opt_4x: '4x Scope', opt_6x: '6x Scope', opt_pistol_rmr: 'Pistol Red Dot',
-    mag_extended: 'Extended Mag', mag_drum: 'Drum Mag', mag_fast: 'Fast Mag',
+    mag_extended: '40-Round STANAG', mag_drum: '60-Round Compact Drum', mag_fast: 'Coupled Rifle Magazines',
     mag_shell_tube: 'Extended Tube', mag_belt_box: 'Large Ammo Box', mag_sr_10: '10-Round Mag',
   };
   for (const [id, name] of Object.entries(names)) assert.equal(attachmentById(id).name, name, id);

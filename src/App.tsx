@@ -10,7 +10,7 @@ import { settleResult } from './game/economy/settlement';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'ranked-setup';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const LEGACY_WALLET_NOTICE_THRESHOLD = 9_000_000;
 
@@ -29,7 +29,7 @@ const DEFAULT_HUD: HudState = {
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, nukeFlash: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
@@ -164,6 +164,14 @@ export default function App() {
         setFx(f => ({ ...f, banner: { id, label: event.label } }));
         later(() => setFx(f => f.banner?.id === id ? { ...f, banner: null } : f), 1600);
         break;
+      case 'streakmsg':
+        setFx(f => ({ ...f, streakMsg: { id, text: event.text } }));
+        later(() => setFx(f => f.streakMsg?.id === id ? { ...f, streakMsg: null } : f), 3600);
+        break;
+      case 'nuke':
+        setFx(f => ({ ...f, nukeFlash: id }));
+        later(() => setFx(f => f.nukeFlash === id ? { ...f, nukeFlash: null } : f), 5200);
+        break;
       case 'objective':
         setFx(f => ({ ...f, missionBanner: { id, title: event.phase.title, index: event.index } }));
         later(() => setFx(f => f.missionBanner?.id === id ? { ...f, missionBanner: null } : f), 2600);
@@ -233,10 +241,16 @@ export default function App() {
    * `mapOverride` beats the (possibly not-yet-committed) settings state so
    * "Play" in Arena Mode can never race the map selection. */
   const deploy = async (mapOverride?: GameSettings['map']) => {
-    await launch(mapOverride);
+    await launch(mapOverride, 'mission');
   };
 
-  const launch = async (mapOverride?: GameSettings['map']) => {
+  /** OPERATION BLACKOUT: always the warehouse, always ranked. */
+  const deployRanked = async () => {
+    if (settings.map !== 'arena') set({ map: 'arena' });
+    await launch('arena', 'comp');
+  };
+
+  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' | 'comp' = 'mission') => {
     if (!canvasRef.current || launching) return;
     const map = mapOverride ?? settings.map;
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
@@ -253,7 +267,11 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor,
+        // Ranked deploys with the player's own per-weapon builds and their ladder state.
+        mode === 'comp'
+          ? { mode: 'comp', compBuilds: profileRef.current.builds, rankedProfile: profileRef.current.ranked }
+          : mode === 'tdm' ? { mode: 'tdm' } : { mode: 'mission' });
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -351,8 +369,17 @@ export default function App() {
           onProfile={updateProfile}
           armor={tdmArmor}
           onArmor={setTdmArmor}
-          onDeploy={() => { void launch('arena'); }}
+          onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
+        />
+      )}
+      {phase === 'ranked-setup' && !launching && (
+        <RankedSetup
+          rank={rankFor(profile.ranked.rating, profile.ranked)}
+          rating={profile.ranked.rating}
+          record={profile.ranked}
+          onDeploy={() => { void deployRanked(); }}
+          onBack={() => { setMenuView('home'); changePhase('menu'); }}
         />
       )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}

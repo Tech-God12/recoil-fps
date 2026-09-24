@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
-import type { CashLogEntry, GameSettings } from '../game/engine';
+import type { CashLogEntry, CompDebrief, GameSettings } from '../game/engine';
 import { weaponById } from '../game/economy/catalog';
 import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
 import { MAPS, type MapId } from '../game/world';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
+import type { StreakHud } from '../game/streaks';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
 import CashCounter from './armory/CashCounter';
 import { gradeFor } from '../game/economy/rewards';
+import { CompDebriefPanel } from './Competitive';
 import { voice } from '../game/voice';
 import mapAlrasul from '../assets/map-alrasul.jpg';
 import mapKasbah from '../assets/map-kasbah.jpg';
@@ -36,6 +38,7 @@ export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
   mission: MissionReport; pressure: PressureStats;
   cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
+  comp?: CompDebrief;
   tdm?: {
     alphaScore: number; bravoScore: number; playerKills: number; outcome: TDMOutcome;
     roster: { name: string; team: 'alpha' | 'bravo'; dead: boolean; armorIcon: string; you?: boolean; kills: number; deaths: number; headshots: number }[];
@@ -86,9 +89,9 @@ const INTEL_TABS = [
    Right: wallet + operator chip, intel tabs, loadout card, motto.
    Fully interactive: mouse + WASD/arrows + Enter + Tab profile.
    ================================================================ */
-function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings }: {
+function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings, onRanked }: {
   prof: PlayerProfile; primaryName: string; secondaryName: string;
-  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void;
+  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void; onRanked?: () => void;
 }) {
   const [sel, setSel] = useState(0);
   const [intel, setIntel] = useState(2);
@@ -137,10 +140,11 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
     { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'loadout', idx: '03', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
-    { id: 'settings', idx: '04', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
+    { id: 'ranked', idx: '03', title: 'OPERATION BLACKOUT', sub: 'RANKED SEARCH & DESTROY', action: () => onRanked?.() },
+    { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
+    { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
   ];
-  const activate = useCallback((i: number) => { items[i]?.action(); }, [onSelect, onArmory, onSettings]);
+  const activate = useCallback((i: number) => { items[i]?.action(); }, [items]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -405,9 +409,9 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, onRanked, initialView, profile }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; onArenaSetup?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
+  onArmory?: () => void; onArenaSetup?: () => void; onRanked?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
@@ -453,6 +457,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onSelect={v => setView(v)}
         onArmory={() => onArmory?.()}
         onSettings={onSettings}
+        onRanked={onRanked}
       />
     );
   }
@@ -708,8 +713,8 @@ export function BootScreen({ map }: { map?: MapId }) {
 /* ================================================================
    PAUSE — SUSPENDED
    ================================================================ */
-export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: {
-  mission?: MissionHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
+export function PauseMenu({ mission, streaks, onResume, onRestart, onSettings, onQuit }: {
+  mission?: MissionHud; streaks?: StreakHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
 }) {
   const readout = mission ? objectiveReadout(mission) : undefined;
   return (
@@ -743,6 +748,23 @@ export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: 
             </div>
           )}
           <p className="pause-note">All mission timers frozen</p>
+          {streaks && (
+            <div className="pause-streaks" aria-label="Scorestreaks">
+              <div className="pause-streaks-head">
+                <span>Scorestreaks</span>
+                <span className="tabular">{streaks.points} pts this life</span>
+              </div>
+              {streaks.ladder.map(l => (
+                <div key={l.id} className={`pause-streak-row ${l.ready ? 'ready' : ''} ${l.claimed && !l.ready ? 'claimed' : ''}`}>
+                  <span className="keycap">{l.key}</span>
+                  <span className="psr-name">{l.name}</span>
+                  <span className="psr-cost tabular">{l.cost}</span>
+                  <span className="psr-state">{l.active ? 'LIVE' : l.ready ? 'READY' : l.claimed ? 'USED' : ''}</span>
+                </div>
+              ))}
+              <p className="pause-streaks-foot">Kills 100 · headshots 150 · objectives 250. Streak kills never chain. Progress resets on death; armed streaks are kept.</p>
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -775,6 +797,28 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
     cashRows.push({ label: CASH_REASONS[reason], detail: `×${entries.length}`, total });
   }
   const tdm = r.tdm;
+  if (r.comp) {
+    return (
+      <main className={`results-root ${r.win ? '' : 'lose'}`}>
+        <div className="results-wrap">
+          <div className="results-header">
+            <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
+            <div className="results-titleblock">
+              <div className="stamp-label">BLACKOUT REPORT</div>
+              <h1>OPERATION BLACKOUT</h1>
+              <p className="mono">RANKED SEARCH &amp; DESTROY · WAREHOUSE COMPLEX · {missionClock(r.timeSec)}</p>
+            </div>
+          </div>
+          <CompDebriefPanel report={r.comp} />
+          <div className="results-actions">
+            <button className="deploy-btn" onClick={onRedeploy}>RE-QUEUE</button>
+            <button className="menu-secondary-btn" onClick={onArmory}>ARMORY (+${Math.round(wallet.earned)})</button>
+            <button className="menu-secondary-btn" onClick={onMenu}>BACK TO MENU</button>
+          </div>
+        </div>
+      </main>
+    );
+  }
   return (
     <main className={`results-root ${isDraw ? 'draw' : hasWon ? '' : 'lose'}`}>
       <div className="results-wrap">

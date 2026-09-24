@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react';
 import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
 import MissionObjective, { missionClock } from './MissionObjective';
+import { CompHudLayer, CompScoreboard } from './Competitive';
 import ScopeView, { type ScopeControls } from './ScopeView';
+import { NukeCountdown, StreakActive, StreakMessage, StreakRail, StrikeDesignator } from './Streaks';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean } | null;
@@ -14,6 +16,8 @@ export interface HudFx {
   callout: { id: number; text: string } | null;
   flashPow: number;
   missionBanner: { id: number; title: string; index: number } | null;
+  streakMsg: { id: number; text: string } | null;
+  nukeFlash: number | null;
 }
 
 /* ================================================================
@@ -68,7 +72,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
   // Hold-Tab scoreboard (TDM only). Listens on window so it works regardless
   // of pointer lock; Tab's default focus-move is suppressed while playing.
   const [showBoard, setShowBoard] = useState(false);
-  const isTdm = !!hud.tdm && active !== false;
+  const isTdm = (!!hud.tdm || !!hud.comp) && active !== false;
   useEffect(() => {
     if (!isTdm) { setShowBoard(false); return; }
     const down = (e: KeyboardEvent) => { if (e.code === 'Tab') { e.preventDefault(); setShowBoard(true); } };
@@ -108,13 +112,26 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
       {/* flashbang */}
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
+      {/* tactical nuke whiteout */}
+      {fx.nukeFlash !== null && <div key={fx.nukeFlash} className="sk-nuke-flash" />}
       {hud.mission && <MissionObjective mission={hud.mission} />}
+
+      {/* ============ SCORESTREAKS ============ */}
+      {hud.streaks && !hud.comp && active !== false && !hud.tdm?.playerDead && <StreakRail st={hud.streaks} />}
+      {hud.streaks && !hud.comp && <StreakActive st={hud.streaks} />}
+      {hud.streaks?.designating && !hud.comp && !hud.tdm?.playerDead && <StrikeDesignator />}
+      {hud.streaks?.nukeCountdown !== null && hud.streaks?.nukeCountdown !== undefined && <NukeCountdown t={hud.streaks.nukeCountdown} />}
+      {fx.streakMsg && <StreakMessage key={fx.streakMsg.id} text={fx.streakMsg.text} tdm={!!hud.tdm} />}
 
       {/* ============ FULL SCOREBOARD (hold Tab) ============ */}
       {hud.tdm && showBoard && <TdmFullBoard tdm={hud.tdm} />}
+      {hud.comp && showBoard && <CompScoreboard comp={hud.comp} />}
+
+      {/* ============ OPERATION BLACKOUT ============ */}
+      {hud.comp && <CompHudLayer comp={hud.comp} />}
 
       {/* ============ WAREHOUSE TDM SCOREBOARD ============ */}
-      {hud.tdm && (
+      {hud.tdm && !hud.comp && (
         <div className="tdm-scoreboard" aria-label="Match score">
           <div className="tdm-score-row">
             <div className="tdm-score-team alpha"><span className="lbl">ALPHA</span><span className="num">{hud.tdm.alphaScore}</span></div>
@@ -231,7 +248,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
 
       {/* ============ CENTER STACK ============ */}
-      {hud.ads < 0.3 && !hud.sprinting && (
+      {hud.ads < 0.3 && !hud.sprinting && !hud.streaks?.designating && (
         <div className="absolute left-1/2 top-1/2" style={{ opacity: 1 - hud.ads / 0.3 }}>
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>
@@ -309,6 +326,20 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         const hot = hud.enemiesMap.filter(e => e.hot).length;
         // Objective bearing chevron on the dish rim + straight-line distance readout.
         let objChip: { deg: number; dist: number; extract: boolean } | null = null;
+        const compObj = hud.comp
+          ? (hud.comp.bomb.state === 'planted' || hud.comp.bomb.state === 'dropped')
+            ? hud.comp.bombMap
+            : hud.comp.siteRings.find(s => s.id === hud.comp!.targetSite) ?? null
+          : null;
+        if (compObj) {
+          const dx = (compObj.nx - hud.playerMap.nx) * hud.worldHalf * 2;
+          const dz = (compObj.nz - hud.playerMap.nz) * hud.worldHalf * 2;
+          objChip = {
+            deg: Math.atan2(dx, -dz) * 180 / Math.PI - hud.bearing,
+            dist: Math.hypot(dx, dz),
+            extract: hud.comp!.bomb.state === 'planted',
+          };
+        }
         if (hud.missionMap) {
           const dx = (hud.missionMap.nx - hud.playerMap.nx) * hud.worldHalf * 2;
           const dz = (hud.missionMap.nz - hud.playerMap.nz) * hud.worldHalf * 2;
@@ -331,6 +362,26 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
                       style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%`, transform: `rotate(${e.yaw}deg)` }}
                     />
                   ))}
+                  {/* OPERATION BLACKOUT: bomb sites, the charge and the squad */}
+                  {hud.comp && (
+                    <>
+                      {hud.comp.siteRings.map(s => (
+                        <span
+                          key={s.id}
+                          className={`radar-site ${s.active ? 'active' : ''} ${s.planted ? 'planted' : ''}`}
+                          style={{ left: `${s.nx * 100}%`, top: `${s.nz * 100}%`, width: `${s.rPct * 2}%`, height: `${s.rPct * 2}%` }}
+                        ><i>{s.id}</i></span>
+                      ))}
+                      {hud.comp.bombMap && <span className="radar-bomb" style={{ left: `${hud.comp.bombMap.nx * 100}%`, top: `${hud.comp.bombMap.nz * 100}%` }} />}
+                      {hud.comp.mates.map(m => (
+                        <span
+                          key={m.id}
+                          className={`radar-mate ${m.alive ? '' : 'down'}`}
+                          style={{ left: `${m.nx * 100}%`, top: `${m.nz * 100}%` }}
+                        />
+                      ))}
+                    </>
+                  )}
                   {hud.missionMap && (
                     <>
                       <span className={`radar-obj-ring ${hud.missionMap.extract ? 'extract' : ''}`} style={{ left: `${hud.missionMap.nx * 100}%`, top: `${hud.missionMap.nz * 100}%`, width: `${hud.missionMap.ringPct * 2}%`, height: `${hud.missionMap.ringPct * 2}%` }} />
@@ -354,13 +405,14 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
               <span className="radar-sweep" />
               <span className="radar-player" />
               <span className="radar-frame" />
+              {hud.streaks?.uav && <><span className="radar-uav-sweep" aria-hidden="true" /><span className="radar-uav-tag">UAV</span></>}
               <span className="radar-tick t0" /><span className="radar-tick t45" /><span className="radar-tick t90" /><span className="radar-tick t135" />
             </div>
             {/* Instrument footer: live bearing, objective range, contact count */}
             <div className="radar-meta mono" aria-hidden="true">
               <span className="radar-meta-brg tabular">{String(Math.round(hud.bearing)).padStart(3, '0')}°</span>
               {objChip && <span className={`radar-meta-obj ${objChip.extract ? 'extract' : ''}`}>{objChip.extract ? 'EXFIL' : 'OBJ'} {Math.round(objChip.dist)}m</span>}
-              <span className={`radar-meta-hostiles ${hot > 0 ? 'hot' : ''}`}>{hud.enemiesMap.length > 0 ? `${hud.enemiesMap.length} HOSTILE${hud.enemiesMap.length > 1 ? 'S' : ''}` : 'CLEAR'}</span>
+              <span className={`radar-meta-hostiles ${hot > 0 ? 'hot' : ''} ${hud.streaks?.uav ? 'uav' : ''}`}>{hud.enemiesMap.length > 0 ? `${hud.enemiesMap.length} ${hud.streaks?.uav ? 'PAINTED' : 'CONTACT' + (hud.enemiesMap.length > 1 ? 'S' : '')}` : 'NO CONTACT'}</span>
             </div>
           </div>
         );
@@ -420,6 +472,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
             <i /><span className="keycap">Q·E</span> HOLD LEAN
             <i /><span className="keycap">SPACE</span> VAULT
             <i /><span className="keycap">X</span> ATTACH / BLAST
+            <i /><span className="keycap">3-7</span> STREAKS
           </span>
         </div>
       )}

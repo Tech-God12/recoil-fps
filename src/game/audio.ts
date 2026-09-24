@@ -713,6 +713,64 @@ export class SpatialAudioEngine {
   }
 
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }
+
+  /**
+   * OPERATION BLACKOUT — the charge's LED beeper. Pitch and level rise as the fuse
+   * burns down, so a player can hear the clock without looking at the HUD.
+   * `urgency` is 0 (freshly planted) .. 1 (about to blow).
+   */
+  bombBeep(urgency: number) {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const u = Math.max(0, Math.min(1, urgency));
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.setValueAtTime(1750 + u * 900, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.035 + u * 0.05, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.075);
+    o.connect(g);
+    g.connect(this.master!);
+    o.start(t);
+    o.stop(t + 0.09);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+  }
+
+  /** Plant / defuse completion sting: two rising tones for the attackers, one for the cut. */
+  chargePlanted() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    [420, 640, 880].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(f, t + i * 0.06);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + i * 0.06);
+      g.gain.linearRampToValueAtTime(0.09, t + i * 0.06 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.06 + 0.16);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + i * 0.06); o.stop(t + i * 0.06 + 0.18);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    });
+  }
+
+  chargeDefused() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    [880, 560].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(f, t + i * 0.09);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + i * 0.09);
+      g.gain.linearRampToValueAtTime(0.085, t + i * 0.09 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.09 + 0.22);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + i * 0.09); o.stop(t + i * 0.09 + 0.25);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    });
+  }
   throwWhoosh() { this.ensure(); this.burstDirect({ dur: 0.16, gain: 0.2, freq: 950, q: 0.5, attack: 0.04 }); }
 
   fleshImpact(_pan = 0) {
@@ -778,6 +836,242 @@ export class SpatialAudioEngine {
       o.start(t + 0.05 + i * 0.08);
       o.stop(t + 0.13 + i * 0.08);
     });
+  }
+
+  // ==================== SCORESTREAKS ====================
+  /** A streak crossed its threshold: rising three-note chime, unmistakable under gunfire. */
+  streakReady() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    [[660, 0], [880, 0.09], [1320, 0.18]].forEach(([f, when]) => {
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + when);
+      g.gain.exponentialRampToValueAtTime(0.28, t + when + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.34);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + when); o.stop(t + when + 0.36);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    });
+  }
+
+  /** Streak called in: deep confirm thud + radio squelch. */
+  streakDeploy() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    this.burstDirect({ dur: 0.05, gain: 0.18, freq: 2600, q: 5 });
+    this.burstDirect({ dur: 0.05, gain: 0.14, freq: 1900, q: 5, when: 0.09 });
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(48, t + 0.35);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    o.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + 0.42);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+  }
+
+  /** Sentry gun round: short, metallic, very fast — a sewing machine bolted to a tripod. */
+  sentryFireSpatial(wx: number, wy: number, wz: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = this.rf(3400); bp.Q.value = 1.1;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.55, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    src.connect(bp); bp.connect(g); g.connect(panner);
+    src.start(t, Math.random() * 0.4); src.stop(t + 0.06);
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.setValueAtTime(this.rf(210), t);
+    o.frequency.exponentialRampToValueAtTime(80, t + 0.06);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.22, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    o.connect(og); og.connect(panner);
+    o.start(t); o.stop(t + 0.08);
+    o.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); o.disconnect(); og.disconnect(); panner.disconnect(); };
+  }
+
+  /** Helicopter chin gun: a fat, ripping 30 mm burst that rolls across the sky. */
+  chopperGunSpatial(wx: number, wy: number, wz: number, rounds: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime;
+    const step = 0.05;
+    let last: AudioNode | null = null;
+    for (let i = 0; i < rounds; i++) {
+      const when = t + i * step;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise();
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 900;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.9, when);
+      g.gain.exponentialRampToValueAtTime(0.001, when + 0.045);
+      src.connect(lp); lp.connect(g); g.connect(panner);
+      src.start(when, Math.random() * 0.4); src.stop(when + 0.05);
+      last = src;
+      src.onended = () => { src.disconnect(); lp.disconnect(); g.disconnect(); };
+    }
+    if (last) (last as AudioBufferSourceNode).addEventListener('ended', () => panner.disconnect());
+  }
+
+  /**
+   * Looping rotor bed: filtered noise whose gain is chopped by a blade-slap LFO, plus a
+   * low turbine drone. Returns a handle so the engine can drag the panner with the
+   * airframe every frame and cut it clean on despawn.
+   */
+  rotorLoop(wx: number, wy: number, wz: number): { move(x: number, y: number, z: number): void; stop(): void } {
+    const ctx = this.ensure();
+    const panner = ctx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.distanceModel = 'inverse';
+    panner.refDistance = 6;
+    panner.maxDistance = 400;
+    panner.rolloffFactor = 1.1;
+    panner.connect(this.master!);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(); src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 520;
+    const chop = ctx.createGain(); chop.gain.value = 0.35;
+    const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 12.5;
+    const lfoG = ctx.createGain(); lfoG.gain.value = 0.3;
+    lfo.connect(lfoG); lfoG.connect(chop.gain);
+    const drone = ctx.createOscillator(); drone.type = 'sawtooth'; drone.frequency.value = 62;
+    const droneLp = ctx.createBiquadFilter(); droneLp.type = 'lowpass'; droneLp.frequency.value = 240;
+    const droneG = ctx.createGain(); droneG.gain.value = 0.22;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, ctx.currentTime);
+    master.gain.exponentialRampToValueAtTime(1.0, ctx.currentTime + 1.2);
+    src.connect(lp); lp.connect(chop); chop.connect(master);
+    drone.connect(droneLp); droneLp.connect(droneG); droneG.connect(master);
+    master.connect(panner);
+    src.start(); lfo.start(); drone.start();
+    const move = (x: number, y: number, z: number) => {
+      const t = ctx.currentTime;
+      if (panner.positionX) {
+        panner.positionX.linearRampToValueAtTime(x, t + 0.1);
+        panner.positionY.linearRampToValueAtTime(y, t + 0.1);
+        panner.positionZ.linearRampToValueAtTime(z, t + 0.1);
+      } else panner.setPosition(x, y, z);
+    };
+    move(wx, wy, wz);
+    let stopped = false;
+    return {
+      move,
+      stop: () => {
+        if (stopped) return; stopped = true;
+        const t = ctx.currentTime;
+        master.gain.cancelScheduledValues(t);
+        master.gain.setValueAtTime(master.gain.value, t);
+        master.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+        src.stop(t + 1.6); lfo.stop(t + 1.6); drone.stop(t + 1.6);
+        src.onended = () => { [src, lp, chop, lfo, lfoG, drone, droneLp, droneG, master, panner].forEach(n => n.disconnect()); };
+      },
+    };
+  }
+
+  /** Fast-mover pass: rising then tearing-away noise sweep — the Doppler crack of jets on the deck. */
+  jetFlyby(wx: number, wy: number, wz: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    panner.refDistance = 20; panner.maxDistance = 600; panner.rolloffFactor = 0.8;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(); src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.7;
+    bp.frequency.setValueAtTime(320, t);
+    bp.frequency.exponentialRampToValueAtTime(1400, t + 1.8);
+    bp.frequency.exponentialRampToValueAtTime(260, t + 3.6);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(1.4, t + 1.8);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 3.8);
+    src.connect(bp); bp.connect(g); g.connect(panner);
+    src.start(t); src.stop(t + 3.9);
+    src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); panner.disconnect(); };
+  }
+
+  /** Bomb release: a heavy whistle dropping in pitch before the strike lands. */
+  bombWhistle() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(1900, t);
+    o.frequency.exponentialRampToValueAtTime(700, t + 1.6);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+    o.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + 1.75);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+  }
+
+  /** Tactical nuke siren: one full sweep, called every second of the countdown. */
+  nukeSiren(urgent: boolean) {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(urgent ? 620 : 420, t);
+    o.frequency.exponentialRampToValueAtTime(urgent ? 980 : 760, t + 0.45);
+    o.frequency.exponentialRampToValueAtTime(urgent ? 620 : 420, t + 0.9);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 1800;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(urgent ? 0.2 : 0.14, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.92);
+    o.connect(lp); lp.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + 0.95);
+    o.onended = () => { o.disconnect(); lp.disconnect(); g.disconnect(); };
+  }
+
+  /** The detonation. Sub-bass slam, long rolling rumble, hearing-loss whine. */
+  nukeBlast() {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(70, t);
+    o.frequency.exponentialRampToValueAtTime(18, t + 3.5);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(1.6, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 4);
+    o.connect(og); og.connect(this.master!);
+    o.start(t); o.stop(t + 4.1);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(); src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(900, t);
+    lp.frequency.exponentialRampToValueAtTime(120, t + 5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(1.3, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 5.5);
+    src.connect(lp); lp.connect(g); g.connect(this.master!);
+    src.start(t); src.stop(t + 5.6);
+    const ring = ctx.createOscillator();
+    ring.frequency.value = 3400;
+    const rg = ctx.createGain();
+    rg.gain.setValueAtTime(0.22, t + 0.1);
+    rg.gain.exponentialRampToValueAtTime(0.0001, t + 5);
+    ring.connect(rg); rg.connect(this.master!);
+    ring.start(t + 0.1); ring.stop(t + 5.1);
+    src.onended = () => { [o, og, src, lp, g, ring, rg].forEach(n => n.disconnect()); };
   }
 
   private burstDirect(opts: {

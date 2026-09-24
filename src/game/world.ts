@@ -709,9 +709,11 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     };
     // spawn protection line: three barriers per team, shielding the pads
     for (const x of [-12, 0, 12]) { uBarrier(x, 26, 'n'); uBarrier(x, -26, 's'); }
-    // one mid barrier per yard half — cross-lane cover that never plugs the lane
-    uBarrier(-27, 9, 'n'); uBarrier(27, 9, 'n');
-    uBarrier(-27, -9, 's'); uBarrier(27, -9, 's');
+    // one mid barrier per yard half — cross-lane cover that never plugs the lane.
+    // Kept 1.5 m clear of the flank containers (x ±28.75): at ±27 the outer arm
+    // touched the container and formed a dead-end pocket that snagged bots.
+    uBarrier(-25.5, 9, 'n'); uBarrier(25.5, 9, 'n');
+    uBarrier(-25.5, -9, 's'); uBarrier(25.5, -9, 's');
 
     // ---- shipping containers (2.5w x 2.6h x 6.2d) — the yard cover ----
     const container = (x: number, z: number, ry: number, m: THREE.Material, stack = false) => {
@@ -998,7 +1000,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       holeSeed += 1.3; hole(bx - 0.5, 1.35, -24.71, 0, holeSeed);
       holeSeed += 1.3; hole(bx + 0.5, 1.2, -24.71, 0, holeSeed);
     }
-    for (const bx of [-27, 27]) for (const bz of [-9, 9]) {
+    for (const bx of [-25.5, 25.5]) for (const bz of [-9, 9]) {
       holeSeed += 1.1; hole(bx + (bz > 0 ? 0.5 : -0.5), 1.25, bz + (bz > 0 ? -2.03 : 2.03), bz > 0 ? Math.PI : 0, holeSeed);
     }
     for (const [sx2, sz2] of [[-10.5, 12.2], [10.5, -12.2], [0, 5.6], [-26, 12.5], [26, -12.5]] as const)

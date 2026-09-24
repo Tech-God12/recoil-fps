@@ -1,5 +1,6 @@
 // Recoil FPS — in-game HUD (VOLT PROTOCOL)
 import { useEffect, useState } from 'react';
+import DefuseHud, { DefuseBoard, type DefuseFx } from './defuse/DefuseHud';
 import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
 import MissionObjective, { missionClock } from './MissionObjective';
@@ -64,11 +65,11 @@ function TdmFullBoard({ tdm }: { tdm: NonNullable<HudState['tdm']> }) {
   );
 }
 
-export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx; active?: boolean } & ScopeControls) {
+export default function Hud({ hud, s, fx, dfx, active, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx; dfx?: DefuseFx; active?: boolean } & ScopeControls) {
   // Hold-Tab scoreboard (TDM only). Listens on window so it works regardless
   // of pointer lock; Tab's default focus-move is suppressed while playing.
   const [showBoard, setShowBoard] = useState(false);
-  const isTdm = !!hud.tdm && active !== false;
+  const isTdm = (!!hud.tdm || !!hud.defuse) && active !== false;
   useEffect(() => {
     if (!isTdm) { setShowBoard(false); return; }
     const down = (e: KeyboardEvent) => { if (e.code === 'Tab') { e.preventDefault(); setShowBoard(true); } };
@@ -86,7 +87,9 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
 
   const maxHp = hud.tdm?.maxHp ?? 100;
   const lowHp = hud.hp < maxHp * 0.35;
-  const vig = hud.hp < maxHp * 0.6 ? 1 - hud.hp / (maxHp * 0.6) : 0;
+  // Dead in a defusal round: spectator view — no own vignette, reticle or ammo/vitals.
+  const spectating = !!hud.defuse && hud.defuse.roster.some(r => r.you && !r.alive);
+  const vig = !spectating && hud.hp < maxHp * 0.6 ? 1 - hud.hp / (maxHp * 0.6) : 0;
   const magPct = hud.magSize ? hud.mag / hud.magSize : 0;
   const segs = Math.min(hud.magSize || 30, 30);
   const filled = Math.round(magPct * segs);
@@ -112,6 +115,8 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
 
       {/* ============ FULL SCOREBOARD (hold Tab) ============ */}
       {hud.tdm && showBoard && <TdmFullBoard tdm={hud.tdm} />}
+      {hud.defuse && showBoard && <DefuseBoard d={hud.defuse} />}
+      {hud.defuse && dfx && <DefuseHud d={hud.defuse} fx={dfx} />}
 
       {/* ============ WAREHOUSE TDM SCOREBOARD ============ */}
       {hud.tdm && (
@@ -231,7 +236,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
 
       {/* ============ CENTER STACK ============ */}
-      {hud.ads < 0.3 && !hud.sprinting && (
+      {hud.ads < 0.3 && !hud.sprinting && !spectating && (
         <div className="absolute left-1/2 top-1/2" style={{ opacity: 1 - hud.ads / 0.3 }}>
           <Reticle s={s} spread={(hud.spread || 0) * 520} />
         </div>
@@ -283,7 +288,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           </div>
         </div>
       )}
-      {fx.callout && (
+      {fx.callout && !dfx?.end && (
         <div key={fx.callout.id} className="mission-radio">
           <span>RADIO</span> {fx.callout.text}
         </div>
@@ -331,6 +336,13 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
                       style={{ left: `${e.nx * 100}%`, top: `${e.nz * 100}%`, transform: `rotate(${e.yaw}deg)` }}
                     />
                   ))}
+                  {hud.alliesMap?.map(a => (
+                    <span key={a.name} className={`radar-ally ${a.dead ? 'dead' : ''} ${a.bomb ? 'bomb' : ''}`}
+                      style={{ left: `${a.nx * 100}%`, top: `${a.nz * 100}%`, transform: `rotate(${a.yaw}deg)` }} />
+                  ))}
+                  {hud.objectivesMap?.map((o, i) => (
+                    <span key={i} className={`radar-c4 ${o.kind}`} style={{ left: `${o.nx * 100}%`, top: `${o.nz * 100}%` }} />
+                  ))}
                   {hud.missionMap && (
                     <>
                       <span className={`radar-obj-ring ${hud.missionMap.extract ? 'extract' : ''}`} style={{ left: `${hud.missionMap.nx * 100}%`, top: `${hud.missionMap.nz * 100}%`, width: `${hud.missionMap.ringPct * 2}%`, height: `${hud.missionMap.ringPct * 2}%` }} />
@@ -367,7 +379,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       })()}
 
       {/* ============ AMMO ============ */}
-      <div className="absolute bottom-7 right-8 text-right">
+      <div className="absolute bottom-7 right-8 text-right" style={spectating ? { display: 'none' } : undefined}>
         <div className="weapon-name">{hud.weapon}</div>
         <div className="weapon-card mono" aria-label="Loadout">
           <span className={hud.heldSlot === 'primary' ? 'held' : ''}>1 · {hud.heldSlot === 'primary' ? hud.weapon : hud.secondaryWeapon}</span>
@@ -425,7 +437,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
 
       {/* ============ VITALS ============ */}
-      <div className="absolute bottom-7 left-8">
+      <div className="absolute bottom-7 left-8" style={spectating ? { display: 'none' } : undefined}>
         <div className="vitals hud-chip">
           <div className="vitals-head"><span className="live-dot" />VITALS</div>
           <div className="flex items-end gap-3 mt-1">

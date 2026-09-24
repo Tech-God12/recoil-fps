@@ -712,6 +712,78 @@ export class SpatialAudioEngine {
     }
   }
 
+  // ==================== BOMB DEFUSAL ====================
+  /** Pure tone helper routed to master or a spatial panner. */
+  private tone(freq: number, when: number, dur: number, gain: number, type: OscillatorType = 'sine', dest?: AudioNode, slideTo?: number) {
+    const ctx = this.ensure();
+    const t = ctx.currentTime + when;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(dest ?? this.master!);
+    o.start(t); o.stop(t + dur + 0.02);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+  }
+
+  /** The planted C4's beep — positional, pitched up as the fuse burns down. */
+  c4Beep(wx: number, wy: number, wz: number, urgency: number) {
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    panner.refDistance = 4; panner.rolloffFactor = 0.9;
+    this.tone(2350 + urgency * 700, 0, 0.09, 0.32, 'square', panner);
+    this.tone(4700 + urgency * 1400, 0, 0.05, 0.06, 'sine', panner);
+  }
+
+  /** Arming keypad chirps (one per call). */
+  c4Key() { this.tone(1800 + Math.random() * 900, 0, 0.07, 0.16, 'square'); }
+
+  /** Bomb planted: two-tone confirm + mechanical latch. */
+  c4Planted() {
+    this.tone(1320, 0, 0.12, 0.2, 'square');
+    this.tone(1760, 0.14, 0.2, 0.2, 'square');
+    this.burstDirect({ dur: 0.05, gain: 0.3, freq: 900, q: 2, when: 0.02 });
+  }
+
+  /** Defuse kit / wire-cutting ticks. */
+  defuseTick() { this.burstDirect({ dur: 0.03, gain: 0.18, freq: 4200 + Math.random() * 800, q: 4 }); }
+
+  /** Bomb defused: descending power-down then a clean click. */
+  c4Defused() {
+    this.tone(1900, 0, 0.5, 0.18, 'square', undefined, 240);
+    this.burstDirect({ dur: 0.04, gain: 0.35, freq: 2600, q: 3, when: 0.52 });
+  }
+
+  /** Round win / loss stingers: short brass-like chords. */
+  roundStinger(win: boolean) {
+    const notes = win ? [523.25, 659.25, 783.99, 1046.5] : [392, 311.13, 261.63, 196];
+    notes.forEach((f, i) => {
+      this.tone(f, i * 0.09, 0.55 - i * 0.05, 0.1, 'sawtooth');
+      this.tone(f / 2, i * 0.09, 0.6, 0.06, 'triangle');
+    });
+  }
+
+  /** Freeze time over: short rising "go" swell. */
+  roundGo() {
+    this.tone(330, 0, 0.35, 0.12, 'sawtooth', undefined, 880);
+    this.tone(660, 0.05, 0.3, 0.06, 'triangle', undefined, 1320);
+  }
+
+  /** Buy confirm register chime / denied buzz. */
+  buyChime(ok: boolean) {
+    if (ok) { this.tone(1568, 0, 0.09, 0.14, 'triangle'); this.tone(2093, 0.07, 0.16, 0.12, 'triangle'); }
+    else this.tone(140, 0, 0.18, 0.18, 'square');
+  }
+
+  /** Last-man-standing sting. */
+  clutchSting() {
+    this.tone(220, 0, 0.9, 0.1, 'sawtooth', undefined, 110);
+    this.tone(880, 0.02, 0.4, 0.06, 'sine', undefined, 440);
+  }
+
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }
   throwWhoosh() { this.ensure(); this.burstDirect({ dur: 0.16, gain: 0.2, freq: 950, q: 0.5, attack: 0.04 }); }
 

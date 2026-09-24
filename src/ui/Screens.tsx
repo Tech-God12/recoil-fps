@@ -17,6 +17,10 @@ import mapArena from '../assets/map-arena.jpg';
 import ridgeArt from '../assets/map-ridgeline.jpg';
 import operatorArt from '../assets/operator.jpg';
 import menuCenter from '../assets/menu-center.jpg';
+import modeDefuseArt from '../assets/mode-defuse.jpg';
+import type { ArenaChoice } from '../App';
+import type { DefuseSummary } from '../game/defuse/director';
+import { BombGlyph } from './defuse/DefuseHud';
 import { TxBack, TxCoords, TxLock } from './tactical';
 import MapFlyover from './MapFlyover';
 import { gunThumbnail } from './armory/GunViewer';
@@ -39,6 +43,7 @@ export interface Results {
     alphaScore: number; bravoScore: number; playerKills: number;
     roster: { name: string; team: 'alpha' | 'bravo'; dead: boolean; armorIcon: string; you?: boolean; kills: number; deaths: number; headshots: number }[];
   };
+  defuse?: DefuseSummary;
 }
 
 const Arrow = () => (
@@ -135,7 +140,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
 
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
-    { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 TEAM DEATHMATCH', action: () => onSelect('arena') },
+    { id: 'arena', idx: '02', title: 'ARENA MODE', sub: 'TDM · BOMB DEFUSAL', action: () => onSelect('arena') },
     { id: 'loadout', idx: '03', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
     { id: 'settings', idx: '04', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
   ];
@@ -312,12 +317,22 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
    ARENA MODE — hovering the Warehouse card turns the whole screen into
    a live 3D orbit of the arena (same MapFlyover tech as theater select).
    ================================================================ */
-function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup }: {
+const DEFAULT_ARENA: ArenaChoice = { mode: 'tdm', format: 'short', side: 'random' };
+
+function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup, arena = DEFAULT_ARENA, onArena }: {
   primaryName: string; secondaryName: string;
   onBack: () => void; onMap: (map: GameSettings['map']) => void;
   onDeploy: (map?: GameSettings['map']) => void; onArenaSetup?: () => void;
+  arena?: ArenaChoice; onArena?: (a: ArenaChoice) => void;
 }) {
   const [live, setLive] = useState(false);
+  const defuse = arena.mode === 'defuse';
+  const pick = (patch: Partial<ArenaChoice>) => onArena?.({ ...arena, ...patch });
+  const go = () => { onMap('arena'); onDeploy('arena'); };
+  const fmt = arena.format === 'standard' ? { rounds: 12, first: 7 } : { rounds: 8, first: 5 };
+  const sub = defuse
+    ? `5V5 · FIRST TO ${fmt.first} · ONE LIFE PER ROUND · BUY ECONOMY`
+    : '5V5 · 2:30 MATCH · 5S RESPAWN';
   return (
     <main className="tx-root arena2-root">
       <div className="map2-base" aria-hidden="true" />
@@ -331,61 +346,97 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
       <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
         <TxBack onClick={onBack} />
         <div className="map2-titleblock">
-          <span className="map2-kicker">ARENA MODE<br />TEAM DEATHMATCH</span>
+          <span className="map2-kicker">ARENA MODE<br />{defuse ? 'BOMB DEFUSAL' : 'TEAM DEATHMATCH'}</span>
           <h1 className="map2-title">WAREHOUSE</h1>
-          <span className="map2-sub">5V5 · 2:30 MATCH · 5S RESPAWN</span>
+          <span className="map2-sub">{sub}</span>
           <i className="tx-rule" aria-hidden="true" />
         </div>
         <TxCoords lat="33.7731° N" lon="44.4208° E" />
         <div className="map2-brand">
           <b>RECOIL</b>
-          <em>{primaryName}&nbsp;&nbsp;//&nbsp;&nbsp;{secondaryName}</em>
+          <em>{defuse ? 'BUY IN-MATCH · $800 START' : <>{primaryName}&nbsp;&nbsp;//&nbsp;&nbsp;{secondaryName}</>}</em>
         </div>
       </header>
 
-      <div className="arena2-cards" role="listbox" aria-label="Choose an arena">
+      <div className="arena2-cards two" role="radiogroup" aria-label="Choose a game mode">
         <button
-          type="button"
-          role="option"
-          aria-selected={live}
-          className={`map2-card seq ${live ? 'sel' : ''}`}
-          style={{ animationDelay: '.08s' }}
-          onMouseEnter={() => setLive(true)}
-          onMouseLeave={() => setLive(false)}
-          onFocus={() => setLive(true)}
-          onBlur={() => setLive(false)}
-          onClick={() => { onMap('arena'); onDeploy('arena'); }}
-          aria-label="Warehouse arena, deploy"
+          type="button" role="radio" aria-checked={!defuse}
+          className={`map2-card seq ${!defuse ? 'sel' : ''}`} style={{ animationDelay: '.08s' }}
+          onMouseEnter={() => setLive(true)} onMouseLeave={() => setLive(false)}
+          onFocus={() => setLive(true)} onBlur={() => setLive(false)}
+          onClick={() => pick({ mode: 'tdm' })} onDoubleClick={go}
+          aria-label="Team deathmatch"
         >
           <img src={MAP_ART.arena} alt="" draggable={false} className="map2-art" />
           <span className="map2-shade" aria-hidden="true" />
           <span className="map2-num mono">01</span>
           <span className="map2-info">
-            <b>WAREHOUSE</b>
-            <em>CONTAINER YARD · TWIN HALLS</em>
-            <span className="map2-obj mono">5V5 · 2:30 · 5S RESPAWN</span>
+            <b>TEAM DEATHMATCH</b>
+            <em>RESPAWN · FIRST TEAM TO THE MOST KILLS</em>
+            <span className="map2-obj mono">5V5 · 2:30 · YOUR ARMORY LOADOUT</span>
+          </span>
+          <span className="map2-go"><Arrow /></span>
+        </button>
+        <button
+          type="button" role="radio" aria-checked={defuse}
+          className={`map2-card seq mode-defuse ${defuse ? 'sel' : ''}`} style={{ animationDelay: '.12s' }}
+          onMouseEnter={() => setLive(true)} onMouseLeave={() => setLive(false)}
+          onFocus={() => setLive(true)} onBlur={() => setLive(false)}
+          onClick={() => pick({ mode: 'defuse' })} onDoubleClick={go}
+          aria-label="Bomb defusal"
+        >
+          <img src={modeDefuseArt} alt="" draggable={false} className="map2-art" />
+          <span className="map2-shade" aria-hidden="true" />
+          <span className="map2-num mono">02</span>
+          <span className="mode-new mono">NEW</span>
+          <span className="map2-info">
+            <b className="mode-title"><BombGlyph size={26} lit /> BOMB DEFUSAL</b>
+            <em>PLANT OR DEFUSE · SITES A &amp; B · NO RESPAWNS</em>
+            <span className="map2-obj mono">ROUNDS · BUY MENU · ECONOMY · HALFTIME SWAP</span>
           </span>
           <span className="map2-go"><Arrow /></span>
         </button>
       </div>
+
+      <div className={`arena-opts ${defuse ? '' : 'off'}`} aria-hidden={!defuse}>
+        <div className="arena-opt">
+          <span>FORMAT</span>
+          <div className="seg">
+            <button type="button" tabIndex={defuse ? 0 : -1} className={arena.format === 'short' ? 'on' : ''} onClick={() => pick({ format: 'short' })}>Short<small>FT5 · 8 RDS</small></button>
+            <button type="button" tabIndex={defuse ? 0 : -1} className={arena.format === 'standard' ? 'on' : ''} onClick={() => pick({ format: 'standard' })}>Competitive<small>FT7 · 12 RDS</small></button>
+          </div>
+        </div>
+        <div className="arena-opt">
+          <span>START SIDE</span>
+          <div className="seg">
+            {(['attack', 'defend', 'random'] as const).map(sd => (
+              <button key={sd} type="button" tabIndex={defuse ? 0 : -1} className={arena.side === sd ? 'on' : ''} onClick={() => pick({ side: sd })}>{sd}</button>
+            ))}
+          </div>
+        </div>
+      </div>
       <p className="map2-hint mono" role="status">
-        HOVER WAREHOUSE FOR A LIVE FLYOVER · CLICK TO PLAY
+        {defuse
+          ? 'ATTACKERS PLANT THE C4 · DEFENDERS STOP THEM OR DEFUSE · [B] BUY · [X] PLANT / DEFUSE · [TAB] SCOREBOARD'
+          : 'HOVER A MODE FOR A LIVE FLYOVER · DOUBLE-CLICK TO PLAY'}
       </p>
 
       <div className="arena2-cta seq" style={{ animationDelay: '.2s' }}>
-        <button className="deploy-btn" onClick={() => { onMap('arena'); onDeploy('arena'); }}>
+        <button className="deploy-btn" onClick={go}>
           <span>Play</span>
-          <span className="hint">Warehouse · 5v5 TDM</span>
+          <span className="hint">{defuse ? `Warehouse · Defusal ${arena.format === 'standard' ? 'FT7' : 'FT5'}` : 'Warehouse · 5v5 TDM'}</span>
           <Arrow />
         </button>
-        <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
-          Set up loadout <span>armor + weapon</span>
-        </button>
+        {!defuse && (
+          <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
+            Set up loadout <span>armor + weapon</span>
+          </button>
+        )}
       </div>
 
       <footer className="map2-foot mono">
         <span>ALPHA 5&nbsp;&nbsp;//&nbsp;&nbsp;BRAVO 5</span>
-        <span className="map2-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
+        <span className="map2-foot-right">V1.2.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
       </footer>
     </main>
   );
@@ -404,9 +455,10 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, arena, onArena }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
   onArmory?: () => void; onArenaSetup?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
+  arena?: ArenaChoice; onArena?: (a: ArenaChoice) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
@@ -579,6 +631,8 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onMap={onMap}
         onDeploy={onDeploy}
         onArenaSetup={onArenaSetup}
+        arena={arena}
+        onArena={onArena}
       />
     );
   }
@@ -652,7 +706,7 @@ const BOOT_LINES = [
   'Insertion corridor clear',
 ];
 
-export function BootScreen({ map }: { map?: MapId }) {
+export function BootScreen({ map, defuse = false }: { map?: MapId; defuse?: boolean }) {
   const [line, setLine] = useState(0);
   const [pct, setPct] = useState(0);
   const isTdm = map === 'arena';
@@ -667,6 +721,10 @@ export function BootScreen({ map }: { map?: MapId }) {
   // user gesture, so speech is already unlocked when this mounts.
   useEffect(() => {
     voice.unlock();
+    if (!mission && defuse) {
+      voice.briefing('Warehouse. Bomb defusal. Attackers carry the charge to site A or site B. Defenders hold both sites, or defuse. One life per round, so buy smart and trade your teammates. Good luck, operator.');
+      return;
+    }
     if (!mission) {
       voice.briefing('Warehouse arena. Five on five, two minutes thirty on the clock. Most eliminations wins. Five second redeploy. Watch the container lanes and fight for the twin halls. Good luck, operator.');
       return;
@@ -676,16 +734,16 @@ export function BootScreen({ map }: { map?: MapId }) {
     voice.briefing(narration);
     // No cancel on unmount: builds are fast, so the narration is allowed to
     // finish over the first seconds in-game (mission radio interrupts it anyway).
-  }, [mission]);
+  }, [mission, defuse]);
   return (
     <div className="boot-root boot-cine" role="status" aria-live="polite">
-      <div className="boot-cine-art" style={{ backgroundImage: `url(${MAP_ART[map ?? 'alrasul']})` }} aria-hidden="true" />
+      <div className="boot-cine-art" style={{ backgroundImage: `url(${defuse && map === 'arena' ? modeDefuseArt : MAP_ART[map ?? 'alrasul']})` }} aria-hidden="true" />
       <div className="boot-cine-shade" aria-hidden="true" />
       <div className="boot-cine-grid" aria-hidden="true" />
 
       <div className="boot-cine-top">
         <span className="boot-kicker">Insertion — {mapName}</span>
-        <h2 className="boot-cine-title">{mission ? `Operation ${mission.name}` : 'Warehouse TDM'}</h2>
+        <h2 className="boot-cine-title">{mission ? `Operation ${mission.name}` : defuse ? 'Bomb Defusal' : 'Warehouse TDM'}</h2>
       </div>
 
       <div className="boot-cine-bottom">
@@ -697,7 +755,7 @@ export function BootScreen({ map }: { map?: MapId }) {
         <div className="boot-cine-railwrap">
           <div className="boot-bar" aria-hidden="true"><span className="boot-bar__fill" style={{ width: `${pct}%` }} /></div>
           <div className="boot-cine-railmeta mono">
-            <span>{mission ? `${mission.phases[0].title} · ${mission.phases[0].location}` : '5v5 · 2:30 · most kills wins'}</span>
+            <span>{mission ? `${mission.phases[0].title} · ${mission.phases[0].location}` : defuse ? '5v5 · plant or defuse · one life per round' : '5v5 · 2:30 · most kills wins'}</span>
             <span className="tabular">{String(pct).padStart(3, '0')}%</span>
           </div>
         </div>
@@ -758,6 +816,7 @@ export type ResultsWallet = { before: number; after: number; gradeBonus: number;
 const CASH_REASONS: Record<string, string> = {
   kill: 'Eliminations', headshot: 'Headshots', grenade: 'Grenade kills',
   streak: 'Streak bonuses', phase: 'Phases secured', extraction: 'Extraction',
+  eliminations: 'Eliminations', 'rounds won': 'Rounds won', 'round MVPs': 'Round MVPs', 'match victory': 'Match victory',
 };
 
 export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
@@ -774,6 +833,8 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
     cashRows.push({ label: CASH_REASONS[reason], detail: `×${entries.length}`, total });
   }
   const tdm = r.tdm;
+  const df = r.defuse;
+  const dfYou = df?.players.find(p => p.you);
   return (
     <main className={`results-root ${r.win ? '' : 'lose'}`}>
       <div className="results-wrap">
@@ -781,16 +842,50 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
           <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
           <div className="results-titleblock">
             <div className="stamp-label">Grade {grade}</div>
-            <h2 className="results-title">{tdm
+            <h2 className="results-title">{df
+              ? (df.winner === 'alpha' ? 'Match won — Bomb Defusal' : df.winner === 'draw' ? 'Draw — Bomb Defusal' : 'Match lost — Bomb Defusal')
+              : tdm
               ? (r.win ? 'Victory — Alpha squad' : tdm.alphaScore === tdm.bravoScore ? 'Draw' : 'Defeat — Bravo squad')
               : (r.win ? 'Extraction complete' : 'Mission failed')}</h2>
-            <p className="results-sub">{tdm
+            <p className="results-sub">{df
+              ? `Warehouse — ALPHA ${df.alphaScore} : ${df.bravoScore} BRAVO over ${df.rounds} rounds.${dfYou ? ` You: ${dfYou.kills} kills, ${dfYou.adr} ADR${dfYou.mvps ? `, ${dfYou.mvps}× MVP` : ''}${dfYou.plants ? `, ${dfYou.plants} plant${dfYou.plants > 1 ? 's' : ''}` : ''}${dfYou.defuses ? `, ${dfYou.defuses} defuse${dfYou.defuses > 1 ? 's' : ''}` : ''}${dfYou.clutches ? `, ${dfYou.clutches} clutch${dfYou.clutches > 1 ? 'es' : ''}` : ''}.` : ''}`
+              : tdm
               ? `Warehouse TDM — final score ALPHA ${tdm.alphaScore} : ${tdm.bravoScore} BRAVO. You dropped ${tdm.playerKills} of Alpha's ${tdm.alphaScore}.`
               : `${r.mission.name} — ${r.win
                 ? 'You completed the operation and reached the pickup.'
                 : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}`}</p>
           </div>
         </div>
+        {df && (() => {
+          const half = Math.floor((df.format === 'standard' ? 12 : 8) / 2);
+          const icon: Record<string, string> = { elimination: '✕', bomb: '✹', defuse: '✂', time: '◷' };
+          const players = [...df.players].sort((a, b) => (a.team === b.team ? 0 : a.team === 'alpha' ? -1 : 1) || b.kills - a.kills || b.adr - a.adr);
+          return (
+            <section className="tdm-standings dfr" aria-label="Match report" style={{ padding: '10px 10px 8px' }}>
+              <div className="dfr-score">
+                <span className="t a">ALPHA</span><b className="tabular">{df.alphaScore}</b><i>:</i><b className="tabular">{df.bravoScore}</b><span className="t b">BRAVO</span>
+              </div>
+              <div className="df-history">
+                {df.history.map((h, i) => (
+                  <span key={i} className={`df-hcell ${h.winner === 'alpha' ? 'a' : 'b'} ${i === half ? 'half' : ''}`} title={`Round ${h.round}: ${h.winner} — ${h.reason} · MVP ${h.mvp}`}>{icon[h.reason]}</span>
+                ))}
+              </div>
+              <div className="sec-label"><span>Scoreboard</span><span className="mono">K · A · D · ADR · HS · MVP · OBJ</span></div>
+              <div className="df-brow head" style={{ gridTemplateColumns: '1.6fr 34px 34px 34px 44px 44px 40px 1fr' }}>
+                <span className="nm">OPERATOR</span><span>K</span><span>A</span><span>D</span><span>ADR</span><span>HS</span><span className="mvp">MVP</span><span>OBJ</span>
+              </div>
+              {players.map(p => (
+                <div key={p.name} className={`df-brow ${p.you ? 'you' : ''}`} style={{ gridTemplateColumns: '1.6fr 34px 34px 34px 44px 44px 40px 1fr', borderLeft: `2px solid ${p.team === 'alpha' ? '#4FB0C6' : '#E05A48'}` }}>
+                  <span className="nm">{p.you ? 'YOU' : p.name}</span>
+                  <span>{p.kills}</span><span>{p.assists}</span><span>{p.deaths}</span><span>{p.adr}</span>
+                  <span>{p.kills ? Math.round(p.headshots / p.kills * 100) : 0}%</span>
+                  <span className="mvp">{p.mvps ? `★${p.mvps}` : ''}</span>
+                  <span style={{ fontSize: 10, color: 'var(--bone-dim)' }}>{[p.plants && `${p.plants} PLANT`, p.defuses && `${p.defuses} DEFUSE`, p.clutches && `${p.clutches} CLUTCH`].filter(Boolean).join(' · ')}</span>
+                </div>
+              ))}
+            </section>
+          );
+        })()}
         {tdm && (() => {
           const standings = [...tdm.roster].sort((a, b) =>
             b.kills - a.kills || b.headshots - a.headshots || a.deaths - b.deaths);
@@ -818,14 +913,14 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
         })()}
 
         <div className="stats-grid">
-          {!tdm && (
+          {!tdm && !df && (
             <div className="stat-cell">
               <span className="stat-label">Objectives</span>
               <div className="stat-value tabular"><CountUp to={completed} /><small> / {r.mission.phases.length}</small></div>
             </div>
           )}
           <div className="stat-cell">
-            <span className="stat-label">{tdm ? 'Match time' : 'Mission time'}</span>
+            <span className="stat-label">{tdm || df ? 'Match time' : 'Mission time'}</span>
             <div className="stat-value tabular">{missionClock(r.timeSec)}</div>
           </div>
           <div className="stat-cell">
@@ -866,7 +961,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
           </div>
         </section>
 
-        {!tdm && <section className="timeline" aria-label="Mission timeline">
+        {!tdm && !df && <section className="timeline" aria-label="Mission timeline">
           <div className="sec-label" style={{ paddingBottom: 10 }}><span>Timeline</span><span className="mono">Elapsed</span></div>
           {r.mission.phases.map((phase, i) => {
             const isDone = phase.complete;
@@ -885,7 +980,9 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
         </section>}
 
         <p className="results-note">
-          {tdm
+          {df
+            ? <><b>{df.rounds}</b> rounds played · <b>{df.history.filter(h => h.reason === 'bomb').length}</b> detonations · <b>{df.history.filter(h => h.reason === 'defuse').length}</b> defuses · <b>{r.headshots}</b> headshots confirmed.</>
+            : tdm
             ? <><b>10</b> combatants in the yard · <b>{r.headshots}</b> headshots confirmed · armor absorbed the rest.</>
             : <><b>{r.pressure.totalSpawned}</b> hostiles entered the operation · peak pressure <b>{r.pressure.peakLive}</b> · <b>{r.headshots}</b> headshots confirmed.</>}
         </p>

@@ -9,8 +9,36 @@ import { grantCash, loadProfile, saveProfile, type PlayerProfile } from './game/
 import { gradeBonus, gradeFor } from './game/economy/rewards';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
+import BuyMenu from './ui/defuse/BuyMenu';
+import { emptyDefuseFx, type DefuseFx } from './ui/defuse/DefuseHud';
+import type { WeaponId } from './game/economy/catalog';
+import type { WeaponBuild } from './game/economy/loadout';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup';
+/** Arena mode choice (persisted): classic TDM or round-based Bomb Defusal. */
+export interface ArenaChoice { mode: 'tdm' | 'defuse'; format: 'short' | 'standard'; side: 'attack' | 'defend' | 'random' }
+const ARENA_KEY = 'recoilfps.arena.v1';
+function loadArena(): ArenaChoice {
+  try {
+    const r = JSON.parse(localStorage.getItem(ARENA_KEY) ?? '{}');
+    return {
+      mode: r.mode === 'defuse' ? 'defuse' : 'tdm',
+      format: r.format === 'standard' ? 'standard' : 'short',
+      side: r.side === 'attack' || r.side === 'defend' ? r.side : 'random',
+    };
+  } catch { return { mode: 'tdm', format: 'short', side: 'random' }; }
+}
+/** Armory builds (attachments + finishes) for every gun, so bought guns spawn as the player built them. */
+function defuseBuilds(p: PlayerProfile): Partial<Record<WeaponId, WeaponBuild>> {
+  const out: Partial<Record<WeaponId, WeaponBuild>> = { ...p.builds };
+  for (const b of [p.loadout.primary, p.loadout.secondary]) out[b.weapon] = b;
+  for (const [id, skin] of Object.entries(p.skins) as [WeaponId, WeaponBuild['skin']][]) {
+    const cur = out[id] ?? { weapon: id, attachments: {} };
+    if (!cur.skin && skin) out[id] = { ...cur, skin };
+  }
+  return out;
+}
+
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'buy';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 
 /**
@@ -65,6 +93,9 @@ export default function App() {
   const [profile, setProfile] = useState<PlayerProfile>(loadRichProfile);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
   const [tdmArmor, setTdmArmor] = useState<TDMArmor>(1);
+  const [arena, setArena] = useState<ArenaChoice>(loadArena);
+  const [dfx, setDfx] = useState<DefuseFx>(emptyDefuseFx);
+  useEffect(() => { try { localStorage.setItem(ARENA_KEY, JSON.stringify(arena)); } catch { /* optional */ } }, [arena]);
   // Which MainMenu screen to show when phase returns to 'menu' (so leaving the
   // TDM loadout screen lands back on Arena Mode, not the home screen).
   const [menuView, setMenuView] = useState<'home' | 'arena'>('home');
@@ -171,6 +202,55 @@ export default function App() {
         setFx(f => ({ ...f, missionBanner: { id, title: event.phase.title, index: event.index } }));
         later(() => setFx(f => f.missionBanner?.id === id ? { ...f, missionBanner: null } : f), 2600);
         break;
+      case 'buy-menu': {
+        if (phaseRef.current !== 'playing') break;
+        changePhase('buy');
+        if (document.pointerLockElement) document.exitPointerLock();
+        break;
+      }
+      case 'defuse': {
+        const ev = event.ev;
+        switch (ev.type) {
+          case 'round-start':
+            setDfx(f => ({ ...f, end: null, clutch: null, bomb: null, start: { id, round: ev.round, side: ev.side, pistol: ev.pistol, matchPoint: ev.matchPoint, suddenDeath: ev.suddenDeath, lastOfHalf: ev.lastOfHalf, halftimeReset: ev.halftimeReset } }));
+            later(() => setDfx(f => f.start?.id === id ? { ...f, start: null } : f), 3300);
+            break;
+          case 'freeze-end':
+            setDfx(f => ({ ...f, start: null, go: { id } }));
+            later(() => setDfx(f => f.go?.id === id ? { ...f, go: null } : f), 1700);
+            // Buy window is over for anyone still shopping at the whistle? No — CS keeps a short
+            // grace period; the menu itself shows BUY TIME OVER when it expires.
+            break;
+          case 'round-end':
+            setDfx(f => ({ ...f, start: null, go: null, clutch: null, bomb: null, end: { id, won: ev.winner === 'alpha', reasonText: ev.reasonText, reason: ev.reason, mvp: ev.mvp, mvpWhy: ev.mvpWhy, income: ev.income, halftime: ev.halftime, over: ev.over, clutch: ev.clutch, alpha: ev.alphaScore, bravo: ev.bravoScore, suddenDeath: ev.suddenDeath } }));
+            later(() => setDfx(f => f.end?.id === id ? { ...f, end: null } : f), 6000);
+            break;
+          case 'bomb': {
+            const site = ev.site ? ` ${ev.site}` : '';
+            const mine = ev.byTeam === 'alpha';
+            const banner: DefuseFx['bomb'] =
+              ev.what === 'planted' ? { id, text: `BOMB PLANTED${site ? ` AT${site}` : ''}`, tone: mine ? 'info' : 'bad' }
+              : ev.what === 'defused' ? { id, text: 'BOMB DEFUSED', tone: mine ? 'good' : 'bad' }
+              : ev.what === 'dropped' && ev.playerCarrier ? { id, text: 'YOU DROPPED THE BOMB', tone: 'info' }
+              : ev.what === 'picked' && ev.playerCarrier ? { id, text: 'YOU PICKED UP THE BOMB', tone: 'info' }
+              : null;
+            if (banner) {
+              setDfx(f => ({ ...f, bomb: banner }));
+              later(() => setDfx(f => f.bomb?.id === id ? { ...f, bomb: null } : f), 3400);
+            }
+            break;
+          }
+          case 'money':
+            setDfx(f => ({ ...f, pops: [...f.pops.slice(-3), { id, amount: ev.amount, reason: ev.reason }] }));
+            later(() => setDfx(f => ({ ...f, pops: f.pops.filter(p => p.id !== id) })), 1850);
+            break;
+          case 'clutch':
+            setDfx(f => ({ ...f, clutch: { id, vs: ev.vs } }));
+            later(() => setDfx(f => f.clutch?.id === id ? { ...f, clutch: null } : f), 4000);
+            break;
+        }
+        break;
+      }
       case 'end': {
         engineRef.current?.setPaused(true);
         // Debrief payout: run cash × difficulty, plus the grade bonus on a win.
@@ -192,7 +272,7 @@ export default function App() {
   }, [changePhase, later, updateProfile]);
 
   useEffect(() => {
-    if (phase !== 'playing') return;
+    if (phase !== 'playing' && phase !== 'buy') return;
     const interval = window.setInterval(() => {
       if (engineRef.current) setHud(engineRef.current.hud());
     }, 50);
@@ -252,7 +332,7 @@ export default function App() {
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
     const epoch = ++session.current;
     clearTimers();
-    setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
+    setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx()); setDfx(emptyDefuseFx());
     // The boot screen must be the ONLY thing on screen — leaving the loadout
     // phase mounted produced the "loading + loadout at the same time" overlap.
     if (phaseRef.current === 'tdm-setup') changePhase('menu');
@@ -263,8 +343,21 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor);
+      const defuseCfg = map === 'arena' && arena.mode === 'defuse'
+        ? { format: arena.format, side: arena.side === 'random' ? (Math.random() < 0.5 ? 'attack' as const : 'defend' as const) : arena.side, builds: defuseBuilds(profileRef.current) }
+        : null;
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor, defuseCfg);
       engineRef.current = engine;
+      // Dev-only QA hook (stripped from production builds).
+      if (import.meta.env.DEV) {
+        const w = window as unknown as { __engine?: Engine; __app?: Record<string, () => void> };
+        w.__engine = engine;
+        // Headless QA can't take pointer lock: force the phases directly.
+        w.__app = {
+          play: () => { engine.setPaused(false); changePhase('playing'); },
+          buy: () => { engine.setPaused(false); changePhase('buy'); },
+        };
+      }
       engine.applySettings(settings);
       changePhase('paused');
       engine.start();
@@ -300,11 +393,17 @@ export default function App() {
     } catch { if (epoch === session.current) setError('Mouse capture was blocked. Select Resume to try again.'); }
   };
 
+  /** Leave the buy menu: re-capture the mouse (keys count as user activation); on refusal fall back to pause. */
+  const closeBuy = async () => {
+    await resume();
+    if (phaseRef.current === 'buy') { engineRef.current?.setPaused(true); changePhase('paused'); }
+  };
+
   const quit = () => {
     session.current++; clearTimers(); engineRef.current?.dispose(); engineRef.current = null;
     // Leaving an arena match returns to the Arena Mode screen, not the home menu.
     setMenuView(settings.map === 'arena' ? 'arena' : 'home');
-    changePhase('menu'); setShowSettings(false); setError(''); setFx(emptyFx()); setHud(DEFAULT_HUD);
+    changePhase('menu'); setShowSettings(false); setError(''); setFx(emptyFx()); setDfx(emptyDefuseFx()); setHud(DEFAULT_HUD);
     if (document.pointerLockElement) document.exitPointerLock();
   };
 
@@ -328,11 +427,12 @@ export default function App() {
   return (
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
-      {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} />}
+      {(phase === 'playing' || phase === 'paused' || phase === 'buy') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} dfx={dfx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
+      {phase === 'buy' && engineRef.current && <BuyMenu engine={engineRef.current} onClose={() => { void closeBuy(); }} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} arena={arena} onArena={setArena} />}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? (arena.mode === 'defuse' ? 'WAREHOUSE · BOMB DEFUSAL' : 'WAREHOUSE · 5V5 TDM') : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
         <TdmSetup
           profile={profile}
@@ -348,7 +448,7 @@ export default function App() {
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>
       </div>}
       {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
-      {launching && <BootScreen map={settings.map} />}
+      {launching && <BootScreen map={settings.map} defuse={arena.mode === 'defuse'} />}
     </div>
   );
 }

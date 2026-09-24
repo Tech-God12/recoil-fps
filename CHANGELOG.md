@@ -1,3 +1,40 @@
+## 2026-09-23 — Bomb Defusal: round-based 5v5 competitive mode
+
+New Arena mode alongside TDM, built on the Warehouse yard: CS-style Bomb Defusal. Two bomb sites (A · Wreck Yard, B · Crane Dock) with purpose-built cover (plant-stack crates, stacked back-wall containers, jersey-barrier lips), painted boundaries and big stencilled site letters on the floor and on signage. Attackers carry the C4 (a modelled prop on the carrier's back) and plant with X (3.2 s); defenders defuse with X (10 s, 5 s with a kit). The fuse is 40 s with CS-accelerating beeps and a blast that kills anything within the radius. One life per round: dead players get a chase-cam spectator (LMB/RMB to cycle).
+
+Full match loop: 12 s freeze/buy phase, 1:45 rounds, halftime side swap with economy reset, match point, and a sudden-death decider at $10,000 each on a regulation tie. Formats are Short (first to 5, 8 rounds) and Competitive (first to 7, 12 rounds), and you pick your start side (attack, defend or random).
+
+CS economy: $800 pistol rounds, a win reward per win condition, a 1400→3400 loss-bonus ladder (−1 notch per win), an $800 team plant bonus, the time-expiry "save tax" on surviving attackers, and per-weapon kill rewards (AWM $100 … SPAS $900). The in-match buy menu (B, inside the 20 s buy window) has 3D gun renders with damage/rate/control/mobility bars, two-level keyboard buying (category digit → item digit), side-locked items, a helmet-upgrade discount and AUTO-BUY. Bought guns spawn with your Armory attachments and finishes. H drops the bomb for a teammate.
+
+Bot director, per round:
+- Bots buy with team economy discipline (eco / force / full buy).
+- Attackers split into yard and hall stacks, with a lurker. They execute a site, plant, and play post-plant crossfires.
+- Defenders run a 2-2-1 setup and rotate on intel.
+- Retakes are coordinated: defenders stage and swing in together instead of trickling in.
+- Objective bots LOS-check up to 3 nearest enemies rather than only the closest, so they no longer ignore visible shooters.
+- Bots hear running enemies within 12 m, while stationary angle-holders stay silent and get a reaction/accuracy edge, which recreates the CS peeker/holder asymmetry.
+
+Balance was tuned with a headless full-match simulator (`scripts/defuse-sim.ts`): attack wins 54% over 237 simulated rounds, with elimination, bomb, defuse and time endings all occurring.
+
+HUD:
+- Round scorebar with ATK/DEF tags, alive pips (bomb carrier marked) and a clock that turns into a pulsing C4 + site letter once planted.
+- Plant/defuse progress bar with a keypad readout and context hints.
+- Carrier badge, buy chip and money pops.
+- Round-start / GO / bomb event / clutch (1vN) banners.
+- Round-end card with the reason, MVP, score and income.
+- Screen-projected bomb marker and radar squad blips + C4.
+- Tab board with cash, kit, K/A/D, ADR, HS%, MVPs and a round-history strip.
+
+Results screen gets a match report (score, round history, full scoreboard with plants/defuses/clutches) and payouts for rounds won, MVPs and the match win. The Arena screen now has a TDM / Bomb Defusal mode picker with new key art. The loading screen and voice briefing adapt to the mode.
+
+Also: bot unstick logic probes backwards as well as sideways (bots no longer grind inside U-barrier cups), and the four mid-yard U-barriers moved 1.5 m inboard, which removes the dead-end pocket they formed with the flank containers (affects TDM too).
+
+Verification:
+- `node scripts/validate.mjs`: lint and typecheck clean. 137 Node tests including 16 new `tests/defuse-rules.test.js`. The only failures are the 17 already failing on `main`.
+- Production build.
+- ~60 headless simulated matches.
+- In-browser QA (headless Chromium): menu, buy menu, live HUD, player plant, player defuse, spectator, Tab board and results, plus a TDM launch regression check.
+
 ## 2026-09-16 — Tactical radar upgrade, armory stat ribbon, new key art
 
 Minimap rebuilt into a real instrument: enemy blips are now directional wedges showing where each hostile is LOOKING (amber while unaware, burning red pulse once they have contact), the dish rim smoulders red during contact, a faint square grid + 45-degree rim ticks make the terrain read as a mapped instrument, north pops brass, an olive chevron rides the rim pointing at the objective even when it's off-dish, and a footer strip reads live bearing / objective distance / hostile count (goes CLEAR when quiet). Armory stage gained a key-figures ribbon under the gun (DMG/RPM/MAG/ADS/RELOAD/SUPPR at a glance). Map key art regenerated at higher fidelity: Sandblast now a golden-hour drone shot with both bridges, souk tarps and the rusted water tower; Town a dawn kasbah in valley mist with the signal keep, kilns and west gate — both graded to their in-game lighting.

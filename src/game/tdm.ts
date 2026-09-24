@@ -36,6 +36,74 @@ export const TDM_DAMAGE_MUL = 1.0;
 export const TDM_HEAD_REDUCTION = [0, 0.10, 0.18];
 export const TDM_BODY_REDUCTION = [0, 0.12, 0.22];
 export const TDM_ARMOR_NAMES = ['None', 'Light', 'Heavy'] as const;
+
+/** Per-bot firearm profile. TDM bots all carry TDM_RIFLE (the original tuning);
+ * Bomb Defusal bots carry whatever their economy bought. Damage is RAW (pre-armor). */
+export interface BotGun {
+  id: string;
+  label: string;
+  body: [number, number];
+  head: number;
+  /** Rounds per burst [min, max] and seconds between rounds inside a burst. */
+  burst: [number, number];
+  gap: number;
+  /** Hit chance at 4 m and at 65 m (linear in between). */
+  accNear: number;
+  accFar: number;
+  headChance: number;
+  /** Beyond this range the gun is nearly useless (shotgun). */
+  range: number;
+  /** Extra acquisition delay (scoped rifles are slower on the draw). */
+  react?: number;
+}
+export const TDM_RIFLE: BotGun = { id: 'tdm', label: 'RIFLE', body: [18, 24], head: 44, burst: [2, 5], gap: 0.12, accNear: 0.82, accFar: 0.43, headChance: 0.10, range: 78 };
+export const BOT_GUNS: Record<string, BotGun> = {
+  m1911: { id: 'm1911', label: '1911', body: [20, 25], head: 62, burst: [1, 3], gap: 0.30, accNear: 0.74, accFar: 0.26, headChance: 0.12, range: 60 },
+  deagle: { id: 'deagle', label: 'DEAGLE', body: [36, 44], head: 115, burst: [1, 2], gap: 0.5, accNear: 0.72, accFar: 0.34, headChance: 0.12, range: 70 },
+  mp7: { id: 'mp7', label: 'MP', body: [15, 19], head: 44, burst: [3, 6], gap: 0.075, accNear: 0.72, accFar: 0.28, headChance: 0.10, range: 60 },
+  vector: { id: 'vector', label: 'VECTOR', body: [16, 20], head: 46, burst: [4, 7], gap: 0.06, accNear: 0.74, accFar: 0.28, headChance: 0.10, range: 60 },
+  spas12: { id: 'spas12', label: 'SPAS', body: [48, 70], head: 92, burst: [1, 1], gap: 0.9, accNear: 0.86, accFar: 0.05, headChance: 0.14, range: 20 },
+  ak47: { id: 'ak47', label: 'AK-47', body: [30, 36], head: 132, burst: [3, 5], gap: 0.11, accNear: 0.82, accFar: 0.45, headChance: 0.11, range: 78 },
+  m4a1: { id: 'm4a1', label: 'M416', body: [26, 31], head: 96, burst: [3, 6], gap: 0.085, accNear: 0.84, accFar: 0.47, headChance: 0.11, range: 78 },
+  scar_h: { id: 'scar_h', label: 'SCAR', body: [34, 40], head: 118, burst: [2, 4], gap: 0.11, accNear: 0.82, accFar: 0.5, headChance: 0.11, range: 78 },
+  awm: { id: 'awm', label: 'AWM', body: [105, 118], head: 300, burst: [1, 1], gap: 1.5, accNear: 0.86, accFar: 0.8, headChance: 0.12, range: 90, react: 0.22 },
+  m249: { id: 'm249', label: 'M249', body: [28, 33], head: 92, burst: [5, 9], gap: 0.075, accNear: 0.7, accFar: 0.36, headChance: 0.09, range: 78 },
+};
+
+/** Objective orders a director hands a bot (Bomb Defusal). When present they
+ * replace the TDM patrol brain whenever the bot is not actively fighting. */
+export interface BotOrders {
+  goal: THREE.Vector3;
+  /** Movement speed toward the goal (m/s). */
+  speed: number;
+  /** On arrival, face this point and hold the angle. */
+  look?: THREE.Vector3;
+  /** Crouch-and-work at the goal (planting / defusing): no movement. */
+  busy?: boolean;
+  /** Ignore enemies entirely (last-second plant / ninja defuse). */
+  stick?: boolean;
+}
+
+export interface TDMOptions {
+  /** TDM: 5 s redeploys. Bomb Defusal: dead stays dead until the next round. */
+  respawn: boolean;
+  /** Bots only notice enemies inside a ~150° cone (or very close / after contact). */
+  visionCone: boolean;
+  /** Objective AI: lost-contact bots return to their orders instead of roaming. */
+  objective: boolean;
+  baseHp: number;
+  hpPerArmor: number;
+  headReduction: readonly number[];
+  bodyReduction: readonly number[];
+  /** Difficulty knobs (1 / 0 = the original TDM tuning). */
+  accuracyMul: number;
+  reactionAdd: number;
+}
+export const TDM_DEFAULT_OPTIONS: TDMOptions = {
+  respawn: true, visionCone: false, objective: false,
+  baseHp: 150, hpPerArmor: 20, headReduction: [0, 0.10, 0.18], bodyReduction: [0, 0.12, 0.22],
+  accuracyMul: 1, reactionAdd: 0,
+};
 export const TDM_ARMOR_ICONS = ['○', '◍', '⬢'] as const;
 
 export interface TDMContext {
@@ -50,7 +118,7 @@ export interface TDMContext {
   playerFeet(): THREE.Vector3;
   playerAlive(): boolean;
   /** Bot→player damage. The engine applies the player's own armor reduction. */
-  damagePlayer(amount: number, from: THREE.Vector3, killer: TDMBot): void;
+  damagePlayer(amount: number, from: THREE.Vector3, killer: TDMBot, isHead?: boolean): void;
   moveCollide(pos: THREE.Vector3, dx: number, dz: number, radius: number): void;
   onCallout(kind: string, pos: THREE.Vector3, team: TDMTeam): void;
   throwGrenade(from: THREE.Vector3, target: THREE.Vector3, owner: TDMBot): void;
@@ -183,6 +251,8 @@ export class TDMBot {
   private repathT = 0;
   private stuckT = 0;
   private escapeDir = 0;
+  private escapeX = 0;
+  private escapeZ = 0;
   private escapeT = 0;
   private blockedT = 0;
   // visuals
@@ -204,13 +274,21 @@ export class TDMBot {
   /** Boosted push speed while hunting an ignited target. */
   private huntPush = false;
 
+  /** Firearm profile — TDM rifle unless an economy bought something else. */
+  gun: BotGun = TDM_RIFLE;
+  /** Director orders (objective modes); null = classic TDM patrol brain. */
+  orders: BotOrders | null = null;
+  /** Something worth turning toward (heard gunfire / footsteps) while holding an angle. */
+  private alertLook: THREE.Vector3 | null = null;
+  private alertT = 0;
+
   get pusher() { return this.personality > 0.58; }
   get flanker() { return this.personality > 0.35 && this.personality < 0.75; }
   get dead() { return this.state === 'DEAD'; }
 
   constructor(ctx: TDMContext, mgr: TDMManager, nav: NavGrid, team: TDMTeam, name: string, armor: TDMArmor, spawn: THREE.Vector3) {
     this.ctx = ctx; this.mgr = mgr; this.nav = nav; this.team = team; this.name = name; this.armor = armor;
-    this.maxHp = TDM_BASE_HP + armor * TDM_HP_PER_ARMOR;
+    this.maxHp = mgr.opts.baseHp + armor * mgr.opts.hpPerArmor;
     this.hp = this.maxHp;
     this.model = buildArmoredSoldier(armor, team === 'alpha' ? 0x2C7C8E : 0xA33326);
     if (team === 'alpha') {
@@ -252,7 +330,9 @@ export class TDMBot {
 
   respawn(at: THREE.Vector3) {
     this.pos.copy(at);
+    this.maxHp = this.mgr.opts.baseHp + this.armor * this.mgr.opts.hpPerArmor;
     this.hp = this.maxHp;
+    this.alertLook = null; this.alertT = 0;
     this.frags = 3; this.flashes = 1;
     this.state = 'PATROL'; this.stateTime = 0;
     this.respawnT = -1; this.deadAge = 0; this.deathT = -1;
@@ -304,6 +384,11 @@ export class TDMBot {
   /** Heard gunfire: soft intel — hunt the noise if not already fighting. */
   hearShot(pos: THREE.Vector3) {
     if (this.dead) return;
+    if (this.mgr.opts.objective) {
+      // Objective AI never abandons its post for a noise — it turns to face it.
+      this.alertLook = pos.clone(); this.alertT = 3.5;
+      return;
+    }
     if (this.state === 'PATROL') {
       this.lastKnown = pos.clone();
       this.lastSeenT = Math.min(this.lastSeenT, 4);
@@ -317,7 +402,9 @@ export class TDMBot {
   takeDamage(amount: number, isHead: boolean, attacker: TDMBot | 'player', applyArmor = true): boolean {
     if (this.dead) return false;
     let dmg = amount;
-    if (applyArmor) dmg *= 1 - (isHead ? TDM_HEAD_REDUCTION[this.armor] : TDM_BODY_REDUCTION[this.armor]);
+    const o = this.mgr.opts;
+    if (applyArmor) dmg *= 1 - (isHead ? o.headReduction[this.armor] : o.bodyReduction[this.armor]);
+    this.mgr.onDamage?.(attacker, this, Math.min(dmg, this.hp));
     this.hp -= dmg;
     this.flinch = isHead ? 0.35 : 0.22;
     // being shot reveals the shooter's rough position
@@ -335,7 +422,8 @@ export class TDMBot {
     this.state = 'DEAD';
     if (this.onFire) this.endFire();
     this.deathT = 0;
-    this.respawnT = TDM_RESPAWN_SECONDS;
+    this.respawnT = this.mgr.opts.respawn ? TDM_RESPAWN_SECONDS : -1;
+    this.orders = null;
     let surfaceY = this.ctx.groundHeight(this.pos.x, this.pos.z);
     for (const b of this.ctx.solids) {
       if (b.maxY > this.pos.y + 0.4 || b.maxY <= surfaceY) continue;
@@ -347,6 +435,7 @@ export class TDMBot {
   // ==================== MOMENTUM: "ON FIRE" ====================
   /** Called on every confirmed kill this combatant lands. */
   registerKill() {
+    if (!this.mgr.opts.respawn) return; // no ON FIRE momentum in round play
     this.killTimes.push(performance.now());
   }
 
@@ -444,6 +533,36 @@ export class TDMBot {
     return best;
   }
 
+  /** Objective AI: the nearest enemy this bot can actually SEE (up to 3 LOS
+   * probes, nearest first), honouring the vision cone for unaware bots. Falls
+   * back to the nearest enemy without LOS so the bot still tracks a heading. */
+  private acquireVisible(): { target: TargetRef | null; los: boolean } {
+    const cands: { t: TargetRef; d: number }[] = [];
+    if (this.team === 'bravo' && this.ctx.playerAlive()) {
+      const feet = this.ctx.playerFeet();
+      cands.push({ t: { feet, eye: this.ctx.playerPos(), isPlayer: true, bot: null }, d: feet.distanceTo(this.pos) });
+    }
+    for (const bot of this.mgr.bots) {
+      if (bot.team === this.team || bot.dead) continue;
+      cands.push({ t: { feet: bot.pos.clone(), eye: bot.eyePos(), isPlayer: false, bot }, d: bot.pos.distanceTo(this.pos) });
+    }
+    if (!cands.length) return { target: null, los: false };
+    cands.sort((a, b) => a.d - b.d);
+    // Footsteps: a RUNNING enemy within 12 m gives itself away (full 360° awareness).
+    // Stationary angle-holders stay silent — the CS peeker/holder asymmetry.
+    const heard = cands.some(c => c.d < 12 && !!c.t.bot && c.t.bot.moveSpeed > 3.2);
+    const aware = this.hadLOS || this.lastSeenT < 1.5 || heard;
+    let probes = 0;
+    for (const c of cands) {
+      if (c.d > 95 || probes >= 3) break;
+      const sameAsCurrent = this.target && (c.t.isPlayer ? this.target.isPlayer : this.target.bot === c.t.bot);
+      if (this.mgr.opts.visionCone && !aware && !sameAsCurrent && c.d > 4 && !this.renderedWithin(c.t.feet, 1.3)) continue;
+      probes++;
+      if (this.checkLOS(c.t)) return { target: c.t, los: true };
+    }
+    return { target: cands[0].t, los: false };
+  }
+
   private checkLOS(target: TargetRef): boolean {
     const eye = this.eyePos();
     const dist = eye.distanceTo(target.eye);
@@ -484,25 +603,29 @@ export class TDMBot {
       this.stuckT += dt; this.blockedT += dt;
       if (this.stuckT > 0.25) {
         if (this.escapeT <= 0) {
-          // probe BOTH perpendicular directions and commit to whichever
-          // actually moves — no more guessing wrong and grinding a wall
+          // Probe five headings relative to the goal (±90°, ±135°, 180°) and commit
+          // to the one that really moves. Backing out matters: in a U-barrier cup
+          // or a container pocket every sideways/forward probe hits a wall.
           const px = this.pos.x, pz = this.pos.z, step = speed * dt * 1.6;
-          let bestSide = 0, bestGain = 0;
-          for (const side of [1, -1] as const) {
+          const ux = dx / d, uz = dz / d;
+          let best: [number, number] | null = null, bestScore = 0;
+          for (const ang of [Math.PI / 2, -Math.PI / 2, Math.PI * 0.75, -Math.PI * 0.75, Math.PI]) {
+            const c = Math.cos(ang), sn = Math.sin(ang);
+            const ex = ux * c - uz * sn, ez = ux * sn + uz * c;
             const probe = this.pos.clone();
-            this.ctx.moveCollide(probe, (-dz / d) * side * step * 4, (dx / d) * side * step * 4, 0.36);
+            this.ctx.moveCollide(probe, ex * step * 4, ez * step * 4, 0.36);
             const gain = Math.hypot(probe.x - px, probe.z - pz);
-            if (gain > bestGain) { bestGain = gain; bestSide = side; }
+            // prefer the least-backwards heading unless it barely moves
+            const score = gain * (Math.abs(ang) > Math.PI * 0.6 ? 0.8 : 1);
+            if (score > bestScore * 1.05) { bestScore = score; best = [ex, ez]; }
           }
-          this.escapeDir = bestSide !== 0 ? bestSide : (this.escapeDir === 0 ? 1 : -this.escapeDir);
+          if (best && bestScore > step * 0.5) { this.escapeX = best[0]; this.escapeZ = best[1]; }
+          else { this.escapeDir = this.escapeDir === 0 ? 1 : -this.escapeDir; this.escapeX = -uz * this.escapeDir; this.escapeZ = ux * this.escapeDir; }
           this.escapeT = 0.7;
           this.path = null; this.repathT = Math.max(this.repathT, 0.4);
         }
         this.escapeT -= dt;
-        const side = this.escapeDir;
-        this.ctx.moveCollide(this.pos,
-          ((-dz / d) * side * 0.95 + (dx / d) * 0.3) * speed * dt * 1.6,
-          ((dx / d) * side * 0.95 + (dz / d) * 0.3) * speed * dt * 1.6, 0.36);
+        this.ctx.moveCollide(this.pos, this.escapeX * speed * dt * 1.6, this.escapeZ * speed * dt * 1.6, 0.36);
         // truly wedged → give up on this goal entirely and pick a new one
         if (this.blockedT > 2.2) { this.blockedT = 0; this.stuckT = 0; this.escapeT = 0; this.path = null; this.repathT = Math.max(this.repathT, 1.0); return true; }
       }
@@ -541,9 +664,12 @@ export class TDMBot {
     this.ctx.onBotFire(muzzle, this.team);
     const aimAt = target.eye.clone();
     const dist = muzzle.distanceTo(aimAt);
-    // accuracy 0.82 close → 0.43 at 65 m; first bullet of a burst +0.12
-    let acc = THREE.MathUtils.lerp(0.82, 0.43, THREE.MathUtils.clamp((dist - 4) / 61, 0, 1));
+    const gun = this.gun;
+    // accuracy near → far over 4..65 m; first bullet of a burst +0.12
+    let acc = THREE.MathUtils.lerp(gun.accNear, gun.accFar, THREE.MathUtils.clamp((dist - 4) / 61, 0, 1));
     if (this.burstIdx === 0) acc = Math.min(0.94, acc + 0.12);
+    if (dist > gun.range) acc *= 0.25;
+    acc = Math.min(0.97, acc * this.mgr.opts.accuracyMul * (this.holdingAngle() ? 1.15 : 1));
     this.burstIdx++;
     // never shoot through a wall
     ray.set(muzzle, tmpA.copy(aimAt).sub(muzzle).normalize()); ray.far = Math.max(0, dist - 0.25);
@@ -552,16 +678,19 @@ export class TDMBot {
     if (wall) { this.ctx.effects.tracer(muzzle, wall.point, hostile); return; }
     if (Math.random() < acc) {
       this.ctx.effects.tracer(muzzle, aimAt, hostile);
-      const headshot = Math.random() < 0.10;
-      // 44 head / 18-24 body — tuned against the lighter TDM armor curve so a
-      // full-HP player survives roughly 7-9 hits (plus regen between fights)
-      const dmg = (headshot ? 44 : 18 + Math.random() * 6) * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
+      const headshot = Math.random() < gun.headChance;
+      // TDM rifle: 44 head / 18-24 body — tuned against the lighter TDM armor curve so a
+      // full-HP player survives roughly 7-9 hits (plus regen between fights).
+      // Shotguns lose most of their punch past half range.
+      const falloff = gun.range < 30 ? THREE.MathUtils.clamp(1.25 - dist / gun.range, 0.2, 1) : 1;
+      const body = gun.body[0] + Math.random() * (gun.body[1] - gun.body[0]);
+      const dmg = (headshot ? gun.head : body) * falloff * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
       if (target.isPlayer) {
-        if (this.ctx.playerAlive()) this.ctx.damagePlayer(dmg, this.pos, this);
+        if (this.ctx.playerAlive()) this.ctx.damagePlayer(dmg, this.pos, this, headshot);
       } else if (target.bot && !target.bot.dead) {
         this.ctx.effects.blood(aimAt);
         const killed = target.bot.takeDamage(dmg, headshot, this);
-        if (killed) this.mgr.handleKill(this, target.bot, headshot, 'RIFLE');
+        if (killed) this.mgr.handleKill(this, target.bot, headshot, gun.label);
       }
     } else {
       const miss = aimAt.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.6, (Math.random() - 0.3) * 1.8, (Math.random() - 0.5) * 2.6));
@@ -597,19 +726,50 @@ export class TDMBot {
     }
   }
 
+  /** Smoothed ground speed (m/s) — running bots are audible, holders are silent. */
+  moveSpeed = 0;
+  private hearX = NaN;
+  private hearZ = NaN;
+
   updateLogic(dt: number) {
+    if (Number.isFinite(this.hearX) && dt > 0) {
+      const v = Math.hypot(this.pos.x - this.hearX, this.pos.z - this.hearZ) / dt;
+      this.moveSpeed += (Math.min(12, v) - this.moveSpeed) * 0.5;
+    }
+    this.hearX = this.pos.x; this.hearZ = this.pos.z;
     if (this.dead || this.stunTimer > 0) return;
     this.stateTime += dt; this.lastSeenT += dt;
     this.grenadeCD = Math.max(0, this.grenadeCD - dt);
 
+    this.alertT = Math.max(0, this.alertT - dt);
+    const stick = !!this.orders?.stick;
     this.losTimer -= dt;
-    if (this.losTimer <= 0) {
+    if (stick) {
+      // committed to the objective: eyes on the job, not the fight
+      this.target = null; this.hasLOS = false; this.hadLOS = false;
+      if (this.state !== 'PATROL') this.setState('PATROL');
+    } else if (this.losTimer <= 0) {
       this.losTimer = 0.08 + Math.random() * 0.07;
-      this.target = this.acquireTarget();
-      this.hasLOS = this.target ? this.checkLOS(this.target) : false;
+      if (this.mgr.opts.objective) {
+        const r = this.acquireVisible();
+        this.target = r.target; this.hasLOS = r.los;
+      } else {
+        this.target = this.acquireTarget();
+        this.hasLOS = this.target ? this.checkLOS(this.target) : false;
+      }
+      // Vision cone: an unaware bot cannot see behind itself. Contact, damage or
+      // point-blank range always counts — you can sneak up, not stand in front.
+      if (!this.mgr.opts.objective && this.hasLOS && this.target && this.mgr.opts.visionCone && !this.hadLOS && this.lastSeenT > 1.5) {
+        const d = Math.hypot(this.target.feet.x - this.pos.x, this.target.feet.z - this.pos.z);
+        if (d > 4 && !this.renderedWithin(this.target.feet, 1.3)) this.hasLOS = false;
+      }
       if (this.hasLOS && this.target) {
         // fresh acquisition → human reaction delay before the first round
-        if (!this.hadLOS) this.reactionT = 0.28 + Math.random() * 0.22;
+        if (!this.hadLOS) {
+          this.reactionT = 0.28 + Math.random() * 0.22 + (this.gun.react ?? 0) + this.mgr.opts.reactionAdd;
+          // Holding a pre-aimed angle beats running into it (the peeker's disadvantage in round play).
+          if (this.holdingAngle()) this.reactionT *= 0.5;
+        }
         this.lastKnown = this.target.feet.clone();
         this.lastSeenT = 0;
         if (this.state === 'PATROL') this.setState('ENGAGE');
@@ -628,6 +788,7 @@ export class TDMBot {
     switch (this.state) {
       case 'PATROL': {
         this.crouched = false;
+        if (this.orders) { this.followOrders(dt); break; }
         // bounty spotted while patrolling → drop everything and PUSH the fire target
         if (target && this.isFireTarget(target)) { this.startPush(target, true); break; }
         if (!this.patrolTarget) {
@@ -675,11 +836,14 @@ export class TDMBot {
           if (this.burstLeft > 0 && this.shotTimer <= 0 && canFire(target)) {
             this.fireShot(target);
             this.burstLeft--;
-            this.shotTimer = 0.12 + Math.random() * 0.06;
+            this.shotTimer = this.gun.gap + Math.random() * this.gun.gap * 0.5;
             if (this.burstLeft <= 0) this.pauseTimer = 0.35 + Math.random() * 0.55;
           } else if (this.burstLeft <= 0) {
             this.pauseTimer -= dt;
-            if (this.pauseTimer <= 0) { this.burstLeft = 2 + Math.floor(Math.random() * 4); this.burstIdx = 0; }
+            if (this.pauseTimer <= 0) {
+              const [b0, b1] = this.gun.burst;
+              this.burstLeft = b0 + Math.floor(Math.random() * (b1 - b0 + 1)); this.burstIdx = 0;
+            }
           }
           // strafe perpendicular to the target while shooting
           this.strafeT -= dt;
@@ -691,7 +855,13 @@ export class TDMBot {
           else if (dist < 5) this.ctx.moveCollide(this.pos, (dx / d) * 2.0 * dt, (dz / d) * 2.0 * dt, 0.36);
           this.tryGrenade(target, dist);
           // committed push: pushers close the fight instead of poking forever
-          if (this.pusher && dist > 6 && dist < 28 && Math.random() < dt * 0.9) this.startPush(target);
+          if (this.pusher && dist > 6 && dist < 28 && Math.random() < dt * (this.mgr.opts.objective ? 0.25 : 0.9)) this.startPush(target);
+        } else if (this.mgr.opts.objective && this.orders) {
+          // Objective play: a short hunt of the last sighting, then back to the plan.
+          this.tryGrenade(target, dist);
+          if (this.flanker && Math.random() < 0.2 && this.lastSeenT < 3) this.startFlank(target);
+          else if (this.lastSeenT > 1.6) this.setState('PATROL');
+          else if (this.lastKnown) this.faceTarget(this.lastKnown);
         } else {
           // lost sight: flankers wing around, pushers charge the last position, holders hunt
           this.tryGrenade(target, dist);
@@ -713,7 +883,7 @@ export class TDMBot {
         // shoot on the move whenever sight opens up (still needs to face them)
         if (this.hasLOS && target && canFire(target)) {
           this.shotTimer -= dt;
-          if (this.shotTimer <= 0) { this.burstIdx = 1; this.fireShot(target); this.shotTimer = 0.22 + Math.random() * 0.08; }
+          if (this.shotTimer <= 0) { this.burstIdx = 1; this.fireShot(target); this.shotTimer = Math.max(0.22, this.gun.gap * 1.6) + Math.random() * 0.08; }
         }
         if (this.goTo(this.pushTarget, this.huntPush ? 6.6 : 4.6, dt) || this.stateTime > (this.huntPush ? 9 : 7)) {
           this.pushTarget = null; this.huntPush = false; this.setState('ENGAGE');
@@ -739,7 +909,7 @@ export class TDMBot {
           if (this.hasLOS && target && this.stateTime > 1.2 && canFire(target)) {
             this.crouched = false;
             this.shotTimer -= dt;
-            if (this.shotTimer <= 0) { this.burstIdx = 0; this.fireShot(target); this.shotTimer = 0.15; }
+            if (this.shotTimer <= 0) { this.burstIdx = 0; this.fireShot(target); this.shotTimer = Math.max(0.15, this.gun.gap * 1.3); }
           }
           if (this.stateTime > 4.5 + Math.random() * 3) {
             this.coverPos = null;
@@ -750,6 +920,45 @@ export class TDMBot {
       }
       case 'DEAD': break;
     }
+  }
+
+  /** Parked on its ordered spot (director objective play). */
+  holdingAngle(): boolean {
+    const o = this.orders;
+    return !!o && !o.busy && Math.hypot(o.goal.x - this.pos.x, o.goal.z - this.pos.z) < 0.9;
+  }
+
+  /** Rendered body facing within `half` radians of the point. */
+  private renderedWithin(t: THREE.Vector3, half: number): boolean {
+    const want = Math.atan2(-(t.x - this.pos.x), -(t.z - this.pos.z));
+    let d = want - this.model.group.rotation.y;
+    while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d) < half;
+  }
+
+  /** Director-driven movement: travel to the goal, then hold / work the angle. */
+  private followOrders(dt: number) {
+    const o = this.orders!;
+    const d = Math.hypot(o.goal.x - this.pos.x, o.goal.z - this.pos.z);
+    if (d > 0.55) {
+      this.goTo(o.goal, o.speed, dt);
+      return;
+    }
+    this.path = null;
+    if (o.busy) {
+      this.crouched = true;
+      this.faceTarget(o.look ?? o.goal);
+      return;
+    }
+    // Holding an angle: turn to any fresh noise, otherwise watch the assigned lane.
+    const look = this.alertT > 0 && this.alertLook ? this.alertLook : o.look;
+    if (look) this.faceTarget(look);
+  }
+
+  /** Where this bot currently has eyes on an enemy (null = no contact). Used by directors for intel. */
+  sighting(): { pos: THREE.Vector3; isPlayer: boolean; bot: TDMBot | null } | null {
+    if (this.dead || !this.hasLOS || !this.target) return null;
+    return { pos: this.target.feet, isPlayer: this.target.isPlayer, bot: this.target.bot };
   }
 
   private startPush(target: TargetRef, hunt = false) {
@@ -823,7 +1032,8 @@ export class TDMBot {
         this.model.group.position.y = this.pos.y + 0.1 * Math.sin(t * Math.PI);
       }
       // corpse fades from the field a moment before the respawn
-      if (this.deadAge > TDM_RESPAWN_SECONDS - 1.5) this.model.group.visible = false;
+      // (objective rounds keep the bodies on the floor until the round resets)
+      if (this.mgr.opts.respawn && this.deadAge > TDM_RESPAWN_SECONDS - 1.5) this.model.group.visible = false;
       return;
     }
     if (this.stunTimer > 0) this.stunTimer -= dt;
@@ -871,11 +1081,20 @@ export class TDMManager {
   timeLeft = TDM_MATCH_SECONDS;
   rosterVersion = 0;
   nav: NavGrid;
+  readonly opts: TDMOptions;
+  /** Freeze time: bodies render, brains and legs do not. */
+  frozen = false;
+  /** Objective-mode hooks (Bomb Defusal director). */
+  onKill?: (killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string) => void;
+  onDamage?: (attacker: TDMBot | 'player', victim: TDMBot, amount: number) => void;
+  /** Spawn pads per team; defaults to the TDM yards. Directors re-point these at halftime. */
+  pads: Record<TDMTeam, [number, number][]> = { alpha: ALPHA_SPAWNS, bravo: BRAVO_SPAWNS };
   private ctx: TDMContext;
   private tick = 0;
 
-  constructor(ctx: TDMContext) {
+  constructor(ctx: TDMContext, opts: Partial<TDMOptions> = {}) {
     this.ctx = ctx;
+    this.opts = { ...TDM_DEFAULT_OPTIONS, ...opts };
     this.nav = new NavGrid(ctx.solids, ctx.half, ctx.groundHeight);
     for (let i = 0; i < ALPHA_NAMES.length; i++) {
       const s = this.getSpawn('alpha');
@@ -890,7 +1109,7 @@ export class TDMManager {
   /** Team spawn: one of five authored pads with a ±2–4 m scatter, preferring the
    * pad farthest from any living enemy so respawns never land inside a fight. */
   getSpawn(team: TDMTeam): THREE.Vector3 {
-    const pads = team === 'alpha' ? ALPHA_SPAWNS : BRAVO_SPAWNS;
+    const pads = this.pads[team];
     let best: THREE.Vector3 | null = null, bestD = -1;
     for (const [px, pz] of pads) {
       const jitterA = Math.random() * Math.PI * 2, jitterR = 2 + Math.random() * 2;
@@ -921,6 +1140,7 @@ export class TDMManager {
     if (killer !== 'player') { killer.kills++; if (headshot) killer.headshots++; killer.registerKill(); }
     if (victim !== 'player') victim.deaths++;
     this.rosterVersion++;
+    this.onKill?.(killer, victim, headshot, weapon);
     const killerName = killer === 'player' ? 'YOU' : killer.name;
     const victimName = victim === 'player' ? 'YOU' : victim.name;
     const vx = victim === 'player' ? this.ctx.playerFeet().x : victim.pos.x;
@@ -953,14 +1173,14 @@ export class TDMManager {
   }
 
   update(dt: number) {
-    this.timeLeft = Math.max(0, this.timeLeft - dt);
+    if (this.opts.respawn) this.timeLeft = Math.max(0, this.timeLeft - dt);
     this.tick++;
     for (let i = 0; i < this.bots.length; i++) {
       const b = this.bots[i];
       b.updateVisualFrame(dt);
-      if ((i + this.tick) % 2 === 0) b.updateLogic(dt * 2);
-      b.updateFire(dt);
-      if (b.dead && b.respawnT > 0) {
+      if (!this.frozen && (i + this.tick) % 2 === 0) b.updateLogic(dt * 2);
+      if (this.opts.respawn) b.updateFire(dt);
+      if (this.opts.respawn && b.dead && b.respawnT > 0) {
         b.respawnT -= dt;
         if (b.respawnT <= 0 && this.timeLeft > 3) {
           b.respawn(this.getSpawn(b.team));

@@ -14,7 +14,7 @@ import { attachmentById, weaponById, type WeaponId } from './economy/catalog';
 import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
 import { REWARDS, difficultyMultiplier, streakAward } from './economy/rewards';
 import { skinById } from './economy/skins';
-import { sanitizeBuild, type Loadout, type WeaponBuild } from './economy/loadout';
+import { emptyBuild, sanitizeBuild, type Loadout, type WeaponBuild } from './economy/loadout';
 import { clampScopePower, magnificationFov } from './economy/optics';
 import { recoilImpulse, recoilRecovery } from './recoil';
 import { Effects } from './effects';
@@ -31,6 +31,12 @@ import {
   TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL,
   type TDMArmor, type TDMBot, type TDMContext, type TDMTeam,
 } from './tdm';
+import { DefuseDirector, type CombatantStat, type DefuseEvent, type DefuseSummary } from './defuse/director';
+import {
+  DEFUSE, DEFUSE_BODY_REDUCTION, DEFUSE_HEAD_REDUCTION, formatById, lossBonus,
+  type BuyCheck, type DefuseSide, type DefuseTeam, type Kit, type RoundPhase, type RoundRecord, type SiteId,
+} from './defuse/rules';
+import { SITES, buildSiteArchitecture, siteAt } from './defuse/sites';
 
 export interface GameSettings {
   // Gameplay
@@ -132,6 +138,11 @@ export interface HudState {
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
   tdm?: TdmHud;
+  defuse?: DefuseHud;
+  /** Friendly markers for the radar (objective modes). */
+  alliesMap?: { nx: number; nz: number; yaw: number; dead: boolean; bomb: boolean; name: string }[];
+  /** Objective markers for the radar (bomb sites, the bomb). */
+  objectivesMap?: { nx: number; nz: number; label: string; kind: 'site' | 'bomb' | 'bomb-planted' }[];
 }
 
 /** Warehouse TDM scoreboard payload — present only when the arena map is running. */
@@ -148,6 +159,45 @@ export interface TdmHud {
   onFire: boolean;
   onFireLeft: number;
 }
+/** Bomb Defusal launch options (Warehouse only). */
+export interface DefuseConfig {
+  format: 'short' | 'standard';
+  side: DefuseSide;
+  /** The player's armory builds — bought guns spawn with their attachments/finishes. */
+  builds?: Partial<Record<WeaponId, WeaponBuild>>;
+}
+
+export interface DefuseHud {
+  round: number;
+  maxRounds: number;
+  winTarget: number;
+  format: string;
+  phase: RoundPhase;
+  timer: number;
+  alphaScore: number;
+  bravoScore: number;
+  side: DefuseSide;
+  matchPoint: DefuseTeam | null;
+  suddenDeath: boolean;
+  bomb: { state: 'carried' | 'dropped' | 'planted' | 'defused' | 'exploded'; site: SiteId | null; timeLeft: number; urgency: number; carrierYou: boolean };
+  money: number;
+  kit: Kit;
+  buyOpen: boolean;
+  buyTime: number;
+  nextLoss: number;
+  action: { kind: 'plant' | 'defuse'; progress: number } | null;
+  hint: string | null;
+  inSite: SiteId | null;
+  roster: CombatantStat[];
+  history: RoundRecord[];
+  spectating: string | null;
+  bombScreen: { x: number; y: number; behind: boolean; dist: number; planted: boolean } | null;
+  alive: { alpha: number; bravo: number };
+}
+
+/** Director events the UI renders (beeps/feed are handled engine-side). */
+export type DefuseUiEvent = Exclude<DefuseEvent, { type: 'beep' } | { type: 'feed' }>;
+
 export interface TdmRosterEntry {
   name: string;
   team: TDMTeam;
@@ -170,13 +220,17 @@ export type GameEvent =
   | { type: 'streak'; label: string }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
+  | { type: 'defuse'; ev: DefuseUiEvent }
+  | { type: 'buy-menu' }
   | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string }
-  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] } };
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] }; defuse?: DefuseSummary };
 
 export interface CashLogEntry { reason: string; amount: number; t: number }
 
 interface WeaponDef {
   name: string;
+  /** Catalog id (loadout-built weapons only). */
+  id?: WeaponId;
   model: WeaponModel;
   auto: boolean;
   rpm: number;
@@ -298,6 +352,20 @@ export class Engine {
   private tdmPlayerDead = false;
   private tdmRespawnT = 0;
   private tdmPlayerKills = 0;
+  // ---- Bomb Defusal (arena map, round-based) ----
+  private isDefuse = false;
+  private defuseCfg: DefuseConfig | null = null;
+  private director: DefuseDirector | null = null;
+  private defuseClock = 0;
+  private defuseArmor: 0 | 1 | 2 = 0;
+  private defuseWeapons = new Map<WeaponId, WeaponDef>();
+  private spectateIdx = 0;
+  private specCam = new THREE.Vector3();
+  private specLook = new THREE.Vector3();
+  private specInit = false;
+  private spotted = new Map<TDMBot, number>();
+  private spotT = 0;
+  private keypadT = 0;
   private tdmPlayerDeaths = 0;
   // ---- momentum "ON FIRE" ----
   private killTimes: number[] = [];
@@ -444,6 +512,8 @@ export class Engine {
   private pings: { dir: number; age: number }[] = [];
   private hittables: THREE.Object3D[] = [];
   private raycaster = new THREE.Raycaster();
+  private spotRay = new THREE.Raycaster();
+  private deadT = 0;
   private rmb = false;
   private boltCycle = 0;
   private adaptiveEnabled = true;
@@ -462,17 +532,22 @@ export class Engine {
    * could even paint. create() stages it across frames and pre-compiles shaders off the
    * blocking path instead.
    */
-  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1): Promise<Engine> {
+  static async create(canvas: HTMLCanvasElement, difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, defuse: DefuseConfig | null = null): Promise<Engine> {
     const engine = new Engine(canvas);
-    await engine.init(difficulty, onEvent, mapId, loadout, tdmArmor);
+    await engine.init(difficulty, onEvent, mapId, loadout, tdmArmor, defuse);
     return engine;
   }
 
-  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1) {
+  private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, defuse: DefuseConfig | null = null) {
     this.onEvent = onEvent;
     this.isTDM = mapId === 'arena';
+    this.isDefuse = this.isTDM && !!defuse;
+    this.defuseCfg = this.isDefuse ? defuse : null;
     this.tdmArmor = tdmArmor;
-    if (this.isTDM) {
+    if (this.isDefuse) {
+      this.hp = DEFUSE.hp;
+      this.frags = 0; this.flashes = 0;
+    } else if (this.isTDM) {
       this.hp = TDM_BASE_HP + tdmArmor * TDM_HP_PER_ARMOR;
       this.frags = 3; this.flashes = 1;
     }
@@ -524,6 +599,9 @@ export class Engine {
     // Heaviest single stage: procedural texture set plus all world geometry.
     await nextFrame();
     this.world = buildWorld(this.scene, mapId);
+    // Bomb Defusal dresses the warehouse with two walled bomb sites before any
+    // derived data (solid grid, nav, radar image) is computed from the world.
+    if (this.isDefuse) buildSiteArchitecture(this.world);
     this.buildSolidGrid();
     const maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     this.world.group.traverse(o => {
@@ -805,7 +883,7 @@ void main(){
         playerPos: () => this.eyePos(),
         playerFeet: () => this.pos.clone(),
         playerAlive: () => !this.dead,
-        damagePlayer: (a, f, killer) => this.damagePlayerTDM(a, f, killer),
+        damagePlayer: (a, f, killer, isHead) => this.damagePlayerTDM(a, f, killer, isHead),
         moveCollide: ctx.moveCollide,
         onCallout: (k, p, team) => {
           if (k === 'onfire' && team === 'alpha') {
@@ -827,14 +905,23 @@ void main(){
           audio.enemyFireSpatial(p.x, p.y, p.z);
           if (team === 'bravo') this.addPing(p);
         },
-        onFeed: (killer, weapon, victim, headshot, killerTeam, zone) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam, zone }),
+        onFeed: (killer, weapon, victim, headshot, killerTeam, zone) => { if (!this.isDefuse) this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam, zone }); },
         onScore: () => { /* scoreboard reads live values from hud() */ },
         playerOnFire: () => this.onFire,
       };
-      this.tdm = new TDMManager(tdmCtx);
+      if (this.isDefuse) {
+        const diff = ({ Easy: [0.72, 0.28], Normal: [0.9, 0.1], Hard: [1.05, 0] } as Record<string, [number, number]>)[difficulty] ?? [0.9, 0.1];
+        this.tdm = new TDMManager(tdmCtx, {
+          respawn: false, visionCone: true, objective: true,
+          baseHp: DEFUSE.hp, hpPerArmor: 0,
+          headReduction: [0, 0, DEFUSE_HEAD_REDUCTION], bodyReduction: [0, DEFUSE_BODY_REDUCTION, DEFUSE_BODY_REDUCTION],
+          accuracyMul: diff[0], reactionAdd: diff[1],
+        });
+      } else this.tdm = new TDMManager(tdmCtx);
       this.ai = new AIManager(ctx, []); // empty roster: keeps every mission-path callsite alive
       this.pos.copy(this.tdm.getSpawn('alpha'));
       this.yaw = Math.atan2(this.pos.x - 0, this.pos.z - 0);
+      if (this.isDefuse && this.defuseCfg) this.startDefuse(this.defuseCfg);
       this.buildSolidGrid();
       this.renderer.shadowMap.needsUpdate = true;
       this.rebuildHittables();
@@ -897,6 +984,21 @@ void main(){
     this.keys.add(e.code);
     if (e.code === 'Space') e.preventDefault();
     if (this.dead) return;
+    // Bomb Defusal: B opens the buy menu inside the buy window; freeze time
+    // (and holding X on the bomb) locks jumping and utility.
+    if (this.isDefuse && this.director) {
+      if (e.code === 'KeyB' && this.director.buyOpen) {
+        this.keys.clear(); this.triggerHeld = false; this.rmb = false; this.cooking = false;
+        this.onEvent({ type: 'buy-menu' });
+        return;
+      }
+      if (e.code === 'KeyH' && !e.repeat) {
+        const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+        if (this.director.playerDropBomb(fwd)) audio.buyChime(true);
+        return;
+      }
+      if (this.defuseLocked() && (e.code === 'Space' || e.code === 'KeyG' || e.code === 'KeyF')) return;
+    }
 
     if (e.code === 'KeyR') this.startReload();
     if (e.code === 'Digit1') this.switchWeapon(0);
@@ -905,7 +1007,8 @@ void main(){
     if (e.code === 'Digit4') this.switchWeapon(3);
     if (e.code === 'Digit5') this.switchWeapon(4);
     if (e.code === 'KeyQ' && !e.repeat) this.qDownT = performance.now();
-    if (e.code === 'KeyB') this.fireMasterkey();
+    if (e.code === 'KeyB' && !this.isDefuse) this.fireMasterkey();
+    if (e.code === 'KeyB' && this.isDefuse && this.def().masterkey) this.fireMasterkey();
     if (e.code === 'KeyV' && this.variableScope() && this.ads > .65) { this.beginScopeAdjustment(); return; }
     if (e.code === 'KeyV' && this.def().lpvo) this.def().lpvoHigh = !this.def().lpvoHigh;
     if (this.ads > .65 && (e.code === 'BracketLeft' || e.code === 'BracketRight')) this.setScopePower((this.def().scopePower ?? 6) + (e.code === 'BracketRight' ? .2 : -.2));
@@ -974,6 +1077,12 @@ void main(){
   };
 
   private onMouseDown = (e: MouseEvent) => {
+    // Dead in a round: clicks cycle the spectated teammate.
+    if (this.isDefuse && this.dead && !this.paused && document.pointerLockElement === this.canvas) {
+      this.spectateIdx += e.button === 2 ? -1 : 1;
+      this.specInit = false;
+      return;
+    }
     if (document.pointerLockElement !== this.canvas || this.paused || this.dead || this.scopeAdjusting) return;
     if (e.button === 0) {
       this.triggerHeld = true;
@@ -1281,6 +1390,26 @@ void main(){
     ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.lineWidth = 4;
     ctx.strokeRect(0, 0, S, S);
+    if (this.isDefuse) {
+      // Bomb sites: painted zones + big letters (the radar's primary landmarks)
+      for (const site of Object.values(SITES)) {
+        const z = site.zone;
+        const x = px(z.minX), y = pz(z.minZ), w = (z.maxX - z.minX) * scale, h = (z.maxZ - z.minZ) * scale;
+        ctx.fillStyle = 'rgba(214,72,40,0.22)';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(255,140,90,0.95)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([7, 4]);
+        ctx.strokeRect(x, y, w, h);
+        ctx.setLineDash([]);
+        ctx.font = 'bold 38px sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+        ctx.strokeText(site.id, px(site.center[0]), pz(site.center[1]));
+        ctx.fillStyle = 'rgba(255,232,205,0.96)';
+        ctx.fillText(site.id, px(site.center[0]), pz(site.center[1]));
+      }
+    }
     return c.toDataURL();
   }
 
@@ -1427,6 +1556,7 @@ void main(){
     const ms = Math.round((this.def().swapTime ?? 0.13) * 1000);
     setTimeout(() => {
       if (this.disposed || this.ended) return;
+      if (!this.weapons[from] || !this.weapons[i]) return; // arsenal changed mid-swap (round buy)
       this.weapons[from].model.group.visible = false;
       this.lastCur = from;
       this.cur = i;
@@ -1518,6 +1648,7 @@ void main(){
 
   // ==================== AIMED BALLISTICS / RECOIL ====================
   private tryFire() {
+    if (this.isDefuse && this.defuseLocked()) return;
     if (this.paused || this.dead || this.ended || !this.started || this.scopeAdjusting) return;
     if (this.fireCD > 0 || this.reloadT >= 0 || this.switchT >= 0 || this.cooking) return;
     if (this.sprinting || this.sprintToFireDelay > 0) return; // Cannot fire during sprint
@@ -1610,8 +1741,14 @@ void main(){
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
-        // TTK floor: no weapon may two-tap the 150 HP base pool (3+ headshots always)
-        dmg = Math.min(dmg, 74);
+        if (this.isDefuse) {
+          // Round-based lethality (100 HP, armor applied bot-side): the bolt-action
+          // AWM drops anyone it hits above the belt — the CS AWP contract.
+          if (d.boltAction && part !== 'limb') dmg = 400;
+        } else {
+          // TTK floor: no weapon may two-tap the 150 HP base pool (3+ headshots always)
+          dmg = Math.min(dmg, 74);
+        }
         if (!shotHit) { this.hits++; shotHit = true; }
         this.effects.blood(h.point);
         audio.fleshImpact(0);
@@ -1768,6 +1905,7 @@ void main(){
     applySkin(model.group, skinById(build.skin ?? 'factory'));
     return {
       name: entry.name.toUpperCase(),
+      id,
       model,
       auto: stats.auto, rpm: stats.rpm, damage: stats.damage,
       headMul: stats.headMul, limbMul: stats.limbMul,
@@ -2035,7 +2173,7 @@ void main(){
         const dmg = distP < 3.2 ? 95 : THREE.MathUtils.lerp(95, 20, (distP - 3.2) / 3.3);
         if (this.isTDM) {
           // grenades from your own team never hurt you in the arena
-          if (!g.owner || g.owner.team === 'bravo') this.damagePlayerTDM(dmg, g.pos, g.owner ?? null);
+          if (!g.owner || g.owner.team === 'bravo') this.damagePlayerTDM(dmg, g.pos, g.owner ?? null, undefined);
         } else this.damagePlayer(dmg, g.pos);
       }
       // TDM: splash resolves against every bot on both teams, with armor applied
@@ -2047,7 +2185,7 @@ void main(){
           const d = bot.pos.distanceTo(g.pos);
           if (d < 7) {
             // scaled for the bigger TDM health pools — a close frag finishes fights
-            const dmg = (d < 3.5 ? 170 : THREE.MathUtils.lerp(140, 35, (d - 3.5) / 3.5));
+            const dmg = (d < 3.5 ? 170 : THREE.MathUtils.lerp(140, 35, (d - 3.5) / 3.5)) * (this.isDefuse ? 0.6 : 1);
             const killed = bot.takeDamage(dmg, false, g.owner ?? 'player');
             if (killed) {
               if (g.owner) this.tdm.handleKill(g.owner, bot, false, 'FRAG');
@@ -2223,6 +2361,7 @@ void main(){
     const wasFire = bot.onFire;
     audio.killConfirm();
     this.tdm?.handleKill('player', bot, headshot, weapon);
+    if (this.isDefuse) return; // no momentum/bounty system in round play
     this.registerFireKill();
     if (wasFire) this.awardShutdown();
   }
@@ -2265,9 +2404,10 @@ void main(){
     return null;
   }
 
-  private damagePlayerTDM(amount: number, from: THREE.Vector3, killer: TDMBot | null) {
+  private damagePlayerTDM(amount: number, from: THREE.Vector3, killer: TDMBot | null, headHit?: boolean) {
     if (this.dead || this.ended) return;
-    const isHead = amount >= 40; // bot headshot rounds arrive at 44
+    if (this.isDefuse) { this.damagePlayerDefuse(amount, from, killer, !!headHit, killer && headHit !== undefined ? killer.gun.label : 'FRAG'); return; }
+    const isHead = headHit ?? amount >= 40; // bot headshot rounds arrive at 44
     const reduced = amount * (1 - (isHead ? TDM_HEAD_REDUCTION[this.tdmArmor] : TDM_BODY_REDUCTION[this.tdmArmor]));
     this.hp -= reduced;
     this.lastDamageT = 0;
@@ -2306,6 +2446,368 @@ void main(){
     this.reloadT = -1; this.reloadStages = []; this.currentReloadStage = 'idle';
   }
 
+
+  // ==================== BOMB DEFUSAL ====================
+  /** Freeze time or hands-on-the-bomb: no movement, shooting or utility. */
+  private defuseLocked(): boolean {
+    const d = this.director;
+    return !!d && (d.frozen || d.playerBusy);
+  }
+
+  private startDefuse(cfg: DefuseConfig) {
+    const tdm = this.tdm!;
+    this.director = new DefuseDirector(tdm, {
+      scene: this.scene,
+      groundHeight: (x, z) => (this.world.navigationHeight ?? this.world.groundHeight)(x, z),
+      playerFeet: () => this.pos.clone(),
+      playerAlive: () => !this.dead,
+      placePlayer: (spawn, faceTo, kit, rearm) => this.placeDefusePlayer(spawn, faceTo, kit, rearm),
+      explode: pos => this.bombExplosion(pos),
+      emit: ev => this.onDefuseEvent(ev),
+      matchOver: summary => this.endDefuseMatch(summary),
+    }, formatById(cfg.format), cfg.side);
+  }
+
+  /** Round start: teleport to the pad, full HP, the kit's guns + utility. */
+  private placeDefusePlayer(spawn: THREE.Vector3, faceTo: THREE.Vector3, kit: Kit, rearm: boolean) {
+    this.pos.copy(spawn);
+    this.lastPos.copy(spawn);
+    this.vel.set(0, 0, 0); this.vx = 0; this.vz = 0;
+    this.yaw = Math.atan2(spawn.x - faceTo.x, spawn.z - faceTo.z);
+    this.pitch = 0;
+    this.dead = false; this.tdmPlayerDead = false; this.deadT = 0;
+    this.hp = DEFUSE.hp;
+    this.lastDamageT = 99;
+    this.defuseArmor = kit.armor;
+    this.frags = kit.frags; this.flashes = kit.flashes;
+    this.crouched = false; this.sliding = false; this.sprinting = false; this.cooking = false;
+    this.triggerHeld = false; this.rmb = false;
+    this.specInit = false;
+    this.spotted.clear();
+    for (const g of this.grenades) { this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
+    this.grenades.length = 0;
+    if (rearm) this.armDefuseKit(kit, true, true);
+  }
+
+  /** Cached per-weapon defs built from the player's armory builds. */
+  private defuseWeapon(id: WeaponId): WeaponDef {
+    let w = this.defuseWeapons.get(id);
+    if (!w) {
+      w = this.buildLoadoutWeapon(this.defuseCfg?.builds?.[id] ?? emptyBuild(id));
+      w.id = id;
+      this.defuseWeapons.set(id, w);
+    }
+    return w;
+  }
+
+  /** Swap the viewmodel arsenal to match a kit (primary optional, sidearm always). */
+  private armDefuseKit(kit: Kit, refill: boolean, drawPrimary: boolean) {
+    const ids: WeaponId[] = kit.primary ? [kit.primary, kit.secondary] : [kit.secondary];
+    const heldId = this.weapons[this.cur]?.id;
+    const oldMags = new Map(this.weapons.map((w, i) => [w, this.mags[i]] as const));
+    const next = ids.map(id => this.defuseWeapon(id));
+    for (const w of this.weapons) if (!next.includes(w)) this.vmScene.remove(w.model.group);
+    for (const w of next) {
+      if (w.model.group.parent !== this.vmScene) this.vmScene.add(w.model.group);
+      w.model.group.visible = false;
+    }
+    this.weapons = next;
+    this.mags = next.map(w => refill ? w.magSize : (oldMags.get(w) ?? w.magSize));
+    this.reserves = next.map(() => Infinity);
+    const keep = next.findIndex(w => w.id === heldId);
+    this.cur = drawPrimary || keep < 0 ? 0 : keep;
+    this.lastCur = next.length > 1 ? (this.cur === 0 ? 1 : 0) : 0;
+    next[this.cur].model.group.visible = true;
+    this.switchT = -1; this.reloadT = -1; this.reloadStages = []; this.currentReloadStage = 'idle';
+    this.shotIdx = 0; this.mkAmmo = 3; this.mkReloadT = -1;
+  }
+
+  private damagePlayerDefuse(amount: number, from: THREE.Vector3, killer: TDMBot | null, isHead: boolean, weapon: string) {
+    const red = isHead ? (this.defuseArmor >= 2 ? DEFUSE_HEAD_REDUCTION : 0) : (this.defuseArmor >= 1 ? DEFUSE_BODY_REDUCTION : 0);
+    const reduced = amount * (1 - red);
+    const dealt = Math.min(reduced, this.hp);
+    this.hp -= reduced;
+    this.lastDamageT = 0;
+    this.shake = Math.max(this.shake, Math.min(0.7, reduced / 35));
+    audio.playerHurt();
+    this.onEvent({ type: 'damage', dir: this.dirToScreenDeg(from), amount: reduced });
+    this.director?.playerDamaged(killer, dealt);
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.killPlayerDefuse();
+      if (killer && this.tdm) this.tdm.handleKill(killer, 'player', isHead, weapon);
+      else this.director?.playerDiedTo(weapon);
+    }
+  }
+
+  private killPlayerDefuse() {
+    this.dead = true; this.tdmPlayerDead = true; this.tdmPlayerDeaths++;
+    this.deadT = 0;
+    this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
+    this.sprinting = false; this.sliding = false; this.crouched = false;
+    this.spectateIdx = 0; this.specInit = false;
+  }
+
+  /** The C4 goes off: a stacked fireball, a huge shake, and lethal falloff damage. */
+  private bombExplosion(pos: THREE.Vector3) {
+    this.effects.explosion(pos);
+    for (let i = 0; i < 5; i++) {
+      this.effects.explosion(pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 5, Math.random() * 2.5, (Math.random() - 0.5) * 5)));
+    }
+    const distP = this.pos.distanceTo(pos);
+    audio.explosionSpatial(pos.x, pos.y + 0.5, pos.z, Math.max(1, distP * 0.4));
+    audio.explosionSpatial(pos.x, pos.y + 0.5, pos.z, Math.max(2, distP * 0.6));
+    this.shake = Math.max(this.shake, Math.min(1.8, 40 / Math.max(3, distP)));
+    if (distP < 45) this.onEvent({ type: 'flash', power: Math.max(0.15, 0.95 - distP / 45) });
+    if (!this.dead && distP < DEFUSE.blastRadius) {
+      const dmg = DEFUSE.blastDamage * Math.pow(1 - distP / DEFUSE.blastRadius, 1.6);
+      const reduced = dmg * (this.defuseArmor >= 1 ? 1 - DEFUSE_BODY_REDUCTION : 1);
+      this.hp -= reduced;
+      audio.playerHurt();
+      this.onEvent({ type: 'damage', dir: this.dirToScreenDeg(pos), amount: reduced });
+      if (this.hp <= 0) { this.hp = 0; this.killPlayerDefuse(); this.director?.playerDiedTo('C4'); }
+    }
+  }
+
+  private onDefuseEvent(ev: DefuseEvent) {
+    switch (ev.type) {
+      case 'beep':
+        audio.c4Beep(ev.pos.x, ev.pos.y + 0.2, ev.pos.z, ev.urgency);
+        return;
+      case 'feed':
+        this.onEvent({ type: 'tdmfeed', killer: ev.killer, weapon: ev.weapon, victim: ev.victim, headshot: ev.headshot, killerTeam: ev.killerTeam, zone: ev.zone || undefined });
+        return;
+      case 'round-start':
+        this.rebuildHittables();
+        if (ev.suddenDeath) voice.objective('Sudden death. Next round wins.');
+        else if (ev.matchPoint) voice.objective('Match point.');
+        else if (ev.pistol) voice.objective('Pistol round.');
+        else if (ev.lastOfHalf) voice.objective('Last round of the half.');
+        break;
+      case 'freeze-end':
+        audio.roundGo();
+        voice.objective(ev.side === 'attack' ? 'Go, go, go!' : 'Hold the sites.');
+        break;
+      case 'bomb':
+        if (ev.what === 'planted') { audio.c4Planted(); voice.objective('The bomb has been planted.'); }
+        else if (ev.what === 'defused') { audio.c4Defused(); voice.objective('The bomb has been defused.'); }
+        else if (ev.what === 'dropped' && this.director?.playerSide === 'attack') this.onEvent({ type: 'callout', text: 'The bomb has been dropped — pick it up!' });
+        else if (ev.what === 'picked' && ev.playerCarrier) this.onEvent({ type: 'callout', text: 'You have the bomb. Plant it on A or B.' });
+        else if (ev.what === 'defuse-start' && ev.byTeam === 'bravo') this.onEvent({ type: 'callout', text: 'They are defusing the bomb!' });
+        break;
+      case 'round-end':
+        audio.roundStinger(ev.winner === 'alpha');
+        if (ev.winner === 'alpha') this.score += 250;
+        voice.objective(ev.over ? (ev.winner === 'alpha' ? 'Match won.' : 'Match lost.') : ev.winner === 'alpha' ? 'Round won.' : 'Round lost.');
+        break;
+      case 'clutch':
+        audio.clutchSting();
+        break;
+      default:
+        break;
+    }
+    this.onEvent({ type: 'defuse', ev });
+  }
+
+  private updateDefuse(dt: number) {
+    this.defuseClock += dt;
+    const d = this.director!;
+    d.playerHoldingUse = this.keys.has('KeyX') && !this.dead && this.grounded && this.reloadT < 0 && !this.cooking;
+    if (!this.dead) { d.player.kit.frags = this.frags; d.player.kit.flashes = this.flashes; }
+    else this.deadT += dt;
+    d.update(dt);
+    if (d.playerBusy) {
+      this.rmb = false; this.triggerHeld = false;
+      this.keypadT -= dt;
+      if (this.keypadT <= 0) {
+        const defusing = d.bomb.state === 'planted';
+        this.keypadT = defusing ? 0.2 : 0.3;
+        if (defusing) audio.defuseTick(); else audio.c4Key();
+      }
+    } else this.keypadT = 0;
+    this.spotT -= dt;
+    if (this.spotT <= 0) { this.spotT = 0.2; this.updateSpotting(); }
+  }
+
+  /** Radar intel: enemies seen by you or called out by a teammate. */
+  private updateSpotting() {
+    if (!this.tdm) return;
+    const now = performance.now();
+    const eye = this.eyePos();
+    const fwd = this.camDir();
+    const to = new THREE.Vector3();
+    for (const b of this.tdm.bots) {
+      if (b.team === 'alpha') {
+        const s = b.sighting();
+        if (s?.bot) this.spotted.set(s.bot, now);
+        continue;
+      }
+      if (b.dead || this.dead) continue;
+      to.set(b.pos.x, b.pos.y + 1.3, b.pos.z).sub(eye);
+      const dist = to.length();
+      if (dist > 95 || dist < 0.01) continue;
+      to.divideScalar(dist);
+      if (to.dot(fwd) < 0.42) continue;
+      this.spotRay.set(eye, to);
+      this.spotRay.far = dist - 0.5;
+      if (this.spotRay.intersectObjects(this.world.occluders, false).length === 0) this.spotted.set(b, now);
+    }
+  }
+
+  private isSpotted(b: TDMBot): boolean {
+    const t = this.spotted.get(b);
+    return t !== undefined && performance.now() - t < 1600;
+  }
+
+  private spectateTarget(): TDMBot | null {
+    if (!this.tdm) return null;
+    let pool = this.tdm.bots.filter(b => b.team === 'alpha' && !b.dead);
+    if (!pool.length) pool = this.tdm.bots.filter(b => !b.dead); // squad wiped: watch it play out
+    if (!pool.length) return null;
+    return pool[((this.spectateIdx % pool.length) + pool.length) % pool.length];
+  }
+
+  /** Over-the-shoulder follow cam on a living teammate (after a short death cam). */
+  private spectateCamera(dt: number) {
+    if (this.deadT < 1.8) return;
+    const target = this.spectateTarget();
+    if (!target) return;
+    const yaw = target.model.group.rotation.y;
+    const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const head = target.pos.clone(); head.y += 1.55;
+    const want = head.clone().addScaledVector(fwd, -2.6).addScaledVector(right, 0.6); want.y += 0.4;
+    const dir = want.clone().sub(head);
+    const len = dir.length(); dir.divideScalar(len);
+    this.spotRay.set(head, dir); this.spotRay.far = len;
+    const hit = this.spotRay.intersectObjects(this.world.occluders, false)[0];
+    if (hit) want.copy(head).addScaledVector(dir, Math.max(0.35, hit.distance - 0.3));
+    const look = head.clone().addScaledVector(fwd, 9);
+    if (!this.specInit) { this.specCam.copy(want); this.specLook.copy(look); this.specInit = true; }
+    const k = 1 - Math.exp(-dt * 9);
+    this.specCam.lerp(want, k);
+    this.specLook.lerp(look, k);
+    this.camera.position.copy(this.specCam);
+    this.camera.lookAt(this.specLook);
+    this.camera.fov = this.fovSetting;
+    this.camera.updateProjectionMatrix();
+  }
+
+  private endDefuseMatch(summary: DefuseSummary) {
+    if (this.ended) return;
+    this.ended = true;
+    const win = summary.winner === 'alpha';
+    const me = summary.players.find(p => p.you);
+    const roundsWon = summary.history.filter(r => r.winner === 'alpha').length;
+    const t = this.defuseClock; // simulated match time (excludes pauses)
+    const pay = (amount: number, reason: string) => {
+      if (amount <= 0) return;
+      this.cashEarned += amount;
+      this.cashLog.push({ reason, amount, t });
+    };
+    pay((me?.kills ?? 0) * 100, 'eliminations');
+    pay(roundsWon * 150, 'rounds won');
+    pay((me?.mvps ?? 0) * 100, 'round MVPs');
+    if (win) { pay(1000, 'match victory'); this.score += 1000; }
+    const mission: MissionReport = {
+      id: 'defuse-warehouse', name: 'Warehouse Bomb Defusal', map: 'arena',
+      status: win ? 'complete' : 'failed', duration: t, phases: [],
+    };
+    const pressure: PressureStats = { totalSpawned: 10, peakLive: 10, retired: 0, pending: 0, candidateChecks: 0, sightChecks: 0, deferred: 0 };
+    this.pendingResult = {
+      type: 'end', win, kills: me?.kills ?? this.tdmPlayerKills, score: this.score, shots: this.shots, hits: this.hits,
+      headshots: me?.headshots ?? this.headshots, timeSec: t,
+      cash: this.cashEarned, cashLog: [...this.cashLog], difficultyMul: difficultyMultiplier(this.difficultyId),
+      mission, pressure, defuse: summary,
+    };
+    this.finishDelay = 0.4;
+    this.triggerHeld = false; this.rmb = false; this.keys.clear();
+  }
+
+  private defuseHud(): DefuseHud {
+    const d = this.director!;
+    const m = d.match;
+    const b = d.bomb;
+    let action: DefuseHud['action'] = null;
+    let hint: string | null = null;
+    const inSite = this.dead ? null : siteAt(this.pos.x, this.pos.z);
+    if (!this.dead && d.phase !== 'post' && d.phase !== 'over') {
+      if (b.state === 'carried' && b.carrier === d.player) {
+        if (b.plantT > 0) action = { kind: 'plant', progress: Math.min(1, b.plantT / DEFUSE.plantTime) };
+        else if (inSite && d.phase === 'live') hint = `HOLD [X] TO PLANT · SITE ${inSite}`;
+      } else if (b.state === 'planted' && d.playerSide === 'defend') {
+        if (b.defuser === d.player && b.defuseT > 0) {
+          action = { kind: 'defuse', progress: Math.min(1, b.defuseT / (d.player.kit.kit ? DEFUSE.kitDefuseTime : DEFUSE.defuseTime)) };
+        } else if (Math.hypot(this.pos.x - b.pos.x, this.pos.z - b.pos.z) < 1.8) {
+          hint = d.player.kit.kit ? 'HOLD [X] TO DEFUSE · KIT 5s' : 'HOLD [X] TO DEFUSE · 10s (NO KIT)';
+        }
+      }
+    }
+    let bombScreen: DefuseHud['bombScreen'] = null;
+    const showBomb = b.state === 'planted' || (b.state === 'dropped' && d.playerSide === 'attack');
+    // Standing on it (planting/defusing) needs no marker — it would only clamp to a screen edge.
+    if (showBomb && this.camera.position.distanceTo(b.pos) > 3.5) {
+      const v = b.pos.clone(); v.y += 0.6;
+      const dist = this.camera.position.distanceTo(b.pos);
+      v.project(this.camera);
+      const behind = v.z > 1;
+      let x = (v.x + 1) / 2, y = (1 - v.y) / 2;
+      if (behind) { x = 1 - x; y = 0.86; }
+      bombScreen = { x: Math.min(0.96, Math.max(0.04, x)), y: Math.min(0.9, Math.max(0.08, y)), behind, dist, planted: b.state === 'planted' };
+    }
+    const spec = this.dead && this.deadT >= 1.8 ? this.spectateTarget() : null;
+    return {
+      round: d.phase === 'post' || d.phase === 'over' ? Math.max(1, m.history.length) : Math.min(m.round, m.history.length + 1),
+      maxRounds: m.format.maxRounds,
+      winTarget: m.format.winTarget,
+      format: m.format.label,
+      phase: d.phase,
+      timer: d.phase === 'planted' ? b.timeLeft : Math.max(0, d.timer),
+      alphaScore: m.alphaScore,
+      bravoScore: m.bravoScore,
+      side: d.playerSide,
+      matchPoint: m.matchPointFor(),
+      suddenDeath: m.suddenDeath,
+      bomb: { state: b.state, site: b.site, timeLeft: Math.max(0, b.timeLeft), urgency: d.bombUrgency, carrierYou: b.state === 'carried' && b.carrier === d.player },
+      money: d.player.kit.money,
+      kit: { ...d.player.kit },
+      buyOpen: d.buyOpen,
+      buyTime: d.buyTimeLeft,
+      nextLoss: lossBonus(m.lossStreak.alpha + 1),
+      action,
+      hint,
+      inSite,
+      roster: d.stats(),
+      history: m.history,
+      spectating: spec ? spec.name : null,
+      bombScreen,
+      alive: { alpha: d.aliveOn('alpha').length, bravo: d.aliveOn('bravo').length },
+    };
+  }
+
+  // ==================== DEFUSE PUBLIC API (buy menu) ====================
+  defuseBuy(id: string): BuyCheck {
+    const d = this.director;
+    if (!d) return { ok: false, reason: 'No match' };
+    const before = d.player.kit;
+    const r = d.playerBuy(id);
+    audio.buyChime(r.ok);
+    if (r.ok) {
+      const kit = d.player.kit;
+      this.defuseArmor = kit.armor;
+      this.frags = kit.frags;
+      this.flashes = kit.flashes;
+      if (kit.primary !== before.primary || kit.secondary !== before.secondary) this.armDefuseKit(kit, false, kit.primary !== before.primary);
+    }
+    return r;
+  }
+
+  defuseInfo(): { kit: Kit; side: DefuseSide; buyOpen: boolean; buyTime: number; round: number; pistol: boolean } | null {
+    const d = this.director;
+    if (!d) return null;
+    return { kit: { ...d.player.kit }, side: d.playerSide, buyOpen: d.buyOpen, buyTime: d.buyTimeLeft, round: d.match.round, pistol: d.match.pistolRound };
+  }
+
   private endTDMMatch() {
     if (this.ended || !this.tdm) return;
     this.ended = true;
@@ -2338,6 +2840,7 @@ void main(){
 
   private endMatch(win: boolean) {
     if (this.ended) return;
+    if (this.isDefuse) return; // round play ends through the director
     if (this.isTDM) { this.endTDMMatch(); return; }
     if (win && this.missionRuntime.mission.status !== 'complete') return;
     this.ended = true;
@@ -2435,10 +2938,13 @@ void main(){
     // ==================== MOVEMENT SPEED & SPRINT DELAYS ====================
     // WALK: 4.2 m/s. SPRINT: 6.8 m/s. CROUCH: 2.8 m/s. ADS: 2.8 m/s. LEAN: 3.4 m/s.
     let ix = 0, iz = 0;
-    if (k.has('KeyW')) iz -= 1;
-    if (k.has('KeyS')) iz += 1;
-    if (k.has('KeyA')) ix -= 1;
-    if (k.has('KeyD')) ix += 1;
+    const moveLocked = this.isDefuse && this.defuseLocked();
+    if (!moveLocked) {
+      if (k.has('KeyW')) iz -= 1;
+      if (k.has('KeyS')) iz += 1;
+      if (k.has('KeyA')) ix -= 1;
+      if (k.has('KeyD')) ix += 1;
+    }
     const moving = ix !== 0 || iz !== 0;
 
     const wasSprinting = this.sprinting;
@@ -2569,7 +3075,7 @@ void main(){
     // Health regen (to 50 HP after 5s; TDM regenerates to 40% of the armored pool)
     this.lastDamageT += dt;
     const regenCap = this.isTDM ? Math.round((TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR) * 0.4) : 50;
-    if (!this.dead && this.lastDamageT > 5 && this.hp < regenCap) {
+    if (!this.isDefuse && !this.dead && this.lastDamageT > 5 && this.hp < regenCap) {
       this.hp = Math.min(regenCap, this.hp + dt * 10);
     }
 
@@ -2674,7 +3180,14 @@ void main(){
     this.composeCamera(dt);
     this.animateViewmodel(dt);
     this.camera.updateMatrixWorld(true);
-    if (this.isTDM && this.tdm) {
+    if (this.isDefuse && this.tdm && this.director) {
+      this.tdm.update(dt);
+      this.updateDefuse(dt);
+      if (this.tdm.rosterVersion !== this.tdmRosterVersion) {
+        this.tdmRosterVersion = this.tdm.rosterVersion;
+        this.rebuildHittables();
+      }
+    } else if (this.isTDM && this.tdm) {
       this.tdm.update(dt);
       // player respawn cooldown
       if (this.tdmPlayerDead && !this.ended) {
@@ -2742,6 +3255,7 @@ void main(){
     const vmFov = THREE.MathUtils.lerp(68, 56, this.ads);
     this.vmCamera.fov += (vmFov - this.vmCamera.fov) * fk;
     this.vmCamera.updateProjectionMatrix();
+    if (this.isDefuse && this.dead) this.spectateCamera(dt);
   }
 
   // ==================== VIEWMODEL ANIMATION ====================
@@ -3009,6 +3523,7 @@ void main(){
     }
     // Overlay the viewmodel as a clean second pass (depth-relative, clip-safe)
     this.renderer.autoClear = false;
+    if (this.isDefuse && this.dead) return; // spectating: no first-person gun
     this.renderer.clearDepth();
     this.renderer.render(this.vmScene, this.vmCamera);
   }
@@ -3019,6 +3534,12 @@ void main(){
     audio.ensure();
     voice.unlock();
     this.started = true;
+    if (this.isDefuse) {
+      const side = this.director?.playerSide ?? 'attack';
+      this.onEvent({ type: 'callout', text: side === 'attack' ? 'Bomb Defusal — plant the C4 on site A or B.' : 'Bomb Defusal — hold both sites. Stop the plant.' });
+      voice.objective(side === 'attack' ? 'Plant the bomb. Take a site.' : 'Defend the sites.');
+      return;
+    }
     if (this.isTDM) {
       this.onEvent({ type: 'callout', text: 'Warehouse TDM — most kills at 2:30 wins.' });
       voice.objective('Weapons free. Take the yard.');
@@ -3169,6 +3690,7 @@ void main(){
     if (this.isTDM && this.tdm) {
       for (const b of this.tdm.bots) {
         if (b.dead || b.team !== 'bravo') continue;
+        if (this.isDefuse && !this.isSpotted(b)) continue;
         const d = b.pos.distanceTo(this.pos);
         if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(b.pos), dist: d, above: b.pos.y - this.pos.y }; }
       }
@@ -3178,7 +3700,7 @@ void main(){
       mag: this.mags[this.cur],
       weapon: this.def().name,
       masterkey: this.def().masterkey ? { shells: this.mkAmmo, reloading: this.mkReloadT >= 0 } : undefined,
-      cash: this.cashEarned,
+      cash: this.isDefuse && this.director ? this.director.player.kit.money : this.cashEarned,
       secondaryWeapon: (this.weapons.length === 2 ? this.weapons[this.cur === 0 ? 1 : 0] : this.weapons[this.cur === 2 ? 0 : 2])?.name ?? '',
       heldSlot: (this.weapons.length === 2 ? this.cur === 0 : this.cur !== 2) ? 'primary' : 'secondary',
       bipodDeployed: this.bipodDeployed(),
@@ -3211,7 +3733,7 @@ void main(){
       playerMap: { nx: (this.pos.x + H) / (2 * H), nz: (this.pos.z + H) / (2 * H) },
       enemiesMap: this.isTDM && this.tdm
         ? this.tdm.bots
-          .filter(b => !b.dead && b.team === 'bravo')
+          .filter(b => !b.dead && b.team === 'bravo' && (!this.isDefuse || this.isSpotted(b)))
           .map(b => ({
             nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H),
             yaw: -b.yaw * 180 / Math.PI,
@@ -3242,7 +3764,22 @@ void main(){
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
       mission: this.isTDM ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
-      tdm: this.isTDM && this.tdm ? {
+      defuse: this.isDefuse && this.director ? this.defuseHud() : undefined,
+      alliesMap: this.isDefuse && this.tdm && this.director
+        ? this.tdm.bots.filter(b => b.team === 'alpha').map(b => ({
+          nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H), yaw: -b.yaw * 180 / Math.PI, dead: b.dead, name: b.name,
+          bomb: this.director!.bomb.state === 'carried' && this.director!.bomb.carrier?.bot === b,
+        }))
+        : undefined,
+      objectivesMap: this.isDefuse && this.director ? (() => {
+        const d = this.director!;
+        const out: NonNullable<HudState['objectivesMap']> = [];
+        const b = d.bomb;
+        if (b.state === 'planted') out.push({ nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H), label: 'C4', kind: 'bomb-planted' });
+        else if (b.state === 'dropped' && d.playerSide === 'attack') out.push({ nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H), label: 'C4', kind: 'bomb' });
+        return out;
+      })() : undefined,
+      tdm: this.isTDM && this.tdm && !this.isDefuse ? {
         alphaScore: this.tdm.alphaScore,
         bravoScore: this.tdm.bravoScore,
         timeLeft: this.tdm.timeLeft,
@@ -3290,6 +3827,7 @@ void main(){
     }
     for(const texture of textures) texture.dispose();
     this.missionRuntime?.dispose();
+    this.director?.dispose();
     this.tdm?.dispose();
     this.ai.dispose();
     this.composer.dispose();

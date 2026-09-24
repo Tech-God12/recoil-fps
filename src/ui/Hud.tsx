@@ -444,7 +444,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
             <i /><span className="keycap">SPACE</span> VAULT
             <i /><span className="keycap">X</span> ATTACH / BLAST
             <i /><span className="keycap">3-7</span> STREAKS
-            <i /><span className="keycap">Z</span> FIELD KIT
+            <i /><span className="keycap">Z</span> KIT
           </span>
         </div>
       )}

@@ -1,23 +1,23 @@
-// Recoil FPS — Kits menu 3-D preview. Renders the real in-game kit hardware
-// (kit-models.ts builders, so the menu never drifts from what spawns in a match) on a
-// turntable and loops a short demo of the ability: the dart pings, the barricade
-// unfolds and folds, the decoy materialises, walks and glitches. One renderer per
-// mount, capped at 2× DPR, paused while the tab is hidden.
+// Recoil FPS — KITS menu 3-D showcase. Renders the real in-game kit hardware
+// (kit-models.ts, so the menu never drifts from what spawns in a match) on a lit
+// pedestal and loops a short demo of what the kit does: the radar unfolds, spins and
+// scans, finding enemy silhouettes; the barricade drops and unfolds; the decoy
+// materialises and patrols. One renderer per mount, 2× DPR cap, paused when hidden.
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { KitId } from '../game/kits';
 import {
-  buildBarricade, buildDart, buildDecoy, disposeDartFx, disposeDecoy, disposeKitObject,
-  type BarricadeModel, type DartModel, type DecoyModel,
+  buildBarricade, buildDart, buildDecoy, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
+  type BarricadeModel, type DartModel, type DecoyModel, type TagGhost,
 } from '../game/kit-models';
 
-const ACCENT: Record<KitId, number> = { recon: 0x5FE3FF, bulwark: 0xFF7A2E, phantom: 0x6FE8FF };
-
-/** Demo loop length per kit (s): long enough to read the whole ability once. */
-const LOOP: Record<KitId, number> = { recon: 3.2, bulwark: 4.4, phantom: 4.0 };
+const ACCENT: Record<KitId, number> = { recon: 0x5fe3ff, bulwark: 0xff8a3d, phantom: 0x7cf5d8 };
+/** Demo loop length per kit (s). */
+const LOOP: Record<KitId, number> = { recon: 5, bulwark: 5, phantom: 5 };
 
 type Rig =
-  | { id: 'recon'; m: DartModel; root: THREE.Group }
+  | { id: 'recon'; m: DartModel; root: THREE.Group; ghosts: TagGhost[] }
   | { id: 'bulwark'; m: BarricadeModel; root: THREE.Group }
   | { id: 'phantom'; m: DecoyModel; root: THREE.Group };
 
@@ -25,17 +25,22 @@ function buildRig(id: KitId): Rig {
   const root = new THREE.Group();
   if (id === 'recon') {
     const m = buildDart();
-    // Dart stuck nose-down in the floor, pulses expanding around it.
-    m.group.rotation.x = -Math.PI / 2 + 0.35;
-    m.group.position.y = 0.16;
-    m.group.scale.setScalar(3.2);
-    root.add(m.group, m.ring, m.echo, m.dome, m.beam);
-    m.beam.position.y = 1.5;
-    return { id, m, root };
+    // The unit is 45 cm tall: shown at 2.6× so it reads at the same size as the others.
+    m.group.scale.setScalar(2.6);
+    root.add(m.group, m.ring, m.echo);
+    const ghosts = [new THREE.Vector3(-2.1, 0, -2.6), new THREE.Vector3(2.3, 0, -2.9)].map((p, i) => {
+      const g = buildTagGhost();
+      g.group.position.copy(p);
+      g.group.rotation.y = i ? 2.4 : -0.6;
+      g.group.scale.setScalar(0.8);
+      root.add(g.group);
+      return g;
+    });
+    return { id, m, root, ghosts };
   }
   if (id === 'bulwark') {
-    const m = buildBarricade(1.8, 1.4, 0.08);
-    m.group.rotation.y = Math.PI; // show the threat face to the camera
+    const m = buildBarricade(2.4, 1.4, 0.12);
+    m.group.rotation.y = Math.PI; // threat face toward the camera
     root.add(m.group);
     return { id, m, root };
   }
@@ -45,57 +50,89 @@ function buildRig(id: KitId): Rig {
 }
 
 function disposeRig(r: Rig) {
-  if (r.id === 'recon') { disposeDartFx(r.m); disposeKitObject(r.m.group); }
-  else if (r.id === 'bulwark') { disposeKitObject(r.m.group); r.m.plateMat.dispose(); }
-  else disposeDecoy(r.m);
+  if (r.id === 'recon') {
+    disposeDartFx(r.m); disposeKitObject(r.m.group);
+    for (const g of r.ghosts) g.mat.dispose();
+  } else if (r.id === 'bulwark') {
+    disposeKitObject(r.m.group); r.m.plateMat.dispose(); (r.m.lamp.material as THREE.Material).dispose();
+  } else disposeDecoy(r.m);
 }
 
-const ease = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+const easeOut = (x: number) => 1 - Math.pow(1 - clamp01(x), 3);
+const easeBack = (x: number) => { const c = 1.7; const t = clamp01(x) - 1; return 1 + (c + 1) * t * t * t + c * t * t; };
 
-/** Advance the ability demo to loop time `t` (0..LOOP). */
-function animate(r: Rig, t: number, clock: number) {
+/** Advance the demo to loop time `t` (0..LOOP). */
+function animate(r: Rig, t: number, dt: number) {
   if (r.id === 'recon') {
-    const { ring, echo, dome, beam, led } = r.m;
-    const p = (t % 1.6) / 1.6; // two pulses per loop
-    for (const [o, lag, max] of [[ring, 0, 2.4], [echo, 0.12, 2.2], [dome, 0.04, 1.6]] as const) {
-      const q = clamp01(p - lag);
+    const { m } = r;
+    m.setDeploy(t / 0.6);
+    const scanT = t - 0.9;
+    m.dish.rotation.y += dt * (scanT > 0 && scanT % 1.4 < 0.3 ? 14 : 2.5);
+    (m.led.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.2 + (Math.sin(t * 10) > 0 ? 1.6 : 0);
+    const p = scanT > 0 ? (scanT % 1.4) / 1.4 : -1;
+    for (const [o, lag, max, op] of [[m.ring, 0, 3.4, 0.9], [m.echo, 0.1, 3.2, 0.5]] as const) {
+      const q = p - lag;
       o.visible = q > 0 && q < 1;
-      o.scale.setScalar(0.1 + ease(q) * max);
-      (o.material as THREE.MeshBasicMaterial).opacity = (1 - q) * (o === dome ? 0.35 : 0.9);
+      o.position.y = 0.02;
+      o.scale.setScalar(0.05 + easeOut(q) * max);
+      (o.material as THREE.MeshBasicMaterial).opacity = (1 - q) * op;
     }
-    beam.visible = true;
-    (beam.material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.12 * Math.sin(clock * 4);
-    led.scale.setScalar(p < 0.12 ? 1.8 : 1);
+    // enemies "found" by the first scan, held through the loop, faded at the end
+    const shown = scanT > 0.35 ? Math.min(1, (scanT - 0.35) * 3) * Math.min(1, (LOOP.recon - t) * 2) : 0;
+    for (const g of r.ghosts) {
+      g.group.visible = shown > 0;
+      g.mat.uniforms.uTime.value += dt;
+      g.mat.opacity = shown * (0.55 + (p >= 0 && p < 0.25 ? 0.5 : 0));
+    }
     return;
   }
   if (r.id === 'bulwark') {
-    // 0-0.5 s drop, 0.5-1.1 s unfold, hold, 3.4-4.0 s fold, gone to 4.4.
-    const drop = ease(clamp01(t / 0.5));
-    const open = t < 3.4 ? ease(clamp01((t - 0.5) / 0.6)) : 1 - ease(clamp01((t - 3.4) / 0.6));
-    r.m.group.position.y = (1 - drop) * 1.2;
-    r.m.group.visible = t < 4.05;
-    const [l, rr] = r.m.wings;
-    l.rotation.y = (1 - open) * Math.PI / 2;
-    rr.rotation.y = -(1 - open) * Math.PI / 2;
-    (r.m.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = open > 0.98 ? 2.2 : 0.6 + Math.abs(Math.sin(clock * 12)) * 2;
+    // drop in (0–0.45 s), unfold (0.45–1.1 s), hold, fold (4.1–4.5 s)
+    const g = r.m.group;
+    g.position.y = (1 - easeOut(t / 0.45)) * 1.4;
+    const open = t < 4.1 ? easeBack((t - 0.45) / 0.65) : 1 - easeOut((t - 4.1) / 0.4);
+    const swing = (1 - Math.min(1, open)) * Math.PI / 2;
+    r.m.wings[0].rotation.y = swing;
+    r.m.wings[1].rotation.y = -swing;
+    g.visible = t < 4.6;
+    (r.m.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = Math.sin(t * 9) > 0 ? 3 : 0.4;
     return;
   }
-  // phantom: materialise (scan sweeps up), walk in place, glitch near the end.
   const m = r.m;
-  const form = clamp01(t / 0.9);
-  const glitch = t > 3.2 && t < 3.6 && Math.sin(clock * 60) > 0.2;
-  m.mat.opacity = 0.55 * ease(form) * (glitch ? 0.35 : 0.9 + 0.1 * Math.sin(clock * 23));
-  m.torso.position.x = glitch ? 0.08 * Math.sign(Math.sin(clock * 37)) : 0;
-  m.scan.position.y = form * 1.9;
-  (m.scan.material as THREE.MeshBasicMaterial).opacity = form < 1 ? 0.9 : 0;
-  (m.cone.material as THREE.MeshBasicMaterial).opacity = 0.08 + 0.05 * Math.sin(clock * 5);
-  const stride = Math.sin(clock * 7) * 0.55;
+  m.mat.uniforms.uTime.value += dt;
+  const form = clamp01(t / 0.8);
+  const fade = clamp01((LOOP.phantom - t) / 0.4);
+  const glitch = (t > 2.4 && t < 2.55) || (t > 3.6 && t < 3.7);
+  m.group.scale.set(0.2 + 0.8 * easeBack(form), Math.max(0.02, easeBack(form)), 0.2 + 0.8 * easeBack(form));
+  m.mat.opacity = (glitch ? 0.35 : 0.75) * fade;
+  m.torso.position.x = glitch ? 0.07 : 0;
+  m.scan.position.y = ((t * 0.7) % 1) * 1.9;
+  (m.scan.material as THREE.MeshBasicMaterial).opacity = 0.3 * fade;
+  (m.cone.material as THREE.MeshBasicMaterial).opacity = 0.09 * fade;
+  const stride = Math.sin(t * 5) * 0.35;
   m.lLeg.rotation.x = stride; m.rLeg.rotation.x = -stride;
-  if (m.lines) m.lines.offset.y = -clock * 0.6;
+  m.torso.position.y = 0.95 + Math.abs(Math.sin(t * 5)) * 0.02;
 }
 
-export function KitViewer({ kit, className }: { kit: KitId; className?: string }) {
+/** Soft contact shadow: a radial gradient on a floor quad. */
+function shadowTexture(inner = 'rgba(0,0,0,0.75)', outer = 'rgba(0,0,0,0)'): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const grd = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+  grd.addColorStop(0, inner);
+  grd.addColorStop(0.35, inner);
+  grd.addColorStop(1, outer);
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+/**
+ * `shift` moves the subject sideways in screen space (fraction of the width), so the
+ * showcase can sit to the right of the menu text without moving the camera.
+ */
+export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className?: string; shift?: number }) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = host.current;
@@ -104,37 +141,61 @@ export function KitViewer({ kit, className }: { kit: KitId; className?: string }
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     } catch {
-      el.classList.add('kv-nogl'); // CSS shows the static icon fallback
+      el.classList.add('kv-nogl');
       return;
     }
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
-    scene.add(new THREE.HemisphereLight(0xF0E6D2, 0x2A2418, 1.1));
-    const key = new THREE.DirectionalLight(0xFFF2D6, 2.1); key.position.set(3, 5, 4); scene.add(key);
-    const rim = new THREE.PointLight(ACCENT[kit], 6, 8); rim.position.set(-2, 1.6, -1.5); scene.add(rim);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const room = new RoomEnvironment();
+    const envTex = pmrem.fromScene(room, 0.04).texture;
+    scene.environment = envTex;
+    scene.environmentIntensity = 0.35;
+    room.dispose(); pmrem.dispose();
 
-    // Floor disc with a faint grid ring so the model sits on something.
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x17140F, roughness: 0.95 });
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(2.4, 48), floorMat);
-    floor.rotation.x = -Math.PI / 2; scene.add(floor);
-    const haloMat = new THREE.MeshBasicMaterial({ color: ACCENT[kit], transparent: true, opacity: 0.35, side: THREE.DoubleSide });
-    const halo = new THREE.Mesh(new THREE.RingGeometry(1.25, 1.28, 64), haloMat);
-    halo.rotation.x = -Math.PI / 2; halo.position.y = 0.002; scene.add(halo);
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 60);
+    scene.add(new THREE.HemisphereLight(0xf0e6d2, 0x1a150f, 0.7));
+    const key = new THREE.DirectionalLight(0xfff0d8, 2.6); key.position.set(3, 5, 4); scene.add(key);
+    const rim = new THREE.DirectionalLight(ACCENT[kit], 3.2); rim.position.set(-4, 3, -4); scene.add(rim);
+    const fill = new THREE.PointLight(ACCENT[kit], 5, 7); fill.position.set(0, 0.4, 1.8); scene.add(fill);
+
+    // floor: dark disc, accent ring pair, contact shadow
+    const disposables: { dispose(): void }[] = [];
+    const add = <T extends THREE.Mesh>(o: T) => { scene.add(o); disposables.push(o.geometry, o.material as THREE.Material); return o; };
+    // Floor fades to nothing at the edges so there is no visible horizon line.
+    const floorTex = shadowTexture('rgba(22,19,14,1)', 'rgba(22,19,14,0)'); disposables.push(floorTex);
+    add(new THREE.Mesh(new THREE.PlaneGeometry(16, 16), new THREE.MeshBasicMaterial({ map: floorTex, transparent: true, depthWrite: false }))).rotation.x = -Math.PI / 2;
+    const ringMat = new THREE.MeshBasicMaterial({ color: ACCENT[kit], transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+    const ring1 = add(new THREE.Mesh(new THREE.RingGeometry(1.55, 1.58, 96), ringMat)); ring1.rotation.x = -Math.PI / 2; ring1.position.y = 0.003;
+    const ring2Mat = new THREE.MeshBasicMaterial({ color: ACCENT[kit], transparent: true, opacity: 0.18, side: THREE.DoubleSide });
+    const ring2 = add(new THREE.Mesh(new THREE.RingGeometry(1.7, 1.9, 96, 1, 0, Math.PI * 1.4), ring2Mat)); ring2.rotation.x = -Math.PI / 2; ring2.position.y = 0.002;
+    const shTex = shadowTexture(); disposables.push(shTex);
+    const shadow = add(new THREE.Mesh(new THREE.PlaneGeometry(3.2, 3.2), new THREE.MeshBasicMaterial({ map: shTex, transparent: true, depthWrite: false })));
+    shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.004;
 
     const rig = buildRig(kit);
     scene.add(rig.root);
-    // Frame each kit: the dart is tiny, the wall is wide, the decoy is tall.
-    const frame = kit === 'recon' ? { y: 0.55, d: 4.2 } : kit === 'bulwark' ? { y: 0.75, d: 4.6 } : { y: 1.0, d: 4.8 };
+    // Frame on the fully-deployed pose.
+    animate(rig, LOOP[kit] * 0.5, 0);
+    rig.root.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    rig.root.traverse(o => { if (o instanceof THREE.Mesh && o.visible && o !== (rig.id === 'recon' ? rig.m.ring : null) && o !== (rig.id === 'recon' ? rig.m.echo : null)) box.expandByObject(o); });
+    if (rig.id === 'recon') box.set(new THREE.Vector3(-1.3, 0, -1.2), new THREE.Vector3(1.3, 1.45, 0.8));
+    const size = box.getSize(new THREE.Vector3());
+    const centre = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(size.x, size.y * 1.1, size.z) * 0.62 + 0.25;
+    const dist = radius / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
 
     const resize = () => {
       const w = el.clientWidth || 1, h = el.clientHeight || 1;
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
+      if (shift) camera.setViewOffset(w, h, -shift * w, 0, w, h); else camera.clearViewOffset();
       camera.updateProjectionMatrix();
     };
     resize();
@@ -142,18 +203,22 @@ export function KitViewer({ kit, className }: { kit: KitId; className?: string }
     ro.observe(el);
 
     let raf = 0;
-    const t0 = performance.now();
+    let last = performance.now();
+    const t0 = last;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     const tick = () => {
       raf = requestAnimationFrame(tick);
       if (document.hidden) return;
-      const clock = (performance.now() - t0) / 1000;
-      // Reduced motion: hold the fully-deployed pose, no turntable.
-      const loopT = reduce ? LOOP[kit] * 0.6 : clock % LOOP[kit];
-      animate(rig, loopT, reduce ? 0 : clock);
-      const a = reduce ? 0.6 : clock * 0.45;
-      camera.position.set(Math.sin(a) * frame.d, frame.y + 0.9, Math.cos(a) * frame.d);
-      camera.lookAt(0, frame.y, 0);
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const clock = (now - t0) / 1000;
+      animate(rig, reduce ? LOOP[kit] * 0.5 : clock % LOOP[kit], reduce ? 0 : dt);
+      ring2.rotation.z = clock * 0.25;
+      // slow orbit across the front, never showing the back of the kit for long
+      const a = reduce ? 0.5 : 0.5 + Math.sin(clock * 0.3) * 0.6;
+      camera.position.set(centre.x + Math.sin(a) * dist, centre.y + dist * 0.28, centre.z + Math.cos(a) * dist);
+      camera.lookAt(centre.x, centre.y * 0.92, centre.z);
       renderer.render(scene, camera);
     };
     tick();
@@ -162,11 +227,11 @@ export function KitViewer({ kit, className }: { kit: KitId; className?: string }
       cancelAnimationFrame(raf);
       ro.disconnect();
       disposeRig(rig);
-      floor.geometry.dispose(); floorMat.dispose();
-      halo.geometry.dispose(); haloMat.dispose();
+      for (const d of disposables) d.dispose();
+      envTex.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [kit]);
+  }, [kit, shift]);
   return <div ref={host} className={`kit-viewer ${className ?? ''}`} aria-hidden="true" />;
 }

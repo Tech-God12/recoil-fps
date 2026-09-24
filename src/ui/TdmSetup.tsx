@@ -260,7 +260,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
                 <p>▸ Armor cuts head and body damage — check Bravo's kit.</p>
                 <p>▸ Respawn in <b>5s</b> at your protected yard.</p>
                 <p>▸ Most kills at <b>2:30</b> wins the match.</p>
-                <p>▸ Field kit on <b>Z</b>: kills cut <b>20%</b> off its cooldown.</p>
+                <p>▸ Kit on <b>Z</b>: each kill cuts <b>8%</b> off its cooldown.</p>
               </div>
               <p className="tx-hint mono">CLICK A HARDPOINT OR THE GUN TO FIT PARTS</p>
             </>

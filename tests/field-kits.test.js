@@ -153,9 +153,10 @@ test('recall refund and burst victims are pure and bounded', () => {
 });
 
 test('kit hardware stays inside a small geometry budget', () => {
-  // Barricade: 3 plates × (face, stripe, 2 ribs, hinge post) + glass, legs, skid, lamp ≈ 20 draws.
+  // Detailed menu-grade models (bevels, bolts, cylinders) but still a few thousand triangles
+  // and well under 100 draws each, so several live gadgets cost nothing next to the map.
   for (const [name, group, maxTris, maxDraws] of [
-    ['dart', buildDart().group, 400, 12], ['barricade', buildBarricade(2.4, 1.4, 0.12).group, 600, 26], ['decoy', buildDecoy().group, 600, 16],
+    ['radar', buildDart().group, 4000, 60], ['barricade', buildBarricade(2.4, 1.4, 0.12).group, 4000, 80], ['decoy', buildDecoy().group, 8000, 60],
   ]) {
     const b = geometryBudget(group);
     assert.ok(b.triangles < maxTris, `${name}: ${b.triangles} triangles`);
@@ -210,24 +211,24 @@ function fakeWorld() {
 
 const step = (d, seconds, dt = 1 / 60) => { for (let i = 0; i < Math.round(seconds / dt); i++) d.update(dt); };
 
-test('RECON: the dart flies, sticks in the wall, pings three times, tags only what is in range, alerts, and cleans up', () => {
+test('Radar: flies, drops down the wall, sets up, pings three times, tags only what is in range, alerts, and cleans up', () => {
   const w = fakeWorld();
   const d = new KitDirector(w.ctx, 'recon', 1);
   const baseline = w.scene.children.length;
   assert.ok(d.activate());
   assert.ok(!d.charge.ready, 'cooldown started');
   assert.equal(d.liveCount, 1);
-  step(d, 1.0); // ≈0.47 s flight to the wall at 26 m/s + 0.4 s to the first ping
+  step(d, 1.8); // ≈0.47 s to the wall + ≈0.76 s drop down its face + 0.4 s to the first scan
   const hud = d.hud();
   assert.equal(hud.live[0].kind, 'dart');
-  assert.match(hud.live[0].detail, /PING 1\/3/);
+  assert.match(hud.live[0].detail, /SCAN 1\/3/);
   // stuck at the wall face (z ≈ -11.75), not through it
   const dart = w.scene.children.slice(baseline).find(o => o.type === 'Group');
   assert.ok(dart.position.z > -12 && dart.position.z < -11.4, `dart z ${dart.position.z}`);
   // three hostiles within 24 m of the dart are tagged through the wall; the others are not
   const tagged = w.hostiles.filter(h => d.isRevealed(h)).map(h => h.id).sort();
   assert.deepEqual(tagged, [0, 1, 4]);
-  assert.ok(w.messages.some(m => m === 'SONAR — 3 HOSTILES TAGGED · +10% DMG'));
+  assert.ok(w.messages.some(m => m === 'RADAR — 3 ENEMIES FOUND · +10% DMG'));
   assert.equal(hud.tagged, 3);
   // tagged hostiles take +10 % from the player; untagged ones don't
   assert.equal(d.damageMul(w.hostiles[0]), KIT_TUNING.recon.markDamageMul);
@@ -245,7 +246,7 @@ test('RECON: the dart flies, sticks in the wall, pings three times, tags only wh
   assert.equal(w.scene.children.length, baseline - 32, 'marker + silhouette pools removed on dispose');
 });
 
-test('BULWARK: the wall registers as an occluder + blocker, soaks 450 HP of hostile fire, and is removed when broken', () => {
+test('Barricade: the wall registers as an occluder + blocker, soaks 450 HP of hostile fire, and is removed when broken', () => {
   const w = fakeWorld();
   const d = new KitDirector(w.ctx, 'bulwark', 1);
   const occ = w.occluders.length;
@@ -276,7 +277,7 @@ test('BULWARK: the wall registers as an occluder + blocker, soaks 450 HP of host
   assert.ok(d.stats.barricadeDamage >= 450);
 });
 
-test('BULWARK: Z beside your wall recalls it and banks cooldown by remaining integrity', () => {
+test('Barricade: Z beside your wall recalls it and banks cooldown by remaining integrity', () => {
   const w = fakeWorld();
   const d = new KitDirector(w.ctx, 'bulwark', 1);
   assert.ok(d.activate());
@@ -287,7 +288,7 @@ test('BULWARK: Z beside your wall recalls it and banks cooldown by remaining int
   assert.ok(d.activate(), 'recall works while the kit is recharging');
   assert.ok(Math.abs(d.charge.left - (left - 15)) < 1e-6, `half a wall banks 15 s (left ${d.charge.left})`);
   assert.equal(w.solids.length, 0, 'blocker lifted at once');
-  assert.ok(w.messages.some(m => m.startsWith('BARRICADE RECALLED')));
+  assert.ok(w.messages.some(m => m.startsWith('BARRICADE PICKED UP')));
   step(d, KIT_TUNING.bulwark.fold + 0.05);
   assert.equal(d.liveCount, 0, 'folded away');
   assert.equal(d.stats.recalls, 1);
@@ -295,7 +296,7 @@ test('BULWARK: Z beside your wall recalls it and banks cooldown by remaining int
   assert.ok(d.activate() === false && !d.hud().recall);
 });
 
-test('BULWARK: refused placement keeps the charge, walls expire after 24 s, and hostile frags crack them', () => {
+test('Barricade: refused placement keeps the charge, walls expire after 24 s, and hostile frags crack them', () => {
   const w = fakeWorld();
   const d = new KitDirector(w.ctx, 'bulwark', 1);
   w.solids.push({ minX: -5, maxX: 5, minZ: -3, maxZ: 0, minY: 0, maxY: 3 });
@@ -350,7 +351,7 @@ test('PHANTOM: the decoy runs ahead, fires audible blanks, lures sight-lines, di
   assert.ok(w.feedback.includes('burst'));
 });
 
-test("PHANTOM: the decoy's death burst stuns hostiles within 6 m, even on timeout", () => {
+test("Decoy: the decoy's death burst stuns hostiles within 6 m, even on timeout", () => {
   const w = fakeWorld();
   w.player.dir.set(1, 0, 0);
   const d = new KitDirector(w.ctx, 'phantom', 1);
@@ -363,7 +364,7 @@ test("PHANTOM: the decoy's death burst stuns hostiles within 6 m, even on timeou
   step(d, KIT_TUNING.phantom.life);
   assert.equal(w.hostiles[3].stunned, KIT_TUNING.phantom.burstStun);
   assert.equal(w.hostiles[5].stunned, 0, '7 m is outside the burst');
-  assert.ok(w.messages.includes('DECOY BURST — 1 HOSTILE STUNNED'));
+  assert.ok(w.messages.includes('DECOY BURST — 1 ENEMY STUNNED'));
   assert.equal(d.stats.stunned, 1);
   d.dispose();
 });
@@ -375,7 +376,7 @@ test('deploys half charged, locked kit, slow refunds, ready chime and onboarding
   assert.equal(d.charge.left, 22.5);
   assert.ok(d.hud().hint, 'fresh deployment shows the kit prompt');
   assert.equal(d.activate(), false);
-  assert.ok(w.messages.some(m => m.startsWith('SONAR DART RECHARGING')));
+  assert.ok(w.messages.some(m => m.startsWith('RADAR RECHARGING')));
   assert.equal(typeof d.setKit, 'undefined', 'no mid-match swapping');
   d.onKill(2);
   assert.ok(Math.abs(d.charge.left - (22.5 - 7.2)) < 1e-6, `two kills take 7.2 s off (left ${d.charge.left})`);
@@ -386,7 +387,7 @@ test('deploys half charged, locked kit, slow refunds, ready chime and onboarding
   assert.ok(d.charge.ready);
   assert.equal(d.hud().readyEpoch, epoch + 1, 'HUD burst fires once');
   assert.ok(w.feedback.includes('ready'));
-  assert.ok(w.messages.includes('SONAR DART READY — PRESS Z'));
+  assert.ok(w.messages.includes('RADAR READY — PRESS Z'));
   assert.ok(d.activate());
   assert.ok(!d.hud().hint, 'prompt gone after first use');
   assert.equal(d.hud().useEpoch, 1);
@@ -501,8 +502,7 @@ test('HUD slot, prompt, fx, equipped-kit button, read-only pause card and KITS m
   const d = new KitDirector(w.ctx, 'bulwark', 1);
   const hud = d.hud();
   const slot = renderToStaticMarkup(React.createElement(KitSlot, { kit: hud }));
-  assert.match(slot, /BULWARK/);
-  assert.match(slot, /Barricade/);
+    assert.match(slot, /Barricade/);
   assert.match(slot, /keycap">Z</);
   assert.match(slot, /READY/);
   assert.equal((slot.match(/<line /g) ?? []).length, 24, 'segmented charge dial');
@@ -515,27 +515,27 @@ test('HUD slot, prompt, fx, equipped-kit button, read-only pause card and KITS m
   assert.match(none, /NONE EQUIPPED/);
   assert.match(none, /GET A KIT/);
   const eq = renderToStaticMarkup(React.createElement(KitEquipButton, { kit: 'phantom', onOpen() {} }));
-  assert.match(eq, /PHANTOM · Holo-Decoy/);
+  assert.match(eq, /Decoy/);
   d.activate();
   const pause = renderToStaticMarkup(React.createElement(KitPauseCard, { kit: d.hud() }));
   assert.match(pause, /LOCKED FOR THIS DEPLOYMENT/);
   assert.doesNotMatch(pause, /SWAP|<button/, 'no way to change kits mid-game');
-  assert.match(renderToStaticMarkup(React.createElement(KitPauseCard, {})), /No field kit/);
+  assert.match(renderToStaticMarkup(React.createElement(KitPauseCard, {})), /No kit/);
   const noop = () => {};
   const menu = renderToStaticMarkup(React.createElement(PauseMenu, { kit: d.hud(), onResume: noop, onRestart: noop, onSettings: noop, onQuit: noop }));
-  for (const label of ['Resume', 'Settings', 'Restart', 'Quit to menu', 'FIELD KIT']) assert.match(menu, new RegExp(label));
+  for (const label of ['Resume', 'Settings', 'Restart', 'Quit to menu', 'KIT']) assert.match(menu, new RegExp(label));
   assert.doesNotMatch(menu, /SWAP/);
   d.dispose();
   // KITS menu: three cards, the price on the buy button, the wallet on screen
   const shop = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, cash: 5000 }, onProfile: noop, onBack: noop }));
   assert.match(shop, />Kits</);
   assert.equal((shop.match(/role="tab"/g) ?? []).length, 3);
-  assert.match(shop, /BUY · \$4,500/, 'recon is affordable at $5,000');
+  assert.match(shop, /Buy · \$4,500/, 'recon is affordable at $5,000');
   assert.match(shop, /\$5,000/);
   const owned = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, ownedKits: ['recon'], equippedKit: 'recon' }, onProfile: noop, onBack: noop }));
-  assert.match(owned, /EQUIPPED · UNEQUIP/);
+  assert.match(owned, /Equipped/);
   const poor = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, cash: 100 }, onProfile: noop, onBack: noop }));
-  assert.match(poor, /NEED \$4,400 MORE/);
+  assert.match(poor, /Need \$4,400 more/);
 });
 
 // ------------------------------------------------ engine wiring, real map ----

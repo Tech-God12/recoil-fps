@@ -158,43 +158,45 @@ export interface KitDef {
   stats: { label: string; value: string; bar: number }[];
 }
 
+// Player-facing names are plain words: the kit IS the thing it deploys. (`ability`
+// equals `name` so every "… READY" / "… RECHARGING" message reads naturally.)
 export const KIT_DEFS: Record<KitId, KitDef> = {
   recon: {
-    id: 'recon', name: 'RECON', ability: 'Sonar Dart', role: 'Intel',
-    blurb: 'Throw a sensor dart. Three pulses reveal every hostile within 24 m through walls.',
-    rule: 'Tagged hostiles take +10% damage. The ping is loud — hostiles within 14 m come looking.',
-    steps: ['Throw it into the room before you peek.', 'Three pulses paint bodies through walls.', 'Push while they are tagged: +10% damage.'],
+    id: 'recon', name: 'Radar', ability: 'Radar', role: 'Intel',
+    blurb: 'Throw a small radar unit. It sets itself up and shows every enemy within 24 m through walls.',
+    rule: 'Enemies it finds take 10% more damage. It is loud — enemies within 14 m will come to check it out.',
+    steps: ['Throw it into the room before you go in.', 'It scans 3 times and shows enemies through walls.', 'Push while they are marked: +10% damage.'],
     cooldown: KIT_TUNING.recon.cooldown,
     price: KIT_PRICES.recon,
     stats: [
-      { label: 'RADIUS', value: '24 m', bar: 0.8 },
-      { label: 'REVEAL', value: '≈8 s', bar: 0.55 },
+      { label: 'RANGE', value: '24 m', bar: 0.8 },
+      { label: 'SHOWS ENEMIES', value: '≈8 s', bar: 0.55 },
       { label: 'COOLDOWN', value: '45 s', bar: 0.45 },
     ],
   },
   bulwark: {
-    id: 'bulwark', name: 'BULWARK', ability: 'Barricade', role: 'Cover',
-    blurb: 'Slam a folding 1.4 m steel shield ahead of you. Stops bullets, sight-lines and movement.',
-    rule: 'Crouch behind it to be safe; stand to shoot over. 450 HP. Z beside it recalls it for a refund.',
-    steps: ['Face open ground and press Z.', 'Crouch to hide, stand to shoot over it.', 'Walk up and press Z again to recall it.'],
+    id: 'bulwark', name: 'Barricade', ability: 'Barricade', role: 'Cover',
+    blurb: 'Drop a folding steel shield in front of you. It stops bullets and blocks the way.',
+    rule: 'Crouch behind it to stay safe, stand up to shoot over it. 450 HP. Press Z next to it to pick it back up.',
+    steps: ['Look at open ground and press Z.', 'Crouch to hide, stand to shoot over it.', 'Walk up to it and press Z to pick it up.'],
     cooldown: KIT_TUNING.bulwark.cooldown,
     price: KIT_PRICES.bulwark,
     stats: [
-      { label: 'INTEGRITY', value: '450 HP', bar: 1 },
-      { label: 'DURATION', value: '24 s', bar: 0.9 },
+      { label: 'HEALTH', value: '450 HP', bar: 1 },
+      { label: 'LASTS', value: '24 s', bar: 0.9 },
       { label: 'COOLDOWN', value: '60 s', bar: 0.25 },
     ],
   },
   phantom: {
-    id: 'phantom', name: 'PHANTOM', ability: 'Holo-Decoy', role: 'Deception',
-    blurb: 'Send a hologram running ahead firing blanks. Hostiles who see it shoot it instead of you.',
-    rule: 'Lures sight within 32 m, draws hearing within 28 m. On death it bursts: 1.6 s stun within 6 m.',
-    steps: ['Aim down a lane and press Z.', 'Flank while they burn ammo on it.', 'When it dies, anyone close is stunned.'],
+    id: 'phantom', name: 'Decoy', ability: 'Decoy', role: 'Distraction',
+    blurb: 'Send out a fake soldier that runs ahead and fires blanks. Enemies who see it shoot at it instead of you.',
+    rule: 'Works on enemies within 32 m who can see it. When it is destroyed it stuns enemies within 6 m.',
+    steps: ['Aim down a lane and press Z.', 'Flank them while they shoot at it.', 'When it breaks, anyone close gets stunned.'],
     cooldown: KIT_TUNING.phantom.cooldown,
     price: KIT_PRICES.phantom,
     stats: [
-      { label: 'LURE', value: '32 m', bar: 0.9 },
-      { label: 'BURST', value: '6 m stun', bar: 0.6 },
+      { label: 'RANGE', value: '32 m', bar: 0.9 },
+      { label: 'STUN', value: '6 m', bar: 0.6 },
       { label: 'COOLDOWN', value: '50 s', bar: 0.35 },
     ],
   },
@@ -384,6 +386,7 @@ export interface KitHud {
 const ray = new THREE.Raycaster();
 const tmpA = new THREE.Vector3();
 const tmpB = new THREE.Vector3();
+const tmpC = new THREE.Vector3();
 const easeOutBack = (k: number) => { const c = 1.70158; return 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2); };
 
 // ---------------------------------------------------------------- dart ----
@@ -408,10 +411,10 @@ class SonarDart {
     ctx.scene.add(this.model.group, this.model.ring, this.model.echo, this.model.dome, this.model.beam);
   }
 
+  private spin = 2.2;
+
   private orient(d: THREE.Vector3) {
-    // Nose is local -Z: look from pos toward pos - d so -Z faces along d.
-    tmpA.copy(this.model.group.position).sub(d);
-    this.model.group.lookAt(tmpA);
+    this.model.group.rotation.set(0, Math.atan2(-d.x, -d.z), 0);
   }
 
   static readonly LIFE = KIT_TUNING.recon.firstPulse + KIT_TUNING.recon.pulseEvery * (KIT_TUNING.recon.pulses - 1) + 0.8;
@@ -430,20 +433,31 @@ class SonarDart {
       const len = step.length();
       ray.set(this.pos, step.clone().normalize()); ray.far = len + 0.05;
       const hit = ray.intersectObjects(this.ctx.occluders, false)[0];
-      if (hit) {
-        this.pos.copy(hit.point).addScaledVector(step.normalize(), -0.03);
+      const n = hit?.face ? tmpC.copy(hit.face.normal).transformDirection(hit.object.matrixWorld) : null;
+      if (hit && n && n.y > 0.6) {
+        // Landed on top of something (crate, roof, barricade): deploy right there.
+        this.pos.copy(hit.point);
         this.stick();
+      } else if (hit) {
+        // Hit a wall: drop straight down the face and deploy on the ground below.
+        this.pos.copy(hit.point).addScaledVector(step.normalize(), -0.12);
+        this.vel.x = 0; this.vel.z = 0; this.vel.y = Math.min(0, this.vel.y);
       } else {
         this.pos.add(step);
         const g = this.ctx.groundHeight(this.pos.x, this.pos.z);
-        if (this.pos.y <= g + 0.02) { this.pos.y = g + 0.02; this.stick(); }
-        else if (this.flight >= T.maxFlight) this.stick();
+        if (this.pos.y <= g) { this.pos.y = g; this.stick(); }
+        else if (this.flight >= T.maxFlight) { this.pos.y = g; this.stick(); }
       }
       this.model.group.position.copy(this.pos);
-      if (!this.stuck) this.orient(this.vel);
+      // Folded unit tumbles end over end in flight.
+      if (!this.stuck) this.model.group.rotation.set(this.flight * 9, this.model.group.rotation.y, this.flight * 4);
       return;
     }
     this.sinceStick += dt;
+    // Unfold over 0.35 s: legs swing out, mast telescopes up; the dish spins, faster on a pulse.
+    this.model.setDeploy(this.sinceStick / 0.35);
+    this.spin = Math.max(2.2, this.spin - dt * 6);
+    this.model.dish.rotation.y += dt * this.spin;
     const due = T.firstPulse + this.pulsesFired * T.pulseEvery;
     if (this.pulsesFired < T.pulses && this.sinceStick >= due) this.pulse();
     // LED blinks faster as the last pulse approaches
@@ -480,9 +494,12 @@ class SonarDart {
   private stick() {
     this.stuck = true;
     this.vel.set(0, 0, 0);
+    // Stand upright wherever it came to rest.
+    const g0 = this.model.group;
+    g0.rotation.set(0, g0.rotation.y, 0);
+    g0.position.copy(this.pos);
     audio.dartStick(this.pos.x, this.pos.y, this.pos.z);
-    const g = this.ctx.groundHeight(this.pos.x, this.pos.z);
-    this.model.beam.position.set(this.pos.x, g + 1.5, this.pos.z);
+    this.model.beam.position.set(this.pos.x, this.pos.y + 1.5, this.pos.z);
     this.model.beam.visible = true;
   }
 
@@ -490,7 +507,8 @@ class SonarDart {
     const T = KIT_TUNING.recon;
     this.pulsesFired++;
     this.ringT = 0;
-    const g = this.ctx.groundHeight(this.pos.x, this.pos.z) + 0.08;
+    this.spin = 14;
+    const g = this.pos.y + 0.08;
     for (const o of [this.model.ring, this.model.echo]) { o.visible = true; o.position.set(this.pos.x, g, this.pos.z); o.scale.setScalar(0.05); }
     this.model.dome.visible = true;
     this.model.dome.position.set(this.pos.x, g, this.pos.z);
@@ -504,7 +522,7 @@ class SonarDart {
     this.ctx.feedback?.('ping', this.pos);
     // The cost of intel: the ping gives the dart's position away.
     this.ctx.alertAt(this.pos, T.hearRadius);
-    if (this.pulsesFired === 1) this.ctx.announce(tagged.length ? `SONAR — ${tagged.length} HOSTILE${tagged.length === 1 ? '' : 'S'} TAGGED · +10% DMG` : 'SONAR — NO CONTACTS IN RANGE');
+    if (this.pulsesFired === 1) this.ctx.announce(tagged.length ? `RADAR — ${tagged.length} ENEM${tagged.length === 1 ? 'Y' : 'IES'} FOUND · +10% DMG` : 'RADAR — NO ENEMIES IN RANGE');
   }
 
   dispose() {
@@ -515,7 +533,8 @@ class SonarDart {
 }
 
 // ----------------------------------------------------------- barricade ----
-const SAND = new THREE.Color(0x8C7A58);
+// Plate tint multiplies the worn-paint texture: white = as painted, dark = scorched.
+const SAND = new THREE.Color(0xFFFFFF);
 const SCORCHED = new THREE.Color(0x3A3128);
 
 class Barricade {
@@ -737,7 +756,7 @@ class HoloDecoy implements KitLure {
     const caught = burstVictims(this.feet, P.burstRadius, this.ctx.hostiles().filter(h => h.alive()));
     for (const h of caught) h.stun?.(P.burstStun);
     this.stunned = caught.length;
-    if (caught.length) this.ctx.announce(`DECOY BURST — ${caught.length} HOSTILE${caught.length === 1 ? '' : 'S'} STUNNED`);
+    if (caught.length) this.ctx.announce(`DECOY BURST — ${caught.length} ENEM${caught.length === 1 ? 'Y' : 'IES'} STUNNED`);
     else if (shot) this.ctx.announce('DECOY DOWN');
   }
 
@@ -745,7 +764,7 @@ class HoloDecoy implements KitLure {
     if (this.done) return;
     const T = KIT_TUNING.phantom;
     const g = this.model.group;
-    if (this.model.lines) this.model.lines.offset.y -= dt * 0.9; // scanlines crawl upward
+    this.model.mat.uniforms.uTime.value += dt; // scanlines crawl, sweep band travels
     if (this.popT >= 0) {
       // glitch-out: flatten and flare sideways, then gone
       this.popT += dt;
@@ -911,7 +930,7 @@ export class KitDirector {
       const bank = recallRefundSeconds(frac);
       this.charge.bank(bank);
       this.stats.recalls++;
-      this.ctx.announce(`BARRICADE RECALLED — ${Math.round(bank)}s BANKED`);
+      this.ctx.announce(`BARRICADE PICKED UP — ${Math.round(bank)}s BACK`);
       return true;
     }
     if (!this.charge.ready) {
@@ -967,7 +986,7 @@ export class KitDirector {
       ok = this.ctx.canPlaceBox(p.box);
     }
     if (!ok) {
-      this.ctx.announce('NO ROOM FOR BARRICADE — FACE OPEN GROUND');
+      this.ctx.announce('NO ROOM FOR BARRICADE — LOOK AT OPEN GROUND');
       return false;
     }
     for (const w of this.walls) w.destroy(false); // one wall at a time
@@ -986,7 +1005,7 @@ export class KitDirector {
     this.ctx.moveCollide(start, dir.x * 0.5, dir.z * 0.5, 0.3);
     this.decoys.push(new HoloDecoy(this.ctx, start, dir.x, dir.z));
     this.stats.decoys++;
-    this.ctx.announce('DECOY OUT — HOSTILES WILL TRACK IT');
+    this.ctx.announce('DECOY OUT');
     return true;
   }
 
@@ -1094,9 +1113,9 @@ export class KitDirector {
   hud(): KitHud {
     const live: KitLiveHud[] = [];
     const R = KIT_TUNING.recon, B = KIT_TUNING.bulwark, P = KIT_TUNING.phantom;
-    for (const d of this.darts) live.push({ kind: 'dart', label: 'SONAR', timeLeft: d.timeLeft, total: SonarDart.LIFE, detail: d.stuck ? `PING ${d.pulsesFired}/${R.pulses}` : 'IN FLIGHT' });
+    for (const d of this.darts) live.push({ kind: 'dart', label: 'RADAR', timeLeft: d.timeLeft, total: SonarDart.LIFE, detail: d.stuck ? `SCAN ${d.pulsesFired}/${R.pulses}` : 'THROWN' });
     for (const w of this.walls) if (w.active) live.push({ kind: 'barricade', label: 'BARRICADE', timeLeft: Math.max(0, w.life), total: B.life, health: Math.max(0, w.hp / B.hp), detail: `${Math.max(0, Math.ceil(w.hp))} HP` });
-    for (const d of this.decoys) if (d.active()) live.push({ kind: 'decoy', label: 'DECOY', timeLeft: Math.max(0, d.life), total: P.life, health: Math.max(0, d.hp / P.hp), detail: `${d.hitsTaken} ROUNDS DRAWN` });
+    for (const d of this.decoys) if (d.active()) live.push({ kind: 'decoy', label: 'DECOY', timeLeft: Math.max(0, d.life), total: P.life, health: Math.max(0, d.hp / P.hp), detail: `${d.hitsTaken} HITS TAKEN` });
     let tagged = 0;
     for (const t of this.tags.values()) if (t > 0) tagged++;
     return {

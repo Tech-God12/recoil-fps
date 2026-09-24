@@ -139,7 +139,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
     { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'kits', idx: '03', title: 'KITS', sub: prof.equippedKit ? `${KIT_DEFS[prof.equippedKit].name} EQUIPPED · ${KIT_DEFS[prof.equippedKit].ability.toUpperCase()}` : 'BUY AND EQUIP A FIELD ABILITY', action: onKits },
+    { id: 'kits', idx: '03', title: 'KITS', sub: prof.equippedKit ? `${KIT_DEFS[prof.equippedKit].name.toUpperCase()} EQUIPPED` : 'RADAR · BARRICADE · DECOY', action: onKits },
     { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
     { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
   ];
@@ -649,7 +649,7 @@ const BOOT_TIPS = [
   'Lean with Q and E, then return to cover before firing.',
   'Reload before crossing an exposed lane.',
   'Manage the magazine; reserve ammunition is not consumed.',
-  'Press Z for your field kit: sonar dart, barricade or holo-decoy.',
+  'Buy a kit in KITS, then press Z in game: Radar, Barricade or Decoy.',
 ];
 
 export function BootScreen({ map }: { map?: MapId }) {
@@ -802,7 +802,7 @@ export function PauseMenu({ mission, streaks, kit, tdm, mapName, onResume, onRes
           )}
 
           <div className="pz-panel" style={{ animationDelay: '140ms' }}>
-            <div className="pz-panel-head mono"><span>FIELD KIT</span><span>{kit ? <span className="keycap">{kit.key}</span> : 'NONE'}</span></div>
+            <div className="pz-panel-head mono"><span>KIT</span><span>{kit ? <span className="keycap">{kit.key}</span> : 'NONE'}</span></div>
             <KitPauseCard kit={kit} />
           </div>
 

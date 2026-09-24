@@ -15,10 +15,11 @@ export function KitIcon({ id, size = 22 }: { id: KitId; size?: number }) {
   if (id === 'recon') {
     return (
       <svg {...common}>
-        <path d="M4 20 L13 11" />
-        <path d="M13 11 l2.5 -0.6 l-1.9 -1.9 z" fill="currentColor" />
-        <path d="M16 5.5a6 6 0 0 1 2.5 2.5" />
-        <path d="M17.5 2.8a9.5 9.5 0 0 1 3.7 3.7" />
+        <path d="M5 7.5a8 8 0 0 0 11.5 11.5z" />
+        <path d="M10.8 13.2 15 9" />
+        <circle cx="15.6" cy="8.4" r="1.2" fill="currentColor" />
+        <path d="M17.8 3.6a5 5 0 0 1 2.6 2.6" />
+        <path d="M9 21h8" />
       </svg>
     );
   }
@@ -63,7 +64,7 @@ export function KitSlot({ kit }: { kit: KitHud }) {
   return (
     <div
       className={`kit-slot kit-${kit.id} ${kit.ready ? 'ready' : 'charging'} ${kit.recall ? 'recall' : ''}`}
-      aria-label={`Field kit ${kit.name}: ${kit.ability}${kit.ready ? ' ready' : ` recharging ${secs} seconds`}`}
+      aria-label={`Kit ${kit.name}${kit.ready ? ' ready' : ` recharging ${secs} seconds`}`}
     >
       <div className="kit-dial">
         <svg viewBox="0 0 64 64" className="kit-dial-svg" aria-hidden="true">
@@ -91,8 +92,7 @@ export function KitSlot({ kit }: { kit: KitHud }) {
         </div>
       </div>
       <div className="kit-meta">
-        <span className="kit-name">{kit.name}</span>
-        <span className="kit-ability">{kit.ability}</span>
+        <span className="kit-ability">{kit.name}</span>
         <span className="kit-state mono">
           <span className="keycap">{kit.key}</span>
           {kit.recall ? 'RECALL' : kit.ready ? 'READY' : 'CHARGING'}
@@ -110,7 +110,7 @@ export function KitSlot({ kit }: { kit: KitHud }) {
 export function KitLive({ kit }: { kit: KitHud }) {
   if (!kit.live.length) return null;
   return (
-    <div className="kit-live" aria-label="Active field kit gadgets">
+    <div className="kit-live" aria-label="Active kit">
       {kit.live.map((l, i) => {
         const frac = Math.max(0, Math.min(1, l.health ?? l.timeLeft / l.total));
         return (
@@ -132,18 +132,18 @@ export function KitLive({ kit }: { kit: KitHud }) {
 export function KitHint({ kit }: { kit: KitHud }) {
   return (
     <div className={`kit-hint kit-${kit.id}`} role="status">
-      <span className="kit-hint-tag">FIELD KIT</span>
+      <span className="kit-hint-tag">YOUR KIT</span>
       <span className="kit-hint-text">
         {kit.ready
-          ? <>Press <span className="keycap">{kit.key}</span> — {kit.ability}</>
-          : <>{kit.ability} charging · <span className="tabular">{Math.ceil(kit.cooldownLeft)}s</span> · then <span className="keycap">{kit.key}</span></>}
+          ? <>Press <span className="keycap">{kit.key}</span> to use {kit.name}</>
+          : <>{kit.name} charging · <span className="tabular">{Math.ceil(kit.cooldownLeft)}s</span> · then <span className="keycap">{kit.key}</span></>}
       </span>
       <span className="kit-hint-sub">{kit.blurb}</span>
     </div>
   );
 }
 
-/** Kit ticker (SONAR — 3 HOSTILES TAGGED, BARRICADE DESTROYED, ...). */
+/** Kit ticker (RADAR — 3 ENEMIES FOUND, BARRICADE DESTROYED, ...). */
 export function KitMessage({ text }: { text: string }) {
   return (
     <div className="kit-msg" role="status">
@@ -173,11 +173,11 @@ export function KitEquipButton({ kit, onOpen, compact }: { kit: KitId | null; on
   const d = kit ? KIT_DEFS[kit] : null;
   return (
     <button type="button" className={`kit-equip ${kit ? `kit-${kit}` : 'none'} ${compact ? 'compact' : ''}`} onClick={onOpen} disabled={!onOpen}
-      aria-label={d ? `Field kit ${d.name} equipped. Open the Kits menu` : 'No field kit equipped. Open the Kits menu'}>
+      aria-label={d ? `${d.name} equipped. Open the Kits menu` : 'No kit equipped. Open the Kits menu'}>
       <span className="kit-equip-icon">{kit ? <KitIcon id={kit} size={compact ? 18 : 22} /> : <LockIcon size={compact ? 16 : 18} />}</span>
       <span className="kit-equip-body">
-        <em>FIELD KIT <span className="keycap">{KIT_KEY}</span></em>
-        <b>{d ? `${d.name} · ${d.ability}` : 'NONE EQUIPPED'}</b>
+        <em>KIT <span className="keycap">{KIT_KEY}</span></em>
+        <b>{d ? d.name : 'NONE EQUIPPED'}</b>
       </span>
       <span className="kit-equip-go mono">{d ? 'CHANGE' : 'GET A KIT'} ›</span>
     </button>
@@ -193,7 +193,7 @@ export function KitPauseCard({ kit }: { kit?: KitHud }) {
       <div className="pz-kit none">
         <span className="pz-kit-icon"><LockIcon size={18} /></span>
         <div className="pz-kit-body">
-          <b>No field kit</b>
+          <b>No kit</b>
           <p>Buy and equip one from <b>KITS</b> on the main menu. Kits can only be changed between games.</p>
         </div>
       </div>
@@ -202,11 +202,11 @@ export function KitPauseCard({ kit }: { kit?: KitHud }) {
   const d = KIT_DEFS[kit.id];
   const style = { '--pct': kit.pct } as CSSProperties;
   return (
-    <div className={`pz-kit kit-${kit.id} ${kit.ready ? 'ready' : ''}`} style={style} aria-label="Field kit">
+    <div className={`pz-kit kit-${kit.id} ${kit.ready ? 'ready' : ''}`} style={style} aria-label="Kit">
       <span className="pz-kit-icon"><KitIcon id={kit.id} size={22} /></span>
       <div className="pz-kit-body">
         <div className="pz-kit-head">
-          <b>{d.name} · {d.ability}</b>
+          <b>{d.name}</b>
           <span className="pz-kit-state mono">{kit.ready ? 'READY' : `${Math.ceil(kit.cooldownLeft)}s`}</span>
         </div>
         <span className="pz-kit-bar" aria-hidden="true"><i /></span>

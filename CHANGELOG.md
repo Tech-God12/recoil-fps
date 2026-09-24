@@ -4,6 +4,11 @@ Added a **KITS** screen on the home menu (and a Field kit button on the mission 
 
 Verification: `node scripts/validate.mjs` passes (lint, tsc, 162/162 Node tests, 34/34 mutations); `npx vite build` passes. No browser or human playtest was run.
 
+## 2026-09-24 — Kits: simple names, new menu, detailed models
+
+Kits are now just **Radar**, **Barricade** and **Decoy** everywhere (menu, HUD, messages). The Kits menu is a full-screen showroom: a lit 3D stage with each kit playing a looping demo (radar unfolds and scans two enemies, barricade drops and unfolds, decoy materialises and walks), a big name, stat bars, three how-to steps, kit cards and one clear Buy/Equip button. All three models were rebuilt with bevelled plates, bolts, hinges, a dish radar on a tripod and a proper hologram soldier. The radar now drops down walls and sets up on the ground instead of sticking into them.
+
+Verification: 162/162 tests, 34/34 mutations, typecheck, lint and vite build pass.
 ## 2026-09-24 — Field Kits: Sonar Dart, Barricade, Holo-Decoy on Z
 
 Added one cooldown ability per deployment, live in Missions and Warehouse TDM (off in Search & Destroy, where utility is bought). RECON throws a sonar dart that sticks and pings three times, tagging hostiles within 24 m through walls, but each ping is audible within 14 m. BULWARK plants a 1.4 m, 450 HP steel barricade that blocks bullets, sight-lines, movement and AI pathing for 22 s. It covers a crouched player but not a standing one, and hostile fire and frags break it. PHANTOM sends a holographic operator running ahead firing blanks. Mission soldiers and bravo bots with eyes on it inside 32 m aim and fire at it instead of you, and shooting a lured hostile snaps it out half the time. Cooldowns are 30 / 40 / 35 s, and each non-streak kill refunds 20 %. Kits are picked on the mission card or TDM setup, swapped from the pause menu (the new kit starts cold) and persisted as a sanitized `fieldKit` setting. HUD: cooldown dial with Z keycap, live object chips, event ticker, first-use prompt. All sounds come from the spatial synth, and all models are procedural. See `docs/field-kits.md`. Nothing was removed.

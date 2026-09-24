@@ -76,7 +76,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   },
   {
     id: 'ak47', name: 'AK-47', short: 'AK-47', cls: 'AR', slot: 'primary',
-    price: 3800, starter: false,
+    price: 1900, starter: false,
     blurb: 'Hard-hitting 7.62. Slower, louder, heavier — and every round lands like a slammed door.',
     base: base({ pattern: [[1.65, -0.16], [1.85, 0.23], [2, 0.34], [2.1, -0.27], [2.2, -0.4], [2.25, 0.45], [2.3, 0.3], [2.2, -0.38]], auto: true, rpm: 600, damage: 46, headMul: 2.5, limbMul: 0.8, magSize: 30, reserve: 120, hipSpread: 0.010, adsFov: 58, tacReload: 2.4, emptyReload: 3.0, adsTime: 0.25 }),
     slots: ["muzzle", "optic", "magazine"],
@@ -92,7 +92,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   },
   {
     id: 'awm', name: 'AWM', short: 'AWM', cls: 'SR', slot: 'primary',
-    price: 7800, starter: false,
+    price: 3900, starter: false,
     blurb: 'Bolt-action .338 Lapua. One round, one silhouette down — if you can stand the scope sway and the report.',
     base: base({ pattern: [[4.2, 0.28]], auto: false, rpm: 48, damage: 78, headMul: 3.0, limbMul: 1.0, magSize: 5, reserve: 25, hipSpread: 0.045, adsFov: 22, tacReload: 2.25, emptyReload: 2.7, adsTime: 0.42, noiseRadius: 90, moveSpeedMul: 0.96 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'rail'],
@@ -100,7 +100,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   },
   {
     id: 'mp7', name: 'MP', short: 'MP', cls: 'PDW', slot: 'secondary',
-    price: 2400, starter: false,
+    price: 1200, starter: false,
     blurb: 'Pocket firestorm. 900 RPM of 4.6mm riding your secondary slot — a machine pistol for when the primary runs dry.',
     base: base({ pattern: [[0.85, 0.12], [0.95, -0.18], [1.05, 0.2], [1.12, -0.24], [1.18, 0.22]], auto: true, rpm: 900, damage: 24, headMul: 2.2, limbMul: 0.8, magSize: 40, reserve: 200, hipSpread: 0.011, adsFov: 60, tacReload: 1.9, emptyReload: 2.3, adsTime: 0.18, noiseRadius: 55 }),
     slots: ["muzzle", "optic", "magazine", "stock", "rail"],
@@ -108,7 +108,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   },
   {
     id: 'vector', name: 'Vector', short: 'Vector', cls: 'SMG', slot: 'primary',
-    price: 4600, starter: false,
+    price: 2300, starter: false,
     blurb: 'Fast-cycling Super-V action. Manageable initial kick, but sustained bursts still climb and wander.',
     base: base({ pattern: [[1.0, -0.12], [1.08, 0.2], [1.16, -0.25], [1.22, 0.28], [1.25, -0.32]], auto: true, rpm: 1100, damage: 24, headMul: 2.0, limbMul: 0.85, magSize: 25, reserve: 175, hipSpread: 0.011, adsFov: 62, tacReload: 2.0, emptyReload: 2.5, adsTime: 0.17, recoilMul: 0.7, falloffStart: 22, noiseRadius: 58 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
@@ -116,7 +116,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   },
   {
     id: 'spas12', name: 'SPAS', short: 'SPAS', cls: 'SG', slot: 'primary',
-    price: 5200, starter: false,
+    price: 2600, starter: false,
     blurb: 'Pump-action devastation. Eight pellets of 12-gauge diplomacy inside 12 metres — nothing argues back.',
     base: base({ pattern: [[3.2, -0.3]], auto: false, rpm: 80, damage: 14, headMul: 1.6, limbMul: 0.9, magSize: 8, reserve: 40, hipSpread: 0.045, adsSpread: 0.028, adsFov: 66, tacReload: 3.2, emptyReload: 3.2, adsTime: 0.24, recoilMul: 1.5, falloffStart: 12, falloffMul: 0.45, noiseRadius: 80 }),
     slots: ["muzzle", "optic", "magazine", "underbarrel", "rail"],
@@ -124,7 +124,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   },
   {
     id: 'scar_h', name: 'SCAR', short: 'SCAR', cls: 'BR', slot: 'primary',
-    price: 6400, starter: false,
+    price: 3200, starter: false,
     blurb: 'Two-tap battle rifle. Slow, surgical, and heavy — the muzzle climbs like it has somewhere to be.',
     base: base({ pattern: [[1.45, 0.18], [1.62, -0.25], [1.78, 0.32], [1.87, 0.38], [1.95, -0.35], [1.97, -0.28]], auto: true, rpm: 600, damage: 52, headMul: 2.4, limbMul: 0.85, magSize: 20, reserve: 100, hipSpread: 0.010, adsFov: 55, tacReload: 2.3, emptyReload: 2.9, adsTime: 0.26, recoilMul: 1.35, falloffStart: 45, falloffMul: 0.9, noiseRadius: 75 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
@@ -132,7 +132,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   },
   {
     id: 'deagle', name: 'Deagle', short: 'Deagle', cls: 'PISTOL', slot: 'secondary',
-    price: 3200, starter: false,
+    price: 1600, starter: false,
     blurb: 'Hand cannon in .50 AE. Two rounds centre-mass ends the conversation — and nearly your wrist.',
     base: base({ pattern: [[3.7, 0.34]], auto: false, rpm: 240, damage: 62, headMul: 2.8, limbMul: 0.8, magSize: 7, reserve: 35, hipSpread: 0.009, adsFov: 64, tacReload: 1.7, emptyReload: 2.0, adsTime: 0.19, recoilMul: 1.8, falloffStart: 30, noiseRadius: 85, moveSpeedMul: 1.03 }),
     slots: ['muzzle', 'optic', 'magazine', 'rail', 'barrel'],
@@ -140,7 +140,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
   },
   {
     id: 'm249', name: 'M249', short: 'M249', cls: 'LMG', slot: 'primary',
-    price: 8600, starter: false,
+    price: 4300, starter: false,
     blurb: '100-round belt of suppression. Slow to shoulder, slow to reload, impossible to ignore downrange.',
     base: base({ pattern: [[1.05, 0.1], [1.18, 0.18], [1.28, -0.23], [1.35, -0.3], [1.45, 0.33], [1.5, 0.37], [1.56, -0.35]], auto: true, rpm: 800, damage: 36, headMul: 2.2, limbMul: 0.85, magSize: 100, reserve: 200, hipSpread: 0.016, adsFov: 60, tacReload: 5.4, emptyReload: 5.4, adsTime: 0.40, recoilMul: 1.15, falloffStart: 40, noiseRadius: 80, moveSpeedMul: 0.92, swapTime: 0.32 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
@@ -153,7 +153,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_flash_hider",
     "slot": "muzzle",
     "name": "5.56 / 7.62 Flash Hider",
-    "price": 500,
+    "price": 250,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -177,7 +177,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_compensator",
     "slot": "muzzle",
     "name": "Rifle Compensator",
-    "price": 1000,
+    "price": 500,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -205,7 +205,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_suppressor",
     "slot": "muzzle",
     "name": "QD Rifle Suppressor",
-    "price": 1600,
+    "price": 800,
     "tier": 2,
     "compat": [
       "m4a1",
@@ -235,7 +235,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_suppressor_sr",
     "slot": "muzzle",
     "name": ".338 Moderator",
-    "price": 2400,
+    "price": 1200,
     "tier": 3,
     "compat": [
       "awm"
@@ -265,7 +265,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_brake_heavy",
     "slot": "muzzle",
     "name": "Precision Muzzle Brake",
-    "price": 1400,
+    "price": 700,
     "tier": 2,
     "compat": [
       "awm",
@@ -295,7 +295,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_duckbill",
     "slot": "muzzle",
     "name": "Duckbill Choke",
-    "price": 1000,
+    "price": 500,
     "tier": 2,
     "compat": [
       "spas12"
@@ -317,7 +317,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_full_choke",
     "slot": "muzzle",
     "name": "Full Choke",
-    "price": 1200,
+    "price": 600,
     "tier": 2,
     "compat": [
       "spas12"
@@ -341,7 +341,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_reddot",
     "slot": "optic",
     "name": "Red Dot Sight",
-    "price": 900,
+    "price": 450,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -371,7 +371,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_holo",
     "slot": "optic",
     "name": "Holographic Sight",
-    "price": 1400,
+    "price": 700,
     "tier": 2,
     "compat": [
       "m4a1",
@@ -401,7 +401,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_2x",
     "slot": "optic",
     "name": "2x Scope",
-    "price": 1200,
+    "price": 600,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -428,7 +428,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_3x",
     "slot": "optic",
     "name": "3x Scope",
-    "price": 1800,
+    "price": 900,
     "tier": 2,
     "compat": [
       "m4a1",
@@ -456,7 +456,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_4x",
     "slot": "optic",
     "name": "4x Scope",
-    "price": 2400,
+    "price": 1200,
     "tier": 2,
     "compat": [
       "m4a1",
@@ -486,7 +486,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_6x",
     "slot": "optic",
     "name": "6x Scope",
-    "price": 3200,
+    "price": 1600,
     "tier": 3,
     "compat": [
       "m4a1",
@@ -518,7 +518,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_pistol_rmr",
     "slot": "optic",
     "name": "Pistol Red Dot",
-    "price": 1000,
+    "price": 500,
     "tier": 2,
     "compat": [
       "m1911",
@@ -544,7 +544,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_extended",
     "slot": "magazine",
     "name": "40-Round STANAG",
-    "price": 1200,
+    "price": 600,
     "tier": 2,
     "compat": [
       "m4a1"
@@ -571,7 +571,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_drum",
     "slot": "magazine",
     "name": "60-Round Compact Drum",
-    "price": 2700,
+    "price": 1350,
     "tier": 3,
     "compat": [
       "m4a1"
@@ -599,7 +599,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_fast",
     "slot": "magazine",
     "name": "Coupled Rifle Magazines",
-    "price": 1400,
+    "price": 700,
     "tier": 2,
     "compat": [
       "m4a1",
@@ -626,7 +626,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_shell_tube",
     "slot": "magazine",
     "name": "Extended Tube",
-    "price": 1400,
+    "price": 700,
     "tier": 2,
     "compat": [
       "spas12"
@@ -649,7 +649,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_belt_box",
     "slot": "magazine",
     "name": "Large Ammo Box",
-    "price": 2600,
+    "price": 1300,
     "tier": 3,
     "compat": [
       "m249"
@@ -676,7 +676,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_sr_10",
     "slot": "magazine",
     "name": "10-Round Mag",
-    "price": 1500,
+    "price": 750,
     "tier": 2,
     "compat": [
       "awm"
@@ -698,7 +698,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "ub_vert_grip",
     "slot": "underbarrel",
     "name": "Vertical Grip",
-    "price": 800,
+    "price": 400,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -723,7 +723,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "ub_angled_grip",
     "slot": "underbarrel",
     "name": "Angled Foregrip",
-    "price": 1000,
+    "price": 500,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -749,7 +749,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "ub_bipod",
     "slot": "underbarrel",
     "name": "Bipod",
-    "price": 1100,
+    "price": 550,
     "tier": 2,
     "compat": [
       "awm",
@@ -776,7 +776,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "ub_shotgun_m26",
     "slot": "underbarrel",
     "name": "Masterkey Breacher",
-    "price": 3600,
+    "price": 1800,
     "tier": 3,
     "compat": [
       "m4a1"
@@ -802,7 +802,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "stk_none",
     "slot": "stock",
     "name": "Lightweight Stock Kit",
-    "price": 600,
+    "price": 300,
     "tier": 1,
     "compat": [
       "m4a1"
@@ -827,7 +827,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "stk_heavy",
     "slot": "stock",
     "name": "Fitted Cheek & Recoil Kit",
-    "price": 1300,
+    "price": 650,
     "tier": 2,
     "compat": [
       "m4a1",
@@ -856,7 +856,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "stk_folding",
     "slot": "stock",
     "name": "Compact Stock Pad",
-    "price": 1000,
+    "price": 500,
     "tier": 2,
     "compat": [
       "vector",
@@ -882,7 +882,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "rail_laser",
     "slot": "rail",
     "name": "Rifle Laser Module",
-    "price": 900,
+    "price": 450,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -910,7 +910,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "rail_flashlight",
     "slot": "rail",
     "name": "Scout Weapon Light",
-    "price": 700,
+    "price": 350,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -939,7 +939,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "rail_canted",
     "slot": "rail",
     "name": "45\u00b0 Canted Irons",
-    "price": 800,
+    "price": 400,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -962,7 +962,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "brl_long",
     "slot": "barrel",
     "name": "Long Barrel",
-    "price": 1500,
+    "price": 750,
     "tier": 2,
     "compat": [
       "m4a1",
@@ -989,7 +989,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "brl_short",
     "slot": "barrel",
     "name": "CQB Short Barrel",
-    "price": 1400,
+    "price": 700,
     "tier": 2,
     "compat": [
       "m4a1",
@@ -1017,7 +1017,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "brl_ported",
     "slot": "barrel",
     "name": "Ported Slide / Barrel",
-    "price": 1100,
+    "price": 550,
     "tier": 2,
     "compat": [
       "m1911",
@@ -1040,7 +1040,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_ak_brake",
     "slot": "muzzle",
     "name": "AK Slant Brake",
-    "price": 1000,
+    "price": 500,
     "tier": 1,
     "compat": [
       "ak47"
@@ -1065,7 +1065,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_ak_suppressor",
     "slot": "muzzle",
     "name": "AK Threaded Suppressor",
-    "price": 1600,
+    "price": 800,
     "tier": 2,
     "compat": [
       "ak47"
@@ -1093,7 +1093,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_smg_comp",
     "slot": "muzzle",
     "name": "Compact SMG Compensator",
-    "price": 1000,
+    "price": 500,
     "tier": 1,
     "compat": [
       "mp7",
@@ -1119,7 +1119,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_smg_suppressor",
     "slot": "muzzle",
     "name": "Compact SMG Suppressor",
-    "price": 1600,
+    "price": 800,
     "tier": 2,
     "compat": [
       "mp7",
@@ -1148,7 +1148,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_45_suppressor",
     "slot": "muzzle",
     "name": ".45 Pistol Suppressor",
-    "price": 1600,
+    "price": 800,
     "tier": 2,
     "compat": [
       "m1911"
@@ -1176,7 +1176,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "muz_50_brake",
     "slot": "muzzle",
     "name": ".50 AE Port Brake",
-    "price": 1000,
+    "price": 500,
     "tier": 1,
     "compat": [
       "deagle"
@@ -1201,7 +1201,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_ak_4x",
     "slot": "optic",
     "name": "AK 4\u00d7 Side-Mount Optic",
-    "price": 2400,
+    "price": 1200,
     "tier": 2,
     "compat": [
       "ak47"
@@ -1228,7 +1228,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_ak_dot",
     "slot": "optic",
     "name": "AK Dovetail Red Dot",
-    "price": 900,
+    "price": 450,
     "tier": 1,
     "compat": [
       "ak47"
@@ -1253,7 +1253,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "opt_8x",
     "slot": "optic",
     "name": "8\u00d7 Marksman Scope",
-    "price": 4000,
+    "price": 2000,
     "tier": 3,
     "compat": [
       "awm"
@@ -1281,7 +1281,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_extended_ak",
     "slot": "magazine",
     "name": "45-Round AK Magazine",
-    "price": 1200,
+    "price": 600,
     "tier": 2,
     "compat": [
       "ak47"
@@ -1308,7 +1308,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_extended_scar",
     "slot": "magazine",
     "name": "30-Round SCAR Magazine",
-    "price": 1200,
+    "price": 600,
     "tier": 2,
     "compat": [
       "scar_h"
@@ -1335,7 +1335,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_extended_vector",
     "slot": "magazine",
     "name": "33-Round Vector Magazine",
-    "price": 1200,
+    "price": 600,
     "tier": 2,
     "compat": [
       "vector"
@@ -1362,7 +1362,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_extended_mp7",
     "slot": "magazine",
     "name": "50-Round MP7 Magazine",
-    "price": 1200,
+    "price": 600,
     "tier": 2,
     "compat": [
       "mp7"
@@ -1389,7 +1389,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_extended_1911",
     "slot": "magazine",
     "name": "10-Round .45 Magazine",
-    "price": 1200,
+    "price": 600,
     "tier": 2,
     "compat": [
       "m1911"
@@ -1416,7 +1416,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_extended_deagle",
     "slot": "magazine",
     "name": "9-Round .50 AE Magazine",
-    "price": 1200,
+    "price": 600,
     "tier": 2,
     "compat": [
       "deagle"
@@ -1443,7 +1443,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_drum_ak",
     "slot": "magazine",
     "name": "75-Round AK Drum",
-    "price": 2700,
+    "price": 1350,
     "tier": 3,
     "compat": [
       "ak47"
@@ -1471,7 +1471,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_drum_vector",
     "slot": "magazine",
     "name": "50-Round Vector Drum",
-    "price": 2700,
+    "price": 1350,
     "tier": 3,
     "compat": [
       "vector"
@@ -1499,7 +1499,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_quick_mp7",
     "slot": "magazine",
     "name": "MP7 Quick-Pull Magazine",
-    "price": 1400,
+    "price": 700,
     "tier": 2,
     "compat": [
       "mp7"
@@ -1525,7 +1525,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "mag_quick_vector",
     "slot": "magazine",
     "name": "Vector Quick-Pull Magazine",
-    "price": 1400,
+    "price": 700,
     "tier": 2,
     "compat": [
       "vector"
@@ -1551,7 +1551,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "ub_half_grip",
     "slot": "underbarrel",
     "name": "Half Grip",
-    "price": 1100,
+    "price": 550,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -1578,7 +1578,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "ub_thumb_grip",
     "slot": "underbarrel",
     "name": "Thumb Grip",
-    "price": 1200,
+    "price": 600,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -1604,7 +1604,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "ub_light_grip",
     "slot": "underbarrel",
     "name": "Light Grip",
-    "price": 1000,
+    "price": 500,
     "tier": 1,
     "compat": [
       "m4a1",
@@ -1630,7 +1630,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "ub_spas_sleeve",
     "slot": "underbarrel",
     "name": "SPAS Pump Handstop",
-    "price": 800,
+    "price": 400,
     "tier": 1,
     "compat": [
       "spas12"
@@ -1654,7 +1654,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "rail_compact_laser",
     "slot": "rail",
     "name": "Compact Laser Module",
-    "price": 900,
+    "price": 450,
     "tier": 1,
     "compat": [
       "mp7",
@@ -1678,7 +1678,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "rail_pistol_laser",
     "slot": "rail",
     "name": "Pistol Trigger-Guard Laser",
-    "price": 900,
+    "price": 450,
     "tier": 1,
     "compat": [
       "m1911",
@@ -1702,7 +1702,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "id": "rail_pistol_light",
     "slot": "rail",
     "name": "Compact Pistol Light",
-    "price": 700,
+    "price": 350,
     "tier": 1,
     "compat": [
       "m1911",

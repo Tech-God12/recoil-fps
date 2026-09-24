@@ -28,8 +28,8 @@ import {
   TDMManager, TDM_BASE_HP, TDM_HP_PER_ARMOR, TDM_DAMAGE_MUL, TDM_MATCH_SECONDS, TDM_RESPAWN_SECONDS,
   TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, TDM_ARMOR_ICONS,
   TDM_FIRE_KILLS, TDM_FIRE_WINDOW, TDM_FIRE_SECONDS, TDM_FIRE_COOLDOWN,
-  TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL,
-  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam,
+  TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL, TDM_SHUTDOWN_CASH, TDM_DRAW_CASH, tdmOutcome,
+  type TDMArmor, type TDMBot, type TDMContext, type TDMTeam, type TDMOutcome,
 } from './tdm';
 
 export interface GameSettings {
@@ -47,9 +47,9 @@ export interface GameSettings {
   shadowQuality: 'off' | 'low' | 'medium' | 'high';
   bloom: boolean;
   bloomStrength: number;    // 0 - 100
-  vignette: number;         // 0 - 100
+  vignette: number;         // 0 - 70
   filmGrain: number;        // 0 - 100
-  brightness: number;       // 80 - 160 (exposure %)
+  brightness: number;       // 80 - 170 (exposure %)
   cameraShake: number;      // 0 - 100
   showFps: boolean;
   // Audio
@@ -57,9 +57,9 @@ export interface GameSettings {
   voices: boolean;
   // Crosshair
   crosshairColor: string;
-  crosshairSize: number;    // 4 - 20
-  crosshairGap: number;     // 0 - 24
-  crosshairThickness: number; // 1 - 5
+  crosshairSize: number;    // 3 - 24
+  crosshairGap: number;     // 0 - 26
+  crosshairThickness: number; // 1 - 6
   crosshairDot: boolean;
 }
 
@@ -89,6 +89,51 @@ export const DEFAULT_SETTINGS: GameSettings = {
   crosshairThickness: 2,
   crosshairDot: true,
 };
+
+/** Validate persisted and live patches before they reach input, audio or the renderer. */
+export function sanitizeSettings(input: unknown): GameSettings {
+  let raw = input;
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw) as unknown; } catch { raw = {}; }
+  }
+  const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const number = (key: string, fallback: number, min: number, max: number): number => {
+    const value = data[key];
+    return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+  };
+  const boolean = (key: string, fallback: boolean): boolean => typeof data[key] === 'boolean' ? data[key] as boolean : fallback;
+  const choice = <T extends string>(key: string, options: readonly T[], fallback: T): T => {
+    const value = data[key];
+    return typeof value === 'string' && (options as readonly string[]).includes(value) ? value as T : fallback;
+  };
+  const color = data.crosshairColor;
+  return {
+    sensitivity: number('sensitivity', DEFAULT_SETTINGS.sensitivity, 0.5, 10),
+    adsSensitivity: number('adsSensitivity', DEFAULT_SETTINGS.adsSensitivity, 0.2, 1.5),
+    invertY: boolean('invertY', DEFAULT_SETTINGS.invertY),
+    adsToggle: boolean('adsToggle', DEFAULT_SETTINGS.adsToggle),
+    fov: number('fov', DEFAULT_SETTINGS.fov, 70, 120),
+    difficulty: choice('difficulty', ['Easy', 'Normal', 'Hard'], DEFAULT_SETTINGS.difficulty),
+    map: choice('map', ['alrasul', 'kasbah', 'arena'], DEFAULT_SETTINGS.map),
+    adaptiveResolution: boolean('adaptiveResolution', DEFAULT_SETTINGS.adaptiveResolution),
+    resolutionScale: number('resolutionScale', DEFAULT_SETTINGS.resolutionScale, 50, 100),
+    shadowQuality: choice('shadowQuality', ['off', 'low', 'medium', 'high'], DEFAULT_SETTINGS.shadowQuality),
+    bloom: boolean('bloom', DEFAULT_SETTINGS.bloom),
+    bloomStrength: number('bloomStrength', DEFAULT_SETTINGS.bloomStrength, 0, 100),
+    vignette: number('vignette', DEFAULT_SETTINGS.vignette, 0, 70),
+    filmGrain: number('filmGrain', DEFAULT_SETTINGS.filmGrain, 0, 100),
+    brightness: number('brightness', DEFAULT_SETTINGS.brightness, 80, 170),
+    cameraShake: number('cameraShake', DEFAULT_SETTINGS.cameraShake, 0, 100),
+    showFps: boolean('showFps', DEFAULT_SETTINGS.showFps),
+    masterVolume: number('masterVolume', DEFAULT_SETTINGS.masterVolume, 0, 100),
+    voices: boolean('voices', DEFAULT_SETTINGS.voices),
+    crosshairColor: typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color : DEFAULT_SETTINGS.crosshairColor,
+    crosshairSize: number('crosshairSize', DEFAULT_SETTINGS.crosshairSize, 3, 24),
+    crosshairGap: number('crosshairGap', DEFAULT_SETTINGS.crosshairGap, 0, 26),
+    crosshairThickness: number('crosshairThickness', DEFAULT_SETTINGS.crosshairThickness, 1, 6),
+    crosshairDot: boolean('crosshairDot', DEFAULT_SETTINGS.crosshairDot),
+  };
+}
 
 export interface HudState {
   hp: number;
@@ -171,7 +216,7 @@ export type GameEvent =
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
   | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string }
-  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; roster: TdmRosterEntry[] } };
+  | { type: 'end'; win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number; mission: MissionReport; pressure: PressureStats; cash: number; cashLog: CashLogEntry[]; difficultyMul: number; tdm?: { alphaScore: number; bravoScore: number; playerKills: number; outcome: TDMOutcome; roster: TdmRosterEntry[] } };
 
 export interface CashLogEntry { reason: string; amount: number; t: number }
 
@@ -630,7 +675,7 @@ void main(){
         reserve: 150,
         hipSpread: 0.008,
         adsSpread: 0.000,
-        pattern: weaponById('m4a1')!.base.pattern.map(p=>[...p] as [number,number]),
+        pattern: [[0, 0]],
         adsFov: 56,
         tacReload: 2.1,
         emptyReload: 2.7,
@@ -647,7 +692,7 @@ void main(){
         reserve: 120,
         hipSpread: 0.010,
         adsSpread: 0.000,
-        pattern: weaponById('ak47')!.base.pattern.map(p=>[...p] as [number,number]),
+        pattern: [[0, 0]],
         adsFov: 58,
         tacReload: 2.4,
         emptyReload: 3.0,
@@ -664,7 +709,7 @@ void main(){
         reserve: 48,
         hipSpread: 0.006,
         adsSpread: 0.000,
-        pattern: weaponById('m1911')!.base.pattern.map(p=>[...p] as [number,number]),
+        pattern: [[0, 0]],
         adsFov: 64,
         tacReload: 1.5,
         emptyReload: 1.8,
@@ -681,7 +726,7 @@ void main(){
         reserve: 25,
         hipSpread: 0.045,
         adsSpread: 0.000,
-        pattern: weaponById('awm')!.base.pattern.map(p=>[...p] as [number,number]),
+        pattern: [[0, 0]],
         adsFov: 22,
         tacReload: 2.25,
         emptyReload: 2.7,
@@ -704,6 +749,7 @@ void main(){
         emptyReload: 2.3,
       },
     ];
+    // Catalog recoil replaces the neutral constructor patterns before input can fire.
     this.weapons.forEach((weapon,index)=>{
       const entry=weaponById((['m4a1','ak47','m1911','awm','mp7'] as WeaponId[])[index])!;
       weapon.pattern=entry.base.pattern.map(p=>[...p] as [number,number]);
@@ -2243,7 +2289,7 @@ void main(){
 
   /** The bounty is collected: +$500 and the SHUT DOWN banner. */
   private awardShutdown() {
-    this.earnCash(500, 'shutdown');
+    this.earnCash(TDM_SHUTDOWN_CASH, 'shutdown');
     audio.shutdown();
     this.onEvent({ type: 'streak', label: 'SHUT DOWN' });
   }
@@ -2309,11 +2355,13 @@ void main(){
   private endTDMMatch() {
     if (this.ended || !this.tdm) return;
     this.ended = true;
-    const win = this.tdm.alphaScore > this.tdm.bravoScore;
+    const outcome = tdmOutcome(this.tdm.alphaScore, this.tdm.bravoScore);
+    const win = outcome === 'win';
     if (win) this.score += 500; // match victory bonus
+    if (outcome === 'draw') this.earnCash(TDM_DRAW_CASH, 'draw');
     const mission: MissionReport = {
       id: 'tdm-warehouse', name: 'Warehouse TDM', map: 'arena',
-      status: win ? 'complete' : 'failed', duration: TDM_MATCH_SECONDS - this.tdm.timeLeft,
+      status: outcome === 'loss' ? 'failed' : 'complete', duration: TDM_MATCH_SECONDS - this.tdm.timeLeft,
       phases: [],
     };
     const pressure: PressureStats = { totalSpawned: 10, peakLive: 10, retired: 0, pending: 0, candidateChecks: 0, sightChecks: 0, deferred: 0 };
@@ -2323,7 +2371,7 @@ void main(){
       cash: this.cashEarned, cashLog: [...this.cashLog], difficultyMul: difficultyMultiplier(this.difficultyId),
       mission, pressure,
       tdm: {
-        alphaScore: this.tdm.alphaScore, bravoScore: this.tdm.bravoScore, playerKills: this.tdmPlayerKills,
+        alphaScore: this.tdm.alphaScore, bravoScore: this.tdm.bravoScore, playerKills: this.tdmPlayerKills, outcome,
         roster: [
           { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots },
           ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots, onFire: b.onFire })),
@@ -2333,6 +2381,7 @@ void main(){
     this.finishDelay = 1.2;
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Match over. Alpha squad takes the yard.');
+    else if (outcome === 'draw') voice.objective('Match tied. No side takes the yard.');
     else voice.defeat();
   }
 

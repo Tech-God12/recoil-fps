@@ -100,7 +100,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                     })}
                   </div>
                   <SectionTitle sub="Lower these first if performance drops">Performance</SectionTitle>
-                  <Slider label="Resolution scale" value={s.resolutionScale} min={40} max={100} unit="%" onChange={v => set({ resolutionScale: v })} />
+                  <Slider label="Resolution scale" value={s.resolutionScale} min={50} max={100} unit="%" onChange={v => set({ resolutionScale: v })} />
                   <Segmented label="Shadows" value={s.shadowQuality} options={[{ v: 'off', l: 'Off' }, { v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High' }]} onChange={v => set({ shadowQuality: v })} />
                   <Toggle label="Adaptive resolution" value={s.adaptiveResolution ?? true} onChange={v => set({ adaptiveResolution: v })} />
                   <Toggle label="Show FPS" value={s.showFps} onChange={v => set({ showFps: v })} />

@@ -12,6 +12,11 @@ import { NavGrid } from './ai';
 
 export type TDMTeam = 'alpha' | 'bravo';
 export type TDMArmor = 0 | 1 | 2;
+export type TDMOutcome = 'win' | 'loss' | 'draw';
+
+export function tdmOutcome(alphaScore: number, bravoScore: number): TDMOutcome {
+  return alphaScore === bravoScore ? 'draw' : alphaScore > bravoScore ? 'win' : 'loss';
+}
 export type TDMBotState = 'PATROL' | 'ENGAGE' | 'FLANK' | 'PUSH' | 'COVER' | 'DEAD';
 
 export const TDM_MATCH_SECONDS = 150;
@@ -27,6 +32,7 @@ export const TDM_FIRE_DMG_MUL = 1.1;
 export const TDM_FIRE_SPEED_MUL = 1.05;
 export const TDM_FIRE_HUNT_RANGE = 50;
 export const TDM_SHUTDOWN_CASH = 500;
+export const TDM_DRAW_CASH = 250;
 /** Player-weapon damage multiplier in TDM. Full damage — bullets must FEEL like
  * they hurt. The 3-headshot floor is enforced by the engine's per-round damage
  * cap (74), not by gutting every hit. */

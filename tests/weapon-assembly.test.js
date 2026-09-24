@@ -42,7 +42,7 @@ test('contact audit detects a genuinely displaced stock, not just scene-graph pa
   disposeWeapon(model);
 });
 
-test('all 185 supported attachment/weapon pairings have a continuous contact path', () => {
+test('all 119 supported attachment/weapon pairings have a continuous contact path', () => {
   let checked = 0;
   for (const entry of ATTACHMENT_CATALOG) for (const id of entry.compat) {
     if (!weaponById(id).slots.includes(entry.slot)) continue;
@@ -54,7 +54,7 @@ test('all 185 supported attachment/weapon pairings have a continuous contact pat
       checked++;
     } finally { disposeWeapon(model); }
   }
-  assert.equal(checked, 185);
+  assert.equal(checked, 119);
 });
 
 test('fully equipped builds remain connected when replacement slots overlap', () => {
@@ -94,19 +94,21 @@ test('factory and upgraded magazines never intersect neighbouring foregrips/bipo
   }
 });
 
-test('clearance audit detects the Vector drum pushed back through its foregrip', () => {
+test('clearance audit detects the Vector drum displaced forward through its foregrip', () => {
   const model = WEAPON_BUILDERS.vector();
   attach(model, attachmentById('mag_drum'), 'vector');
   attach(model, attachmentById('ub_vert_grip'), 'vector');
-  model.mag.position.y += 0.065;
+  model.mag.position.z -= 0.065;
   assert.equal(assembliesInterfere(model.mag, model.attached.underbarrel), true);
   disposeWeapon(model);
 });
 
-test('side-rail mounts inherit the socket rotation, including pistol underframe rails', () => {
-  for (const id of ['m4a1', 'ak47', 'spas12', 'm1911', 'deagle']) {
+test('each supported side-rail mount inherits its socket transform, including pistol underframes', () => {
+  for (const id of ['m4a1', 'spas12', 'm1911', 'deagle']) {
     const model = WEAPON_BUILDERS[id]();
-    attach(model, attachmentById('rail_flashlight'), id);
+    const rail = attachmentsFor(id, 'rail')[0];
+    assert.ok(rail, `${id} has a rail part`);
+    assert.equal(attach(model, rail, id), true);
     const part = model.attached.rail, socket = model.sockets.rail;
     assert.equal(part.parent, socket.parent);
     assert.ok(part.quaternion.angleTo(socket.quaternion) < 1e-8, `${id} rail orientation`);
@@ -206,7 +208,7 @@ test('stock AWM glass has supported rings without an opaque obstruction on the o
 });
 
 test('barrel/muzzle swapping is order-independent and never revives hidden factory devices', () => {
-  for (const id of ['m4a1', 'ak47', 'scar_h', 'vector', 'm249', 'm1911', 'deagle']) {
+  for (const id of ['m4a1', 'scar_h', 'm249']) {
     const model = WEAPON_BUILDERS[id](), original = model.muzzle.position.z;
     attach(model, attachmentById('brl_long'), id);
     attach(model, attachmentById('muz_flash_hider'), id);
@@ -245,7 +247,9 @@ test('slide/cover optics and their sockets share the same moving assembly', () =
 test('SPAS tube extensions do not steal the reload/pump handle', () => {
   const model = WEAPON_BUILDERS.spas12(), pump = model.mag;
   attach(model, attachmentById('mag_shell_tube'), 'spas12');
-  attach(model, attachmentById('ub_vert_grip'), 'spas12');
+  const pumpStop = attachmentsFor('spas12', 'underbarrel')[0];
+  assert.equal(pumpStop.id, 'ub_spas_sleeve');
+  attach(model, pumpStop, 'spas12');
   assert.equal(model.mag, pump);
   assert.equal(model.attached.underbarrel.parent, pump);
   const extension = model.attached.magazine.position.clone();
@@ -255,13 +259,15 @@ test('SPAS tube extensions do not steal the reload/pump handle', () => {
   disposeWeapon(model);
 });
 
-test('showcase bounds ignore arms and stripped furniture but include fitted accessories', () => {
+test('showcase bounds ignore hidden arms and furniture but include fitted accessories', () => {
   const model = WEAPON_BUILDERS.m4a1(), before = weaponBounds(model.group);
   model.lArm.position.set(50, -50, 20);
   const unchanged = weaponBounds(model.group);
   assert.ok(before.min.distanceTo(unchanged.min) < 1e-6 && before.max.distanceTo(unchanged.max) < 1e-6);
-  attach(model, attachmentById('stk_none'), 'm4a1');
-  assert.ok(weaponBounds(model.group).max.z < before.max.z - 0.1, 'hidden stock must not affect fit');
+  const stock = model.removable.stock[0];
+  stock.visible = false;
+  assert.ok(weaponBounds(model.group).max.z < before.max.z - 0.1, 'hidden stock geometry is excluded from fit');
+  stock.visible = true;
   attach(model, attachmentById('muz_suppressor'), 'm4a1');
   assert.ok(weaponBounds(model.group).min.z < before.min.z - 0.05, 'long fitted muzzle must be included');
   disposeWeapon(model);

@@ -4,6 +4,7 @@ import type { GameSettings } from '../game/engine';
 import { DEFAULT_SETTINGS } from '../game/engine';
 import { MAPS, isMissionMap } from '../game/world';
 import { Panel, SectionTitle, Slider, Toggle, Segmented, ColorPick, CBtn } from './components';
+import { BINDS } from './bindings';
 
 const PRESETS: { id: string; label: string; hint: string; tag: string; v: Partial<GameSettings> }[] = [
   { id: 'perf', label: 'Performance', hint: 'Max FPS', tag: 'FPS', v: { resolutionScale: 60, shadowQuality: 'off', bloom: false, vignette: 0, filmGrain: 0 } },
@@ -22,12 +23,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'controls', label: 'Controls' },
 ];
 
-const BINDS: [string, string][] = [
-  ['Move', 'WASD'], ['Sprint', 'Shift'], ['Crouch', 'C'], ['Slide', 'Sprint + C'],
-  ['Jump / Vault', 'Space'], ['Fire', 'Mouse Left'], ['Aim', 'Mouse Right'], ['Reload', 'R'],
-  ['Lean left', 'Q — hold'], ['Lean right', 'E — hold'], ['Frag grenade', 'Hold G'], ['Flashbang', 'F'],
-  ['Primary / Sidearm', '1 / 2'], ['Last weapon', 'Tap Q'], ['Plant / Detonate', 'X'], ['Pause', 'Esc'],
-];
 
 export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p: Partial<GameSettings>) => void; onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('graphics');
@@ -171,7 +166,9 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
 export function Reticle({ s, spread = 0 }: { s: GameSettings; spread?: number }) {
   const gap = s.crosshairGap + spread;
   const L = s.crosshairSize, T = s.crosshairThickness, C = s.crosshairColor;
-  const arm = (st: React.CSSProperties) => <span style={{ position: 'absolute', background: C, boxShadow: '0 1px 2px rgba(0,0,0,0.65)', ...st }} />;
+  // Arms glide on spread changes: bloom growth and the kill-confirm pulse read as
+  // a kick, not a flicker. 160 ms matches the HUD poll cadence (50 ms) ×3.
+  const arm = (st: React.CSSProperties) => <span style={{ position: 'absolute', background: C, boxShadow: '0 1px 2px rgba(0,0,0,0.65)', transition: 'top 160ms ease-out, left 160ms ease-out', ...st }} />;
   return (
     <div className="relative" style={{ width: 0, height: 0 }}>
       {arm({ width: T, height: L, left: -T / 2, top: -gap - L })}

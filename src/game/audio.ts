@@ -2,6 +2,8 @@
 export class SpatialAudioEngine {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
+  comp: DynamicsCompressorNode | null = null;
+  makeup: GainNode | null = null;
   echoBus: DelayNode | null = null;
   echoFb: GainNode | null = null;
   echoGain: GainNode | null = null;
@@ -19,7 +21,21 @@ export class SpatialAudioEngine {
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = Math.max(0, Math.min(1.2, this.volume01)) * 0.85;
-      this.master.connect(this.ctx.destination);
+      // Master bus glue: stacked gunshot bursts (gains 1.0 + 0.68 + 0.42) plus
+      // explosions and callouts used to hard-clip the destination. Gentle 4:1
+      // at −18 dB keeps transients punchy without the digital crunch.
+      this.comp = this.ctx.createDynamicsCompressor();
+      this.comp.threshold.value = -18;
+      this.comp.ratio.value = 4;
+      this.comp.attack.value = 0.003;
+      this.comp.release.value = 0.18;
+      // +1 dB makeup restores the body the glue takes; peaks stay controlled
+      // because the squash happens before this gain stage, not after.
+      this.makeup = this.ctx.createGain();
+      this.makeup.gain.value = 1.12;
+      this.master.connect(this.comp);
+      this.comp.connect(this.makeup);
+      this.makeup.connect(this.ctx.destination);
 
       // Reverb/Echo bus
       this.echoBus = this.ctx.createDelay(1.0);
@@ -323,6 +339,12 @@ export class SpatialAudioEngine {
     // Single shell thumbed into the tube: click-clack.
     this.burstDirect({ dur: 0.02, gain: 0.3, freq: 2000, q: 1.8 });
     this.burstDirect({ dur: 0.025, gain: 0.35, freq: 2600, q: 1.8, when: 0.07 });
+  }
+
+  /** Ejected casing: a bright delayed tink ~90 ms after the report, when brass
+   *  meets ground. Quiet on purpose — it should be felt, not heard over the gun. */
+  fireCasing() {
+    this.burstDirect({ dur: 0.03, gain: 0.1, freq: this.rf(6400), q: 4, hp: 4200, when: 0.09 });
   }
 
   beltCoverOpen() {

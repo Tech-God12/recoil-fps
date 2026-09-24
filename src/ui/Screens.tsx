@@ -23,6 +23,7 @@ import ridgeArt from '../assets/map-ridgeline.jpg';
 import operatorArt from '../assets/operator.jpg';
 import menuCenter from '../assets/menu-center.jpg';
 import { TxBack, TxCoords, TxLock } from './tactical';
+import { menuStep } from './bindings';
 import MapFlyover from './MapFlyover';
 import { gunThumbnail } from './armory/GunViewer';
 import { weaponTexturesReady } from '../game/weapons/finish';
@@ -158,8 +159,8 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
       if (e.code === 'Tab') { e.preventDefault(); setProfileOpen(o => !o); return; }
       if (e.code === 'Escape') { setProfileOpen(false); return; }
       if (profileOpen) return;
-      if (e.code === 'KeyW' || e.code === 'ArrowUp') { e.preventDefault(); setSel(s => (s + 3) % 4); }
-      else if (e.code === 'KeyS' || e.code === 'ArrowDown') { e.preventDefault(); setSel(s => (s + 1) % 4); }
+      if (e.code === 'KeyW' || e.code === 'ArrowUp') { e.preventDefault(); setSel(s => menuStep(s, -1, items.length)); }
+      else if (e.code === 'KeyS' || e.code === 'ArrowDown') { e.preventDefault(); setSel(s => menuStep(s, 1, items.length)); }
       else if (e.code === 'KeyA' || e.code === 'ArrowLeft') { setIntel(v => (v + 3) % 4); }
       else if (e.code === 'KeyD' || e.code === 'ArrowRight') { setIntel(v => (v + 1) % 4); }
       else if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); activate(sel); }
@@ -902,6 +903,39 @@ const CASH_REASONS: Record<string, string> = {
 };
 const DF_REASON_ICON: Record<string, string> = { elimination: '☠', bomb: '✹', defuse: '✂', time: '◷' };
 
+interface CashRow { label: string; detail: string; total: number }
+
+/** Shared payout ledger: mission, TDM, defusal, and ranked all settle cash, so
+ *  all results screens itemize it. (Ranked used to swallow the breakdown — the
+ *  wallet moved with no explanation.) */
+function CashCard({ r, cashRows, wallet, grade }: { r: Results; cashRows: CashRow[]; wallet: ResultsWallet; grade: string }) {
+  return (
+    <section className="cash-card" aria-label="Cash earned">
+      <div className="sec-label"><span>Cash earned</span><CashCounter value={r.cash} /></div>
+      {cashRows.map((row) => (
+        <div className="cash-row" key={row.label}>
+          <span className="cash-row-label">{row.label} <small>{row.detail}</small></span>
+          <span className="cash-row-val mono">+${row.total.toLocaleString('en-US')}</span>
+        </div>
+      ))}
+      <div className="cash-row">
+        <span className="cash-row-label">Difficulty <small>×{r.difficultyMul}</small></span>
+        <span className="cash-row-val mono">+${Math.round(r.cash * r.difficultyMul).toLocaleString('en-US')}</span>
+      </div>
+      {wallet.gradeBonus > 0 && (
+        <div className="cash-row">
+          <span className="cash-row-label">Grade bonus <small>{grade}</small></span>
+          <span className="cash-row-val mono">+${wallet.gradeBonus.toLocaleString('en-US')}</span>
+        </div>
+      )}
+      <div className="cash-wallet">
+        <span>Wallet</span>
+        <span className="tabular">${wallet.before.toLocaleString('en-US')} → <CashCounter value={wallet.after} /></span>
+      </div>
+    </section>
+  );
+}
+
 export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   r: Results; wallet: ResultsWallet; onRedeploy: () => void; onMenu: () => void; onArmory: () => void;
 }) {
@@ -933,6 +967,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
             </div>
           </div>
           <CompDebriefPanel report={r.comp} />
+          <CashCard r={r} cashRows={cashRows} wallet={wallet} grade={grade} />
           <div className="results-actions">
             <button className="deploy-btn" onClick={onRedeploy}>RE-QUEUE</button>
             <button className="menu-secondary-btn" onClick={onArmory}>ARMORY (+${Math.round(wallet.earned)})</button>
@@ -1047,29 +1082,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
           </div>
         </div>
 
-        <section className="cash-card" aria-label="Cash earned">
-          <div className="sec-label"><span>Cash earned</span><CashCounter value={r.cash} /></div>
-          {cashRows.map((row) => (
-            <div className="cash-row" key={row.label}>
-              <span className="cash-row-label">{row.label} <small>{row.detail}</small></span>
-              <span className="cash-row-val mono">+${row.total.toLocaleString('en-US')}</span>
-            </div>
-          ))}
-          <div className="cash-row">
-            <span className="cash-row-label">Difficulty <small>×{r.difficultyMul}</small></span>
-            <span className="cash-row-val mono">+${Math.round(r.cash * r.difficultyMul).toLocaleString('en-US')}</span>
-          </div>
-          {wallet.gradeBonus > 0 && (
-            <div className="cash-row">
-              <span className="cash-row-label">Grade bonus <small>{grade}</small></span>
-              <span className="cash-row-val mono">+${wallet.gradeBonus.toLocaleString('en-US')}</span>
-            </div>
-          )}
-          <div className="cash-wallet">
-            <span>Wallet</span>
-            <span className="tabular">${wallet.before.toLocaleString('en-US')} → <CashCounter value={wallet.after} /></span>
-          </div>
-        </section>
+        <CashCard r={r} cashRows={cashRows} wallet={wallet} grade={grade} />
 
         {!tdm && !df && <section className="timeline" aria-label="Mission timeline">
           <div className="sec-label" style={{ paddingBottom: 10 }}><span>Timeline</span><span className="mono">Elapsed</span></div>

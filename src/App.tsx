@@ -286,8 +286,22 @@ export default function App() {
    * loadout screen is reached explicitly via "Set up loadout" in Arena Mode.
    * `mapOverride` beats the (possibly not-yet-committed) settings state so
    * "Play" in Arena Mode can never race the map selection. */
+  // The mode of the live (or most recent) deployment. Pause → Restart replays the
+  // SAME mode: restarting a ranked match must not silently drop you into a
+  // story mission (audit U2 — newly reachable now that BLACKOUT deploys). The
+  // map follows the live setting, so a map change in pause Settings is honored.
+  const launchMode = useRef<'mission' | 'tdm' | 'comp' | 'defusal'>('mission');
+
   const deploy = async (mapOverride?: GameSettings['map']) => {
     await launch(mapOverride, 'mission');
+  };
+
+  const restart = () => {
+    const mode = launchMode.current;
+    if (mode === 'comp') { void deployRanked(); }
+    else if (mode === 'tdm') { void launch('arena', 'tdm'); }
+    else if (mode === 'defusal') { void launch('sirocco', 'defusal'); }
+    else { void deploy(); }
   };
 
   /** OPERATION BLACKOUT: always the warehouse, always ranked. */
@@ -300,6 +314,7 @@ export default function App() {
     if (!canvasRef.current || launching) return;
     const map = mapOverride ?? settings.map;
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
+    launchMode.current = mode;
     const epoch = ++session.current;
     clearTimers();
     setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
@@ -398,7 +413,7 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} onRanked={() => changePhase('ranked-setup')} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>
@@ -419,8 +434,8 @@ export default function App() {
           onClose={closeBuy}
         />
       )}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} defusal={hud.defusal} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
-      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} defusal={hud.defusal} onResume={resume} onRestart={restart} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={restart} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : settings.map === 'sirocco' ? 'SIROCCO · BOMB DEFUSAL' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
         <TdmSetup

@@ -9,12 +9,16 @@ import type { Effects } from './effects';
 import type { AABB } from './world';
 import { arenaZoneAt } from './world';
 import { NavGrid } from './ai';
+import { applyCompetitiveDamage } from './competitive/rules';
+import type { BotGear, CompOrder } from './competitive/tactics';
 
 export type TDMTeam = 'alpha' | 'bravo';
 export type TDMArmor = 0 | 1 | 2;
 export type TDMBotState = 'PATROL' | 'ENGAGE' | 'FLANK' | 'PUSH' | 'COVER' | 'DEAD';
 
 export const TDM_MATCH_SECONDS = 150;
+/** Ranked Search & Destroy health: one life per round, no momentum layer. */
+export const COMP_BASE_HP = 100;
 export const TDM_RESPAWN_SECONDS = 5;
 export const TDM_BASE_HP = 150;
 export const TDM_HP_PER_ARMOR = 20;
@@ -49,8 +53,9 @@ export interface TDMContext {
   playerPos(): THREE.Vector3;   // eye
   playerFeet(): THREE.Vector3;
   playerAlive(): boolean;
-  /** Bot→player damage. The engine applies the player's own armor reduction. */
-  damagePlayer(amount: number, from: THREE.Vector3, killer: TDMBot): void;
+  /** Bot→player damage. The engine applies the player's own armor reduction.
+   *  Ranked matches pass an explicit headshot flag; TDM infers it from damage. */
+  damagePlayer(amount: number, from: THREE.Vector3, killer: TDMBot, isHead?: boolean): void;
   moveCollide(pos: THREE.Vector3, dx: number, dz: number, radius: number): void;
   onCallout(kind: string, pos: THREE.Vector3, team: TDMTeam): void;
   throwGrenade(from: THREE.Vector3, target: THREE.Vector3, owner: TDMBot): void;
@@ -58,6 +63,14 @@ export interface TDMContext {
   onFeed(killer: string, weapon: string, victim: string, headshot: boolean, killerTeam: TDMTeam, zone: string): void;
   onScore(): void; // roster / scoreboard changed
   playerOnFire(): boolean;
+  /** Ranked S&D: the round engine owns life, death and the clock — not the manager. */
+  competitive?: boolean;
+  /** Ranked S&D: objective orders from the tactical director. */
+  orders?: { get(bot: TDMBot): CompOrder | null };
+  /** Ranked S&D: false during freezetime / round end — brains hold the spawn. */
+  combatLive?: () => boolean;
+  /** Every confirmed kill, whoever scored it — the ranked rules count them once. */
+  onKill?: (killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string) => void;
 }
 
 const ray = new THREE.Raycaster();
@@ -148,6 +161,17 @@ export class TDMBot {
   stunTimer = 0;
   /** 0 cautious .. 1 aggressive. >0.58 = pusher, 0.35–0.75 may flank, else holder. */
   personality = Math.random();
+  // ---- Ranked S&D ----
+  /** Hardware this operator bought: damage, cadence, magazine, reload. */
+  gear: BotGear | null = null;
+  /** Competitive armour pool (0..100) and helmet state. */
+  armorPool = 0;
+  helmet = false;
+  /** Bodies stay on the deck for the whole round — information is a resource. */
+  corpseHold = false;
+  private magLeft = 30;
+  private reloadLeft = 0;
+  private readonly orderVec = new THREE.Vector3();
 
   private ctx: TDMContext;
   private mgr: TDMManager;
@@ -276,6 +300,68 @@ export class TDMBot {
     g.updateMatrixWorld(true);
   }
 
+  /**
+   * Ranked round spawn: a full reset at an exact spot, with no respawn timer.
+   * Returns true when the operator was brought back from the dead.
+   */
+  roundSpawn(x: number, y: number, z: number, yaw: number): boolean {
+    const wasDead = this.dead;
+    this.respawn(new THREE.Vector3(x, y, z));
+    this.yaw = yaw;
+    this.model.group.rotation.y = yaw;
+    this.model.group.updateMatrixWorld(true);
+    this.hp = this.maxHp;
+    this.armorPool = Math.max(0, Math.min(100, this.armorPool));
+    if (this.gear) { this.magLeft = this.gear.mag; this.reloadLeft = 0; }
+    this.corpseHold = true;
+    this.deadAge = 0;
+    this.deathT = -1;
+    this.lastSeenT = 999;
+    this.hasLOS = false;
+    this.target = null;
+    this.orderVec.set(0, 0, 0);
+    return wasDead;
+  }
+
+  /** Ranked loadout applied at round start and after every buy. */
+  setCompetitive(gear: BotGear, armor: number, helmet: boolean): void {
+    this.gear = gear;
+    this.maxHp = COMP_BASE_HP;
+    this.armorPool = Math.max(0, Math.min(100, armor));
+    this.helmet = helmet;
+    this.magLeft = gear.mag;
+    this.reloadLeft = 0;
+    if (!this.dead) this.hp = Math.min(this.hp, this.maxHp);
+  }
+
+  /** True when this operator currently has eyes on an enemy. */
+  seesEnemy(): boolean { return !this.dead && this.hasLOS && !!this.target; }
+
+  /** Current marching order from the tactical director (null in TDM). */
+  order(): CompOrder | null { return this.ctx.orders?.get(this) ?? null; }
+
+  /**
+   * Ranked damage: the competitive armour model, shared with the player's own
+   * hit resolution so both sides of a fight obey identical rules.
+   */
+  applyRankedDamage(amount: number, isHead: boolean, pierce: boolean, attacker: TDMBot | 'player'): { killed: boolean; taken: number } {
+    if (this.dead) return { killed: false, taken: 0 };
+    const result = applyCompetitiveDamage(this.hp, this.armorPool, this.helmet, amount, isHead, pierce);
+    const taken = Math.max(0, this.hp - result.hp);
+    this.hp = result.hp;
+    this.armorPool = result.armor;
+    this.flinch = isHead ? 0.35 : 0.22;
+    const from = attacker === 'player' ? this.ctx.playerFeet() : attacker.pos;
+    this.lastKnown = from.clone();
+    this.lastSeenT = 0;
+    if (this.hp <= 0) { this.hp = 0; this.die(); return { killed: true, taken }; }
+    // A committed plant or defuse is not interrupted by taking fire.
+    const busy = this.order()?.mode === 'action';
+    if (!busy && this.state === 'PATROL') this.state = 'ENGAGE';
+    if (!busy && this.hp < this.maxHp * 0.35 && this.state !== 'COVER' && Math.random() < 0.65) this.enterCover();
+    return { killed: false, taken };
+  }
+
   applyStun(t: number) {
     if (this.dead) return;
     this.stunTimer = Math.max(this.stunTimer, t);
@@ -345,6 +431,14 @@ export class TDMBot {
   }
 
   // ==================== MOMENTUM: "ON FIRE" ====================
+  /** Ranked magazines: reload after the last round, then the magazine is full again. */
+  private magazineTick(dt: number): void {
+    if (this.reloadLeft > 0) {
+      this.reloadLeft = Math.max(0, this.reloadLeft - dt);
+      if (this.reloadLeft === 0 && this.gear) this.magLeft = this.gear.mag;
+    }
+  }
+
   /** Called on every confirmed kill this combatant lands. */
   registerKill() {
     this.killTimes.push(performance.now());
@@ -369,6 +463,8 @@ export class TDMBot {
   /** Momentum timers — driven by the manager with real (unstripped) dt. */
   updateFire(dt: number) {
     if (this.dead) return;
+    if (this.ctx.competitive) { this.magazineTick(dt); return; } // ranked has no ON FIRE streak
+
     this.fireCooldown = Math.max(0, this.fireCooldown - dt);
     const now = performance.now();
     while (this.killTimes.length && now - this.killTimes[0] > TDM_FIRE_WINDOW * 1000) this.killTimes.shift();
@@ -533,6 +629,23 @@ export class TDMBot {
     return Math.abs(d) < 0.7;
   }
 
+  /** May this operator fire right now? Ranked operators must have rounds loaded. */
+  private canShootNow(): boolean {
+    if (!this.gear) return true;
+    return this.reloadLeft <= 0 && this.magLeft > 0;
+  }
+
+  /** One burst round through the ranked cadence: magazine, reload, then the shot. */
+  private rankedShot(target: TargetRef): boolean {
+    const gear = this.gear;
+    if (!gear) { this.fireShot(target); return true; }
+    if (this.reloadLeft > 0) return false;
+    if (this.magLeft <= 0) { this.reloadLeft = gear.reload; return false; }
+    this.fireShot(target);
+    this.magLeft--;
+    return true;
+  }
+
   private fireShot(target: TargetRef) {
     this.model.group.updateMatrixWorld(true);
     const muzzle = this.model.parts.muzzle.getWorldPosition(new THREE.Vector3());
@@ -541,15 +654,48 @@ export class TDMBot {
     this.ctx.onBotFire(muzzle, this.team);
     const aimAt = target.eye.clone();
     const dist = muzzle.distanceTo(aimAt);
-    // accuracy 0.82 close → 0.43 at 65 m; first bullet of a burst +0.12
-    let acc = THREE.MathUtils.lerp(0.82, 0.43, THREE.MathUtils.clamp((dist - 4) / 61, 0, 1));
-    if (this.burstIdx === 0) acc = Math.min(0.94, acc + 0.12);
+    const gear = this.gear;
+    let acc: number;
+    if (gear) {
+      // Ranked: the bought gun's accuracy, degraded by range and sharpened when
+      // the operator is settled (first round of a burst, crouched, holding).
+      acc = gear.accuracy * (1 - Math.min(0.55, Math.max(0, (dist - 12) / 110)));
+      if (this.burstIdx === 0) acc = Math.min(0.9, acc + 0.1);
+      if (this.crouched) acc = Math.min(0.92, acc + 0.06);
+    } else {
+      // accuracy 0.82 close → 0.43 at 65 m; first bullet of a burst +0.12
+      acc = THREE.MathUtils.lerp(0.82, 0.43, THREE.MathUtils.clamp((dist - 4) / 61, 0, 1));
+      if (this.burstIdx === 0) acc = Math.min(0.94, acc + 0.12);
+    }
     this.burstIdx++;
     // never shoot through a wall
     ray.set(muzzle, tmpA.copy(aimAt).sub(muzzle).normalize()); ray.far = Math.max(0, dist - 0.25);
     const wall = ray.intersectObjects(this.ctx.occluders, false)[0];
     const hostile = this.team === 'bravo';
     if (wall) { this.ctx.effects.tracer(muzzle, wall.point, hostile); return; }
+    if (gear) {
+      // Ranked ballistics: buckshot rolls every pellet, rifles roll once.
+      const pellets = Math.max(1, gear.pellets);
+      let landed = 0;
+      for (let i = 0; i < pellets; i++) if (Math.random() < acc) landed++;
+      if (!landed) {
+        const miss = aimAt.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.4, (Math.random() - 0.3) * 1.6, (Math.random() - 0.5) * 2.4));
+        this.ctx.effects.tracer(muzzle, miss, hostile);
+        return;
+      }
+      this.ctx.effects.tracer(muzzle, aimAt, hostile);
+      const headshot = Math.random() < (dist < 16 ? 0.13 : 0.07);
+      const falloff = gear.class === 'SHOTGUN' ? (dist < 9 ? 1 : Math.max(0.1, 1 - (dist - 9) / 14)) : (dist > 45 ? 0.85 : 1);
+      const raw = (headshot ? gear.headDamage : gear.damage * landed) * falloff;
+      if (target.isPlayer) {
+        if (this.ctx.playerAlive()) this.ctx.damagePlayer(raw, this.pos, this, headshot);
+      } else if (target.bot && !target.bot.dead) {
+        this.ctx.effects.blood(aimAt);
+        const result = target.bot.applyRankedDamage(raw, headshot, gear.class === 'SNIPER', this);
+        if (result.killed) this.mgr.handleKill(this, target.bot, headshot, gear.name);
+      }
+      return;
+    }
     if (Math.random() < acc) {
       this.ctx.effects.tracer(muzzle, aimAt, hostile);
       const headshot = Math.random() < 0.10;
@@ -597,8 +743,44 @@ export class TDMBot {
     }
   }
 
+  /**
+   * Ranked S&D: execute the tactical director's order. `move` travels a lane,
+   * `post` holds an angle, `action` stands still and works the objective.
+   */
+  private workOrder(order: CompOrder, dt: number): void {
+    const gearMul = this.gear?.speedMul ?? 1;
+    if (order.mode === 'action') {
+      // Committed to the plant / defuse: stand still, watch the approach.
+      this.crouched = true;
+      this.patrolTarget = null;
+      if (order.watchX !== undefined && order.watchZ !== undefined) {
+        this.faceTarget(this.orderVec.set(order.watchX, this.pos.y, order.watchZ));
+      } else if (this.lastKnown) this.faceTarget(this.lastKnown);
+      return;
+    }
+    const dist = Math.hypot(order.x - this.pos.x, order.z - this.pos.z);
+    if (order.mode === 'post') {
+      if (dist > 1.1) {
+        this.crouched = false;
+        this.goTo(this.orderVec.set(order.x, 0, order.z), 4.3 * gearMul * (order.speed ?? 1), dt);
+      } else {
+        this.crouched = true;
+        const wx = order.watchX ?? order.x + 1, wz = order.watchZ ?? order.z;
+        this.faceTarget(this.orderVec.set(wx, this.pos.y, wz));
+      }
+      return;
+    }
+    this.crouched = false;
+    this.goTo(this.orderVec.set(order.x, 0, order.z), 3.9 * gearMul * (order.speed ?? 1), dt);
+  }
+
   updateLogic(dt: number) {
     if (this.dead || this.stunTimer > 0) return;
+    const order = this.order();
+    // A committed plant or defuse owns the entire body until the director or the
+    // round engine says otherwise — that is what makes an executing carrier killable.
+    if (order?.mode === 'action') { this.workOrder(order, dt); return; }
+    const leash = order && !order.free ? order : null;
     this.stateTime += dt; this.lastSeenT += dt;
     this.grenadeCD = Math.max(0, this.grenadeCD - dt);
 
@@ -630,6 +812,7 @@ export class TDMBot {
         this.crouched = false;
         // bounty spotted while patrolling → drop everything and PUSH the fire target
         if (target && this.isFireTarget(target)) { this.startPush(target, true); break; }
+        if (order) { this.workOrder(order, dt); break; }
         if (!this.patrolTarget) {
           const roll = Math.random();
           if (roll < 0.35) {
@@ -672,14 +855,19 @@ export class TDMBot {
           // burst fire: 2–5 rounds, 0.12–0.18 s between shots.
           // Gated on canFire so the body must visibly aim first.
           this.shotTimer -= dt;
-          if (this.burstLeft > 0 && this.shotTimer <= 0 && canFire(target)) {
-            this.fireShot(target);
-            this.burstLeft--;
-            this.shotTimer = 0.12 + Math.random() * 0.06;
-            if (this.burstLeft <= 0) this.pauseTimer = 0.35 + Math.random() * 0.55;
+          if (this.burstLeft > 0 && this.shotTimer <= 0 && canFire(target) && this.canShootNow()) {
+            if (this.rankedShot(target)) this.burstLeft--;
+            this.shotTimer = this.gear ? this.gear.shotGap : 0.12 + Math.random() * 0.06;
+            if (this.burstLeft <= 0) this.pauseTimer = this.gear ? 0.26 + Math.random() * 0.45 : 0.35 + Math.random() * 0.55;
           } else if (this.burstLeft <= 0) {
             this.pauseTimer -= dt;
-            if (this.pauseTimer <= 0) { this.burstLeft = 2 + Math.floor(Math.random() * 4); this.burstIdx = 0; }
+            if (this.pauseTimer <= 0) {
+              const gear = this.gear;
+              this.burstLeft = gear
+                ? gear.burst[0] + Math.floor(Math.random() * (gear.burst[1] - gear.burst[0] + 1))
+                : 2 + Math.floor(Math.random() * 4);
+              this.burstIdx = 0;
+            }
           }
           // strafe perpendicular to the target while shooting
           this.strafeT -= dt;
@@ -691,11 +879,17 @@ export class TDMBot {
           else if (dist < 5) this.ctx.moveCollide(this.pos, (dx / d) * 2.0 * dt, (dz / d) * 2.0 * dt, 0.36);
           this.tryGrenade(target, dist);
           // committed push: pushers close the fight instead of poking forever
-          if (this.pusher && dist > 6 && dist < 28 && Math.random() < dt * 0.9) this.startPush(target);
+          if (!leash && this.pusher && dist > 6 && dist < 28 && Math.random() < dt * 0.9) this.startPush(target);
         } else {
           // lost sight: flankers wing around, pushers charge the last position, holders hunt
           this.tryGrenade(target, dist);
-          if (this.flanker && Math.random() < 0.5 && this.lastSeenT < 6) this.startFlank(target);
+          if (leash) {
+            // Anchored operators check the corner they were shot from, then go back
+            // to the post. No cross-map chasing on a hold order.
+            if (this.lastKnown && this.lastSeenT < 6 && !this.goTo(this.lastKnown, 3.6, dt)) break;
+            this.lastKnown = null; this.lastSeenT = 999;
+            this.setState('PATROL');
+          } else if (this.flanker && Math.random() < 0.5 && this.lastSeenT < 6) this.startFlank(target);
           else if (this.pusher || this.isFireTarget(target)) this.startPush(target, this.isFireTarget(target));
           else if (this.lastKnown) {
             if (this.goTo(this.lastKnown, 3.8, dt) || this.lastSeenT > 8) {
@@ -711,9 +905,13 @@ export class TDMBot {
         this.crouched = false;
         if (!this.pushTarget) { this.setState('ENGAGE'); break; }
         // shoot on the move whenever sight opens up (still needs to face them)
-        if (this.hasLOS && target && canFire(target)) {
+        if (this.hasLOS && target && canFire(target) && this.canShootNow()) {
           this.shotTimer -= dt;
-          if (this.shotTimer <= 0) { this.burstIdx = 1; this.fireShot(target); this.shotTimer = 0.22 + Math.random() * 0.08; }
+          if (this.shotTimer <= 0) {
+            this.burstIdx = 1;
+            if (this.rankedShot(target)) this.shotTimer = this.gear ? Math.max(0.14, this.gear.shotGap * 1.6) : 0.22 + Math.random() * 0.08;
+            else this.shotTimer = 0.2;
+          }
         }
         if (this.goTo(this.pushTarget, this.huntPush ? 6.6 : 4.6, dt) || this.stateTime > (this.huntPush ? 9 : 7)) {
           this.pushTarget = null; this.huntPush = false; this.setState('ENGAGE');
@@ -736,10 +934,14 @@ export class TDMBot {
           this.crouched = true;
           if (this.lastKnown) this.faceTarget(this.lastKnown);
           // pop out and return fire once partially recovered / after a beat
-          if (this.hasLOS && target && this.stateTime > 1.2 && canFire(target)) {
+          if (this.hasLOS && target && this.stateTime > 1.2 && canFire(target) && this.canShootNow()) {
             this.crouched = false;
             this.shotTimer -= dt;
-            if (this.shotTimer <= 0) { this.burstIdx = 0; this.fireShot(target); this.shotTimer = 0.15; }
+            if (this.shotTimer <= 0) {
+              this.burstIdx = 0;
+              if (this.rankedShot(target)) this.shotTimer = this.gear ? this.gear.shotGap : 0.15;
+              else this.shotTimer = 0.25;
+            }
           }
           if (this.stateTime > 4.5 + Math.random() * 3) {
             this.coverPos = null;
@@ -822,8 +1024,8 @@ export class TDMBot {
         this.model.group.rotation.x = -t * Math.PI / 2 * 0.96;
         this.model.group.position.y = this.pos.y + 0.1 * Math.sin(t * Math.PI);
       }
-      // corpse fades from the field a moment before the respawn
-      if (this.deadAge > TDM_RESPAWN_SECONDS - 1.5) this.model.group.visible = false;
+      // corpses fade before a TDM respawn; in ranked they stay all round
+      if (!this.corpseHold && this.deadAge > TDM_RESPAWN_SECONDS - 1.5) this.model.group.visible = false;
       return;
     }
     if (this.stunTimer > 0) this.stunTimer -= dt;
@@ -916,7 +1118,10 @@ export class TDMManager {
 
   handleKill(killer: TDMBot | 'player', victim: TDMBot | 'player', headshot: boolean, weapon: string) {
     const killerTeam: TDMTeam = killer === 'player' ? 'alpha' : killer.team;
-    if (killerTeam === 'alpha') this.alphaScore++; else this.bravoScore++;
+    // Ranked matches score ROUNDS, not kills — the round engine counts bodies.
+    if (!this.ctx.competitive) {
+      if (killerTeam === 'alpha') this.alphaScore++; else this.bravoScore++;
+    }
     // per-combatant stat lines (the player's own line lives in the engine)
     if (killer !== 'player') { killer.kills++; if (headshot) killer.headshots++; killer.registerKill(); }
     if (victim !== 'player') victim.deaths++;
@@ -927,6 +1132,7 @@ export class TDMManager {
     const vz = victim === 'player' ? this.ctx.playerFeet().z : victim.pos.z;
     this.ctx.onFeed(killerName, weapon, victimName, headshot, killerTeam, arenaZoneAt(vx, vz));
     this.ctx.onScore();
+    this.ctx.onKill?.(killer, victim, headshot, weapon);
   }
 
   /** Someone is ON FIRE — enemies are told to hunt. */
@@ -952,7 +1158,27 @@ export class TDMManager {
     return out;
   }
 
+  /**
+   * Ranked tick. Brains, weapons and visuals only: the round engine owns life,
+   * death, respawns and the clock, so none of those are advanced here.
+   */
+  updateCompetitive(dt: number) {
+    this.tick++;
+    // Freezetime in ranked S&D is exactly that: nobody moves, nobody shoots, and
+    // the only thing advancing is the idle animation. Same again after the round
+    // resolves, so a dead-round firefight cannot decide the next round's economy.
+    const live = !this.ctx.combatLive || this.ctx.combatLive();
+    for (let i = 0; i < this.bots.length; i++) {
+      const b = this.bots[i];
+      b.updateVisualFrame(dt);
+      if (!live) continue;
+      if ((i + this.tick) % 2 === 0) b.updateLogic(dt * 2);
+      b.updateFire(dt);
+    }
+  }
+
   update(dt: number) {
+    if (this.ctx.competitive) { this.updateCompetitive(dt); return; }
     this.timeLeft = Math.max(0, this.timeLeft - dt);
     this.tick++;
     for (let i = 0; i < this.bots.length; i++) {

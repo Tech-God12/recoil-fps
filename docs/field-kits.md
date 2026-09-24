@@ -1,54 +1,48 @@
 # Field Kits
 
-One tactical ability per deployment, on a cooldown, bound to **Z**. It works in Missions and Warehouse TDM. Competitive (Search & Destroy) turns it off, because that mode's utility comes from the buy menu.
+One tactical ability per deployment, on a cooldown, bound to **Z**. It works in Missions and Warehouse TDM.
 
-You pick the kit on the main menu (mission card) or on the TDM setup screen. You can swap it from the pause menu, and the new kit starts on a full cooldown. The choice is saved in settings as `fieldKit`.
+## Getting a kit
+
+- New players own **no kit** and deploy without one.
+- Open **KITS** from the home menu (tile 03), or use the **Field kit** button on the mission deploy panel or the TDM loadout screen.
+- Each kit is a one-time purchase paid from match cash: Recon **$4,500**, Phantom **$6,000**, Bulwark **$7,500**. The first kit you buy is equipped automatically. You can equip any kit you own, or unequip to deploy with none.
+- The equipped kit is **locked in when the game starts**. To change it you have to end the game. The pause menu only shows it for reference.
+- Saved as `ownedKits` / `equippedKit` on the player profile (sanitized in `readKits`). The old free `fieldKit` setting is gone.
 
 ## The kits
 
 | Kit | Ability | Cooldown | What it does | The catch |
 | --- | --- | --- | --- | --- |
-| **RECON** | Sonar Dart | 30 s | Throws a fin-stabilised dart (26 m/s, 55 % gravity) that sticks where it lands. It fires 3 pings, 2.5 s apart, starting 0.4 s after impact. Each ping tags every hostile within **24 m** through walls for 3.2 s (red world marker + radar contact). | Each ping can be heard within **14 m**. Hostiles in that range walk over to look for the dart. |
-| **BULWARK** | Barricade | 40 s | Plants a steel wall 1.7 m ahead of you, snapped to the nearest axis you are facing. It is 2.4 m wide, **1.4 m** tall and has **450 HP**. It blocks bullets and sight-lines both ways, blocks movement, and AI path around it. It lasts 22 s. | A crouched eye (1.22 m) is covered; a standing eye (1.62 m) is exposed. Crouch to be safe, stand to shoot over it. Hostile fire wears it down, and each hostile frag deals up to 260. If the spot is blocked, placement is refused and you keep the charge. |
-| **PHANTOM** | Holo-Decoy | 35 s | Sends a hologram of an operator jogging 3.6 m/s along your aim for 2.6 s (≈9 m). It then holds position and fires blanks every 0.55–1.1 s for the rest of its 10 s life. Any hostile inside **32 m** with line of sight to it targets it **instead of you**. | 120 HP, so one volley pops it. The blanks can be heard within 28 m. If you shoot a lured hostile, there is a **50 %** chance it snaps out of it and turns on you (TDM bots are then immune for 3 s). |
+| **RECON** | Sonar Dart | 45 s | Throws a dart that sticks where it lands and fires 3 pings, 2.5 s apart. Each ping tags every hostile within **24 m** for 3.2 s, drawn as a **full-body silhouette through walls** (it drops to crouch height when they crouch) plus a marker and a radar contact. **Tagged hostiles take +10 % damage** from you. | Each ping can be heard within **14 m**, and hostiles in that range come looking for the dart. |
+| **BULWARK** | Barricade | 60 s | Slams down a folding steel shield 1.7 m ahead of you: 2.4 m wide, **1.4 m** tall, **450 HP**, lasts 24 s. It blocks bullets, sight-lines, movement and AI pathing. Press **Z within 3.5 m of it to recall it**, which works even while the kit is recharging and banks `30 s × remaining integrity` of cooldown. | Crouch to be covered; standing exposes you. Hostile fire and frags break it. If the spot is blocked, placement is refused and you keep the charge. |
+| **PHANTOM** | Holo-Decoy | 50 s | A hologram jogs 9 m along your aim, then **strafes** and fires blanks for 10 s. Hostiles inside **32 m** that can see it shoot it instead of you. When it dies (shot or timed out) it **bursts and stuns every hostile within 6 m for 1.6 s**. | 120 HP. Shooting a lured hostile has a 50 % chance to break the lure. |
 
-**Kill refund:** each kill you make takes **20 %** of the full cooldown off your kit (6 s for Recon). Streak kills don't count, which matches the scorestreak rule that streaks don't chain.
+**Charge rules (retuned after the "refills after 1–2 kills" feedback):**
+- Kits start each game **50 % charged**, so there is no ability at the spawn.
+- Each kill takes **8 %** of the full cooldown off (was 20 %), and kills can refund **at most 30 % per charge**. For example, two kills on Recon take off 7.2 s, and no killing spree can take off more than 13.5 s.
+- Cooldowns went up about 50 %: 30/40/35 s became 45/60/50 s.
 
-## What it changes moment to moment
+## UI & effects
 
-- **Recon:** throw before you peek. Now you know how many are in the room, but they may come to you.
-- **Bulwark:** make cover in an open lane, then keep choosing between crouching safely and standing to shoot over it while it takes damage.
-- **Phantom:** draw fire across a sight-line, then flank the hostiles shooting at the decoy. Shooting a lured hostile has a 50 % chance to break the lure.
-
-## HUD & discoverability
-
-- **Kit slot** next to the vitals: a conic cooldown dial with the kit icon, a **Z** keycap and READY / CHARGING state. While a dart is pinging it also shows a TAGGED count.
-- **Live chips** above the slot for each deployed object: dart pings (`PING 2/3`), barricade and decoy health bars, and time left.
-- **Ticker** (top centre) for events: `SONAR — 3 HOSTILES TAGGED`, `BARRICADE DESTROYED`, `DECOY DOWN`, `… READY — PRESS Z`, and refusals.
-- **Onboarding:** a `Press Z` prompt stays up until you use the kit for the first time. The first-run control strip lists `Z FIELD KIT`, and there is a boot-screen tip.
-- **Menus:** a kit picker on the mission card and TDM setup, a rule line on TDM setup, and a pause-menu card with the equipped kit's rules plus swap buttons.
-
-## Audio
-
-All sounds come from the existing spatial synth (`audio.ts`), with no sample files. They are: the dart throw whoosh, a thunk on impact, a positional sonar ping (sine chirp + echo tap), the barricade slam and a metal ping on each hit, a crash when it breaks, the decoy's shimmer on spawn, blank bursts at its position, a glitch-out when it dies, and a two-note chime when the kit is ready.
-
-## Models
-
-Procedural, in the same style as `streak-models.ts` (`kit-models.ts`). The dart is a body, fins and an emissive sensor ring. The barricade is three plated panels on kick-stands with hazard edging and a damage tint. The decoy is a translucent scan-lined operator with a rifle silhouette and a base ring. Geometry budgets are enforced in tests.
+- **KITS screen** (`KitsMenu.tsx`): three kit cards showing price, OWNED or EQUIPPED; a live 3D turntable that loops each ability's animation (`KitViewer.tsx`, built from the real in-game models); animated stat bars; how-to steps; a buy/equip button with a shine and a toast. Keyboard: ←/→ or 1–3 to select, Enter to buy or equip, Esc to go back.
+- **HUD slot:** a 24-tick segmented dial with a glowing arc, a burst ring when the kit becomes ready, a flash when it is used, a RECALL state for Bulwark, a charge bar, and a `N TAGGED · +10%` badge.
+- **Screen effects** (`KitFx`): a sonar sweep ring on each ping, a dust flash when the barricade slams down, a red vignette when it breaks, and glitch bars when the decoy bursts. Camera shake scales with distance.
+- **World effects:** the dart has an echo ring, a wire dome and a beacon beam. The barricade unfolds on its hinges, kicks up slam dust, throws sparks where it is hit, scorches as it takes damage and shudders when critical. The decoy has a projector cone, a scan ring and a scanline crawl, glitches its torso, and ends in a holo burst.
+- **Pause menu** (redesigned): blurred backdrop, large PAUSED title, icon actions with keyboard navigation (↑↓, 1–4). Restart and Quit need a second press to confirm. It shows a TDM scoreboard (score, time, your K/D) or the mission objective, a read-only kit card with a charge bar, and a scorestreak grid.
 
 ## Code map
 
-- `src/game/kits.ts`: tuning table, `KitCharge`, pure helpers (`snapCardinal`, `barricadePlacement`, `sonarTagged`, `chooseLure`) and `KitDirector` (it owns the dart, barricade and decoy entities, and is mode-agnostic through `KitContext`).
-- `src/game/kit-models.ts`: meshes.
-- `src/game/ai.ts`: `Enemy.lure` redirects look, aim and fire at the decoy. Rounds that stop on a barricade plate damage it.
-- `src/game/tdm.ts`: bravo bots prefer a visible decoy in `acquireTarget`, `fireShot` routes damage to the decoy or barricade, and `lureImmuneT` handles the lure break.
-- `src/game/engine.ts`: `kitContext()` bridge (placement vs solids, blocker/occluder/nav-grid refresh, hearing alerts), Z key, kill refunds, frag damage to barricades, HUD snapshot, cleanup on death, match end and dispose.
-- `src/ui/Kits.tsx` + `index.css` (FIELD KITS section): slot, chips, hint, ticker, picker and pause card.
-- `tests/field-kits.test.js`: 16 tests. Pure logic, geometry budgets, headless director sims for each kit (spawn → act → cleanup), real `Enemy` and `TDMBot` lure and barricade tests, engine wiring on the real warehouse map, and UI render.
+- `src/game/economy/kit-shop.ts`: ids, prices, `buyKit`, `equipKit`, `readKits`.
+- `src/game/kits.ts`: tuning table, `KitCharge` (capped refunds, `bank`), pure helpers (`barricadePlacement`, `sonarTagged`, `burstVictims`, `recallRefundSeconds`, `chooseLure`) and `KitDirector`.
+- `src/game/kit-models.ts`: meshes. `src/game/effects.ts`: `sparks`, `slamDust`, `sonarPulse`, `holoBurst`, `kitFlash`.
+- `src/game/engine.ts`: builds the director only when a kit is equipped. Handles the damage multiplier on player hits, stun/crouch hooks for hostiles, and the `kitfx` event plus camera shake.
+- `src/ui/Kits.tsx`, `KitsMenu.tsx`, `KitViewer.tsx`, `Screens.tsx` (`PauseMenu`); CSS in the FIELD KITS / KITS / PAUSE sections of `index.css`.
+- `tests/field-kits.test.js`: 19 tests.
 
 ## Limitations
 
-- Friendly TDM bots (alpha) don't use kits, and bravo bots don't have kits of their own.
-- Mission AI can't tell a decoy is fake except through the 50 % break when shot. They don't learn it across encounters.
-- Barricades are axis-snapped slabs, so they can't be placed at an angle.
-- No human playtest or browser/hardware check was done. The numbers above come from reasoning and headless simulation.
+- Bots don't use kits.
+- Barricades snap to an axis.
+- Pressing Z next to your own wall always recalls it; walk away from it to plant a new one.
+- No browser or human playtest was done. The numbers come from reasoning and headless simulation.

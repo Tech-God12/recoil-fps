@@ -1,8 +1,11 @@
 // Recoil FPS — Field Kit UI: the in-game ability slot, live gadget chips, onboarding
-// prompt and ticker, the deploy-screen kit picker and the pause-menu reference/swap.
-// Everything uses the print-room palette (brass / bone / signal on ink) plus one cyan
-// accent reserved for sonar, so kit intel never reads as UAV (red) intel.
-import { KIT_DEFS, KIT_IDS, KIT_KEY, KIT_TUNING, type KitHud, type KitId } from '../game/kits';
+// prompt, ticker and screen-space kit effects, the "equipped kit" button on the deploy
+// screens and the read-only pause-menu reference. The full shop/equip screen lives in
+// KitsMenu.tsx. Print-room palette (brass / bone / signal on ink); each kit carries one
+// accent: recon cyan (sonar, never confused with the red UAV), bulwark signal orange,
+// phantom holo teal.
+import type { CSSProperties } from 'react';
+import { KIT_DEFS, KIT_KEY, KIT_TUNING, type KitFxKind, type KitHud, type KitId } from '../game/kits';
 
 /* ------------------------------------------------------------------ */
 /* Icons (inline SVG, stroke = currentColor)                           */
@@ -38,17 +41,53 @@ export function KitIcon({ id, size = 22 }: { id: KitId; size?: number }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* In-game ability slot (bottom-left, above the vitals)                */
-/* ------------------------------------------------------------------ */
-export function KitSlot({ kit }: { kit: KitHud }) {
-  const deg = Math.round(kit.pct * 360);
+export function LockIcon({ size = 14 }: { size?: number }) {
   return (
-    <div className={`kit-slot kit-${kit.id} ${kit.ready ? 'ready' : 'charging'}`} aria-label={`Field kit ${kit.name}: ${kit.ability}${kit.ready ? ' ready' : ` recharging ${Math.ceil(kit.cooldownLeft)} seconds`}`}>
-      <div className="kit-dial" style={{ background: `conic-gradient(var(--kit-accent) ${deg}deg, rgba(237,228,211,0.1) ${deg}deg)` }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <rect x="5" y="11" width="14" height="10" rx="1.5" /><path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* In-game ability slot (bottom-left, beside the vitals)               */
+/* ------------------------------------------------------------------ */
+/** 24 tick marks around the dial: one per 1/24 of a charge. */
+const TICKS = Array.from({ length: 24 }, (_, i) => i);
+const R = 27; // dial radius in the 64×64 viewBox
+const CIRC = 2 * Math.PI * R;
+
+export function KitSlot({ kit }: { kit: KitHud }) {
+  const lit = Math.floor(kit.pct * TICKS.length);
+  const secs = Math.ceil(kit.cooldownLeft);
+  return (
+    <div
+      className={`kit-slot kit-${kit.id} ${kit.ready ? 'ready' : 'charging'} ${kit.recall ? 'recall' : ''}`}
+      aria-label={`Field kit ${kit.name}: ${kit.ability}${kit.ready ? ' ready' : ` recharging ${secs} seconds`}`}
+    >
+      <div className="kit-dial">
+        <svg viewBox="0 0 64 64" className="kit-dial-svg" aria-hidden="true">
+          <circle cx="32" cy="32" r={R} className="kit-dial-track" />
+          <circle
+            cx="32" cy="32" r={R} className="kit-dial-arc"
+            strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - kit.pct)}
+            transform="rotate(-90 32 32)"
+          />
+          {TICKS.map(i => {
+            const a = (i / TICKS.length) * Math.PI * 2 - Math.PI / 2;
+            return (
+              <line key={i} className={i < lit || kit.ready ? 'on' : ''}
+                x1={32 + Math.cos(a) * 30.5} y1={32 + Math.sin(a) * 30.5}
+                x2={32 + Math.cos(a) * 32} y2={32 + Math.sin(a) * 32} />
+            );
+          })}
+        </svg>
+        {/* Keyed bursts: remount on every ready / use so the CSS animation replays. */}
+        {kit.readyEpoch > 0 && <span key={`r${kit.readyEpoch}`} className="kit-burst ready" aria-hidden="true" />}
+        {kit.useEpoch > 0 && <span key={`u${kit.useEpoch}`} className="kit-burst use" aria-hidden="true" />}
         <div className="kit-dial-core">
-          <KitIcon id={kit.id} />
-          {!kit.ready && <span className="kit-cd tabular">{Math.ceil(kit.cooldownLeft)}</span>}
+          <KitIcon id={kit.id} size={24} />
+          {!kit.ready && <span className="kit-cd tabular">{secs}</span>}
         </div>
       </div>
       <div className="kit-meta">
@@ -56,10 +95,11 @@ export function KitSlot({ kit }: { kit: KitHud }) {
         <span className="kit-ability">{kit.ability}</span>
         <span className="kit-state mono">
           <span className="keycap">{kit.key}</span>
-          {kit.ready ? 'READY' : 'CHARGING'}
+          {kit.recall ? 'RECALL' : kit.ready ? 'READY' : 'CHARGING'}
         </span>
+        <span className="kit-bar" aria-hidden="true"><i style={{ width: `${Math.round(kit.pct * 100)}%` }} /></span>
       </div>
-      {kit.tagged > 0 && <span className="kit-tagged mono" role="status">{kit.tagged} TAGGED</span>}
+      {kit.tagged > 0 && <span className="kit-tagged mono" role="status">{kit.tagged} TAGGED · +10%</span>}
     </div>
   );
 }
@@ -71,27 +111,32 @@ export function KitLive({ kit }: { kit: KitHud }) {
   if (!kit.live.length) return null;
   return (
     <div className="kit-live" aria-label="Active field kit gadgets">
-      {kit.live.map((l, i) => (
-        <div key={`${l.kind}-${i}`} className={`kit-chip kit-chip-${l.kind}`}>
-          <span className="kit-chip-name">{l.label}</span>
-          {l.detail && <span className="kit-chip-detail mono">{l.detail}</span>}
-          <span className="kit-chip-time tabular">{Math.ceil(l.timeLeft)}s</span>
-          <span className="kit-chip-bar"><i style={{ width: `${Math.max(0, Math.min(1, l.health ?? l.timeLeft / l.total)) * 100}%` }} /></span>
-        </div>
-      ))}
+      {kit.live.map((l, i) => {
+        const frac = Math.max(0, Math.min(1, l.health ?? l.timeLeft / l.total));
+        return (
+          <div key={`${l.kind}-${i}`} className={`kit-chip kit-chip-${l.kind} ${frac < 0.35 ? 'low' : ''}`}>
+            <span className="kit-chip-name">{l.label}</span>
+            {l.detail && <span className="kit-chip-detail mono">{l.detail}</span>}
+            <span className="kit-chip-time tabular">{Math.ceil(l.timeLeft)}s</span>
+            <span className="kit-chip-bar"><i style={{ width: `${frac * 100}%` }} /></span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Onboarding prompt: first 20 s of a deployment, until first use      */
+/* Onboarding prompt: first 45 s of a deployment, until first use      */
 /* ------------------------------------------------------------------ */
 export function KitHint({ kit }: { kit: KitHud }) {
   return (
-    <div className="kit-hint" role="status">
+    <div className={`kit-hint kit-${kit.id}`} role="status">
       <span className="kit-hint-tag">FIELD KIT</span>
       <span className="kit-hint-text">
-        Press <span className="keycap">{kit.key}</span> — {kit.ability}
+        {kit.ready
+          ? <>Press <span className="keycap">{kit.key}</span> — {kit.ability}</>
+          : <>{kit.ability} charging · <span className="tabular">{Math.ceil(kit.cooldownLeft)}s</span> · then <span className="keycap">{kit.key}</span></>}
       </span>
       <span className="kit-hint-sub">{kit.blurb}</span>
     </div>
@@ -109,65 +154,69 @@ export function KitMessage({ text }: { text: string }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Deploy-screen picker (missions list + TDM setup)                     */
+/* Screen-space kit effects (one overlay per event, keyed to replay)   */
 /* ------------------------------------------------------------------ */
-function statLine(id: KitId): string {
-  if (id === 'recon') return `${KIT_TUNING.recon.pulses} pings · ${KIT_TUNING.recon.radius} m · ${KIT_TUNING.recon.cooldown}s`;
-  if (id === 'bulwark') return `${KIT_TUNING.bulwark.hp} HP · ${KIT_TUNING.bulwark.life}s · ${KIT_TUNING.bulwark.cooldown}s`;
-  return `${KIT_TUNING.phantom.hp} HP · ${KIT_TUNING.phantom.life}s · ${KIT_TUNING.phantom.cooldown}s`;
-}
-
-export function KitPicker({ value, onChange, compact }: { value: KitId; onChange: (id: KitId) => void; compact?: boolean }) {
+export function KitFx({ kind }: { kind: KitFxKind }) {
   return (
-    <div className={`kit-picker ${compact ? 'compact' : ''}`} role="radiogroup" aria-label="Field kit">
-      <div className="kit-picker-head mono">
-        <span>FIELD KIT</span>
-        <span>ABILITY ON <span className="keycap">{KIT_KEY}</span></span>
-      </div>
-      <div className="kit-picker-row">
-        {KIT_IDS.map(id => {
-          const d = KIT_DEFS[id];
-          const on = id === value;
-          return (
-            <button key={id} type="button" role="radio" aria-checked={on}
-              className={`kit-card kit-${id} ${on ? 'on' : ''}`} onClick={() => onChange(id)} title={`${d.blurb} ${d.rule}`}>
-              <span className="kit-card-icon"><KitIcon id={id} size={compact ? 18 : 22} /></span>
-              <span className="kit-card-body">
-                <b>{d.name}</b>
-                <em>{d.ability}</em>
-                {!compact && <span className="kit-card-stats mono">{statLine(id)}</span>}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      {!compact && <p className="kit-picker-blurb">{KIT_DEFS[value].blurb} <span>{KIT_DEFS[value].rule}</span></p>}
+    <div className={`kit-fx kit-fx-${kind}`} aria-hidden="true">
+      {kind === 'ping' && <><i className="kf-ring" /><i className="kf-ring two" /></>}
+      {kind === 'burst' && <><i className="kf-glitch" /><i className="kf-glitch b" /><i className="kf-glitch c" /></>}
+      {kind === 'slam' && <i className="kf-dust" />}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Pause-menu reference + mid-match swap                               */
+/* Deploy screens: the equipped kit, as a button into the KITS menu    */
 /* ------------------------------------------------------------------ */
-export function KitPauseCard({ kit, onKit }: { kit: KitHud; onKit?: (id: KitId) => void }) {
+export function KitEquipButton({ kit, onOpen, compact }: { kit: KitId | null; onOpen?: () => void; compact?: boolean }) {
+  const d = kit ? KIT_DEFS[kit] : null;
   return (
-    <div className="pause-kit" aria-label="Field kit">
-      <div className="pause-streaks-head">
-        <span>Field kit · <span className="keycap">{kit.key}</span></span>
-        <span className="tabular">{kit.ready ? 'READY' : `${Math.ceil(kit.cooldownLeft)}s`}</span>
+    <button type="button" className={`kit-equip ${kit ? `kit-${kit}` : 'none'} ${compact ? 'compact' : ''}`} onClick={onOpen} disabled={!onOpen}
+      aria-label={d ? `Field kit ${d.name} equipped. Open the Kits menu` : 'No field kit equipped. Open the Kits menu'}>
+      <span className="kit-equip-icon">{kit ? <KitIcon id={kit} size={compact ? 18 : 22} /> : <LockIcon size={compact ? 16 : 18} />}</span>
+      <span className="kit-equip-body">
+        <em>FIELD KIT <span className="keycap">{KIT_KEY}</span></em>
+        <b>{d ? `${d.name} · ${d.ability}` : 'NONE EQUIPPED'}</b>
+      </span>
+      <span className="kit-equip-go mono">{d ? 'CHANGE' : 'GET A KIT'} ›</span>
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Pause-menu reference (read-only: kits are locked mid-deployment)    */
+/* ------------------------------------------------------------------ */
+export function KitPauseCard({ kit }: { kit?: KitHud }) {
+  if (!kit) {
+    return (
+      <div className="pz-kit none">
+        <span className="pz-kit-icon"><LockIcon size={18} /></span>
+        <div className="pz-kit-body">
+          <b>No field kit</b>
+          <p>Buy and equip one from <b>KITS</b> on the main menu. Kits can only be changed between games.</p>
+        </div>
       </div>
-      {KIT_IDS.map(id => {
-        const d = KIT_DEFS[id];
-        const on = id === kit.id;
-        return (
-          <button key={id} type="button" className={`pause-kit-row ${on ? 'on' : ''}`} onClick={() => onKit?.(id)} disabled={on || !onKit} aria-pressed={on}>
-            <span className="pause-kit-icon"><KitIcon id={id} size={18} /></span>
-            <span className="psr-name">{d.name} · {d.ability}</span>
-            <span className="psr-state">{on ? 'EQUIPPED' : 'SWAP'}</span>
-          </button>
-        );
-      })}
-      <p className="pause-streaks-foot">{kit.blurb} {kit.rule} Kills cut {Math.round(KIT_TUNING.killRefund * 100)}% off the cooldown. Swapping starts the new kit on a full cooldown.</p>
+    );
+  }
+  const d = KIT_DEFS[kit.id];
+  const style = { '--pct': kit.pct } as CSSProperties;
+  return (
+    <div className={`pz-kit kit-${kit.id} ${kit.ready ? 'ready' : ''}`} style={style} aria-label="Field kit">
+      <span className="pz-kit-icon"><KitIcon id={kit.id} size={22} /></span>
+      <div className="pz-kit-body">
+        <div className="pz-kit-head">
+          <b>{d.name} · {d.ability}</b>
+          <span className="pz-kit-state mono">{kit.ready ? 'READY' : `${Math.ceil(kit.cooldownLeft)}s`}</span>
+        </div>
+        <span className="pz-kit-bar" aria-hidden="true"><i /></span>
+        <ul className="pz-kit-steps">
+          {d.steps.map((s, i) => <li key={i}><span className="mono">{String(i + 1).padStart(2, '0')}</span>{s}</li>)}
+        </ul>
+        <p className="pz-kit-foot mono">
+          <LockIcon size={11} /> LOCKED FOR THIS DEPLOYMENT · KILLS −{Math.round(KIT_TUNING.killRefund * 100)}% (MAX {Math.round(KIT_TUNING.refundCap * 100)}%/CHARGE)
+        </p>
+      </div>
     </div>
   );
 }

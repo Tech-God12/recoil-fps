@@ -714,63 +714,6 @@ export class SpatialAudioEngine {
 
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }
 
-  /**
-   * OPERATION BLACKOUT — the charge's LED beeper. Pitch and level rise as the fuse
-   * burns down, so a player can hear the clock without looking at the HUD.
-   * `urgency` is 0 (freshly planted) .. 1 (about to blow).
-   */
-  bombBeep(urgency: number) {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    const u = Math.max(0, Math.min(1, urgency));
-    const o = ctx.createOscillator();
-    o.type = 'square';
-    o.frequency.setValueAtTime(1750 + u * 900, t);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.035 + u * 0.05, t + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.075);
-    o.connect(g);
-    g.connect(this.master!);
-    o.start(t);
-    o.stop(t + 0.09);
-    o.onended = () => { o.disconnect(); g.disconnect(); };
-  }
-
-  /** Plant / defuse completion sting: two rising tones for the attackers, one for the cut. */
-  chargePlanted() {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    [420, 640, 880].forEach((f, i) => {
-      const o = ctx.createOscillator();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(f, t + i * 0.06);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t + i * 0.06);
-      g.gain.linearRampToValueAtTime(0.09, t + i * 0.06 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.06 + 0.16);
-      o.connect(g); g.connect(this.master!);
-      o.start(t + i * 0.06); o.stop(t + i * 0.06 + 0.18);
-      o.onended = () => { o.disconnect(); g.disconnect(); };
-    });
-  }
-
-  chargeDefused() {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    [880, 560].forEach((f, i) => {
-      const o = ctx.createOscillator();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(f, t + i * 0.09);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t + i * 0.09);
-      g.gain.linearRampToValueAtTime(0.085, t + i * 0.09 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.09 + 0.22);
-      o.connect(g); g.connect(this.master!);
-      o.start(t + i * 0.09); o.stop(t + i * 0.09 + 0.25);
-      o.onended = () => { o.disconnect(); g.disconnect(); };
-    });
-  }
   throwWhoosh() { this.ensure(); this.burstDirect({ dur: 0.16, gain: 0.2, freq: 950, q: 0.5, attack: 0.04 }); }
 
   fleshImpact(_pan = 0) {
@@ -1196,6 +1139,44 @@ export class SpatialAudioEngine {
   decoyPop(wx: number, wy: number, wz: number) {
     this.spatialTone(wx, wy, wz, { from: 1400, to: 180, dur: 0.3, gain: 0.3, type: 'square' });
     for (let i = 0; i < 4; i++) this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.3, freq: 3000 + i * 900, q: 5, when: i * 0.045 });
+  }
+
+  /** Decoy glitch burst: a sub-bass thump under a descending digital shriek and crackle. */
+  decoyBurst(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 110, to: 38, dur: 0.45, gain: 0.55, type: 'sine' });
+    this.spatialTone(wx, wy, wz, { from: 2600, to: 240, dur: 0.38, gain: 0.26, type: 'sawtooth' });
+    for (let i = 0; i < 7; i++) this.spatialNoise(wx, wy, wz, { dur: 0.025, gain: 0.34, freq: 1800 + (i % 3) * 1500, q: 6, when: 0.02 + i * 0.038 });
+  }
+
+  /** Barricade recalled: servo whine up, then two latch clicks. */
+  barricadeRecall(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 240, to: 720, dur: 0.28, gain: 0.22, type: 'triangle' });
+    this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.4, freq: 2400, q: 4, when: 0.26 });
+    this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.34, freq: 1900, q: 4, when: 0.34 });
+  }
+
+  /** Kits menu: purchase confirmed — register drawer plus a rising two-note seal. */
+  kitPurchase() {
+    this.burstDirect({ dur: 0.05, gain: 0.3, freq: 2600, q: 2 });
+    this.burstDirect({ dur: 0.18, gain: 0.16, freq: 5200, q: 6, when: 0.05 });
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    [[440, 0.06], [660, 0.14], [990, 0.22]].forEach(([f, when]) => {
+      const o = ctx.createOscillator();
+      o.type = 'triangle'; o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + when);
+      g.gain.exponentialRampToValueAtTime(0.16, t + when + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.3);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + when); o.stop(t + when + 0.32);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    });
+  }
+
+  /** Kits menu: moving the selection between kits — a dry mechanical tick. */
+  kitSelect() {
+    this.burstDirect({ dur: 0.025, gain: 0.12, freq: 3400, q: 5 });
   }
 
   private burstDirect(opts: {

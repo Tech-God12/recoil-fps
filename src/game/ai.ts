@@ -222,6 +222,8 @@ export class Enemy {
   private recentDamage = 0;
   private grenadeCD = 0;
   private crouched = false;
+  /** Read-only crouch state (field-kit sonar silhouettes drop to crouch height). */
+  get isCrouched(): boolean { return this.crouched; }
   private strafeDir = 0; private strafeT = 0; private strafeCD = 0;
   private lastX = 0; private lastZ = 0;
   private path: THREE.Vector3[] | null = null;
@@ -482,8 +484,8 @@ export class Enemy {
     if (obstruction) {
       ctx.effects.tracer(muzzle,obstruction.point,true);
       // Field-kit barricade plates carry a damage hook: rounds that stop on them count.
-      const kitHit = obstruction.object.userData.kitHit as ((n: number) => void) | undefined;
-      if (kitHit) kitHit(roll);
+      const kitHit = obstruction.object.userData.kitHit as ((n: number, at?: THREE.Vector3) => void) | undefined;
+      if (kitHit) kitHit(roll, obstruction.point);
       return;
     }
     if (lure && this.hasLOS && Math.random() < acc) {

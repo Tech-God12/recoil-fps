@@ -5,12 +5,13 @@ import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
+import KitsMenu from './ui/KitsMenu';
 import { developmentCashGrant, grantCash, loadProfile, resetCurrentCash, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { settleResult } from './game/economy/settlement';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'ranked-setup';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'kits';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const LEGACY_WALLET_NOTICE_THRESHOLD = 9_000_000;
 
@@ -29,7 +30,7 @@ const DEFAULT_HUD: HudState = {
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, kitMsg: null, nukeFlash: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, kitMsg: null, kitFx: null, nukeFlash: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
@@ -164,6 +165,10 @@ export default function App() {
         setFx(f => ({ ...f, banner: { id, label: event.label } }));
         later(() => setFx(f => f.banner?.id === id ? { ...f, banner: null } : f), 1600);
         break;
+      case 'kitfx':
+        setFx(f => ({ ...f, kitFx: { id, kind: event.kind } }));
+        later(() => setFx(f => f.kitFx?.id === id ? { ...f, kitFx: null } : f), 900);
+        break;
       case 'kitmsg':
         setFx(f => ({ ...f, kitMsg: { id, text: event.text } }));
         later(() => setFx(f => f.kitMsg?.id === id ? { ...f, kitMsg: null } : f), 2800);
@@ -248,13 +253,7 @@ export default function App() {
     await launch(mapOverride, 'mission');
   };
 
-  /** OPERATION BLACKOUT: always the warehouse, always ranked. */
-  const deployRanked = async () => {
-    if (settings.map !== 'arena') set({ map: 'arena' });
-    await launch('arena', 'comp');
-  };
-
-  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' | 'comp' = 'mission') => {
+  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' = 'mission') => {
     if (!canvasRef.current || launching) return;
     const map = mapOverride ?? settings.map;
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
@@ -272,10 +271,9 @@ export default function App() {
     if (session.current !== epoch) return;
     try {
       const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor,
-        // Ranked deploys with the player's own per-weapon builds and their ladder state.
-        mode === 'comp'
-          ? { mode: 'comp', compBuilds: profileRef.current.builds, rankedProfile: profileRef.current.ranked }
-          : mode === 'tdm' ? { mode: 'tdm', kit: settings.fieldKit } : { mode: 'mission', kit: settings.fieldKit });
+        // The kit is whatever the player bought and equipped in KITS — none means none.
+        // It is fixed for the whole deployment; changing it means ending the game.
+        { mode, kit: profileRef.current.equippedKit });
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -327,6 +325,14 @@ export default function App() {
     changePhase('armory');
     if (document.pointerLockElement) document.exitPointerLock();
   };
+  // KITS opens from the home menu or the TDM loadout screen and returns there.
+  const [kitsFrom, setKitsFrom] = useState<'menu' | 'tdm-setup'>('menu');
+  const openKits = (from: 'menu' | 'tdm-setup' = 'menu') => {
+    setKitsFrom(from);
+    if (from === 'menu') setMenuView('home');
+    setShowSettings(false);
+    changePhase('kits');
+  };
   const armoryBack = () => {
     changePhase(armoryFrom === 'results' && results ? 'results' : 'menu');
   };
@@ -351,7 +357,7 @@ export default function App() {
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} onKit={id => set({ fieldKit: id })} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} onKits={openKits} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>
@@ -364,7 +370,7 @@ export default function App() {
           </div>
         </aside>
       )}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} kit={hud.kit} onKit={id => { set({ fieldKit: id }); const eng = engineRef.current; if (eng) { eng.setKit(id); setHud(eng.hud()); } }} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} streaks={hud.streaks} kit={hud.kit} tdm={hud.tdm} mapName={settings.map === 'arena' ? 'Warehouse · 5v5 TDM' : (MAPS.find(m => m.id === settings.map)?.name ?? '')} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
@@ -375,18 +381,12 @@ export default function App() {
           onArmor={setTdmArmor}
           onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
-          kit={settings.fieldKit}
-          onKit={id => set({ fieldKit: id })}
+          kit={profile.equippedKit}
+          onKits={() => openKits('tdm-setup')}
         />
       )}
-      {phase === 'ranked-setup' && !launching && (
-        <RankedSetup
-          rank={rankFor(profile.ranked.rating, profile.ranked)}
-          rating={profile.ranked.rating}
-          record={profile.ranked}
-          onDeploy={() => { void deployRanked(); }}
-          onBack={() => { setMenuView('home'); changePhase('menu'); }}
-        />
+      {phase === 'kits' && (
+        <KitsMenu profile={profile} onProfile={updateProfile} onBack={() => changePhase(kitsFrom)} />
       )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">

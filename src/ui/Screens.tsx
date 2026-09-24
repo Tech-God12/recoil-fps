@@ -5,6 +5,7 @@ import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
 import { MAPS, type MapId } from '../game/world';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
+import type { StreakHud } from '../game/streaks';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
@@ -713,8 +714,8 @@ export function BootScreen({ map }: { map?: MapId }) {
 /* ================================================================
    PAUSE — SUSPENDED
    ================================================================ */
-export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: {
-  mission?: MissionHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
+export function PauseMenu({ mission, streaks, onResume, onRestart, onSettings, onQuit }: {
+  mission?: MissionHud; streaks?: StreakHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
 }) {
   const readout = mission ? objectiveReadout(mission) : undefined;
   return (
@@ -748,6 +749,23 @@ export function PauseMenu({ mission, onResume, onRestart, onSettings, onQuit }: 
             </div>
           )}
           <p className="pause-note">All mission timers frozen</p>
+          {streaks && (
+            <div className="pause-streaks" aria-label="Scorestreaks">
+              <div className="pause-streaks-head">
+                <span>Scorestreaks</span>
+                <span className="tabular">{streaks.points} pts this life</span>
+              </div>
+              {streaks.ladder.map(l => (
+                <div key={l.id} className={`pause-streak-row ${l.ready ? 'ready' : ''} ${l.claimed && !l.ready ? 'claimed' : ''}`}>
+                  <span className="keycap">{l.key}</span>
+                  <span className="psr-name">{l.name}</span>
+                  <span className="psr-cost tabular">{l.cost}</span>
+                  <span className="psr-state">{l.active ? 'LIVE' : l.ready ? 'READY' : l.claimed ? 'USED' : ''}</span>
+                </div>
+              ))}
+              <p className="pause-streaks-foot">Kills 100 · headshots 150 · objectives 250. Streak kills never chain. Progress resets on death; armed streaks are kept.</p>
+            </div>
+          )}
         </div>
       </div>
     </section>

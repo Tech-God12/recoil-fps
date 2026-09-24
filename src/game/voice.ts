@@ -104,6 +104,10 @@ class VoiceManager {
     };
     this.speak(map[label] ?? label, 'announcer', { key: `streak:${label}`, cooldownMs: 1500, rate: 1.1 });
   }
+  /** Scorestreak announcer: "UAV online", "Enemy sentry destroyed", etc. Interrupts nothing important. */
+  announce(text: string) {
+    this.speak(text, 'announcer', { key: `announce:${text}`, cooldownMs: 1200, rate: 1.05, volume: 0.85 });
+  }
   headshot() { this.speak('Headshot.', 'announcer', { key: 'hs', cooldownMs: 5000, volume: 0.6 }); }
   lowAmmo() { this.speak('Reloading.', 'announcer', { key: 'lowammo', cooldownMs: 15000, volume: 0.55 }); }
   defeat() { this.speak('Operator down. Mission failed.', 'announcer', { key: 'lose', cooldownMs: 60000 }); }

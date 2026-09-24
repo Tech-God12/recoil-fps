@@ -455,6 +455,8 @@ export class TDMBot {
 
   /** True when this operator currently has eyes on an enemy. */
   seesEnemy(): boolean { return !this.dead && this.hasLOS && !!this.target; }
+  /** Currently staring at the PLAYER (not just any target)? Drives the HUD threat readout. */
+  seesPlayer(): boolean { return !this.dead && this.hasLOS && !!this.target && this.target.isPlayer; }
 
   /** Current marching order from the tactical director (null in TDM). */
   order(): CompOrder | null { return this.ctx.orders?.get(this) ?? null; }
@@ -862,7 +864,7 @@ export class TDMBot {
       // full-HP player survives roughly 7-9 hits (plus regen between fights)
       const dmg = (headshot ? 44 : 18 + Math.random() * 6) * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
       if (target.isPlayer) {
-        if (this.ctx.playerAlive()) this.ctx.damagePlayer(dmg, this.pos, this);
+        if (this.ctx.playerAlive()) this.ctx.damagePlayer(dmg, this.pos, this, headshot);
       } else if (target.bot && !target.bot.dead) {
         this.ctx.effects.blood(aimAt);
         const killed = target.bot.takeDamage(dmg, headshot, this);

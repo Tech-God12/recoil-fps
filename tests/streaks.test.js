@@ -2,25 +2,26 @@ import './helpers/register-json.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 const { StreakLadder, STREAK_LADDER, STREAK_POINTS, streakDef } = await import('../src/game/streaks.ts');
+const { REWARDS } = await import('../src/game/economy/rewards.ts');
 
 test('ladder is ordered, ascending and matches the CoD-style tiering', () => {
   assert.deepEqual(STREAK_LADDER.map(s => s.id), ['uav', 'airstrike', 'sentry', 'chopper', 'nuke']);
   for (let i = 1; i < STREAK_LADDER.length; i++) assert.ok(STREAK_LADDER[i].cost > STREAK_LADDER[i - 1].cost, `${STREAK_LADDER[i].id} must cost more than ${STREAK_LADDER[i - 1].id}`);
-  assert.equal(streakDef('uav').cost, 400);
-  assert.equal(streakDef('nuke').cost, 2500);
+  assert.equal(streakDef('uav').cost, 300);
+  assert.equal(streakDef('nuke').cost, 2000);
   assert.equal(STREAK_POINTS.headshot, 150);
 });
 
 test('points arm streaks in order and each threshold is claimed once per life', () => {
   const l = new StreakLadder();
-  assert.deepEqual(l.addPoints(300), []);
+  assert.deepEqual(l.addPoints(200), []);
   assert.deepEqual(l.addPoints(100).map(s => s.id), ['uav']);
   assert.ok(l.has('uav'));
   // more points do not re-arm a claimed tier
   assert.deepEqual(l.addPoints(100), []);
   // a big jump can arm several tiers at once, in ladder order
   assert.deepEqual(l.addPoints(600).map(s => s.id), ['airstrike', 'sentry']);
-  assert.equal(l.points, 1100);
+  assert.equal(l.points, 1000);
   assert.deepEqual(l.earned, ['uav', 'airstrike', 'sentry']);
 });
 
@@ -29,8 +30,8 @@ test('next() reports the upcoming tier with progress measured from the previous 
   l.addPoints(550);
   const n = l.next();
   assert.equal(n.def.id, 'airstrike');
-  assert.equal(n.remaining, 150);
-  assert.ok(Math.abs(n.pct - 0.5) < 1e-9, 'halfway between 400 and 700');
+  assert.equal(n.remaining, 50);
+  assert.ok(Math.abs(n.pct - 5 / 6) < 1e-9, 'five-sixths of the way between 300 and 600');
   l.addPoints(2000);
   assert.equal(l.next(), null, 'ladder complete');
 });
@@ -131,7 +132,7 @@ test('sentry, UAV, chopper and airstrike all engage hostiles headlessly and clea
     const w = fakeWorld();
     const d = new StreakDirector(w.ctx);
     assert.equal(d.activate('sentry'), false, 'nothing is armed yet');
-    d.addPoints(1500);
+    d.addPoints(1200);
     assert.ok(d.ladder.has('chopper'));
     assert.ok(w.messages.some(m => m.includes('ATTACK HELICOPTER READY')), 'arming is announced');
     const before = w.scene.children.length;
@@ -170,7 +171,7 @@ test('tactical nuke counts down ten seconds then resolves exactly once', () => {
   try {
     const w = fakeWorld();
     const d = new StreakDirector(w.ctx);
-    d.addPoints(2500);
+    d.addPoints(2000);
     assert.ok(d.activate('nuke'));
     assert.ok(!d.activate('nuke'), 'no double nuke');
     assert.ok(d.nukeCountdown > 9.9);
@@ -244,4 +245,28 @@ test('airstrike refuses danger-close targets and runs its bomb line across the l
     assert.ok(Math.max(...zs) - Math.min(...zs) > 25, 'line sweeps across the view');
     assert.ok(w.blasts.every(b => b.pos.distanceTo(new THREE.Vector3(0, 0, 0)) > 30), 'no splash near the designator');
   } finally { unmute(); restore(); }
+});
+
+test('ladder is earnable inside one life: 3/6/9/12/20 body-shot kills', () => {
+  // Kill economy comes from REWARDS.kill, not a literal: if the award ever
+  // moves, this test must move with it. The old 400/700/1000/1500/2500 ladder
+  // priced the chopper and nuke out of every realistic life.
+  const ladder = new StreakLadder();
+  const armedAt = {};
+  for (let kill = 1; kill <= 25; kill++) {
+    for (const def of ladder.addPoints(REWARDS.kill)) armedAt[def.id] ??= kill;
+  }
+  assert.equal(armedAt.uav, 3, 'UAV must arm on the 3rd kill');
+  assert.equal(armedAt.airstrike, 6, 'airstrike must arm on the 6th kill');
+  assert.equal(armedAt.sentry, 9, 'sentry must arm on the 9th kill');
+  assert.equal(armedAt.chopper, 12, 'chopper must arm on the 12th kill');
+  assert.equal(armedAt.nuke, 20, 'nuke must arrive inside one great life');
+});
+
+test('headshots accelerate the ladder: two skulls arm the UAV', () => {
+  const ladder = new StreakLadder();
+  ladder.addPoints(STREAK_POINTS.headshot);
+  ladder.addPoints(STREAK_POINTS.headshot);
+  assert.ok(ladder.has('uav'), '2 x 150 pts must arm the 300-pt UAV');
+  assert.ok(!ladder.has('airstrike'), 'but not the 600-pt airstrike');
 });

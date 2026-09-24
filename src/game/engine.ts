@@ -440,6 +440,29 @@ const LOADOUT_AUDIO: Record<WeaponId, NonNullable<WeaponDef['audioTag']>> = {
   spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle',
 };
 
+/**
+ * VIEWMODEL RIG — one source of truth for gun scale, hip pose and ADS depth.
+ * Scale 1.35 (was 1.95): the old rig filled a quarter of the screen and occluded
+ * sightlines — see audit 2026-09-24 G3. ADS math derives from sightY × scale, so
+ * re-seating is automatic; the hip pose is unchanged on purpose (position tuning
+ * needs eyes, and scale alone fixes the size complaint). Exported so headless
+ * tests can prove ADS alignment + angular size per gun without a renderer.
+ */
+export const VIEWMODEL_RIG = {
+  scale: 1.35,
+  hip: { x: 0.22, y: -0.19, z: -0.38, ry: 0.035 },
+  adsDepth: -0.34,
+  vmFovHip: 68,
+  vmFovAds: 56,
+} as const;
+
+/**
+ * Kill hitstop: freeze the sim for one-to-three frames on a direct gun kill.
+ * 45 ms reads as punch, not a hitch (all shooters do 30–80 ms); explosions and
+ * streak kills already shake the camera, so they skip it.
+ */
+const HITSTOP_KILL_SECONDS = 0.045;
+
 export class Engine {
   // Assigned in init(), which Engine.create() awaits before handing the instance out.
   private renderer!: THREE.WebGLRenderer;
@@ -555,11 +578,13 @@ export class Engine {
   private streakPaidMark = 0;
   private streakPaidRun = 0;
   private headshots = 0;
-  private readonly VM_S = 1.95;
+  private readonly VM_S = VIEWMODEL_RIG.scale;
   // Scratch vectors — hot paths must not allocate per frame
   private readonly _t1 = new THREE.Vector3();
   private readonly _t2 = new THREE.Vector3();
   private readonly _t3 = new THREE.Vector3();
+  private readonly _brassO = new THREE.Vector3();
+  private readonly _brassR = new THREE.Vector3();
   // Spatial hash over world solids (cell 4m) — collision queries check a few
   // nearby boxes instead of scanning the whole map every frame.
   private solidGrid = new Map<string, AABB[]>();
@@ -573,6 +598,7 @@ export class Engine {
   private recoilP = 0;
   private recoilY = 0;
   private shake = 0;
+  private hitstopT = 0;
   private eyeH = 1.62;
 
   // Weapons
@@ -699,7 +725,7 @@ export class Engine {
 
     this.camera = new THREE.PerspectiveCamera(this.fovSetting, 1, 0.12, 500);
     this.camera.rotation.order = 'YXZ';
-    this.vmCamera = new THREE.PerspectiveCamera(68, 1, 0.01, 5);
+    this.vmCamera = new THREE.PerspectiveCamera(VIEWMODEL_RIG.vmFovHip, 1, 0.01, 5);
 
     // Per-map colour grading so the two arenas read instantly different:
     // Sandblast = hot amber desert noon; Town = cooler hazy hill morning.
@@ -817,6 +843,12 @@ void main(){
     const vmSun = new THREE.DirectionalLight(0xFFF2D6, 1.7);
     vmSun.position.set(1.5, 2.5, 0.8);
     this.vmScene.add(vmSun);
+    // Cool camera-side fill: with the warm key alone the gun went near-black on
+    // the cool Town map (audit G4). The key stays dominant; this only lifts the
+    // shadow side so materials keep reading.
+    const vmFill = new THREE.DirectionalLight(0xB9C8E8, 0.9);
+    vmFill.position.set(-1.5, 0.8, 1.5);
+    this.vmScene.add(vmFill);
     this.vmLight = new THREE.PointLight(0xFFC070, 0, 4);
     this.vmScene.add(this.vmLight);
 
@@ -1022,7 +1054,7 @@ void main(){
         playerPos: () => this.eyePos(),
         playerFeet: () => this.pos.clone(),
         playerAlive: () => !this.dead,
-        damagePlayer: (a, f, killer) => this.damagePlayerTDM(a, f, killer),
+        damagePlayer: (a, f, killer, isHead) => this.damagePlayerTDM(a, f, killer, isHead === true),
         moveCollide: ctx.moveCollide,
         onCallout: (k, p, team) => {
           if (k === 'onfire' && team === 'alpha') {
@@ -1237,7 +1269,8 @@ void main(){
     if (e.code === 'KeyR') this.startReload();
     {
       const streak = this.streakForKey(e.code);
-      if (streak) { this.streaks.activate(streak); return; }
+      // Ranked S&D has no killstreaks: ignore the keys (the rail is already hidden).
+      if (streak && !this.isComp) { this.streaks.activate(streak); return; }
       // Escape-free abort for designation: tapping the strike key again cancels it.
     }
     if (e.code === 'Digit1') this.switchWeapon(0);
@@ -1967,7 +2000,9 @@ void main(){
     // Tracer starts just off the camera (gun-side) so it reads as coming from
     // the rifle but converges onto the crosshair ray instead of flying sideways.
     const me = this.camera.matrix.elements;
-    const muzzleWorld = this._t3.copy(origin).addScaledVector(dir, 0.55);
+    // Tracer starts at the lean skip distance: with a fixed 0.55 m origin the beam
+    // visibly spawned inside the wall you were leaning against.
+    const muzzleWorld = this._t3.copy(origin).addScaledVector(dir, skip);
     muzzleWorld.x += me[0] * 0.09 + me[4] * -0.07;
     muzzleWorld.y += me[1] * 0.09 + me[5] * -0.07;
     muzzleWorld.z += me[2] * 0.09 + me[6] * -0.07;
@@ -2000,6 +2035,7 @@ void main(){
           if (part === 'head') { this.headshots++; voice.headshot(); }
           audio.killConfirm();
           this.defusal.handleKill('player', tdmBot, part === 'head', wid);
+          this.hitstopT = HITSTOP_KILL_SECONDS;
           this.onEvent({ type: 'hit', kill: true });
           this.rebuildHittables();
         } else {
@@ -2015,9 +2051,10 @@ void main(){
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
-        // TTK floor: no weapon may two-tap the 150 HP TDM pool (3+ headshots always).
-        // Ranked plays by its own armour maths, so the floor stays out of it.
-        if (!ranked) dmg = Math.min(dmg, 74);
+        // TTK floor: no automatic may two-tap the 150 HP TDM pool. Bolt-actions are
+        // exempt — the AWM's entire job is a one-tap body shot, priced by its 48 RPM,
+        // 5-round mag and slow ADS. Ranked plays by its own armour maths.
+        if (!ranked && !d.boltAction) dmg = Math.min(dmg, 74);
         if (!shotHit) { this.hits++; shotHit = true; }
         this.effects.blood(h.point);
         audio.fleshImpact(0);
@@ -2038,6 +2075,7 @@ void main(){
             // Streaks are an arena reward: ranked rounds have no killstreaks.
             this.streaks.addPoints(part === 'head' ? STREAK_POINTS.headshot : STREAK_POINTS.kill);
           }
+          this.hitstopT = HITSTOP_KILL_SECONDS;
           this.onEvent({ type: 'hit', kill: true });
           this.rebuildHittables();
         } else {
@@ -2096,6 +2134,7 @@ void main(){
               this.earnCash(sb, 'streak');
             }
           }
+          this.hitstopT = HITSTOP_KILL_SECONDS;
           this.onEvent({ type: 'hit', kill: true });
           this.onEvent({ type: 'kill', name: enemy.name, weapon: d.name, headshot: part === 'head' });
           this.rebuildHittables();
@@ -2141,13 +2180,25 @@ void main(){
       else if (tag === 'deagle') audio.fireDeagle();
       else audio.fireSMG();
     }
+    // Every shot ejects: the delayed metallic tink lands ~90 ms after the report,
+    // exactly like brass hitting concrete a beat behind the muzzle blast.
+    audio.fireCasing();
 
     const mf = this.muzzleFlash.material as THREE.MeshBasicMaterial;
     mf.opacity = 1;
     this.muzzleFlash.rotation.z = Math.random() * Math.PI;
-    this.muzzleFlash.scale.setScalar((0.85 + Math.random() * 0.5) * (d.suppressed ? 0.45 : 1.6) * (d.flashMul ?? 1));
+    // Flash reads against the viewmodel scale: 1.2 keeps the old punch now the gun
+    // is 1.35 instead of 1.95 (linear ratio would be 1.11; a touch bigger sells it).
+    this.muzzleFlash.scale.setScalar((0.85 + Math.random() * 0.5) * (d.suppressed ? 0.45 : 1.2) * (d.flashMul ?? 1));
     this.vmLight.intensity = d.suppressed ? 1.2 : 3.5;
-    if (!d.suppressed) this.effects.playerFlash(origin.clone().addScaledVector(dir, 1.0));
+    // One scratch vector feeds the muzzle light, the hanging smoke puff and the
+    // brass origin — no per-shot allocation on top of the existing pellet math.
+    // Smoke fires even suppressed (cans trap gas and puff harder); only the light
+    // is stealth-gated.
+    this._t3.copy(origin).addScaledVector(dir, 1.0);
+    if (!d.suppressed) this.effects.playerFlash(this._t3);
+    this.effects.gunSmoke(this._t3);
+    this.ejectBrass();
     this.ai.notifyGunshot(this.pos, d.noiseRadius ?? 65);
     this.tdm?.notifyGunshot(this.pos, d.noiseRadius ?? 65);
     this.defusal?.notifyGunshot(this.pos, d.noiseRadius ?? 65);
@@ -2253,7 +2304,7 @@ void main(){
     return this.crouched && this.grounded && Math.hypot(this.vx, this.vz) < 0.6 && !!this.def().model.attached.underbarrel?.userData.legs;
   }
 
-  /** Masterkey underbarrel shotgun (B): 7-pellet cone with its own 3-shell tube. */
+  /** Masterkey underbarrel shotgun (B): 8×12 cone per MASTERKEY_SPEC, 3-shell tube. */
   private fireMasterkey(): void {
     const d = this.def();
     if (!d.masterkey || this.mkReloadT >= 0 || this.reloadT >= 0 || this.switchT >= 0 || this.dead || this.ended) return;
@@ -2265,7 +2316,9 @@ void main(){
     const mf = this.muzzleFlash.material as THREE.MeshBasicMaterial;
     mf.opacity = 1;
     this.muzzleFlash.rotation.z = Math.random() * Math.PI;
-    this.muzzleFlash.scale.setScalar(1.1);
+    this.muzzleFlash.scale.setScalar(0.95);
+    this.ejectBrass();
+    audio.fireCasing();
     this.vmLight.intensity = 3;
     this.pitch += 0.014;
     this.recoilP += 0.02;
@@ -2278,7 +2331,7 @@ void main(){
     const me = this.camera.matrix.elements;
     let anyHit = false;
     let anyKill = false;
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 8; i++) {
       const dir = new THREE.Vector3(
         base.x + (Math.random() - 0.5) * 0.09 * (d.spreadX ?? 1),
         base.y + (Math.random() - 0.5) * 0.09 * (d.spreadY ?? 1),
@@ -2294,7 +2347,7 @@ void main(){
         h = cand;
         break;
       }
-      const mw = this._t3.copy(origin).addScaledVector(dir, 0.55);
+      const mw = this._t3.copy(origin).addScaledVector(dir, skip);
       mw.x += me[0] * 0.09 + me[4] * -0.07;
       mw.y += me[1] * 0.09 + me[5] * -0.07;
       mw.z += me[2] * 0.09 + me[6] * -0.07;
@@ -2321,7 +2374,7 @@ void main(){
       }
       if (mkBot && !mkBot.dead && (this.isTDM || this.isComp) && this.tdm) {
         const part = h.object.userData.part as string;
-        let dmg = 13 * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
+        let dmg = 12 * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > 14) dmg *= 0.4;
@@ -2338,7 +2391,7 @@ void main(){
       const enemy = (h.object.userData.enemy as Enemy | undefined);
       if (!enemy || enemy.dead) continue;
       const part = h.object.userData.part as string;
-      let dmg = 13;
+      let dmg = 12;
       if (part === 'head') dmg *= d.headMul;
       else if (part === 'limb') dmg *= d.limbMul;
       if (h.distance > 14) dmg *= 0.4;
@@ -2364,10 +2417,26 @@ void main(){
     }
     this.raycaster.far = 300;
     if (anyHit && !anyKill) { audio.hitMarker(); this.onEvent({ type: 'hit', kill: false }); }
-    if (anyKill) { this.onEvent({ type: 'hit', kill: true }); this.rebuildHittables(); }
+    if (anyKill) { this.hitstopT = HITSTOP_KILL_SECONDS; this.onEvent({ type: 'hit', kill: true }); this.rebuildHittables(); }
     this.ai.notifyGunshot(this.pos, 70);
     this.tdm?.notifyGunshot(this.pos, 70);
     this.defusal?.notifyGunshot(this.pos, 70);
+  }
+
+  /**
+   * Brass ejects from an approximate ejection port: gun-side of the camera,
+   * slightly below the sight line, a third of a metre ahead. The real port lives
+   * in viewmodel space; this world-space approximation is invisible at 12 mm and
+   * lets casings bounce on real footing instead of viewmodel air.
+   */
+  private ejectBrass(): void {
+    const me = this.camera.matrix.elements;
+    this._brassO.copy(this.camera.position);
+    this._brassO.x += me[0] * 0.22 - me[4] * 0.12 - me[8] * 0.35;
+    this._brassO.y += me[1] * 0.22 - me[5] * 0.12 - me[9] * 0.35;
+    this._brassO.z += me[2] * 0.22 - me[6] * 0.12 - me[10] * 0.35;
+    this._brassR.set(me[0], me[1], me[2]);
+    this.effects.ejectBrass(this._brassO, this._brassR);
   }
 
   private rebuildHittables() {
@@ -2488,7 +2557,7 @@ void main(){
           this.damagePlayerComp(dmg, g.pos, g.owner ?? null, false, 'FRAG');
         } else if (this.isTDM) {
           // grenades from your own team never hurt you in the arena
-          if (!g.owner || g.owner.team === 'bravo') this.damagePlayerTDM(dmg, g.pos, g.owner ?? null);
+          if (!g.owner || g.owner.team === 'bravo') this.damagePlayerTDM(dmg, g.pos, g.owner ?? null, false);
         } else this.damagePlayer(dmg, g.pos);
       }
       if (this.isDefusal && this.defusal) {
@@ -2664,7 +2733,7 @@ void main(){
     this.shake = Math.max(this.shake, Math.min(1.4, 14 / Math.max(2.5, distP)));
     if (distP < radius && !this.dead) {
       const dmg = THREE.MathUtils.lerp(maxDamage * 0.6, 15, distP / radius);
-      if (this.isTDM) this.damagePlayerTDM(dmg, pos, null); else this.damagePlayer(dmg, pos);
+      if (this.isTDM) this.damagePlayerTDM(dmg, pos, null, false); else this.damagePlayer(dmg, pos);
     }
     for (const t of this.streakTargets()) {
       if (!t.alive()) continue;
@@ -2912,9 +2981,11 @@ void main(){
     return null;
   }
 
-  private damagePlayerTDM(amount: number, from: THREE.Vector3, killer: TDMBot | null) {
+  private damagePlayerTDM(amount: number, from: THREE.Vector3, killer: TDMBot | null, isHead = false) {
     if (this.dead || this.ended) return;
-    const isHead = amount >= 40; // bot headshot rounds arrive at 44
+    // isHead is threaded explicitly by the caller (bot ballistics know; frags and
+    // streak blasts pass false). The old `amount >= 40` guess mislabelled every
+    // grenade and streak kill as a headshot in the feed and stats.
     const reduced = amount * (1 - (isHead ? TDM_HEAD_REDUCTION[this.tdmArmor] : TDM_BODY_REDUCTION[this.tdmArmor]));
     this.hp -= reduced;
     this.lastDamageT = 0;
@@ -3667,6 +3738,13 @@ void main(){
       }
       return;
     }
+    // Kill hitstop: render the frozen frame without advancing the sim. lastT is
+    // already updated above, so no dt spike follows the freeze.
+    if (this.hitstopT > 0) {
+      this.hitstopT -= frameSeconds;
+      this.render();
+      return;
+    }
     this.update(dt);
     this.render();
   };
@@ -4039,7 +4117,7 @@ void main(){
     this.camera.fov += (targetFov - this.camera.fov) * fk;
     this.camera.updateProjectionMatrix();
 
-    const vmFov = THREE.MathUtils.lerp(68, 56, this.ads);
+    const vmFov = THREE.MathUtils.lerp(VIEWMODEL_RIG.vmFovHip, VIEWMODEL_RIG.vmFovAds, this.ads);
     this.vmCamera.fov += (vmFov - this.vmCamera.fov) * fk;
     this.vmCamera.updateProjectionMatrix();
   }
@@ -4066,7 +4144,7 @@ void main(){
     const hideInAds = inAds && !canted && ((d.scopePower??1)>1 || (d.scopePower===undefined && this.adsFovEff()<45));
     g.visible = !hideInAds;
     this.muzzleFlash.visible = !hideInAds;
-    const hip = { x: 0.22, y: -0.19, z: -0.38, ry: 0.035 };
+    const hip = VIEWMODEL_RIG.hip;
     const opticPart = d.model.attached.optic;
     let adsX = 0;
     let adsY = -(d.model.sightY + ((opticPart?.userData.sightYOffset as number | undefined) ?? 0)) * S;
@@ -4079,7 +4157,7 @@ void main(){
     }
     let px = THREE.MathUtils.lerp(hip.x, adsX, a);
     let py = THREE.MathUtils.lerp(hip.y, adsY, a);
-    let pz = THREE.MathUtils.lerp(hip.z, -0.34, a);
+    let pz = THREE.MathUtils.lerp(hip.z, VIEWMODEL_RIG.adsDepth, a);
     let rx = 0;
     let ry = THREE.MathUtils.lerp(hip.ry, 0, a);
     let rz = cantRoll*a;
@@ -4299,7 +4377,11 @@ void main(){
     // Static architecture shadows refresh only on construction/settings/destruction.
     this.frameNo++;
     this.renderer.shadowMap.autoUpdate = false;
-    if (this.frameNo <= 1) this.renderer.shadowMap.needsUpdate = true;
+    // Static-only shadow updates left every soldier shadowless (audit R1): the map
+    // rendered once on frame 1 and never again. Refreshing every 10th frame keeps
+    // characters grounded at ~6 Hz — imperceptible staleness for ~1/10th of one
+    // shadow pass amortised, and still zero cost with shadows off.
+    if (this.frameNo <= 2 || this.frameNo % 10 === 0) this.renderer.shadowMap.needsUpdate = true;
     if (this.postFxOn) {
       this.composer.render();
     } else {
@@ -4329,6 +4411,12 @@ void main(){
       const side = this.defusal.playerSide === 'attack' ? 'Attackers' : 'Defenders';
       this.onEvent({ type: 'callout', text: `Sirocco — you start on ${side}. B to buy · 6/7 call A/B · 8 follow me.` });
       voice.objective(this.defusal.playerSide === 'attack' ? 'Plant the bomb on A or B.' : 'Defend both bomb sites.');
+      return;
+    }
+    if (this.isComp) {
+      // Ranked owns its rounds; there is no mission runtime to start.
+      this.onEvent({ type: 'callout', text: 'Operation Blackout — seven rounds decide it.' });
+      voice.objective('Blackout live. Plant or defend the sites.');
       return;
     }
     this.missionRuntime.start();
@@ -4473,6 +4561,9 @@ void main(){
     for (const e of this.ai.enemies) {
       if (e.dead) continue;
       const d = e.pos.distanceTo(this.pos);
+      // No wallhack: the readout only tracks hostiles engaging you, or close
+      // enough to hear (<12 m). Anything else is free intel with no counterplay.
+      if (d > 12 && !e.seesPlayer) continue;
       if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(e.pos), dist: d, above: e.pos.y - this.pos.y }; }
     }
     if ((this.isTDM || this.isComp) && this.tdm) {
@@ -4480,6 +4571,7 @@ void main(){
       for (const b of this.tdm.bots) {
         if (b.dead || b.team === playerTeam) continue;
         const d = b.pos.distanceTo(this.pos);
+        if (d > 12 && !b.seesPlayer()) continue;
         if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(b.pos), dist: d, above: b.pos.y - this.pos.y }; }
       }
     }
@@ -4555,7 +4647,7 @@ void main(){
             hot: e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE',
           })),
       missionMap: (() => {
-        if (this.isTDM || this.isDefusal) return undefined;
+        if (this.isTDM || this.isDefusal || this.isComp) return undefined;
         const phase = this.missionRuntime.mission.current;
         if (!phase) return undefined;
         return {
@@ -4620,6 +4712,7 @@ void main(){
     }
     for(const texture of textures) texture.dispose();
     this.streaks?.dispose();
+    this.effects.dispose();
     this.missionRuntime?.dispose();
     if (this.comp) this.comp.dispose();
     else this.tdm?.dispose();

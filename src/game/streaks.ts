@@ -22,12 +22,17 @@ export interface StreakDef {
   icon: string;
 }
 
+// Ladder pricing: points reset on death, and a strong life banks 800–1500 (8–15
+// kills mixed with headshots/objectives). The old top end (1500/2500) needed
+// 15–25 kills in ONE life — the chopper and nuke were decorative. The new curve
+// (3 / 6 / 8–9 / 12 / 20 kills) puts the UAV in every hot life, the chopper in
+// great ones, and the nuke in legendary ones. Pinned by streak earnability tests.
 export const STREAK_LADDER: readonly StreakDef[] = [
-  { id: 'uav', name: 'UAV', short: 'UAV', cost: 400, duration: 30, icon: '◬', desc: 'Recon drone paints every hostile on the radar and through walls for 30 s.' },
-  { id: 'airstrike', name: 'PRECISION AIRSTRIKE', short: 'STRIKE', cost: 700, duration: 0, icon: '✈', desc: 'Designate a point. Two fast-movers carpet a 30 m line through it.' },
-  { id: 'sentry', name: 'SENTRY GUN', short: 'SENTRY', cost: 1000, duration: 60, icon: '⌖', desc: 'Auto-turret placed where you stand. Guns anything it sees for 60 s.' },
-  { id: 'chopper', name: 'ATTACK HELICOPTER', short: 'CHOPPER', cost: 1500, duration: 45, icon: '✱', desc: 'Gunship orbits over you and works the ground with a chin gun for 45 s.' },
-  { id: 'nuke', name: 'TACTICAL NUKE', short: 'NUKE', cost: 2500, duration: 10, icon: '☢', desc: '10 s countdown. Everything on the field dies. In the arena, the match is yours.' },
+  { id: 'uav', name: 'UAV', short: 'UAV', cost: 300, duration: 30, icon: '◬', desc: 'Recon drone paints every hostile on the radar and through walls for 30 s.' },
+  { id: 'airstrike', name: 'PRECISION AIRSTRIKE', short: 'STRIKE', cost: 600, duration: 0, icon: '✈', desc: 'Designate a point. Two fast-movers carpet a 30 m line through it.' },
+  { id: 'sentry', name: 'SENTRY GUN', short: 'SENTRY', cost: 850, duration: 60, icon: '⌖', desc: 'Auto-turret placed where you stand. Guns anything it sees for 60 s.' },
+  { id: 'chopper', name: 'ATTACK HELICOPTER', short: 'CHOPPER', cost: 1200, duration: 45, icon: '✱', desc: 'Gunship orbits over you and works the ground with a chin gun for 45 s.' },
+  { id: 'nuke', name: 'TACTICAL NUKE', short: 'NUKE', cost: 2000, duration: 10, icon: '☢', desc: '10 s countdown. Everything on the field dies. In the arena, the match is yours.' },
 ];
 
 export const STREAK_POINTS = { kill: 100, headshot: 150, objective: 250, assist: 50 } as const;

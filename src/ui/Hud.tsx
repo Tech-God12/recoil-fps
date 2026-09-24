@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
+import { isLowAmmo, shouldShowReload } from './hud-math';
 import MissionObjective, { missionClock } from './MissionObjective';
 import { CompHudLayer, CompScoreboard } from './Competitive';
 import { NukeCountdown, StreakActive, StreakMessage, StreakRail, StrikeDesignator } from './Streaks';
@@ -98,6 +99,8 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
   const segs = Math.min(hud.magSize || 30, 30);
   const filled = Math.round(magPct * segs);
   const displayedMag = hud.reloading && hud.reloadStage === 'magOut' ? 0 : hud.mag;
+  // Relative low-ammo state: an absolute `<= 5` kept the AWM's FULL mag red.
+  const ammoLow = isLowAmmo(displayedMag, hud.magSize);
   const fpsColor = hud.fps >= 55 ? 'var(--olive)' : hud.fps >= 35 ? 'var(--brass)' : 'var(--blood)';
   const hpSegs = 10;
   const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / maxHp * hpSegs)));
@@ -256,7 +259,9 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       {/* ============ CENTER STACK ============ */}
       {!spectating && hud.ads < 0.3 && !hud.sprinting && (
         <div className="absolute left-1/2 top-1/2" style={{ opacity: 1 - hud.ads / 0.3 }}>
-          <Reticle s={s} spread={(hud.spread || 0) * 520} />
+          {/* Kill-confirm pulse: the crosshair kicks open on every hitmark (wider on
+              kills) and glides back via the Reticle's arm transition. */}
+          <Reticle s={s} spread={(hud.spread || 0) * 520 + (fx.hitmark ? (fx.hitmark.kill ? 14 : 8) : 0)} />
         </div>
       )}
       <ScopeView hud={hud} active={active} {...scopeControls} />
@@ -442,7 +447,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           )}
         </div>
         <div className="flex items-end justify-end gap-2.5">
-          <span key={displayedMag} className={`ammo-num tabnum ${displayedMag === 0 ? 'ammo-empty' : displayedMag <= 5 ? 'ammo-warn' : ''}`}>
+          <span key={displayedMag} className={`ammo-num tabnum ${displayedMag === 0 ? 'ammo-empty' : ammoLow ? 'ammo-warn' : ''}`}>
             {displayedMag}
           </span>
           <span className="reserve-chip mb-1">∞</span>
@@ -450,8 +455,8 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         <div className="flex gap-[2px] justify-end mt-2">
           {Array.from({ length: segs }, (_, i) => (
             <span key={i} className="mag-seg" style={{
-              background: i < filled ? (displayedMag <= 5 ? 'var(--blood)' : 'var(--brass)') : 'rgba(255,255,255,0.12)',
-              boxShadow: i < filled ? `0 0 5px ${displayedMag <= 5 ? 'var(--blood)' : 'var(--brass)'}` : 'none',
+              background: i < filled ? (ammoLow ? 'var(--blood)' : 'var(--brass)') : 'rgba(255,255,255,0.12)',
+              boxShadow: i < filled ? `0 0 5px ${ammoLow ? 'var(--blood)' : 'var(--brass)'}` : 'none',
               transitionDelay: hud.reloading ? `${i * 8}ms` : '0ms',
             }} />
           ))}
@@ -472,7 +477,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           {df && <span className={df.smokes > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">Z</span>SMOKE ×{df.smokes}</span>}
         </div>
         {hud.cooking && <div className="mt-1.5 cook-warn">◉ COOKING — RELEASE G</div>}
-        {!hud.reloading && hud.mag <= 5 && <div className="mt-1.5 text-[10px] tracking-[0.3em] font-black text-[var(--brass)] blink">RELOAD</div>}
+        {shouldShowReload(hud.mag, hud.magSize, hud.reloading) && <div className="mt-1.5 text-[10px] tracking-[0.3em] font-black text-[var(--brass)] blink">RELOAD</div>}
       </div>}
 
       {/* ============ ONBOARDING STRIP (first seconds of a mission) ============ */}

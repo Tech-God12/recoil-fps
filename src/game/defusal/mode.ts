@@ -112,6 +112,8 @@ export interface DefusalCtx {
   onMoney(amount: number, reason: string, total: number): void;
   earnWallet(amount: number, reason: string): void;
   onMatchEnd(): void;
+  onBodyFall?(at: THREE.Vector3, heavy: boolean): void;
+  onWeaponDrop?(at: THREE.Vector3): void;
 }
 
 type BombStateId = 'none' | 'carried' | 'dropped' | 'planted' | 'defused' | 'exploded';
@@ -290,6 +292,7 @@ export class DefusalMode implements BotSquad {
     this.tctx = {
       scene: ctx.scene, occluders: ctx.occluders, coverNodes: ctx.coverNodes, solids: ctx.solids, half: ctx.half,
       groundHeight: ctx.groundHeight, effects: ctx.effects, moveCollide: ctx.moveCollide,
+      onBodyFall: ctx.onBodyFall, onWeaponDrop: ctx.onWeaponDrop,
       playerPos: ctx.playerPos, playerFeet: ctx.playerFeet,
       playerAlive: () => ctx.playerAlive() && this.player.alive,
       damagePlayer: (a, f, k, hit) => ctx.damagePlayer(a, f, k, hit as BotHit | undefined),
@@ -322,7 +325,7 @@ export class DefusalMode implements BotSquad {
       const side = this.match.sideOf(c.team);
       const pad = SPAWNS[side][0];
       const bot = new TDMBot(this.tctx, this, this.nav, c.team, c.name, 0, V(pad[0], pad[1]), {
-        baseHp: 100, hpPerArmor: 0, momentum: false, corpseLinger: Infinity,
+        baseHp: 100, hpPerArmor: 0, momentum: false, corpseLinger: Infinity, dropWeapon: false,
         tint: SIDE_TINT[side], marker: c.team === 'alpha', fovCos: Math.cos(THREE.MathUtils.degToRad(95)),
       });
       bot.skill = this.skill;
@@ -528,6 +531,7 @@ export class DefusalMode implements BotSquad {
       const d = c.bot.pos.distanceTo(at);
       if (d > 30) continue;
       const dmg = d < 12 ? 500 : THREE.MathUtils.lerp(120, 0, (d - 12) / 18) * (c.inv.armor ? 0.7 : 1);
+      c.bot.noteHit({ from: at, explosive: true });
       if (c.bot.takeDamage(dmg, false, c.bot, false)) this.recordDeath(c, null, 'C4', false);
     }
   }

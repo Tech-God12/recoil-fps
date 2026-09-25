@@ -1,6 +1,7 @@
 // Recoil FPS — Enemy AI v3: grid A* navigation, unpredictable tactics, squad pushes, grenades
 import * as THREE from 'three';
-import { buildSoldier, type SoldierModel } from './models';
+import { buildSoldier, updateWeaponLod, type SoldierModel } from './models';
+import { BodyReactions, surfaceUnder, type HitInfo } from './reactions';
 import type { Effects } from './effects';
 import type { AABB } from './world';
 import { PRESSURE_BUDGET, type ReinforcementBatch } from './systems/reinforcements';
@@ -41,6 +42,9 @@ export interface AIContext {
    * at all, so a deployment is never met by squads that are already firing.
    */
   canAcquire?(): boolean;
+  /** Death feedback hooks (engine routes them to spatial audio; absent in headless sims). */
+  onBodyFall?(at: THREE.Vector3, heavy: boolean): void;
+  onWeaponDrop?(at: THREE.Vector3): void;
 }
 
 /* ================= NAV GRID (A*) ================= */
@@ -214,7 +218,6 @@ export class Enemy {
   private burstIdx = 0;
   private flankTarget: THREE.Vector3 | null = null;
   private flinch = 0;
-  private deathT = -1;
   private moveTarget: THREE.Vector3 | null = null;
   private walkPhase = 0;
   private locomotion = 0;
@@ -226,6 +229,8 @@ export class Enemy {
   private lastX = 0; private lastZ = 0;
   private path: THREE.Vector3[] | null = null;
   private pathGoal = new THREE.Vector3();
+  /** Reused patrol waypoint (owned per bot, since goTo may keep the reference). */
+  private patrolGoal = new THREE.Vector3();
   private repathT = 0;
   private stuckT = 0;
   // Committed obstacle-avoidance: a side picked once and held, plus the cumulative
@@ -238,6 +243,13 @@ export class Enemy {
   stunTimer = 0;
 
   invalidatePath() { this.path = null; this.repathT = 0; }
+
+  /** Directional flinch + procedural death (shared with arena bots — reactions.ts). */
+  readonly reactions = new BodyReactions();
+  private pendingHit: HitInfo | null = null;
+  /** Describe the NEXT takeDamage call (direction, zone, explosive). Optional: without
+   *  it the hit is assumed to come from the player as a torso/head bullet. */
+  noteHit(info: HitInfo) { this.pendingHit = info; }
 
   constructor(ctx: AIContext, nav: NavGrid, squad: Squad, role: Enemy['role'], spawn: THREE.Vector3) {
     this.ctx = ctx; this.nav = nav; this.squad = squad; this.role = role;
@@ -263,7 +275,7 @@ export class Enemy {
     this.name = NAMES[this.id % NAMES.length];
     this.squad = squad; this.role = role; this.missionZone = zone ?? undefined;
     this.pos.set(...at); this.hp = 100; this.state = 'ALERT'; this.dormant = false;
-    this.deadAge = 0; this.deathT = -1; this.stateTime = 0; this.lastSeenT = 999;
+    this.deadAge = 0; this.stateTime = 0; this.lastSeenT = 999;
     this.reactTimer = -1; this.hasLOS = false; this.losTimer = (this.id % 5) * 0.04;
     this.lastKnown.set(...focus); this.moveTarget = this.approachPoint(new THREE.Vector3(...focus));
     this.coverPos = null; this.hasRealCover = false; this.coverAge = 0;
@@ -276,6 +288,7 @@ export class Enemy {
     this.escapeDir = 0; this.escapeT = 0; this.blockedT = 0;
     this.walkPhase = 0; this.locomotion = 0; this.shotPose = 0; this.lastX = at[0]; this.lastZ = at[2];
     this.yaw = Math.atan2(at[0] - focus[0], at[2] - focus[2]);
+    this.reactions.reset(this.model); this.pendingHit = null;
     const g = this.model.group;
     g.visible = true; g.position.copy(this.pos); g.rotation.set(0, this.yaw, 0); g.scale.setScalar(1);
     const p = this.model.parts;
@@ -295,7 +308,7 @@ export class Enemy {
     if (!this.ctx.playerAlive()) return false;
     // Deployment grace: no acquisition at all until the mission lets hostiles engage.
     if (this.ctx.canAcquire && !this.ctx.canAcquire()) return false;
-    const eye = this.eyePos(); const pp = this.ctx.playerPos();
+    const eye = losEye.set(this.pos.x, this.pos.y + 1.62 - (this.crouched ? 0.4 : 0), this.pos.z); const pp = this.ctx.playerPos();
     const dist = eye.distanceTo(pp);
     if (dist > 70) return false;
     const dir = tmpV.copy(pp).sub(eye).normalize();
@@ -331,8 +344,11 @@ export class Enemy {
   takeDamage(amount: number, isHead: boolean): boolean {
     if (this.dead) return false;
     this.hp -= amount; this.recentDamage += amount;
-    this.flinch = isHead ? 0.35 : 0.22;
-    if (this.hp <= 0) { this.die(); return true; }
+    const hit = this.pendingHit ?? {}; this.pendingHit = null;
+    if (!hit.zone) hit.zone = isHead ? 'head' : 'torso';
+    if (!hit.from) hit.from = this.ctx.playerFeet();
+    if (this.hp <= 0) { this.die(hit); return true; }
+    this.reactions.hit(hit.zone, tmpV.set(this.pos.x - hit.from.x, 0, this.pos.z - hit.from.z).normalize(), this.yaw);
     this.lastKnown.copy(this.ctx.playerFeet()); this.lastSeenT = 0;
     if (this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') { this.setState('ENGAGE'); this.reactTimer = this.ctx.difficulty.reaction * 0.4; this.squad.alertAll(this.lastKnown); }
     // Only the most cautious, badly-hurt enemies give ground — everyone else holds and fights
@@ -344,16 +360,18 @@ export class Enemy {
     return false;
   }
 
-  private die() {
-    this.state = 'DEAD'; this.deathT = 0;
+  private die(hit: HitInfo = {}) {
+    this.state = 'DEAD';
     // Sit the pool on whatever the soldier actually died on (crate, floor slab, roof),
     // instead of pinning every kill to the ground plane under the map.
-    let surfaceY = this.ctx.groundHeight?.(this.pos.x, this.pos.z) ?? 0;
-    for (const b of this.ctx.solids) {
-      if (b.maxY > this.pos.y + 0.4 || b.maxY <= surfaceY) continue;
-      if (this.pos.x > b.minX - 0.3 && this.pos.x < b.maxX + 0.3 && this.pos.z > b.minZ - 0.3 && this.pos.z < b.maxZ + 0.3) surfaceY = b.maxY;
-    }
+    const surfaceY = surfaceUnder(this.pos, this.ctx.solids, this.ctx.groundHeight?.(this.pos.x, this.pos.z) ?? 0);
     this.ctx.effects.bloodDecal(this.pos, surfaceY);
+    this.model.group.rotation.y = this.yaw;
+    this.reactions.die(this.model, hit, {
+      pos: this.model.group.position.clone().setY(this.pos.y), yaw: this.model.group.rotation.y, surfaceY, solids: this.ctx.solids, dropWeapon: true,
+      onImpact: (at, heavy) => this.ctx.onBodyFall?.(at, heavy),
+      onClatter: at => this.ctx.onWeaponDrop?.(at),
+    });
     if (this.role === 'leader') { this.ctx.onCallout('mandown', this.pos); this.squad.leaderDown(); }
     this.ctx.onEliminated?.(this);
   }
@@ -482,16 +500,16 @@ export class Enemy {
   updateVisualFrame(dt: number) {
     if (this.state === 'DEAD') {
       this.deadAge += dt;
-      if (this.deathT >= 0 && this.deathT < 0.6) {
-        this.deathT += dt; const t = Math.min(1, this.deathT / 0.5);
-        this.model.group.rotation.x = -t * Math.PI / 2 * 0.96;
-        this.model.group.position.y = this.pos.y + 0.1 * Math.sin(t * Math.PI);
-      }
+      // Procedural death; returns false once settled so corpses cost nothing after ~1 s.
+      this.reactions.update(dt, this.model);
       return;
     }
     if (this.stunTimer > 0) this.stunTimer -= dt;
     this.flinch = Math.max(0, this.flinch - dt);
     this.updateVisual(dt);
+    this.reactions.applyFlinch(dt, this.model.parts);
+    const pp = this.ctx.playerPos();
+    updateWeaponLod(this.model, Math.hypot(pp.x - this.pos.x, pp.z - this.pos.z));
   }
 
   /** Expensive brain logic (LOS raycasts, cover search, state machine) — staggered across frames. */
@@ -542,7 +560,7 @@ export class Enemy {
   private doPatrol(dt: number) {
     const path = this.squad.patrol; const target = path[this.patrolIdx % path.length];
     const off = this.role === 'flankA' ? 1.4 : this.role === 'flankB' ? -1.4 : 0;
-    if (this.goTo(tmpV.set(target.x + off, 0, target.z + off).clone(), 1.7, dt)) this.patrolIdx++;
+    if (this.goTo(this.patrolGoal.set(target.x + off, 0, target.z + off), 1.7, dt)) this.patrolIdx++;
     this.crouched = false;
   }
   private doAlert(dt: number) {
@@ -809,6 +827,7 @@ export class AIManager {
     const e = this.enemies.find(actor => actor.id === id);
     if (!e) return;
     e.dormant = true; e.model.group.visible = false;
+    e.reactions.reset(e.model); // pull a dropped rifle back so nothing is left on the floor
     this.enemies = this.enemies.filter(actor => actor !== e);
     e.squad.members = e.squad.members.filter(actor => actor !== e);
     this.squads = this.squads.filter(squad => squad.members.length > 0);
@@ -825,6 +844,7 @@ export class AIManager {
 
   dispose() {
     for (const e of this.pool) {
+      e.reactions.reset(e.model); // re-parent a dropped rifle so it is disposed with the body
       e.model.group.removeFromParent();
       e.model.group.traverse(object => {
         if (object instanceof THREE.Mesh) object.geometry.dispose();

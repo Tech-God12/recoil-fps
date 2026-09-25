@@ -78,8 +78,21 @@ class Part {
 export interface SoldierModel {
   group: THREE.Group;
   parts: { torso: THREE.Object3D; head: THREE.Object3D; lLeg: THREE.Object3D; rLeg: THREE.Object3D; lShin: THREE.Object3D; rShin: THREE.Object3D; muzzle: THREE.Object3D; lArm: THREE.Object3D; rArm: THREE.Object3D; rifle: THREE.Object3D };
+  /** Mission soldiers only: detailed finish-shader rifle parts vs the one-draw atlas gun. */
+  weaponLod?: { hi: THREE.Object3D[]; lo: THREE.Object3D; near: boolean };
   hitMeshes: THREE.Mesh[];
 }
+
+/**
+ * Shared material for invisible hit proxies. `visible = false` makes the renderer skip
+ * the mesh entirely while raycasts (which ignore material visibility) still hit it.
+ * These used to be opacity-0 *transparent* meshes: 4 alpha-blended boxes/spheres per
+ * soldier drawn every frame for nothing — 40 of the Warehouse's ~200 draw calls plus
+ * blended overdraw across every soldier's silhouette.
+ */
+export const HIT_PROXY_MAT = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+HIT_PROXY_MAT.visible = false;
+HIT_PROXY_MAT.name = 'hit proxy (never drawn)';
 
 export function buildSoldier(): SoldierModel {
   const m = getSoldierMat();
@@ -178,12 +191,17 @@ export function buildSoldier(): SoldierModel {
   rb.name('world trigger guard').profile([[0.034, -0.029], [-0.025, -0.029], [-0.028, -0.080], [0.028, -0.080]], 0.009, WM.darkSteel, 0, 0.0005, [[[0.023, -0.038], [-0.017, -0.038], [-0.019, -0.070], [0.022, -0.070]]]);
   rb.name('world rear sight').box(0.028, 0.018, 0.041, WM.darkSteel, 0, 0.055, -0.134);
   rb.build(rifle);
+  // Distance LOD (frame budget): the GunBuilder rifle is ~5 finish-shader meshes and
+  // several thousand triangles per soldier; past WEAPON_LOD_DISTANCE it is a handful
+  // of pixels, so the one-draw atlas silhouette stands in.
+  const hi = [...rifle.children];
+  const lo = worldWeaponMesh('rifle').mesh; lo.visible = false; rifle.add(lo);
   const muzzle = new THREE.Object3D(); muzzle.position.set(0,0.02,-0.56); rifle.add(muzzle);
   rifle.position.set(0.09, 0.32, -0.42);
   torso.add(rifle);
 
   // ---- generous invisible hit proxies ----
-  const ghost = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const ghost = HIT_PROXY_MAT;
   const torsoHit = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.15, 0.6), ghost); torsoHit.position.y = 0.28; torsoHit.userData.part = 'torso'; torso.add(torsoHit); hitMeshes.push(torsoHit);
   // Head hit proxy is deliberately generous (≈50% wider than the visual skull):
   // headshots — especially with the AWM — should reward aim in the right area,
@@ -193,7 +211,7 @@ export function buildSoldier(): SoldierModel {
   const neckHit = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.24, 8), ghost); neckHit.position.y = -0.06; neckHit.userData.part = 'head'; head.add(neckHit); hitMeshes.push(neckHit);
   const legHit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.45), ghost); legHit.position.y = 0.45; legHit.userData.part = 'limb'; g.add(legHit); hitMeshes.push(legHit);
 
-  return { group: g, parts: { torso, head, lLeg, rLeg, lShin, rShin, muzzle, lArm, rArm, rifle }, hitMeshes };
+  return { group: g, parts: { torso, head, lLeg, rLeg, lShin, rShin, muzzle, lArm, rArm, rifle }, hitMeshes, weaponLod: { hi, lo, near: true } };
 }
 
 /* ================= TDM ARMORED SOLDIER =================
@@ -304,7 +322,7 @@ export function buildArmoredSoldier(armor: 0 | 1 | 2, tint?: number): SoldierMod
   torso.add(rifle);
 
   // ---- generous invisible hit proxies (scaled to the wider frame) ----
-  const ghost = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const ghost = HIT_PROXY_MAT;
   const torsoHit = new THREE.Mesh(new THREE.BoxGeometry(0.84, 1.18, 0.68), ghost); torsoHit.position.y = 0.28; torsoHit.userData.part = 'torso'; torso.add(torsoHit); hitMeshes.push(torsoHit);
   const headHit = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), ghost); headHit.position.y = 0.14; headHit.userData.part = 'head'; head.add(headHit); hitMeshes.push(headHit);
   const neckHit = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.24, 8), ghost); neckHit.position.y = -0.06; neckHit.userData.part = 'head'; head.add(neckHit); hitMeshes.push(neckHit);
@@ -330,6 +348,24 @@ export function setWorldWeapon(model: SoldierModel, kind: WorldWeaponKind): void
   const { mesh, muzzleZ } = worldWeaponMesh(kind);
   rifle.add(mesh);
   model.parts.muzzle.position.set(0, 0.012, muzzleZ);
+}
+
+/** Beyond this camera distance mission soldiers show the atlas rifle. At 14 m and a
+ *  95° FOV a 0.9 m rifle spans ~60 px at 1080p — enough to read the silhouette, not
+ *  the machining. 2 m of hysteresis stops a soldier at the boundary flickering. */
+export const WEAPON_LOD_DISTANCE = 14;
+const WEAPON_LOD_HYSTERESIS = 2;
+/** Returns true when the detailed rifle is shown. No-op for models without a LOD. */
+export function updateWeaponLod(model: SoldierModel, distance: number): boolean {
+  const lod = model.weaponLod;
+  if (!lod) return true;
+  const near = lod.near ? distance < WEAPON_LOD_DISTANCE + WEAPON_LOD_HYSTERESIS : distance < WEAPON_LOD_DISTANCE - WEAPON_LOD_HYSTERESIS;
+  if (near !== lod.near) {
+    lod.near = near;
+    for (const o of lod.hi) o.visible = near;
+    lod.lo.visible = !near;
+  }
+  return near;
 }
 
 /** Standalone world gun (also used for weapons dropped on the floor). Muzzle points −z. */

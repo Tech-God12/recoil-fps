@@ -4,8 +4,9 @@
 // Lethal hits kill outright and score immediately — no wounded state, no revives.
 // Momentum layer: 3 kills inside 30 s ignites ON FIRE (+damage, +speed) but every enemy hunts you.
 import * as THREE from 'three';
-import { buildArmoredSoldier, type SoldierModel } from './models';
+import { buildArmoredSoldier, HIT_PROXY_MAT, type SoldierModel } from './models';
 import type { Effects } from './effects';
+import { BodyReactions, surfaceUnder, type HitInfo } from './reactions';
 import type { AABB } from './world';
 import { arenaZoneAt } from './world';
 import { NavGrid } from './ai';
@@ -76,6 +77,9 @@ export interface TDMContext {
   playerOnFire(): boolean;
   /** Optional sight blocker (smoke clouds). True = the segment is obscured. */
   sightBlocked?(from: THREE.Vector3, to: THREE.Vector3): boolean;
+  /** Death feedback hooks (engine routes them to spatial audio; absent in headless sims). */
+  onBodyFall?(at: THREE.Vector3, heavy: boolean): void;
+  onWeaponDrop?(at: THREE.Vector3): void;
 }
 
 /** Hit description passed with weapon-profile damage (the engine applies armor). */
@@ -137,6 +141,9 @@ export interface TDMBotOptions {
   marker?: boolean;
   /** Sight cone (cosine of the half-angle). Undefined = 360° awareness (TDM). */
   fovCos?: number;
+  /** Corpse drops its rifle to the floor. Default true; Bomb Defusal passes false
+   *  because it spawns its own pickup for the dead player's gun. */
+  dropWeapon?: boolean;
 }
 
 const ray = new THREE.Raycaster();
@@ -236,6 +243,12 @@ export class TDMBot {
   modelVersion = 0;
   readonly momentum: boolean;
   readonly corpseLinger: number;
+  readonly dropWeapon: boolean;
+  /** Directional flinch + procedural death (shared with mission soldiers — reactions.ts). */
+  readonly reactions = new BodyReactions();
+  private pendingHit: HitInfo | null = null;
+  /** Describe the NEXT damage call (direction, zone, explosive). Optional. */
+  noteHit(info: HitInfo) { this.pendingHit = info; }
   readonly fovCos: number | undefined;
   private alertT = 0;
   private anchoredFire = false;
@@ -291,7 +304,6 @@ export class TDMBot {
   private locomotion = 0;
   private shotPose = 0;
   private flinch = 0;
-  private deathT = -1;
   private lastX = 0;
   private lastZ = 0;
   // ---- momentum "ON FIRE" ----
@@ -319,6 +331,7 @@ export class TDMBot {
     this.ctx = ctx; this.mgr = mgr; this.nav = nav; this.team = team; this.name = name; this.armor = armor;
     this.momentum = opts.momentum ?? true;
     this.corpseLinger = opts.corpseLinger ?? TDM_RESPAWN_SECONDS - 1.5;
+    this.dropWeapon = opts.dropWeapon ?? true;
     this.fovCos = opts.fovCos;
     this.baseHp = opts.baseHp ?? TDM_BASE_HP;
     this.hpPerArmor = opts.hpPerArmor ?? TDM_HP_PER_ARMOR;
@@ -371,6 +384,7 @@ export class TDMBot {
    */
   rebuildModel(armor: TDMArmor, tint: number) {
     const old = this.model;
+    this.reactions.reset(old); // a dropped rifle belongs to the old model — take it back first
     const visible = old.group.visible;
     old.group.removeFromParent();
     old.group.traverse(o => {
@@ -378,7 +392,7 @@ export class TDMBot {
         o.geometry.dispose();
         const m = o.material as THREE.Material;
         // the soldier atlas is shared; only per-model tint/ghost materials are owned
-        if (!(m as THREE.MeshStandardMaterial).map) m.dispose();
+        if (!(m as THREE.MeshStandardMaterial).map && m !== HIT_PROXY_MAT) m.dispose();
       }
     });
     this.armor = armor;
@@ -398,7 +412,7 @@ export class TDMBot {
     this.hp = this.maxHp;
     this.frags = 3; this.flashes = 1;
     this.state = 'PATROL'; this.stateTime = 0;
-    this.respawnT = -1; this.deadAge = 0; this.deathT = -1;
+    this.respawnT = -1; this.deadAge = 0;
     this.target = null; this.lastKnown = null; this.lastSeenT = 999; this.hasLOS = false;
     this.burstLeft = 0; this.pauseTimer = 0.5 + Math.random() * 0.5;
     this.pushTarget = null; this.flankTarget = null; this.coverPos = null; this.patrolTarget = null;
@@ -411,6 +425,7 @@ export class TDMBot {
     this.killTimes = [];
     if (this.onFire) this.endFire();
     this.huntPush = false;
+    this.reactions.reset(this.model); this.pendingHit = null;
     const g = this.model.group;
     g.visible = true; g.position.copy(this.pos); g.rotation.set(0, this.yaw, 0);
     this.model.parts.torso.position.y = 0.95; this.model.parts.torso.rotation.set(0, 0, 0);
@@ -434,7 +449,6 @@ export class TDMBot {
     if (this.gear) { this.magLeft = this.gear.mag; this.reloadLeft = 0; }
     this.corpseHold = true;
     this.deadAge = 0;
-    this.deathT = -1;
     this.lastSeenT = 999;
     this.hasLOS = false;
     this.target = null;
@@ -471,11 +485,12 @@ export class TDMBot {
     const taken = Math.max(0, this.hp - result.hp);
     this.hp = result.hp;
     this.armorPool = result.armor;
-    this.flinch = isHead ? 0.35 : 0.22;
     const from = attacker === 'player' ? this.ctx.playerFeet() : attacker.pos;
+    const hit = this.consumeHit(isHead, from);
     this.lastKnown = from.clone();
     this.lastSeenT = 0;
-    if (this.hp <= 0) { this.hp = 0; this.die(); return { killed: true, taken }; }
+    if (this.hp <= 0) { this.hp = 0; this.die(hit); return { killed: true, taken }; }
+    this.flinchFrom(hit);
     // A committed plant or defuse is not interrupted by taking fire.
     const busy = this.order()?.mode === 'action';
     if (!busy && this.state === 'PATROL') this.state = 'ENGAGE';
@@ -527,30 +542,46 @@ export class TDMBot {
     if (applyArmor) dmg *= 1 - (isHead ? TDM_HEAD_REDUCTION[this.armor] : TDM_BODY_REDUCTION[this.armor]);
     this.mgr.onDamage?.(attacker, this, Math.min(dmg, this.hp));
     this.hp -= dmg;
-    this.flinch = isHead ? 0.35 : 0.22;
     // being shot reveals the shooter's rough position
     const from = attacker === 'player' ? this.ctx.playerFeet() : attacker.pos;
+    const hit = this.consumeHit(isHead, from);
     this.lastKnown = from.clone();
     this.lastSeenT = 0;
+    // Death direction uses the facing at the moment of the hit, before any turn-to-shooter.
+    if (this.hp <= 0) { this.hp = 0; this.die(hit); return true; }
+    this.flinchFrom(hit);
     if (this.fovCos !== undefined) { this.alertT = 1.4; this.faceTarget(from); }
-    if (this.hp <= 0) { this.hp = 0; this.die(); return true; }
     if (this.state === 'PATROL') this.state = 'ENGAGE';
     // Badly hurt → break for cover
     if (this.hp < this.maxHp * 0.35 && this.state !== 'COVER' && Math.random() < 0.65) this.enterCover();
     return false;
   }
 
-  private die() {
+  private consumeHit(isHead: boolean, from: THREE.Vector3): HitInfo {
+    const hit = this.pendingHit ?? {}; this.pendingHit = null;
+    if (!hit.zone) hit.zone = isHead ? 'head' : 'torso';
+    if (!hit.from) hit.from = from;
+    return hit;
+  }
+
+  private flinchFrom(hit: HitInfo) {
+    const f = hit.from!;
+    this.reactions.hit(hit.zone ?? 'torso', new THREE.Vector3(this.pos.x - f.x, 0, this.pos.z - f.z).normalize(), this.model.group.rotation.y);
+  }
+
+  private die(hit: HitInfo = {}) {
     this.state = 'DEAD';
     if (this.onFire) this.endFire();
-    this.deathT = 0;
     this.respawnT = TDM_RESPAWN_SECONDS;
-    let surfaceY = this.ctx.groundHeight(this.pos.x, this.pos.z);
-    for (const b of this.ctx.solids) {
-      if (b.maxY > this.pos.y + 0.4 || b.maxY <= surfaceY) continue;
-      if (this.pos.x > b.minX - 0.3 && this.pos.x < b.maxX + 0.3 && this.pos.z > b.minZ - 0.3 && this.pos.z < b.maxZ + 0.3) surfaceY = b.maxY;
-    }
+    const surfaceY = surfaceUnder(this.pos, this.ctx.solids, this.ctx.groundHeight(this.pos.x, this.pos.z));
     this.ctx.effects.bloodDecal(this.pos, surfaceY);
+    const g = this.model.group;
+    this.reactions.die(this.model, hit, {
+      pos: new THREE.Vector3(this.pos.x, this.pos.y, this.pos.z), yaw: g.rotation.y, surfaceY, solids: this.ctx.solids,
+      dropWeapon: this.dropWeapon,
+      onImpact: (at, heavy) => this.ctx.onBodyFall?.(at, heavy),
+      onClatter: at => this.ctx.onWeaponDrop?.(at),
+    });
   }
 
   // ==================== MOMENTUM: "ON FIRE" ====================
@@ -1279,14 +1310,10 @@ export class TDMBot {
     }
     if (this.dead) {
       this.deadAge += dt;
-      if (this.deathT >= 0 && this.deathT < 0.6) {
-        this.deathT += dt;
-        const t = Math.min(1, this.deathT / 0.5);
-        this.model.group.rotation.x = -t * Math.PI / 2 * 0.96;
-        this.model.group.position.y = this.pos.y + 0.1 * Math.sin(t * Math.PI);
-      }
       // corpse fades from the field a moment before the respawn (ranked bodies stay for the round)
       if (!this.corpseHold && this.deadAge > this.corpseLinger) this.model.group.visible = false;
+      // Procedural death; also keeps a dropped rifle's visibility tied to the corpse.
+      this.reactions.update(dt, this.model);
       return;
     }
     if (this.stunTimer > 0) this.stunTimer -= dt;
@@ -1324,6 +1351,8 @@ export class TDMBot {
     p.lArm.rotation.z += ((aiming ? 0.3 : 0) - p.lArm.rotation.z) * Math.min(1, dt * 6);
     p.torso.rotation.x = -this.flinch * 0.8 + stride * 0.045 - this.shotPose * 0.035;
     p.head.rotation.x = -this.flinch * 1.2;
+    // Directional, zone-aware flinch layered on top (reactions.ts) — same as mission soldiers.
+    this.reactions.applyFlinch(dt, p);
   }
 }
 
@@ -1460,6 +1489,7 @@ export class TDMManager implements BotSquad {
   dispose() {
     for (const b of this.bots) {
       b.disposeMarker();
+      b.reactions.reset(b.model); // re-parent a dropped rifle so it is disposed with the body
       b.model.group.removeFromParent();
       b.model.group.traverse(object => { if (object instanceof THREE.Mesh) object.geometry.dispose(); });
     }

@@ -21,8 +21,7 @@ export interface PlayerProfile {
   builds: Partial<Record<WeaponId, WeaponBuild>>;
   loadout: Loadout;
   skins: Partial<Record<WeaponId, SkinId>>;
-  seenArmoryTutorial: boolean;
-  /** OPERATION BLACKOUT ladder: rating, peak, placements, streaks. */
+  /** Operation Blackout ladder: rating, peak, placements, streaks. */
   ranked: RankedProfile;
 }
 
@@ -48,7 +47,6 @@ export const DEFAULT_PROFILE: PlayerProfile = {
     secondary: { weapon: 'm1911', attachments: {} },
   },
   skins: {},
-  seenArmoryTutorial: false,
   ranked: structuredClone(DEFAULT_RANKED),
 };
 
@@ -136,7 +134,6 @@ export function migrateProfile(raw: unknown): PlayerProfile {
       builds,
       loadout,
       skins,
-      seenArmoryTutorial: d.seenArmoryTutorial === true,
       ranked: readRanked(d.ranked),
     };
   } catch {

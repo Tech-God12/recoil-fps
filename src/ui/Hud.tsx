@@ -35,7 +35,7 @@ function TdmFullBoard({ tdm }: { tdm: NonNullable<HudState['tdm']> }) {
     <div className={`tdm-board-row ${r.you ? 'you' : ''} ${r.dead ? 'dead' : ''} ${r.onFire ? 'fire' : ''}`}>
       <span className="tdm-board-name">
         {mvpKills > 0 && r.kills === mvpKills && <i className="mvp" title="Match leader">★</i>}
-        <em aria-hidden="true">{r.armorIcon}</em>{r.name}{r.onFire ? ' 🔥' : ''}{r.you ? ' (YOU)' : ''}
+        <em aria-hidden="true">{r.armorIcon}</em>{r.name}{r.onFire ? ' 🔥' : ''}
       </span>
       <span className="tabular">{r.kills}</span>
       <span className="tabular">{r.deaths}</span>
@@ -45,15 +45,15 @@ function TdmFullBoard({ tdm }: { tdm: NonNullable<HudState['tdm']> }) {
   );
   const Head = () => (
     <div className="tdm-board-row head">
-      <span className="tdm-board-name">OPERATOR</span><span>K</span><span>D</span><span>HS</span><span>K/D</span>
+      <span className="tdm-board-name">Operator</span><span>K</span><span>D</span><span>HS</span><span>K/D</span>
     </div>
   );
   return (
     <div className="tdm-board" role="dialog" aria-label="Match scoreboard">
       <div className="tdm-board-title">
-        <span className="alpha">ALPHA <b className="tabular">{tdm.alphaScore}</b></span>
-        <span className="mid">WAREHOUSE TDM · {missionClock(tdm.timeLeft)}</span>
-        <span className="bravo"><b className="tabular">{tdm.bravoScore}</b> BRAVO</span>
+        <span className="alpha">Alpha <b className="tabular">{tdm.alphaScore}</b></span>
+        <span className="mid">Warehouse · {missionClock(tdm.timeLeft)}</span>
+        <span className="bravo"><b className="tabular">{tdm.bravoScore}</b> Bravo</span>
       </div>
       <div className="tdm-board-cols">
         <div className="tdm-board-team alpha">
@@ -65,7 +65,7 @@ function TdmFullBoard({ tdm }: { tdm: NonNullable<HudState['tdm']> }) {
           {sorted('bravo').map(r => <Row key={r.name} r={r} />)}
         </div>
       </div>
-      <span className="tdm-board-hint mono">HOLD TAB · ★ MATCH LEADER</span>
+      <span className="tdm-board-hint mono">Hold Tab · ★ match leader</span>
     </div>
   );
 }
@@ -141,12 +141,12 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       {hud.tdm && !hud.comp && (
         <div className="tdm-scoreboard" aria-label="Match score">
           <div className="tdm-score-row">
-            <div className="tdm-score-team alpha"><span className="lbl">ALPHA</span><span className="num">{hud.tdm.alphaScore}</span></div>
+            <div className="tdm-score-team alpha"><span className="lbl">Alpha</span><span className="num">{hud.tdm.alphaScore}</span></div>
             <div className="tdm-score-clock">
               <b className={hud.tdm.timeLeft < 30 ? 'low' : ''}>{missionClock(hud.tdm.timeLeft)}</b>
-              <i>WAREHOUSE TDM</i>
+              <i>Warehouse</i>
             </div>
-            <div className="tdm-score-team bravo"><span className="num">{hud.tdm.bravoScore}</span><span className="lbl">BRAVO</span></div>
+            <div className="tdm-score-team bravo"><span className="num">{hud.tdm.bravoScore}</span><span className="lbl">Bravo</span></div>
           </div>
           <div className="tdm-roster" aria-hidden="true">
             <span className="rteam">
@@ -165,17 +165,17 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
 
       {/* ============ ON FIRE MOMENTUM BANNER ============ */}
       {hud.tdm?.onFire && (
-        <div className="tdm-fire-banner" role="status">🔥 ON FIRE — {Math.ceil(hud.tdm.onFireLeft)}s</div>
+        <div className="tdm-fire-banner" role="status">🔥 On fire — {Math.ceil(hud.tdm.onFireLeft)}s</div>
       )}
 
       {/* ============ TDM RESPAWN OVERLAY ============ */}
       {hud.tdm?.playerDead && (
         <div className="tdm-respawn" role="status">
-          <span className="tdm-respawn-title">ELIMINATED</span>
+          <span className="tdm-respawn-title">Eliminated</span>
           <span className="tdm-respawn-count">{Math.ceil(hud.tdm.respawnIn)}</span>
           <div className="tdm-respawn-bar"><span style={{ width: `${(1 - hud.tdm.respawnIn / 5) * 100}%` }} /></div>
-          <span className="tdm-respawn-sub">REDEPLOYING TO ALPHA YARD</span>
-          <span className="tdm-respawn-score">ALPHA {hud.tdm.alphaScore} — {hud.tdm.bravoScore} BRAVO · YOUR KILLS {hud.tdm.playerKills}</span>
+          <span className="tdm-respawn-sub">Redeploying to the Alpha yard</span>
+          <span className="tdm-respawn-score">Alpha {hud.tdm.alphaScore} — {hud.tdm.bravoScore} Bravo · your kills {hud.tdm.playerKills}</span>
         </div>
       )}
 
@@ -223,7 +223,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           })}
           <span className="compass-notch" />
         </div>
-        <div className="compass-bear hud-chip">{Math.round(hud.bearing).toString().padStart(3, '0')}<span> DEG</span></div>
+        <div className="compass-bear hud-chip">{Math.round(hud.bearing).toString().padStart(3, '0')}<span>°</span></div>
       </div>
 
       {/* ============ CASH (mission wallet; the defusal layer shows round money) ============ */}
@@ -237,15 +237,15 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       <div className="absolute top-14 right-5 flex flex-col items-end gap-1.5">
         {fx.feed.map(f => f.tdm ? (
           <div key={f.id} className="feed-row text-right">
-            <span className={`font-black ${f.tdm.killer === 'YOU' ? 'text-[var(--brass)]' : f.tdm.killerTeam === 'alpha' ? 'text-[#7FC4D4]' : 'text-[#E08A7E]'}`}>{f.tdm.killer || '—'}</span>
+            <span className={`font-black ${f.tdm.killer === 'You' ? 'text-[var(--brass)]' : f.tdm.killerTeam === 'alpha' ? 'text-[#7FC4D4]' : 'text-[#E08A7E]'}`}>{f.tdm.killer || '—'}</span>
             <span className="mono text-[var(--steel)] text-[9px] mx-1.5">[{f.tdm.weapon}]</span>
             {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
-            <span className={f.tdm.victim === 'YOU' ? 'text-[var(--blood)] font-black' : 'text-white/90'}>{f.tdm.victim}</span>
+            <span className={f.tdm.victim === 'You' ? 'text-[var(--blood)] font-black' : 'text-white/90'}>{f.tdm.victim}</span>
             {f.tdm.zone && <span className="feed-zone mono">— {f.tdm.zone}</span>}
           </div>
         ) : (
           <div key={f.id} className="feed-row text-right">
-            <span className="text-[var(--brass)] font-black">YOU</span>
+            <span className="text-[var(--brass)] font-black">You</span>
             <span className="mono text-[var(--steel)] text-[9px] mx-1.5">{f.text.split('  ')[1]}</span>
             {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
             <span className="text-white/90">{f.text.split('  ')[2]}</span>
@@ -294,7 +294,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       {/* ============ GRENADE WARNING ============ */}
       {hud.grenadeAngle !== undefined && (
         <div className="absolute left-1/2 top-[42%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center nade-warn">
-          <span className="text-[15px] font-black tracking-[0.3em] text-[var(--blood)] ">GRENADE</span>
+          <span className="text-[15px] font-black tracking-[0.3em] text-[var(--blood)] ">Grenade</span>
           <div style={{ transform: `rotate(${hud.grenadeAngle}deg)` }}>
             <svg width="46" height="46" viewBox="0 0 40 40"><path d="M20 2L34 30L20 23L6 30L20 2Z" fill="#C8321E" stroke="#D8B07A" strokeWidth="2" /></svg>
           </div>
@@ -313,7 +313,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       )}
       {fx.callout && (
         <div key={fx.callout.id} className="mission-radio">
-          <span>RADIO</span> {fx.callout.text}
+          <span>Radio</span> {fx.callout.text}
         </div>
       )}
       <div className="absolute left-1/2 top-[57%] -translate-x-1/2 flex flex-col items-center gap-1">
@@ -324,7 +324,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
 
       {fx.missionBanner && (
         <div key={fx.missionBanner.id} className="mission-phase-banner" role="status">
-          <span>{String(fx.missionBanner.index + 1).padStart(2, '0')}</span>{fx.missionBanner.title}
+          {fx.missionBanner.title}
         </div>
       )}
 
@@ -468,31 +468,31 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
                 MK {hud.masterkey.reloading ? '···' : `${'●'.repeat(hud.masterkey.shells)}${'○'.repeat(Math.max(0, 3 - hud.masterkey.shells))}`} [B]
               </span>
             )}
-            {hud.bipodDeployed && <span className="bipod">BIPOD DEPLOYED</span>}
+            {hud.bipodDeployed && <span className="bipod">Bipod deployed</span>}
           </div>
         )}
         <div className="flex justify-end gap-3 mt-2.5 nade-row">
-          <span className={hud.frags > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">G</span>FRAG ×{hud.frags}</span>
-          <span className={hud.flashes > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">F</span>FLASH ×{hud.flashes}</span>
-          {df && <span className={df.smokes > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">Z</span>SMOKE ×{df.smokes}</span>}
+          <span className={hud.frags > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">G</span>Frag ×{hud.frags}</span>
+          <span className={hud.flashes > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">F</span>Flash ×{hud.flashes}</span>
+          {df && <span className={df.smokes > 0 ? 'text-white/75' : 'text-white/20'}><span className="keycap mr-1">Z</span>Smoke ×{df.smokes}</span>}
         </div>
-        {hud.cooking && <div className="mt-1.5 cook-warn">◉ COOKING — RELEASE G</div>}
-        {shouldShowReload(hud.mag, hud.magSize, hud.reloading) && <div className="mt-1.5 text-[10px] tracking-[0.3em] font-black text-[var(--brass)] blink">RELOAD</div>}
+        {hud.cooking && <div className="mt-1.5 cook-warn">◉ Cooking — release G</div>}
+        {shouldShowReload(hud.mag, hud.magSize, hud.reloading) && <div className="mt-1.5 text-[10px] tracking-[0.3em] font-black text-[var(--brass)] blink">Reload</div>}
       </div>}
 
       {/* ============ ONBOARDING STRIP (first seconds of a mission) ============ */}
       {hud.mission && hud.mission.elapsed < 12 && (
         <div className="onboard-strip hud-chip" role="status">
           <span className="onboard-fade" style={{ animationDelay: '7.5s' }}>
-            <span className="keycap">WASD</span> MOVE
-            <i /><span className="keycap">RMB</span> SCOPE
-            <i /><span className="keycap">G</span> HOLD FRAG
-            <i /><span className="keycap">1/2</span> SWAP
-            <i /><span className="keycap">Q</span> LAST
-            <i /><span className="keycap">Q·E</span> HOLD LEAN
-            <i /><span className="keycap">SPACE</span> VAULT
-            <i /><span className="keycap">X</span> ATTACH / BLAST
-            <i /><span className="keycap">3-7</span> STREAKS
+            <span className="keycap">WASD</span> Move
+            <i /><span className="keycap">RMB</span> Scope
+            <i /><span className="keycap">G</span> Hold frag
+            <i /><span className="keycap">1/2</span> Swap
+            <i /><span className="keycap">Q</span> Last weapon
+            <i /><span className="keycap">Q·E</span> Hold lean
+            <i /><span className="keycap">Space</span> Vault
+            <i /><span className="keycap">X</span> Interact
+            <i /><span className="keycap">3-7</span> Streaks
           </span>
         </div>
       )}
@@ -500,7 +500,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       {/* ============ VITALS ============ */}
       {!spectating && <div className="absolute bottom-7 left-8">
         <div className="vitals hud-chip">
-          <div className="vitals-head"><span className="live-dot" />VITALS</div>
+          <div className="vitals-head"><span className="live-dot" />Vitals</div>
           <div className="flex items-end gap-3 mt-1">
             <span className={`hp-num ${lowHp ? 'low' : ''}`}>{hud.hp}</span>
             <svg width="76" height="22" viewBox="0 0 76 22" className="overflow-visible mb-1">
@@ -515,9 +515,9 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
             ))}
           </div>
           <div className="vitals-stats mt-2">
-            <div>ELIMINATIONS <b className="text-white">{hud.kills}</b></div>
-            <div>HOSTILES <b className="h">{hud.enemiesLeft}</b></div>
-            {df ? <div>ROUND <b className="cy">{df.round}/{df.maxRounds}</b></div> : <div>SCORE <b className="cy">{hud.score.toLocaleString('en-US')}</b></div>}
+            <div>Eliminations <b className="text-white">{hud.kills}</b></div>
+            <div>Hostiles <b className="h">{hud.enemiesLeft}</b></div>
+            {df ? <div>Round <b className="cy">{df.round}/{df.maxRounds}</b></div> : <div>Score <b className="cy">{hud.score.toLocaleString('en-US')}</b></div>}
           </div>
         </div>
       </div>}

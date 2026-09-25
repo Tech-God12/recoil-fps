@@ -89,22 +89,28 @@ export function ArmorIcon({ tier, size = 26 }: { tier: 0 | 1 | 2; size?: number 
 
 /* ---------------- weapon data helpers ---------------- */
 
+/** Compact class chip for the weapon rack (the full label is too wide for it). */
+export const CLASS_SHORT: Record<WeaponClass, string> = {
+  AR: 'Rifle', BR: 'Battle rifle', SMG: 'SMG', PDW: 'PDW',
+  SR: 'Sniper', SG: 'Shotgun', LMG: 'LMG', PISTOL: 'Sidearm',
+};
+
 export const CLASS_LABEL: Record<WeaponClass, string> = {
-  AR: 'ASSAULT RIFLE', BR: 'BATTLE RIFLE', SMG: 'SUBMACHINE GUN', PDW: 'PERSONAL DEFENSE',
-  SR: 'SNIPER RIFLE', SG: 'SHOTGUN', LMG: 'LIGHT MACHINE GUN', PISTOL: 'SIDEARM',
+  AR: 'Assault rifle', BR: 'Battle rifle', SMG: 'Submachine gun', PDW: 'Personal defense',
+  SR: 'Sniper rifle', SG: 'Shotgun', LMG: 'Light machine gun', PISTOL: 'Sidearm',
 };
 
 export const CALIBER: Record<WeaponId, { round: string; note: string }> = {
   m4a1: { round: '5.56×45 NATO', note: 'Balanced performance, high rate of fire, and exceptional modularity. The trusted choice for operators worldwide.' },
-  ak47: { round: '7.62×39MM', note: 'Heavy intermediate cartridge. Punches through cover and brush like they owe it money.' },
+  ak47: { round: '7.62×39mm', note: 'Heavy intermediate cartridge. Punches through cover and brush like they owe it money.' },
   m1911: { round: '.45 ACP', note: 'Big, slow, authoritative. Eight rounds that end arguments.' },
-  awm: { round: '.338 LAPUA', note: 'Long-range magnum. Flat, fast, and final — if you can stand the sway.' },
-  mp7: { round: '4.6×30MM', note: 'Armor-piercing PDW round. Small case, vicious cycle rate.' },
+  awm: { round: '.338 Lapua', note: 'Long-range magnum. Flat, fast, and final — if you can stand the sway.' },
+  mp7: { round: '4.6×30mm', note: 'Armor-piercing PDW round. Small case, vicious cycle rate.' },
   vector: { round: '.45 ACP', note: 'Pistol-caliber thumper in a fire hose of a gun. Manage the climb.' },
-  spas12: { round: '12 GAUGE', note: 'Eight pellets per trigger pull. Devastating inside a doorway.' },
-  scar_h: { round: '7.62×51MM', note: 'Full-power battle rifle round. Two taps solve most problems.' },
+  spas12: { round: '12 gauge', note: 'Eight pellets per trigger pull. Devastating inside a doorway.' },
+  scar_h: { round: '7.62×51mm', note: 'Full-power battle rifle round. Two taps solve most problems.' },
   deagle: { round: '.50 AE', note: 'Hand-cannon magnum. Loud, proud, and wrist-breaking.' },
-  m249: { round: '5.56×45 BELT', note: 'Linked suppression. One hundred rounds before the long reload.' },
+  m249: { round: '5.56×45 belt', note: 'Linked suppression. One hundred rounds before the long reload.' },
 };
 
 const clampN = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -117,25 +123,25 @@ export function accuracyRating(s: ResolvedWeaponStats): number {
 export function weaponTags(entry: WeaponCatalogEntry, stats: ResolvedWeaponStats): string[] {
   const acc = accuracyRating(stats);
   const rules: [string, boolean][] = [
-    ['PRECISION', !!entry.boltAction],
-    ['SPREAD', (entry.pellets ?? 1) > 1],
-    ['SUSTAINED', !!entry.beltFed],
-    ['HEAVY', stats.damage >= 50],
-    ['RAPID', stats.rpm >= 850],
-    ['ACCURATE', acc >= 75],
-    ['VERSATILE', stats.auto && stats.damage >= 24 && stats.damage <= 46],
-    ['MODULAR', entry.slots.length >= 6],
-    ['STEADY', stats.auto && stats.rpm < 650],
-    ['SEMI', !stats.auto && !entry.boltAction && !entry.pump],
-    ['LONG REACH', stats.falloffStart >= 35],
-    ['DEEP MAG', stats.magSize >= 40],
-    ['SNAPPY', stats.adsTime <= 0.18],
-    ['AGILE', stats.moveSpeedMul > 1],
-    ['PUMP', !!entry.pump],
-    ['CLASSIC', !!entry.slideBlowback],
-    ['FIELD-TESTED', true],
-    ['RELIABLE', true],
-    ['PROVEN', true],
+    ['Precision', !!entry.boltAction],
+    ['Spread', (entry.pellets ?? 1) > 1],
+    ['Sustained', !!entry.beltFed],
+    ['Heavy', stats.damage >= 50],
+    ['Rapid', stats.rpm >= 850],
+    ['Accurate', acc >= 75],
+    ['Versatile', stats.auto && stats.damage >= 24 && stats.damage <= 46],
+    ['Modular', entry.slots.length >= 6],
+    ['Steady', stats.auto && stats.rpm < 650],
+    ['Semi', !stats.auto && !entry.boltAction && !entry.pump],
+    ['Long reach', stats.falloffStart >= 35],
+    ['Deep mag', stats.magSize >= 40],
+    ['Snappy', stats.adsTime <= 0.18],
+    ['Agile', stats.moveSpeedMul > 1],
+    ['Pump', !!entry.pump],
+    ['Classic', !!entry.slideBlowback],
+    ['Field-tested', true],
+    ['Reliable', true],
+    ['Proven', true],
   ];
   return rules.filter(([, ok]) => ok).slice(0, 3).map(([t]) => t);
 }
@@ -155,11 +161,11 @@ export function statBars(entry: WeaponCatalogEntry, stats: ResolvedWeaponStats):
     74 * stats.moveSpeedMul + (stats.adsTime <= 0.2 ? 4 : 0)
     - (stats.tacReload > 3 ? 8 : 0) - (stats.magSize >= 60 ? 3 : 0), 8, 99));
   return [
-    { key: 'dmg', label: 'DAMAGE', text: dmgText, fill: dmgFill },
-    { key: 'rate', label: 'FIRE RATE', text: String(rate), fill: clampN(stats.rpm / 1100 * 100, 4, 100) },
-    { key: 'acc', label: 'ACCURACY', text: String(acc), fill: acc },
-    { key: 'range', label: 'RANGE', text: String(range), fill: range },
-    { key: 'mob', label: 'MOBILITY', text: String(mob), fill: mob },
+    { key: 'dmg', label: 'Damage', text: dmgText, fill: dmgFill },
+    { key: 'rate', label: 'Fire rate', text: String(rate), fill: clampN(stats.rpm / 1100 * 100, 4, 100) },
+    { key: 'acc', label: 'Accuracy', text: String(acc), fill: acc },
+    { key: 'range', label: 'Range', text: String(range), fill: range },
+    { key: 'mob', label: 'Mobility', text: String(mob), fill: mob },
   ];
 }
 
@@ -234,7 +240,7 @@ export function PartsPanel({ entry, build, slot, parts, owned, cash, mode, onEqu
     <div className="tx-parts" key={slot}>
       <div className="tx-sec">
         <span>{SLOT_LABELS[slot]} — {entry.short}</span>
-        <button type="button" className="tx-mini" onClick={onClose}>CLOSE</button>
+        <button type="button" className="tx-mini" onClick={onClose}>Close</button>
       </div>
       {equippedId && (
         <button type="button" className="tx-strip" onClick={onStrip}>
@@ -296,7 +302,7 @@ export function OrangeDeploy({ title, hint, onClick, wide }: {
 export function TxBack({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" className="tx-back" onClick={onClick}>
-      <span aria-hidden="true">‹</span> BACK
+      <span aria-hidden="true">‹</span> Back
     </button>
   );
 }

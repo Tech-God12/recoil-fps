@@ -27,13 +27,13 @@ export const PLACEMENT_MATCHES = 5;
 export const PLACEMENT_MULTIPLIER = 1.75;
 
 export const RANK_TIERS: RankTier[] = [
-  { id: 'bronze', name: 'BRONZE', min: 0, max: 599, color: '#A9724A', divisions: 3 },
-  { id: 'silver', name: 'SILVER', min: 600, max: 1099, color: '#B9C2C8', divisions: 3 },
-  { id: 'gold', name: 'GOLD', min: 1100, max: 1599, color: '#D8B07A', divisions: 3 },
-  { id: 'platinum', name: 'PLATINUM', min: 1600, max: 1999, color: '#7FC5D8', divisions: 3 },
-  { id: 'diamond', name: 'DIAMOND', min: 2000, max: 2399, color: '#8FB7FF', divisions: 3 },
-  { id: 'master', name: 'MASTER', min: 2400, max: 2899, color: '#C88BE0', divisions: 3 },
-  { id: 'grandmaster', name: 'GRANDMASTER', min: 2900, max: RATING_CEILING, color: '#FF6A2B', divisions: 1 },
+  { id: 'bronze', name: 'Bronze', min: 0, max: 599, color: '#A9724A', divisions: 3 },
+  { id: 'silver', name: 'Silver', min: 600, max: 1099, color: '#B9C2C8', divisions: 3 },
+  { id: 'gold', name: 'Gold', min: 1100, max: 1599, color: '#D8B07A', divisions: 3 },
+  { id: 'platinum', name: 'Platinum', min: 1600, max: 1999, color: '#7FC5D8', divisions: 3 },
+  { id: 'diamond', name: 'Diamond', min: 2000, max: 2399, color: '#8FB7FF', divisions: 3 },
+  { id: 'master', name: 'Master', min: 2400, max: 2899, color: '#C88BE0', divisions: 3 },
+  { id: 'grandmaster', name: 'Grandmaster', min: 2900, max: RATING_CEILING, color: '#FF6A2B', divisions: 1 },
 ];
 
 export const RATING_START = 1000;

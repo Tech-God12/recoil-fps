@@ -44,7 +44,7 @@ const statOf = (id: WeaponId): string => {
   const w = weaponById(id);
   if (!w) return '';
   const b = w.base;
-  return `${b.damage} DMG · ${b.rpm} RPM · ${b.magSize} MAG`;
+  return `${b.damage} dmg · ${b.rpm} rpm · ${b.magSize} mag`;
 };
 
 function weapon(
@@ -88,11 +88,11 @@ export const COMP_BUY_ITEMS: CompBuyItem[] = [
   weapon('awm', 4750, 'HEAVY', '9', 3, 'Bolt-action .338. One body shot, one round in the magazine budget.'),
   weapon('m249', 5200, 'HEAVY', '0', 3, 'Belt-fed suppression. Holds a lane alone; you will not be reloading soon.'),
   // ---- gear ----
-  { id: 'g_kevlar', name: 'Kevlar Vest', short: 'KEVLAR', price: 650, kind: 'armor', category: 'GEAR', cls: 'GEAR', key: 'Q', tier: 1, blurb: 'Body armor. Absorbs nearly half of every round that lands.', stat: 'BODY PROTECTION' },
-  { id: 'g_helmet', name: 'Kevlar + Helmet', short: 'HELMET', price: 1000, kind: 'armor', category: 'GEAR', cls: 'GEAR', helmet: true, key: 'W', tier: 2, blurb: 'Adds a helmet: headshots stop being an instant end to your round.', stat: 'BODY + HEAD' },
+  { id: 'g_kevlar', name: 'Kevlar Vest', short: 'KEVLAR', price: 650, kind: 'armor', category: 'GEAR', cls: 'GEAR', key: 'Q', tier: 1, blurb: 'Body armor. Absorbs nearly half of every round that lands.', stat: 'Body protection' },
+  { id: 'g_helmet', name: 'Kevlar + Helmet', short: 'HELMET', price: 1000, kind: 'armor', category: 'GEAR', cls: 'GEAR', helmet: true, key: 'W', tier: 2, blurb: 'Adds a helmet: headshots stop being an instant end to your round.', stat: 'Body + head' },
   { id: 'g_kit', name: 'Defuse Kit', short: 'KIT', price: 400, kind: 'kit', category: 'GEAR', cls: 'GEAR', side: 'defend', key: 'E', tier: 1, blurb: 'Halves defuse time — five seconds instead of ten. Defenders only.', stat: '10s → 5s' },
-  { id: 'g_frag', name: 'Frag Grenade', short: 'FRAG', price: 300, kind: 'nade', category: 'GEAR', cls: 'GEAR', nade: 'frag', key: 'R', tier: 1, blurb: 'Damages through a held angle. Maximum two per operator.', stat: 'LETHAL' },
-  { id: 'g_flash', name: 'Flashbang', short: 'FLASH', price: 200, kind: 'nade', category: 'GEAR', cls: 'GEAR', nade: 'flash', key: 'F', tier: 1, blurb: 'Blinds a held angle for the entry. Maximum two per operator.', stat: 'TEMPORARY' },
+  { id: 'g_frag', name: 'Frag Grenade', short: 'FRAG', price: 300, kind: 'nade', category: 'GEAR', cls: 'GEAR', nade: 'frag', key: 'R', tier: 1, blurb: 'Damages through a held angle. Maximum two per operator.', stat: 'Lethal' },
+  { id: 'g_flash', name: 'Flashbang', short: 'FLASH', price: 200, kind: 'nade', category: 'GEAR', cls: 'GEAR', nade: 'flash', key: 'F', tier: 1, blurb: 'Blinds a held angle for the entry. Maximum two per operator.', stat: 'Temporary' },
 ];
 
 export const COMP_BUY_CATEGORIES: CompBuyCategory[] = ['PISTOLS', 'SMGS', 'RIFLES', 'HEAVY', 'GEAR'];

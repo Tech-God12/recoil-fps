@@ -46,6 +46,9 @@ export const TDM_HEAD_REDUCTION = [0, 0.10, 0.18];
 export const TDM_BODY_REDUCTION = [0, 0.12, 0.22];
 export const TDM_ARMOR_NAMES = ['None', 'Light', 'Heavy'] as const;
 export const TDM_ARMOR_ICONS = ['○', '◍', '⬢'] as const;
+/** Every Warehouse fighter — you included — spawns in light armor. The tier is
+ * fixed, so the loadout screen has nothing to choose. */
+export const TDM_PLAYER_ARMOR: TDMArmor = 1;
 
 export interface TDMContext {
   scene: THREE.Scene;
@@ -1416,8 +1419,8 @@ export class TDMManager implements BotSquad {
     if (killer !== 'player') { killer.kills++; if (headshot) killer.headshots++; killer.registerKill(); }
     if (victim !== 'player') victim.deaths++;
     this.rosterVersion++;
-    const killerName = killer === 'player' ? 'YOU' : killer.name;
-    const victimName = victim === 'player' ? 'YOU' : victim.name;
+    const killerName = killer === 'player' ? 'You' : killer.name;
+    const victimName = victim === 'player' ? 'You' : victim.name;
     const vx = victim === 'player' ? this.ctx.playerFeet().x : victim.pos.x;
     const vz = victim === 'player' ? this.ctx.playerFeet().z : victim.pos.z;
     this.ctx.onFeed(killerName, weapon, victimName, headshot, killerTeam, arenaZoneAt(vx, vz));

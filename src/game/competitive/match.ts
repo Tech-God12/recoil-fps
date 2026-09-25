@@ -23,7 +23,7 @@ import {
 } from './rules';
 import { SITE_PLANS, TacticalDirector, gearFor, type CompOrder } from './tactics';
 
-export const PLAYER_ID = 'YOU';
+export const PLAYER_ID = 'You';
 export const COMP_VISUAL_BUDGET = { draws: 6, triangles: 900 } as const;
 
 /** The player, as seen from the match runner. Implemented by the engine. */
@@ -226,7 +226,7 @@ export class CompetitiveRunner {
   }
 
   private sideLabel(side: CompSide): string {
-    return side === 'attack' ? 'ATTACK' : 'DEFEND';
+    return side === 'attack' ? 'Attack' : 'Defend';
   }
 
   /** Teleport every operator to this round's spawn pads and revive the squad. */
@@ -318,25 +318,25 @@ export class CompetitiveRunner {
         break;
       case 'bomb-defused':
         this.emit({ type: 'sound', cue: 'defused' });
-        this.emit({ type: 'callout', text: `${event.actorId} DEFUSED THE CHARGE` });
-        this.emit({ type: 'feed', text: `${event.actorId} DEFUSED THE CHARGE`, tone: this.toneOf(event.actorId) });
+        this.emit({ type: 'callout', text: `${event.actorId} defused the charge` });
+        this.emit({ type: 'feed', text: `${event.actorId} defused the charge`, tone: this.toneOf(event.actorId) });
         break;
       case 'bomb-detonated':
         this.detonateCharge();
         break;
       case 'bomb-dropped':
-        this.emit({ type: 'feed', text: 'CHARGE IS DOWN', tone: 'neutral' });
+        this.emit({ type: 'feed', text: 'Charge is down', tone: 'neutral' });
         break;
       case 'bomb-picked':
-        this.emit({ type: 'feed', text: `${event.actorId} RECOVERED THE CHARGE`, tone: this.toneOf(event.actorId) });
+        this.emit({ type: 'feed', text: `${event.actorId} recovered the charge`, tone: this.toneOf(event.actorId) });
         break;
       case 'halftime':
-        this.emit({ type: 'banner', title: 'HALFTIME — SIDES SWAPPED', sub: 'ECONOMY RESET' });
-        this.emit({ type: 'callout', text: 'SIDES SWAPPED. ECONOMY RESET.' });
+        this.emit({ type: 'banner', title: 'Halftime — sides swapped', sub: 'Economy reset' });
+        this.emit({ type: 'callout', text: 'Sides swapped. Economy reset.' });
         break;
       case 'overtime':
-        this.emit({ type: 'banner', title: 'OVERTIME', sub: 'FIRST TO LEAD BY TWO' });
-        this.emit({ type: 'callout', text: 'OVERTIME — FIRST TO LEAD BY TWO TAKES IT' });
+        this.emit({ type: 'banner', title: 'Overtime', sub: 'First to lead by two' });
+        this.emit({ type: 'callout', text: 'Overtime — first to lead by two takes it' });
         break;
       default:
         break;
@@ -353,7 +353,7 @@ export class CompetitiveRunner {
     if (this.match.phase === 'live' && previous === 'buy') {
       this.frozen = false;
       this.player.setFrozen(false);
-      this.emit({ type: 'banner', title: 'ROUND LIVE', sub: `${Math.round(this.match.timeLeft)} SECONDS` });
+      this.emit({ type: 'banner', title: 'Round live', sub: `${Math.round(this.match.timeLeft)} seconds` });
       this.emit({ type: 'callout', text: this.attackCallText() });
     }
     if (this.match.phase === 'roundEnd' && this.match.lastRound) {
@@ -367,9 +367,9 @@ export class CompetitiveRunner {
     if (this.match.phase === 'matchEnd') {
       const draw = this.match.draw;
       const winner = this.match.winner;
-      const text = draw ? 'MATCH DRAW' : winner === this.match.of(PLAYER_ID)?.team ? 'VICTORY' : 'DEFEAT';
+      const text = draw ? 'Match draw' : winner === this.match.of(PLAYER_ID)?.team ? 'Victory' : 'Defeat';
       this.emit({ type: 'match-end', winner, draw, text });
-      this.emit({ type: 'banner', title: text, sub: `FINAL ${this.match.score.alpha} — ${this.match.score.bravo}` });
+      this.emit({ type: 'banner', title: text, sub: `Final ${this.match.score.alpha} — ${this.match.score.bravo}` });
       this.emit({ type: 'sound', cue: draw ? 'round-loss' : winner === this.match.of(PLAYER_ID)?.team ? 'match-win' : 'match-loss' });
       this.frozen = true;
       this.player.setFrozen(true);
@@ -475,7 +475,7 @@ export class CompetitiveRunner {
     }
     if (bomb.state === 'carried' && this.lastCarrierId !== bomb.carrierId) {
       this.lastCarrierId = bomb.carrierId;
-      if (bomb.carrierId === PLAYER_ID) this.emit({ type: 'callout', text: 'YOU HAVE THE CHARGE' });
+      if (bomb.carrierId === PLAYER_ID) this.emit({ type: 'callout', text: 'You have the charge' });
     }
     if (bomb.state !== 'carried') this.lastCarrierId = null;
   }
@@ -563,7 +563,7 @@ export class CompetitiveRunner {
   playerTryPickup(): boolean {
     const pos = this.player.position();
     const picked = this.match.tryPickup(PLAYER_ID, pos.x, pos.z);
-    if (picked) this.emit({ type: 'callout', text: 'CHARGE RECOVERED — PLANT AT A OR B' });
+    if (picked) this.emit({ type: 'callout', text: 'Charge recovered — plant at A or B' });
     return picked;
   }
 
@@ -583,11 +583,11 @@ export class CompetitiveRunner {
     const friendly = team === playerTeam;
     if (kind === 'target-a' || kind === 'target-b') return; // the banner covers it
     const texts: Record<string, [string, string]> = {
-      planting: ['THEY ARE PLANTING', 'PLANTING CHARGES'],
-      defusing: ['THEY ARE DEFUSING', 'CUTTING THE WIRE'],
-      retake: ['RETAKE — HOLD THE SITE', 'THEY ARE RETAKEING'],
-      rotating: ['ROTATING', 'CONTACT — ROTATING'],
-      recover: ['RECOVERING THE CHARGE', 'CHARGE IS DOWN'],
+      planting: ['They are planting', 'Planting charges'],
+      defusing: ['They are defusing', 'Cutting the wire'],
+      retake: ['Retake — hold the site', 'They are retaking'],
+      rotating: ['Rotating', 'Contact — rotating'],
+      recover: ['Recovering the charge', 'Charge is down'],
     };
     const line = texts[kind]?.[friendly ? 1 : 0];
     if (line) this.emit({ type: 'callout', text: line });
@@ -607,11 +607,11 @@ export class CompetitiveRunner {
     let prompt: CompHud['prompt'] = null;
     if (actor?.alive && this.match.phase === 'live') {
       if (this.match.bomb.state === 'carried' && this.match.bomb.carrierId === PLAYER_ID) {
-        prompt = { kind: 'plant', ok: site !== null, text: site ? `HOLD [X] TO PLANT — SITE ${site}` : 'CARRY THE CHARGE TO SITE A OR B' };
+        prompt = { kind: 'plant', ok: site !== null, text: site ? `Hold X to plant — site ${site}` : 'Carry the charge to site A or B' };
       } else if (this.match.bomb.state === 'planted' && playerSide === 'defend') {
-        prompt = { kind: 'defuse', ok: bombDist <= COMP_DEFUSE_RADIUS, text: bombDist <= COMP_DEFUSE_RADIUS ? 'HOLD [X] TO DEFUSE' : 'REACH THE CHARGE TO DEFUSE' };
+        prompt = { kind: 'defuse', ok: bombDist <= COMP_DEFUSE_RADIUS, text: bombDist <= COMP_DEFUSE_RADIUS ? 'Hold X to defuse' : 'Reach the charge to defuse' };
       } else if (this.match.bomb.state === 'dropped' && playerSide === 'attack') {
-        prompt = { kind: 'pickup', ok: bombDist <= COMP_PICKUP_RADIUS, text: bombDist <= COMP_PICKUP_RADIUS ? 'CHARGE AT YOUR FEET' : 'RECOVER THE CHARGE' };
+        prompt = { kind: 'pickup', ok: bombDist <= COMP_PICKUP_RADIUS, text: bombDist <= COMP_PICKUP_RADIUS ? 'Charge at your feet' : 'Recover the charge' };
       }
     }
     const spectateBot = this.spectateId ? this.manager.bots.find(b => b.name === this.spectateId) : undefined;
@@ -703,14 +703,14 @@ export function blastDamage(distance: number): number {
 
 export function roundEndText(winner: CompTeam, reason: CompWinReason, match: CompetitiveMatch): string {
   void match;
-  const team = winner === 'alpha' ? 'ALPHA' : 'BRAVO';
+  const team = winner === 'alpha' ? 'Alpha' : 'Bravo';
   switch (reason) {
-    case 'elimination': return `${team} WINS — ENEMY ELIMINATED`;
-    case 'detonation': return 'CHARGE DETONATED';
-    case 'defuse': return `${team} DEFUSED THE CHARGE`;
-    case 'time': return `${team} HOLDS — TIME EXPIRED`;
-    case 'defused-time': return 'CHARGE DEFUSED ON THE LINE';
-    default: return `${team} TAKES THE ROUND`;
+    case 'elimination': return `${team} wins — enemy eliminated`;
+    case 'detonation': return 'Charge detonated';
+    case 'defuse': return `${team} defused the charge`;
+    case 'time': return `${team} holds — time expired`;
+    case 'defused-time': return 'Charge defused on the line';
+    default: return `${team} takes the round`;
   }
 }
 

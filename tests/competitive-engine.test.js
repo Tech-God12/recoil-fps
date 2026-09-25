@@ -136,9 +136,9 @@ test('the ranked HUD renders real round state, rack prices and the site call', (
 
   const html = render(CompHudLayer, { comp: view });
   assert.match(html, /comp-layer/, 'the ranked layer is on screen');
-  assert.match(html, new RegExp(`ROUND ${view.round}`), 'the round number reads through');
+  assert.match(html, new RegExp(`Round ${view.round}`), 'the round number reads through');
   assert.ok(html.includes(`>${view.score.alpha}<`) && html.includes(`>${view.score.bravo}<`), 'both sides of the score print');
-  assert.ok(html.includes(`TARGET SITE ${view.targetSite}`), 'attackers always read a live objective');
+  assert.ok(html.includes(`Target site ${view.targetSite}`), 'attackers always read a live objective');
   assert.ok(!html.includes('undefined'), 'nothing undefined leaks into the HUD');
   assert.ok(!html.includes('NaN'), 'nothing NaN leaks into the HUD');
 });
@@ -171,7 +171,7 @@ test('the hold-Tab board reads like a real scoreboard', () => {
   const html = render(CompScoreboard, { comp: view });
   assert.match(html, /comp-board/);
   assert.ok(view.roster.some(r => r.you), 'the player is on their own board');
-  assert.ok(html.includes('YOU'));
+  assert.ok(html.includes('You'), 'the player is named on the board');
   for (const column of ['K', 'D', 'HS', 'ADR']) assert.ok(html.includes(column), `the board names ${column}`);
   assert.equal(view.rank.tier.id.length > 0, true);
   assert.equal(view.ratingChange, 12, 'the board carries the ranked delta once the match ends');
@@ -200,7 +200,7 @@ test('the ranked front end states the rules and the record honestly', () => {
     onDeploy: () => {}, onBack: () => {},
   });
   assert.match(html, /blackout/);
-  assert.match(html, /SILVER|GOLD|BRONZE|PLATINUM|DIAMOND|MASTER/, 'the tier is named');
+  assert.match(html, /Silver|Gold|Bronze|Platinum|Diamond|Master/, 'the tier is named');
   assert.ok(html.includes('1180'), 'the rating is printed');
   assert.match(html, /7|seven/i, 'the win condition is stated');
   assert.ok(!html.includes('undefined'));

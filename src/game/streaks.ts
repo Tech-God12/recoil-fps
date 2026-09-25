@@ -29,10 +29,10 @@ export interface StreakDef {
 // great ones, and the nuke in legendary ones. Pinned by streak earnability tests.
 export const STREAK_LADDER: readonly StreakDef[] = [
   { id: 'uav', name: 'UAV', short: 'UAV', cost: 300, duration: 30, icon: '◬', desc: 'Recon drone paints every hostile on the radar and through walls for 30 s.' },
-  { id: 'airstrike', name: 'PRECISION AIRSTRIKE', short: 'STRIKE', cost: 600, duration: 0, icon: '✈', desc: 'Designate a point. Two fast-movers carpet a 30 m line through it.' },
-  { id: 'sentry', name: 'SENTRY GUN', short: 'SENTRY', cost: 850, duration: 60, icon: '⌖', desc: 'Auto-turret placed where you stand. Guns anything it sees for 60 s.' },
-  { id: 'chopper', name: 'ATTACK HELICOPTER', short: 'CHOPPER', cost: 1200, duration: 45, icon: '✱', desc: 'Gunship orbits over you and works the ground with a chin gun for 45 s.' },
-  { id: 'nuke', name: 'TACTICAL NUKE', short: 'NUKE', cost: 2000, duration: 10, icon: '☢', desc: '10 s countdown. Everything on the field dies. In the arena, the match is yours.' },
+  { id: 'airstrike', name: 'Precision airstrike', short: 'Strike', cost: 600, duration: 0, icon: '✈', desc: 'Designate a point. Two fast-movers carpet a 30 m line through it.' },
+  { id: 'sentry', name: 'Sentry gun', short: 'Sentry', cost: 850, duration: 60, icon: '⌖', desc: 'Auto-turret placed where you stand. Guns anything it sees for 60 s.' },
+  { id: 'chopper', name: 'Attack helicopter', short: 'Chopper', cost: 1200, duration: 45, icon: '✱', desc: 'Gunship orbits over you and works the ground with a chin gun for 45 s.' },
+  { id: 'nuke', name: 'Tactical nuke', short: 'Nuke', cost: 2000, duration: 10, icon: '☢', desc: '10 s countdown. Everything on the field dies. In the arena, the match is yours.' },
 ];
 
 export const STREAK_POINTS = { kill: 100, headshot: 150, objective: 250, assist: 50 } as const;
@@ -591,7 +591,7 @@ export class StreakDirector {
     const armed = this.ladder.addPoints(n);
     for (const def of armed) {
       audio.streakReady();
-      this.ctx.announce(`${def.name} READY — PRESS ${this.keyLabels[def.id]}`, `${def.name.toLowerCase()} ready.`);
+      this.ctx.announce(`${def.name} ready — press ${this.keyLabels[def.id]}`, `${def.name.toLowerCase()} ready.`);
     }
     return armed;
   }
@@ -606,17 +606,17 @@ export class StreakDirector {
     if (!this.ladder.has(id) || !this.ctx.playerAlive()) return false;
     switch (id) {
       case 'uav': {
-        if (this.uav) { this.uav.life = streakDef('uav').duration; this.ladder.consume(id); this.ctx.announce('UAV TIME EXTENDED'); return true; }
+        if (this.uav) { this.uav.life = streakDef('uav').duration; this.ladder.consume(id); this.ctx.announce('UAV time extended'); return true; }
         this.ladder.consume(id);
         this.uav = new Uav(this.ctx);
         audio.streakDeploy();
-        this.ctx.announce('UAV ONLINE — HOSTILES PAINTED', 'UAV online.');
+        this.ctx.announce('UAV online — hostiles painted', 'UAV online.');
         return true;
       }
       case 'airstrike': {
         // toggles designation; the strike is consumed on confirm
         this.designating = !this.designating;
-        if (this.designating) this.ctx.announce('DESIGNATE TARGET — CLICK TO CONFIRM, RIGHT-CLICK TO ABORT', 'Mark the target.');
+        if (this.designating) this.ctx.announce('Designate target — click to confirm, right-click to abort', 'Mark the target.');
         return true;
       }
       case 'sentry': {
@@ -625,22 +625,22 @@ export class StreakDirector {
         const p = _a.set(feet.x + dir.x * 1.9, 0, feet.z + dir.z * 1.9);
         p.y = this.ctx.groundHeight(p.x, p.z);
         if (Math.abs(p.x) > this.ctx.half - 1 || Math.abs(p.z) > this.ctx.half - 1 || !this.ctx.canPlace(p)) {
-          this.ctx.announce('NO ROOM — SENTRY NEEDS CLEAR GROUND AHEAD');
+          this.ctx.announce('No room — the sentry needs clear ground ahead');
           return false;
         }
         this.ladder.consume(id);
         if (this.sentries.length >= 2) this.sentries.shift()!.dispose();
         this.sentries.push(new Sentry(this.ctx, p.clone(), Math.atan2(dir.x, dir.z) + Math.PI));
         audio.streakDeploy();
-        this.ctx.announce('SENTRY GUN DEPLOYED', 'Sentry gun deployed.');
+        this.ctx.announce('Sentry gun deployed', 'Sentry gun deployed.');
         return true;
       }
       case 'chopper': {
-        if (this.chopper) { this.ctx.announce('GUNSHIP ALREADY ON STATION'); return false; }
+        if (this.chopper) { this.ctx.announce('Gunship already on station'); return false; }
         this.ladder.consume(id);
         this.chopper = new Chopper(this.ctx);
         audio.streakDeploy();
-        this.ctx.announce('ATTACK HELICOPTER INBOUND', 'Attack helicopter inbound.');
+        this.ctx.announce('Attack helicopter inbound', 'Attack helicopter inbound.');
         return true;
       }
       case 'nuke': {
@@ -649,7 +649,7 @@ export class StreakDirector {
         this.nukeT = streakDef('nuke').duration;
         this.nukeTick = 0;
         audio.streakDeploy();
-        this.ctx.announce('TACTICAL NUKE INBOUND — 10 SECONDS', 'Tactical nuke inbound. Ten seconds.');
+        this.ctx.announce('Tactical nuke inbound — 10 seconds', 'Tactical nuke inbound. Ten seconds.');
         return true;
       }
     }
@@ -659,8 +659,8 @@ export class StreakDirector {
   confirmStrike(): boolean {
     if (!this.designating) return false;
     const point = this.ctx.aimPoint();
-    if (!point) { this.ctx.announce('NO TARGET — AIM AT THE GROUND'); return false; }
-    if (point.distanceTo(this.ctx.playerFeet()) < STRIKE_DANGER_CLOSE) { this.ctx.announce(`DANGER CLOSE — PICK A POINT ${STRIKE_DANGER_CLOSE} M OUT OR MORE`); return false; }
+    if (!point) { this.ctx.announce('No target — aim at the ground'); return false; }
+    if (point.distanceTo(this.ctx.playerFeet()) < STRIKE_DANGER_CLOSE) { this.ctx.announce(`Danger close — pick a point ${STRIKE_DANGER_CLOSE} m out or more`); return false; }
     this.designating = false;
     this.ladder.consume('airstrike');
     // The run crosses your line of sight: the jets rip through the target left-to-right
@@ -669,7 +669,7 @@ export class StreakDirector {
     const dir = _c.set(toTarget.z, 0, -toTarget.x);
     this.strikes.push(new Airstrike(this.ctx, point.clone(), dir));
     audio.streakDeploy();
-    this.ctx.announce('STRIKE PACKAGE INBOUND — STAND CLEAR', 'Fast movers inbound. Stand clear.');
+    this.ctx.announce('Strike package inbound — stand clear', 'Fast movers inbound. Stand clear.');
     this.lastEvent = 'strike'; this.lastEventT = 0.6;
     return true;
   }
@@ -679,15 +679,15 @@ export class StreakDirector {
   update(dt: number) {
     this.lastEventT -= dt;
     if (this.lastEventT <= 0) this.lastEvent = '';
-    if (this.uav) { this.uav.update(dt); if (this.uav.life <= 0) { this.uav.dispose(); this.uav = null; this.ctx.announce('UAV OFFLINE'); } }
+    if (this.uav) { this.uav.update(dt); if (this.uav.life <= 0) { this.uav.dispose(); this.uav = null; this.ctx.announce('UAV offline'); } }
     for (let i = this.sentries.length - 1; i >= 0; i--) {
       const s = this.sentries[i];
       s.update(dt);
-      if (s.life <= 0) { s.dispose(); this.sentries.splice(i, 1); this.ctx.announce(`SENTRY EXPIRED — ${s.kills} KILL${s.kills === 1 ? '' : 'S'}`); }
+      if (s.life <= 0) { s.dispose(); this.sentries.splice(i, 1); this.ctx.announce(`Sentry expired — ${s.kills} kill${s.kills === 1 ? '' : 's'}`); }
     }
     if (this.chopper) {
       this.chopper.update(dt);
-      if (this.chopper.life <= 0) { const k = this.chopper.kills; this.chopper.dispose(); this.chopper = null; this.ctx.announce(`GUNSHIP RTB — ${k} KILL${k === 1 ? '' : 'S'}`, 'Gunship returning to base.'); }
+      if (this.chopper.life <= 0) { const k = this.chopper.kills; this.chopper.dispose(); this.chopper = null; this.ctx.announce(`Gunship RTB — ${k} kill${k === 1 ? '' : 's'}`, 'Gunship returning to base.'); }
     }
     for (let i = this.strikes.length - 1; i >= 0; i--) {
       const s = this.strikes[i];
@@ -714,9 +714,9 @@ export class StreakDirector {
     const next = this.ladder.next();
     const active: ActiveStreakHud[] = [];
     if (this.uav) active.push({ id: 'uav', name: 'UAV', timeLeft: this.uav.life, total: streakDef('uav').duration });
-    for (const s of this.sentries) active.push({ id: 'sentry', name: 'SENTRY', timeLeft: s.life, total: streakDef('sentry').duration, detail: `${s.kills} KILLS` });
-    if (this.chopper) active.push({ id: 'chopper', name: 'GUNSHIP', timeLeft: Math.max(0, this.chopper.life), total: streakDef('chopper').duration + 6, detail: `${this.chopper.kills} KILLS` });
-    for (const s of this.strikes) if (!s.done) active.push({ id: 'airstrike', name: 'STRIKE', timeLeft: 1, total: 1, detail: 'INBOUND' });
+    for (const s of this.sentries) active.push({ id: 'sentry', name: 'Sentry', timeLeft: s.life, total: streakDef('sentry').duration, detail: `${s.kills} kills` });
+    if (this.chopper) active.push({ id: 'chopper', name: 'Gunship', timeLeft: Math.max(0, this.chopper.life), total: streakDef('chopper').duration + 6, detail: `${this.chopper.kills} kills` });
+    for (const s of this.strikes) if (!s.done) active.push({ id: 'airstrike', name: 'Strike', timeLeft: 1, total: 1, detail: 'Inbound' });
     return {
       points: this.ladder.points,
       next: next ? { name: next.def.name, cost: next.def.cost, pct: next.pct, remaining: next.remaining } : null,

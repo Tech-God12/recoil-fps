@@ -12,13 +12,13 @@ import type { WeaponBuild } from '../../game/economy/loadout';
 import { skinById, type SkinId } from '../../game/economy/skins';
 
 export const SLOT_LABELS: Record<AttachSlot, string> = {
-  muzzle: 'MUZZLE',
-  optic: 'OPTIC',
-  magazine: 'MAG',
-  underbarrel: 'GRIP',
-  stock: 'STOCK',
-  rail: 'RAIL',
-  barrel: 'BARREL',
+  muzzle: 'Muzzle',
+  optic: 'Optic',
+  magazine: 'Magazine',
+  underbarrel: 'Grip',
+  stock: 'Stock',
+  rail: 'Rail',
+  barrel: 'Barrel',
 };
 
 const REDUCED_MOTION = typeof window !== 'undefined' && typeof window.matchMedia === 'function'

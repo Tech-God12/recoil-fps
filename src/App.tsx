@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine, sanitizeSettings, vignetteOverlay, type GameEvent, type GameSettings, type HudState } from './game/engine';
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
-import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results, type DefusalMenuOptions } from './ui/Screens';
+import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
 import BuyMenu from './ui/BuyMenu';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
@@ -11,21 +11,17 @@ import { settleResult } from './game/economy/settlement';
 import { rankFor } from './game/economy/rank';
 import { RankedSetup } from './ui/Competitive';
 import { MAPS } from './game/world';
-import type { TDMArmor } from './game/tdm';
+import { TDM_PLAYER_ARMOR } from './game/tdm';
 
 type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'ranked-setup';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const LEGACY_WALLET_NOTICE_THRESHOLD = 9_000_000;
-const DEFUSAL_KEY = 'recoilfps.defusal.v1';
-function loadDefusalOptions(): DefusalMenuOptions {
-  try {
-    const raw = JSON.parse(localStorage.getItem(DEFUSAL_KEY) ?? '{}');
-    return {
-      side: raw.side === 'attack' || raw.side === 'defend' ? raw.side : 'random',
-      format: raw.format === 'long' ? 'long' : 'short',
-    };
-  } catch { return { side: 'random', format: 'short' }; }
-}
+/**
+ * Bomb Defusal has no pre-match setup screen any more: the starting side is a
+ * coin flip at spawn and every match is first to 7 rounds.
+ */
+const DEFUSAL_SIDE = 'random' as const;
+const DEFUSAL_FORMAT = 'short' as const;
 
 /**
  * Resolves once the browser has painted. Two animation frames, because the first one
@@ -71,11 +67,9 @@ export default function App() {
   const [showLegacyWalletNotice, setShowLegacyWalletNotice] = useState(false);
   const legacyWalletNoticeDismissed = useRef(false);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
-  const [tdmArmor, setTdmArmor] = useState<TDMArmor>(1);
   // Which MainMenu screen to show when phase returns to 'menu' (so leaving the
   // TDM loadout screen lands back on Arena Mode, not the home screen).
   const [menuView, setMenuView] = useState<'home' | 'arena'>('home');
-  const [defusalOpts, setDefusalOpts] = useState<DefusalMenuOptions>(loadDefusalOptions);
   // Buy menu (Bomb Defusal): the pointer is released while it is open, which must
   // NOT be read as "the player paused" by the pointer-lock watcher below.
   const [buyOpen, setBuyOpen] = useState(false);
@@ -126,10 +120,6 @@ export default function App() {
     engineRef.current?.applySettings(settings);
   }, [settings]);
   const set = useCallback((patch: Partial<GameSettings>) => setSettings(previous => sanitizeSettings({ ...previous, ...patch })), []);
-  useEffect(() => {
-    try { localStorage.setItem(DEFUSAL_KEY, JSON.stringify(defusalOpts)); } catch { /* Storage is optional. */ }
-  }, [defusalOpts]);
-
   const openBuy = useCallback(() => {
     buyOpenRef.current = true;
     setBuyOpen(true);
@@ -331,12 +321,12 @@ export default function App() {
       // Bomb Defusal fields your own armory builds; ranked deploys the ladder state.
       const prof = profileRef.current;
       const launchOptions = map === 'sirocco'
-        ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
+        ? { mode: 'defusal' as const, side: DEFUSAL_SIDE, format: DEFUSAL_FORMAT, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
         : mode === 'comp'
           ? { mode: 'comp' as const, compBuilds: prof.builds, rankedProfile: prof.ranked }
           : mode === 'tdm' ? { mode: 'tdm' as const } : { mode: 'mission' as const };
       buyOpenRef.current = false; setBuyOpen(false);
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, launchOptions);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, TDM_PLAYER_ARMOR, launchOptions);
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -419,7 +409,7 @@ export default function App() {
         <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: vignetteBg }} />
       )}
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} onRanked={() => changePhase('ranked-setup')} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} onRanked={() => changePhase('ranked-setup')} initialView={menuView} profile={profile} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>
@@ -442,13 +432,11 @@ export default function App() {
       )}
       {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} defusal={hud.defusal} onResume={resume} onRestart={restart} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={restart} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : settings.map === 'sirocco' ? 'SIROCCO · BOMB DEFUSAL' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'Warehouse · 5v5 deathmatch' : settings.map === 'sirocco' ? 'Sirocco · bomb defusal' : `${MAPS.find(m => m.id === settings.map)?.name ?? 'Mission'} operation`} />}
       {phase === 'tdm-setup' && !launching && (
         <TdmSetup
           profile={profile}
           onProfile={updateProfile}
-          armor={tdmArmor}
-          onArmor={setTdmArmor}
           onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
         />
@@ -466,7 +454,7 @@ export default function App() {
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>
       </div>}
-      {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
+      {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">Dismiss</button></div>}
       {launching && <BootScreen map={settings.map} />}
     </div>
   );

@@ -57,7 +57,7 @@ export default function ScopeView({ hud, active = true, onScopePower, onScopeAdj
   const power = hud.scopePower ?? 1, kind = hud.reticle;
   const magnified = power > 1;
   const variable = hud.scopeMaxPower > hud.scopeMinPower && !hud.canted && active && hud.hp > 0;
-  const label = hud.canted ? 'CANTED IRONS' : `${power.toFixed(1)}×`;
+  const label = hud.canted ? 'Canted irons' : `${power.toFixed(1)}×`;
   return <div className="optic-overlay" style={{ opacity }} data-optic={kind} data-magnification={power}>
     {magnified ? <>
       <div className={`optic-aperture optic-aperture-${kind}`} />
@@ -66,17 +66,17 @@ export default function ScopeView({ hud, active = true, onScopePower, onScopeAdj
         <span className="optic-power mono">{label}</span>
       </div>
     </> : kind !== 'none' ? <div className="reflex-reticle"><OpticReticle kind={kind} /></div> : null}
-    {hud.canted && <span className="canted-hint mono">BACKUP IRONS · RELEASE T</span>}
+    {hud.canted && <span className="canted-hint mono">Backup irons · release T</span>}
     {variable && hud.ads > .65 && <section className={`scope-zoom-panel ${hud.scopeAdjusting ? 'editing' : ''}`} aria-label="Variable scope adjustment"
       onPointerDown={e=>e.stopPropagation()} onWheel={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key!=='Escape')e.stopPropagation();}}>
-      <div className="scope-zoom-heading"><span>6× PRECISION</span><output aria-live="off">{power.toFixed(1)}×</output></div>
-      <label htmlFor="scope-magnification">MAGNIFICATION</label>
+      <div className="scope-zoom-heading"><span>6× precision</span><output aria-live="off">{power.toFixed(1)}×</output></div>
+      <label htmlFor="scope-magnification">Magnification</label>
       <input id="scope-magnification" aria-label="6x scope magnification" type="range" min={hud.scopeMinPower} max={hud.scopeMaxPower} step="0.1"
         value={power} disabled={!hud.scopeAdjusting} onChange={e=>onScopePower?.(Number(e.currentTarget.value))} />
-      <div className="scope-zoom-limits"><span>{hud.scopeMinPower.toFixed(0)}× · WIDE</span><span>{hud.scopeMaxPower.toFixed(0)}× · TIGHT</span></div>
-      <small>{hud.zoomFov.toFixed(1)}° FOV · {hud.scopeAdjusting ? 'Aim stays up. The mission continues.' : 'WHEEL / [ ] TO ADJUST'}</small>
-      {hud.scopeAdjusting ? <button type="button" onClick={onScopeDone}>RETURN TO AIM <kbd>↵</kbd></button>
-        : <button type="button" onClick={onScopeAdjust}>ADJUST ZOOM <kbd>V</kbd></button>}
+      <div className="scope-zoom-limits"><span>{hud.scopeMinPower.toFixed(0)}× · wide</span><span>{hud.scopeMaxPower.toFixed(0)}× · tight</span></div>
+      <small>{hud.zoomFov.toFixed(1)}° FOV · {hud.scopeAdjusting ? 'Aim stays up. The mission continues.' : 'Scroll or [ ] to adjust'}</small>
+      {hud.scopeAdjusting ? <button type="button" onClick={onScopeDone}>Return to aim <kbd>↵</kbd></button>
+        : <button type="button" onClick={onScopeAdjust}>Adjust zoom <kbd>V</kbd></button>}
     </section>}
   </div>;
 }

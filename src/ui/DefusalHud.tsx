@@ -6,7 +6,7 @@ import type { DefusalHud, DefusalRosterEntry } from '../game/defusal/mode';
 import type { HudState } from '../game/engine';
 import { missionClock } from './MissionObjective';
 
-const SIDE_NAME = { attack: 'ATTACK', defend: 'DEFEND' } as const;
+const SIDE_NAME = { attack: 'Attack', defend: 'Defend' } as const;
 const REASON_ICON: Record<string, string> = { elimination: '☠', bomb: '✹', defuse: '✂', time: '◷' };
 const REASON_TITLE: Record<string, string> = { elimination: 'Elimination', bomb: 'Bomb detonated', defuse: 'Bomb defused', time: 'Time expired' };
 
@@ -68,7 +68,7 @@ export function DefusalBoard({ df }: { df: DefusalHud }) {
     <div className={`df-row ${r.you ? 'you' : ''} ${r.alive ? '' : 'dead'}`}>
       <span className="df-row-name">
         {r.bomb && <em className="df-row-bomb"><C4Glyph size={12} /></em>}
-        {r.name}{r.you ? ' (YOU)' : ''}
+        {r.name}
         {r.weapon && <i className="df-row-gun mono">{r.weapon}</i>}
         {r.kit && <i className="df-row-kit" title="Defuse kit"><KitGlyph /></i>}
       </span>
@@ -91,30 +91,30 @@ export function DefusalBoard({ df }: { df: DefusalHud }) {
   );
   const Cols = () => (
     <div className="df-row head">
-      <span className="df-row-name">PLAYER</span><span>$</span><span>K</span><span>A</span><span>D</span><span>ADR</span><span>HS</span><span>MVP</span><span>SCORE</span>
+      <span className="df-row-name">Player</span><span>$</span><span>K</span><span>A</span><span>D</span><span>ADR</span><span>HS</span><span>MVP</span><span>Score</span>
     </div>
   );
   const bravoSide = df.alphaSide === 'attack' ? 'defend' : 'attack';
   return (
     <div className="df-board" role="dialog" aria-label="Match scoreboard">
       <div className="df-board-top">
-        <span className="df-board-map">SIROCCO · BOMB DEFUSAL</span>
-        <span className="df-board-round mono">ROUND {df.round} / {df.maxRounds} · FIRST TO {df.roundsToWin}</span>
+        <span className="df-board-map">Sirocco · bomb defusal</span>
+        <span className="df-board-round mono">Round {df.round} of {df.maxRounds} · first to {df.roundsToWin}</span>
       </div>
       <History df={df} />
       <div className="df-board-teams">
         <div className="df-board-team">
-          <Head side={df.alphaSide} label="YOUR SQUAD" score={df.alphaScore} />
+          <Head side={df.alphaSide} label="Your squad" score={df.alphaScore} />
           <Cols />
           {team('alpha').map(r => <Row key={r.id} r={r} />)}
         </div>
         <div className="df-board-team">
-          <Head side={bravoSide} label="HOSTILES" score={df.bravoScore} />
+          <Head side={bravoSide} label="Hostiles" score={df.bravoScore} />
           <Cols />
           {team('bravo').map(r => <Row key={r.id} r={r} />)}
         </div>
       </div>
-      <span className="df-board-hint mono">HOLD TAB · ☠ ELIMINATION · ✹ BOMB · ✂ DEFUSE · ◷ TIME</span>
+      <span className="df-board-hint mono">Hold Tab · ☠ elimination · ✹ bomb · ✂ defuse · ◷ time</span>
     </div>
   );
 }
@@ -149,7 +149,7 @@ export default function DefusalHudLayer({ hud, showBoard }: { hud: HudState; sho
           ) : (
             <>
               <b className="tabular">{df.phase === 'halftime' || df.phase === 'ended' ? '—' : missionClock(df.clock)}</b>
-              <i>{df.phase === 'freeze' ? 'BUY PHASE' : df.phase === 'over' ? 'ROUND OVER' : df.phase === 'halftime' ? 'HALFTIME' : `ROUND ${df.round}`}</i>
+              <i>{df.phase === 'freeze' ? 'Buy phase' : df.phase === 'over' ? 'Round over' : df.phase === 'halftime' ? 'Halftime' : `Round ${df.round}`}</i>
             </>
           )}
         </div>
@@ -160,7 +160,7 @@ export default function DefusalHudLayer({ hud, showBoard }: { hud: HudState; sho
         </div>
       </div>
       <div className="df-subtop mono">
-        {mp ? <span className="df-mp">MATCH POINT</span> : df.lastOfHalf ? <span className="df-mp">LAST ROUND OF THE HALF</span> : <span>FIRST TO {df.roundsToWin}</span>}
+        {mp ? <span className="df-mp">Match point</span> : df.lastOfHalf ? <span className="df-mp">Last round of the half</span> : <span>First to {df.roundsToWin}</span>}
         <History df={df} compact />
       </div>
 
@@ -175,12 +175,12 @@ export default function DefusalHudLayer({ hud, showBoard }: { hud: HudState; sho
           {banner.mvp && <em><i>★ MVP</i> {banner.mvp}</em>}
         </div>
       )}
-      {df.bombZone && df.phase === 'live' && <div className="df-bomb-drop mono"><C4Glyph size={14} /> BOMB DROPPED — {df.bombZone}</div>}
+      {df.bombZone && df.phase === 'live' && <div className="df-bomb-drop mono"><C4Glyph size={14} /> Bomb dropped — {df.bombZone}</div>}
 
       {/* ============ PLANT / DEFUSE PROGRESS ============ */}
       {(df.plantProgress > 0 || (df.defuseProgress > 0 && (df.defuserIsPlayer || df.side === 'defend' || df.playerDead))) && (
         <div className={`df-progress ${df.plantProgress > 0 ? 'plant' : 'defuse'}`}>
-          <span>{df.plantProgress > 0 ? 'ARMING THE BOMB' : df.defuserIsPlayer ? `DEFUSING${df.defuseTotal <= 5 ? ' · KIT' : ''}` : 'TEAMMATE DEFUSING'}</span>
+          <span>{df.plantProgress > 0 ? 'Arming the bomb' : df.defuserIsPlayer ? `Defusing${df.defuseTotal <= 5 ? ' · kit' : ''}` : 'Teammate defusing'}</span>
           <div className="df-progress-bar"><i style={{ width: `${Math.round((df.plantProgress || df.defuseProgress) * 100)}%` }} /></div>
           {df.defuseProgress > 0 && planted && <em className="mono tabular">{(df.defuseTotal * (1 - df.defuseProgress)).toFixed(1)}s / {df.bombTimeLeft.toFixed(1)}s</em>}
         </div>
@@ -191,7 +191,7 @@ export default function DefusalHudLayer({ hud, showBoard }: { hud: HudState; sho
       {!df.playerDead && (
         <div className="df-wallet">
           <span className="df-money mono tabular">${df.money.toLocaleString('en-US')}</span>
-          {df.buyOpen && df.inBuyZone && <span className="df-buyhint mono"><b className="keycap">B</b> BUY · {Math.ceil(df.buyTimeLeft)}s</span>}
+          {df.buyOpen && df.inBuyZone && <span className="df-buyhint mono"><b className="keycap">B</b> Buy · {Math.ceil(df.buyTimeLeft)}s</span>}
           <span className="df-kit">
             <span className={df.armor ? 'on' : ''} title={df.armor === 2 ? 'Kevlar + helmet' : df.armor ? 'Kevlar' : 'No armor'}><ArmorGlyph tier={df.armor} /></span>
             {df.kit && <span className="on" title="Defuse kit"><KitGlyph /></span>}
@@ -205,16 +205,16 @@ export default function DefusalHudLayer({ hud, showBoard }: { hud: HudState; sho
         <div className="df-spec" role="status">
           {hud.spectating ? (
             <>
-              <span className="df-spec-k mono">SPECTATING</span>
+              <span className="df-spec-k mono">Spectating</span>
               <b className={hud.spectating.team}>{hud.spectating.name}</b>
               <span className="mono tabular">{hud.spectating.hp} HP · {hud.spectating.weapon}</span>
-              <span className="df-spec-hint mono">LMB NEXT · RMB PREVIOUS</span>
+              <span className="df-spec-hint mono">Left click next · right click previous</span>
             </>
           ) : (
             <>
-              <span className="df-spec-k mono">ELIMINATED</span>
+              <span className="df-spec-k mono">Eliminated</span>
               <b>You are out this round</b>
-              <span className="df-spec-hint mono">{df.phase === 'over' ? 'NEXT ROUND SOON' : 'CLICK TO SPECTATE A TEAMMATE'}</span>
+              <span className="df-spec-hint mono">{df.phase === 'over' ? 'Next round soon' : 'Click to spectate a teammate'}</span>
             </>
           )}
         </div>
@@ -223,13 +223,13 @@ export default function DefusalHudLayer({ hud, showBoard }: { hud: HudState; sho
       {/* first rounds: the mode's controls, while you shop */}
       {df.round <= 2 && df.phase === 'freeze' && !df.playerDead && (
         <div className="onboard-strip hud-chip df-onboard" role="status">
-          <span className="keycap">B</span> BUY
-          <i /><span className="keycap">X</span> {df.side === 'attack' ? 'HOLD: PLANT' : 'HOLD: DEFUSE'} · TAP: PICK UP
-          <i /><span className="keycap">Z</span> SMOKE
-          <i /><span className="keycap">5</span> DROP BOMB
-          <i /><span className="keycap">6·7</span> CALL A·B
-          <i /><span className="keycap">8</span> FOLLOW ME
-          <i /><span className="keycap">TAB</span> SCORES
+          <span className="keycap">B</span> Buy
+          <i /><span className="keycap">X</span> {df.side === 'attack' ? 'Hold to plant' : 'Hold to defuse'} · tap to pick up
+          <i /><span className="keycap">Z</span> Smoke
+          <i /><span className="keycap">5</span> Drop bomb
+          <i /><span className="keycap">6·7</span> Call A · B
+          <i /><span className="keycap">8</span> Follow me
+          <i /><span className="keycap">Tab</span> Scores
         </div>
       )}
 

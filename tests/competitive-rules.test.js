@@ -524,13 +524,13 @@ test('rank tiers cover the whole ladder without gaps or overlaps', () => {
 test('rank badges read III → I inside a tier and promote cleanly', () => {
   const low = rank.rankFor(0);
   assert.equal(low.tier.id, 'bronze');
-  assert.equal(low.label, 'BRONZE III');
+  assert.equal(low.label, 'Bronze III');
   const high = rank.rankFor(599);
-  assert.equal(high.label, 'BRONZE I');
-  assert.equal(rank.rankFor(600).label, 'SILVER III');
-  assert.equal(rank.rankFor(1099).label, 'SILVER I');
+  assert.equal(high.label, 'Bronze I');
+  assert.equal(rank.rankFor(600).label, 'Silver III');
+  assert.equal(rank.rankFor(1099).label, 'Silver I');
   assert.equal(rank.rankFor(1000).tier.id, 'silver');
-  assert.equal(rank.rankFor(3200).label, 'GRANDMASTER');
+  assert.equal(rank.rankFor(3200).label, 'Grandmaster');
   assert.equal(rank.rankFor(99_999).rating, undefined, 'over-ceiling input is clamped, not extrapolated');
   assert.equal(rank.rankFor(-50).tier.id, 'bronze');
 });

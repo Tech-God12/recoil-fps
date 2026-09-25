@@ -1426,7 +1426,7 @@ void main(){
   };
 
   private onMouseDown2 = (e: MouseEvent) => {
-    if (e.button === 2 && this.streaks?.designating) { this.streaks.cancelDesignation(); this.onEvent({ type: 'streakmsg', text: 'STRIKE ABORTED — PACKAGE HELD' }); return; }
+    if (e.button === 2 && this.streaks?.designating) { this.streaks.cancelDesignation(); this.onEvent({ type: 'streakmsg', text: 'Strike aborted — package held' }); return; }
     if (e.button === 2 && !this.scopeAdjusting && !this.paused && !this.dead && !this.ended && document.pointerLockElement === this.canvas) {
       // ADS toggle mode: MMB click keeps the scope in until the next MMB click.
       const want = this.adsToggle ? !this.rmb : true;
@@ -2166,10 +2166,10 @@ void main(){
           else { this.streak = 1; this.streakPaidMark = 0; }
           this.lastKillT = now;
           if (this.streak >= 2) {
-            const label = this.streak >= 6 ? 'UNSTOPPABLE'
-              : this.streak === 5 ? 'PENTA KILL'
-                : this.streak === 4 ? 'QUAD KILL'
-                  : this.streak === 3 ? 'TRIPLE KILL' : 'DOUBLE KILL';
+            const label = this.streak >= 6 ? 'Unstoppable'
+              : this.streak === 5 ? 'Penta kill'
+                : this.streak === 4 ? 'Quad kill'
+                  : this.streak === 3 ? 'Triple kill' : 'Double kill';
             voice.streak(label);
             this.onEvent({ type: 'streak', label });
             const sb = streakAward(this.streak, this.streakPaidMark, 500 - this.streakPaidRun);
@@ -2283,7 +2283,7 @@ void main(){
     });
     applySkin(model.group, skinById(build.skin ?? 'factory'));
     return {
-      name: entry.name.toUpperCase(),
+      name: entry.name,
       weaponId: id,
       model,
       auto: stats.auto, rpm: stats.rpm, damage: stats.damage,
@@ -2754,7 +2754,7 @@ void main(){
     return out;
   }
 
-  private static readonly STREAK_WEAPON: Record<StreakId, string> = { uav: 'UAV', airstrike: 'AIRSTRIKE', sentry: 'SENTRY', chopper: 'GUNSHIP', nuke: 'NUKE' };
+  private static readonly STREAK_WEAPON: Record<StreakId, string> = { uav: 'UAV', airstrike: 'Airstrike', sentry: 'Sentry', chopper: 'Gunship', nuke: 'Nuke' };
 
   /** A streak killed something: score, cash, feed. Deliberately NO streak points — streaks don't chain. */
   private creditStreakKill(name: string, source: StreakId, bot: TDMBot | null) {
@@ -2845,11 +2845,11 @@ void main(){
     for (const t of this.streakTargets()) if (t.alive()) t.damage(99999, 'nuke');
     if (this.isTDM && this.tdm) {
       this.nukeWin = true;
-      this.onEvent({ type: 'streak', label: 'TACTICAL NUKE' });
+      this.onEvent({ type: 'streak', label: 'Tactical nuke' });
       voice.announce('Tactical nuke detonated. Game over.');
       this.endTDMMatch();
     } else {
-      this.onEvent({ type: 'streak', label: 'TACTICAL NUKE' });
+      this.onEvent({ type: 'streak', label: 'Tactical nuke' });
       voice.announce('Tactical nuke detonated. Sector cleared.');
     }
   }
@@ -3007,7 +3007,7 @@ void main(){
       this.onFireT = TDM_FIRE_SECONDS;
       this.killTimes = [];
       audio.onFireIgnite();
-      this.onEvent({ type: 'streak', label: 'ON FIRE' });
+      this.onEvent({ type: 'streak', label: 'On fire' });
     }
   }
 
@@ -3015,7 +3015,7 @@ void main(){
   private awardShutdown() {
     this.earnCash(TDM_SHUTDOWN_CASH, 'shutdown');
     audio.shutdown();
-    this.onEvent({ type: 'streak', label: 'SHUT DOWN' });
+    this.onEvent({ type: 'streak', label: 'Shut down' });
   }
 
   private endPlayerFire() {
@@ -3100,7 +3100,7 @@ void main(){
       tdm: {
         alphaScore: this.tdm.alphaScore, bravoScore: this.tdm.bravoScore, playerKills: this.tdmPlayerKills, outcome,
         roster: [
-          { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots },
+          { name: 'You', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots },
           ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots, onFire: b.onFire })),
         ],
       },
@@ -3680,7 +3680,7 @@ void main(){
       tdm: {
         alphaScore: m.score.alpha, bravoScore: m.score.bravo, playerKills: actor?.kills ?? 0, outcome,
         roster: [
-          { name: 'YOU', team: playerTeam, dead: this.dead, armorIcon: armorIcon(this.compArmor, this.compHelmet), you: true, kills: actor?.kills ?? 0, deaths: actor?.deaths ?? 0, headshots: actor?.headshots ?? 0 },
+          { name: 'You', team: playerTeam, dead: this.dead, armorIcon: armorIcon(this.compArmor, this.compHelmet), you: true, kills: actor?.kills ?? 0, deaths: actor?.deaths ?? 0, headshots: actor?.headshots ?? 0 },
           ...this.comp.manager.bots.map(b => ({
             name: b.name, team: b.team, dead: b.dead,
             armorIcon: armorIcon(b.armorPool, b.helmet),
@@ -4745,7 +4745,7 @@ void main(){
         onFire: this.onFire,
         onFireLeft: Math.max(0, this.onFireT),
         roster: [
-          { name: 'YOU', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots, onFire: this.onFire },
+          { name: 'You', team: 'alpha' as TDMTeam, dead: this.tdmPlayerDead, armorIcon: TDM_ARMOR_ICONS[this.tdmArmor], you: true, kills: this.tdmPlayerKills, deaths: this.tdmPlayerDeaths, headshots: this.headshots, onFire: this.onFire },
           ...this.tdm.bots.map(b => ({ name: b.name, team: b.team, dead: b.dead, armorIcon: TDM_ARMOR_ICONS[b.armor], kills: b.kills, deaths: b.deaths, headshots: b.headshots, onFire: b.onFire })),
         ],
       } : undefined,

@@ -19,7 +19,7 @@ export function compClock(seconds: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-const SIDE_LABEL: Record<string, string> = { attack: 'ATTACK', defend: 'DEFEND' };
+const SIDE_LABEL: Record<string, string> = { attack: 'Attack', defend: 'Defend' };
 
 /* ================================================================
    RANK BADGE — one component, used by the menu, the HUD and the debrief.
@@ -32,12 +32,12 @@ export function RankBadge({ rank, compact, delta }: { rank: RankView; compact?: 
       <span className="rank-glyph" aria-hidden="true">{RANK_GLYPH[tier.id]}</span>
       <span className="rank-body">
         <span className="rank-label">
-          {rank.placed ? rank.label : 'PLACEMENTS'}
-          {rank.placementsLeft > 0 && <em className="rank-placements">{rank.placementsLeft} LEFT</em>}
+          {rank.placed ? rank.label : 'Placements'}
+          {rank.placementsLeft > 0 && <em className="rank-placements">{rank.placementsLeft} left</em>}
         </span>
         <span className="rank-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></span>
         <span className="rank-rating mono">
-          {rank.tier.id === 'grandmaster' ? 'MAX' : `${rank.ratingToNext} TO NEXT`}
+          {rank.tier.id === 'grandmaster' ? 'Max' : `${rank.ratingToNext} to next`}
           {typeof delta === 'number' && delta !== 0 && (
             <b className={delta > 0 ? 'up' : 'down'}>{delta > 0 ? `+${delta}` : delta}</b>
           )}
@@ -64,10 +64,10 @@ export function RankedSetup({ rank, rating, record, onDeploy, onBack }: {
       <div className="blackout-scan" aria-hidden="true" />
       <header className="blackout-head">
         <div>
-          <span className="map2-kicker">COMPETITIVE · RANKED</span>
-          <h1 className="blackout-title">OPERATION<span>BLACKOUT</span></h1>
+          <span className="map2-kicker">Competitive · ranked</span>
+          <h1 className="blackout-title">Operation<span>Blackout</span></h1>
           <p className="blackout-sub">
-            SEARCH &amp; DESTROY · 5v5 · WAREHOUSE COMPLEX<br />
+            Search and destroy · 5v5 · warehouse<br />
             Seven rounds to take the match. One life per round. Money carries.
           </p>
         </div>
@@ -76,7 +76,7 @@ export function RankedSetup({ rank, rating, record, onDeploy, onBack }: {
 
       <div className="blackout-grid">
         <section className="blackout-card">
-          <h2>MATCH FORMAT</h2>
+          <h2>Match format</h2>
           <ul className="blackout-list">
             <li><b>7</b><span>Rounds to win the match, 12 in regulation, overtime on a tie.</span></li>
             <li><b>6</b><span>Sides swap at the half — economy and loss streaks reset.</span></li>
@@ -86,7 +86,7 @@ export function RankedSetup({ rank, rating, record, onDeploy, onBack }: {
         </section>
 
         <section className="blackout-card">
-          <h2>ECONOMY</h2>
+          <h2>Economy</h2>
           <ul className="blackout-list">
             <li><b>$800</b><span>Starting money. Win rounds, plant, defuse — bank the rest.</span></li>
             <li><b>$3250</b><span>Round win. Losing pays 1400 up to 3400 on a streak.</span></li>
@@ -95,16 +95,16 @@ export function RankedSetup({ rank, rating, record, onDeploy, onBack }: {
         </section>
 
         <section className="blackout-card">
-          <h2>YOUR RECORD</h2>
+          <h2>Your record</h2>
           <div className="blackout-record">
-            <span><b>{record.wins}</b>WINS</span>
-            <span><b>{record.losses}</b>LOSSES</span>
-            <span><b>{record.draws}</b>DRAWS</span>
-            <span><b>{winRate}%</b>WIN RATE</span>
+            <span><b>{record.wins}</b>Wins</span>
+            <span><b>{record.losses}</b>Losses</span>
+            <span><b>{record.draws}</b>Draws</span>
+            <span><b>{winRate}%</b>Win rate</span>
             <span className={record.streak >= 0 ? 'up' : 'down'}>
-              <b>{record.streak > 0 ? `${record.streak}W` : record.streak < 0 ? `${Math.abs(record.streak)}L` : '—'}</b>STREAK
+              <b>{record.streak > 0 ? `${record.streak}W` : record.streak < 0 ? `${Math.abs(record.streak)}L` : '—'}</b>Streak
             </span>
-            <span><b>{rating}</b>RATING</span>
+            <span><b>{rating}</b>Rating</span>
           </div>
           <p className="blackout-note">
             Rating moves with the result, your K/D, objectives and the round margin —
@@ -113,19 +113,19 @@ export function RankedSetup({ rank, rating, record, onDeploy, onBack }: {
         </section>
 
         <section className="blackout-card wide">
-          <h2>HOW IT PLAYS</h2>
+          <h2>How it plays</h2>
           <div className="blackout-how">
-            <div><i>1</i><span><b>BUY PHASE</b>Frozen at spawn for 15 seconds. Mouse steers the rack, number keys buy instantly, B re-opens it.</span></div>
-            <div><i>2</i><span><b>EXECUTE</b>The charge is carried to site A or B. Hold the plant; the site is marked on your radar the moment it goes down.</span></div>
-            <div><i>3</i><span><b>HOLD OR RETAKE</b>Defenders hear the charge beep and rotate. Attackers watch the entrances. Nobody respawns until the round is decided.</span></div>
-            <div><i>4</i><span><b>THE CLOCK</b>Every kill, plant and defuse pays the person who did it. The team that manages its wallet wins the long game.</span></div>
+            <div><i>1</i><span><b>Buy phase</b>Frozen at spawn for 15 seconds. Mouse steers the rack, number keys buy instantly, B re-opens it.</span></div>
+            <div><i>2</i><span><b>Execute</b>The charge is carried to site A or B. Hold the plant; the site is marked on your radar the moment it goes down.</span></div>
+            <div><i>3</i><span><b>Hold or retake</b>Defenders hear the charge beep and rotate. Attackers watch the entrances. Nobody respawns until the round is decided.</span></div>
+            <div><i>4</i><span><b>The clock</b>Every kill, plant and defuse pays the person who did it. The team that manages its wallet wins the long game.</span></div>
           </div>
         </section>
       </div>
 
       <div className="blackout-cta">
-        <button className="deploy-btn" onClick={onDeploy}>DEPLOY TO BLACKOUT</button>
-        <button className="menu-secondary-btn" onClick={onBack}>BACK</button>
+        <button className="deploy-btn" onClick={onDeploy}>Deploy</button>
+        <button className="menu-secondary-btn" onClick={onBack}>Back</button>
       </div>
     </main>
   );
@@ -141,9 +141,9 @@ function BuyRack({ comp }: { comp: CompHudView }) {
   return (
     <div className="comp-buy" role="dialog" aria-label="Buy menu">
       <div className="comp-buy-head">
-        <span className="mono">// LOADOUT</span>
+        <span className="mono">Loadout</span>
         <b className="comp-buy-money tabular">${comp.money}</b>
-        <span className="mono comp-buy-hint">MOUSE AIM · CLICK / 1–9 BUY · B CLOSE</span>
+        <span className="mono comp-buy-hint">Mouse to aim · click or 1–9 to buy · B closes</span>
       </div>
       <div className="comp-buy-grid">
         {rows.map((row, r) => (
@@ -181,7 +181,7 @@ export function CompScoreboard({ comp }: { comp: CompHudView }) {
     <div className={`tdm-board-row ${r.you ? 'you' : ''} ${r.alive ? '' : 'dead'}`}>
       <span className="tdm-board-name">
         {r === leader && <i className="mvp" title="Round MVP">★</i>}
-        {r.name}{r.you ? ' (YOU)' : ''}{!r.alive && <em className="comp-dead">DOWN</em>}
+        {r.name}{!r.alive && <em className="comp-dead">Down</em>}
       </span>
       <span className="tabular">{r.kills}</span>
       <span className="tabular">{r.deaths}</span>
@@ -195,9 +195,9 @@ export function CompScoreboard({ comp }: { comp: CompHudView }) {
   return (
     <div className="tdm-board comp-board" role="dialog" aria-label="Competitive scoreboard">
       <div className="tdm-board-title">
-        <span className={`alpha ${comp.playerTeam === 'alpha' ? 'mine' : ''}`}>ALPHA <b className="tabular">{comp.score.alpha}</b></span>
-        <span className="mid">OPERATION BLACKOUT · ROUND {comp.round}</span>
-        <span className={`bravo ${comp.playerTeam === 'bravo' ? 'mine' : ''}`}><b className="tabular">{comp.score.bravo}</b> BRAVO</span>
+        <span className={`alpha ${comp.playerTeam === 'alpha' ? 'mine' : ''}`}>Alpha <b className="tabular">{comp.score.alpha}</b></span>
+        <span className="mid">Operation Blackout · round {comp.round}</span>
+        <span className={`bravo ${comp.playerTeam === 'bravo' ? 'mine' : ''}`}><b className="tabular">{comp.score.bravo}</b> Bravo</span>
       </div>
       <div className="comp-pips" aria-hidden="true">
         {Array.from({ length: Math.max(comp.history.length, comp.round) }, (_, i) => (
@@ -207,13 +207,13 @@ export function CompScoreboard({ comp }: { comp: CompHudView }) {
       <div className="tdm-board-cols">
         <div className="comp-board-full">
           <div className="tdm-board-row head">
-            <span className="tdm-board-name">OPERATOR</span><span>K</span><span>D</span><span>HS</span>
+            <span className="tdm-board-name">Operator</span><span>K</span><span>D</span><span>HS</span>
             <span>P</span><span>D</span><span>ADR</span><span>$</span>
           </div>
           {rows.map(r => <Row key={r.id} r={r} />)}
         </div>
       </div>
-      <span className="tdm-board-hint mono">HOLD TAB · P PLANTS · D DEFUSES · ADR AVERAGE DAMAGE PER ROUND</span>
+      <span className="tdm-board-hint mono">Hold Tab · P plants · D defuses · ADR is average damage per round</span>
     </div>
   );
 }
@@ -236,7 +236,7 @@ export function CompHudLayer({ comp }: { comp: CompHudView }) {
         <span className={`comp-side ${comp.playerSide}`}>{SIDE_LABEL[comp.playerSide]}</span>
         <div className="comp-score">
           <span className={`side alpha ${comp.playerTeam === 'alpha' ? 'mine' : ''}`}>
-            <b className="tabular">{comp.score.alpha}</b>ALPHA
+            <b className="tabular">{comp.score.alpha}</b>Alpha
           </span>
           <div className="comp-pips" aria-hidden="true">
             {Array.from({ length: Math.max(12, comp.history.length) }, (_, i) => (
@@ -244,32 +244,32 @@ export function CompHudLayer({ comp }: { comp: CompHudView }) {
             ))}
           </div>
           <span className={`side bravo ${comp.playerTeam === 'bravo' ? 'mine' : ''}`}>
-            BRAVO<b className="tabular">{comp.score.bravo}</b>
+            Bravo<b className="tabular">{comp.score.bravo}</b>
           </span>
         </div>
         <div className={`comp-clock ${fuseLow && bomb.state === 'planted' ? 'hot' : ''} ${comp.phase === 'buy' ? 'buy' : ''}`}>
           <b className="tabular">{compClock(clock)}</b>
-          <i>{comp.phase === 'buy' ? 'BUY PHASE' : bomb.state === 'planted' ? 'CHARGE ARMED' : `ROUND ${comp.round}`}</i>
+          <i>{comp.phase === 'buy' ? 'Buy phase' : bomb.state === 'planted' ? 'Charge armed' : `Round ${comp.round}`}</i>
         </div>
       </div>
 
       {/* ---------- alive / wallet strip ---------- */}
       <div className="comp-strip">
-        <span className="comp-alive alpha">{comp.alive.alpha}<i>UP</i></span>
-        <span className="comp-vs">VS</span>
-        <span className="comp-alive bravo">{comp.alive.bravo}<i>UP</i></span>
+        <span className="comp-alive alpha">{comp.alive.alpha}<i>up</i></span>
+        <span className="comp-vs">vs</span>
+        <span className="comp-alive bravo">{comp.alive.bravo}<i>up</i></span>
         <span className="comp-wallet mono">${comp.money}</span>
         {comp.armor > 0 && <span className="comp-kit mono">🛡 {Math.round(comp.armor)}{comp.helmet ? '+' : ''}</span>}
-        {comp.kit && <span className="comp-kit mono">✂ KIT</span>}
+        {comp.kit && <span className="comp-kit mono">✂ Kit</span>}
         {attacking
-          ? <span className="comp-call mono">TARGET SITE {comp.siteCall}</span>
-          : <span className="comp-call mono">DEFEND · ROTATE ON CALL</span>}
+          ? <span className="comp-call mono">Target site {comp.siteCall}</span>
+          : <span className="comp-call mono">Defend · rotate on call</span>}
       </div>
 
       {/* ---------- the charge ---------- */}
       {bomb.state === 'planted' && (
         <div className={`comp-charge ${fuseLow ? 'hot' : ''}`}>
-          <span className="comp-charge-label">CHARGE ARMED · SITE {bomb.site ?? '—'}</span>
+          <span className="comp-charge-label">Charge armed · site {bomb.site ?? '—'}</span>
           <span className="comp-charge-fuse tabular">{bomb.fuse.toFixed(1)}s</span>
           <span className="comp-charge-bar" aria-hidden="true">
             <i style={{ width: `${Math.max(0, Math.min(100, (bomb.fuse / 40) * 100))}%` }} />
@@ -277,14 +277,14 @@ export function CompHudLayer({ comp }: { comp: CompHudView }) {
         </div>
       )}
       {bomb.state === 'dropped' && (
-        <div className="comp-charge dropped"><span className="comp-charge-label">CHARGE IS DOWN — RECOVER IT</span></div>
+        <div className="comp-charge dropped"><span className="comp-charge-label">Charge is down — recover it</span></div>
       )}
 
       {/* ---------- objective prompt / action progress ---------- */}
       {action && (
         <div className="comp-action">
           <span className="comp-action-label">
-            {action.kind === 'plant' ? 'PLANTING' : 'DEFUSING'} · {action.actorId === 'YOU' ? 'YOU' : action.actorId}
+            {action.kind === 'plant' ? 'Planting' : 'Defusing'} · {action.actorId}
           </span>
           <span className="comp-action-bar" aria-hidden="true">
             <i style={{ width: `${Math.min(100, (action.progress / action.duration) * 100)}%` }} />
@@ -300,22 +300,22 @@ export function CompHudLayer({ comp }: { comp: CompHudView }) {
       {/* ---------- spectate ---------- */}
       {comp.spectate && (
         <div className="comp-spectate">
-          <span className="mono">ELIMINATED — WATCHING</span>
+          <span className="mono">Eliminated — watching</span>
           <b>{comp.spectate.name}</b>
-          <span className="mono">CLICK TO CYCLE</span>
+          <span className="mono">Click to cycle</span>
         </div>
       )}
 
       {/* ---------- round banner ---------- */}
       {roundOver && comp.roundResult && (
         <div className={`comp-banner ${comp.roundResult.winner === comp.playerTeam ? 'win' : 'loss'}`}>
-          <b>{comp.roundResult.winner === comp.playerTeam ? 'ROUND WON' : 'ROUND LOST'}</b>
-          <span>{comp.roundResult.reason.replace('-', ' ').toUpperCase()}</span>
+          <b>{comp.roundResult.winner === comp.playerTeam ? 'Round won' : 'Round lost'}</b>
+          <span>{comp.roundResult.reason.replace('-', ' ')}</span>
         </div>
       )}
       {comp.matchResult && (
         <div className={`comp-banner match ${comp.matchResult.draw ? 'draw' : comp.matchResult.winner === comp.playerTeam ? 'win' : 'loss'}`}>
-          <b>{comp.matchResult.draw ? 'DRAW' : comp.matchResult.winner === comp.playerTeam ? 'VICTORY' : 'DEFEAT'}</b>
+          <b>{comp.matchResult.draw ? 'Draw' : comp.matchResult.winner === comp.playerTeam ? 'Victory' : 'Defeat'}</b>
           <span>{comp.score.alpha} — {comp.score.bravo}</span>
         </div>
       )}
@@ -335,24 +335,24 @@ export function CompDebriefPanel({ report }: { report: CompDebrief }) {
     <div className="comp-debrief">
       <div className="comp-debrief-head">
         <b className={report.draw ? 'draw' : report.win ? 'win' : 'loss'}>
-          {report.draw ? 'DRAW' : report.win ? 'OPERATION SUCCESSFUL' : 'OPERATION FAILED'}
+          {report.draw ? 'Draw' : report.win ? 'Operation successful' : 'Operation failed'}
         </b>
-        <span className="mono">SITE {report.score.alpha} — {report.score.bravo} · {report.rounds} ROUNDS</span>
+        <span className="mono">Site {report.score.alpha} — {report.score.bravo} · {report.rounds} rounds</span>
       </div>
       <div className="comp-debrief-grid">
-        <div><b className="tabular">{report.kills}</b><span>KILLS</span></div>
-        <div><b className="tabular">{report.deaths}</b><span>DEATHS</span></div>
+        <div><b className="tabular">{report.kills}</b><span>Kills</span></div>
+        <div><b className="tabular">{report.deaths}</b><span>Deaths</span></div>
         <div><b className="tabular">{report.adr}</b><span>ADR</span></div>
-        <div><b className="tabular">{report.plants}</b><span>PLANTS</span></div>
-        <div><b className="tabular">{report.defuses}</b><span>DEFUSES</span></div>
-        <div><b className="tabular">{report.mvps}</b><span>ROUND MVPS</span></div>
+        <div><b className="tabular">{report.plants}</b><span>Plants</span></div>
+        <div><b className="tabular">{report.defuses}</b><span>Defuses</span></div>
+        <div><b className="tabular">{report.mvps}</b><span>Round MVPs</span></div>
       </div>
       <div className="comp-debrief-rank">
         <span className="mono">{report.rankBefore} → {report.rankAfter}</span>
         <RankBadge rank={after} compact delta={report.delta} />
         <span className="comp-debrief-math mono">
-          OUTCOME {report.breakdown.outcome > 0 ? '+' : ''}{report.breakdown.outcome} · PERFORMANCE {report.breakdown.performance > 0 ? '+' : ''}{report.breakdown.performance} · MARGIN {report.breakdown.margin > 0 ? '+' : ''}{report.breakdown.margin}
-          {report.placement && ' · PLACEMENT ×1.75'}
+          Outcome {report.breakdown.outcome > 0 ? '+' : ''}{report.breakdown.outcome} · performance {report.breakdown.performance > 0 ? '+' : ''}{report.breakdown.performance} · margin {report.breakdown.margin > 0 ? '+' : ''}{report.breakdown.margin}
+          {report.placement && ' · placement ×1.75'}
         </span>
       </div>
     </div>

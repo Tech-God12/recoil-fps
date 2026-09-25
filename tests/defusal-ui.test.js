@@ -52,10 +52,10 @@ const hudOf = df => ({ defusal: df, spectating: null, hp: 100, bearing: 0 });
 test('defusal HUD renders the CS top bar, buy phase, money and the Tab board', () => {
   const mode = makeMode('attack');
   const html = renderToStaticMarkup(React.createElement(DefusalHudLayer, { hud: hudOf(mode.hud()), showBoard: true }));
-  for (const text of ['ATTACK', 'DEFEND', 'BUY PHASE', '$800', 'ROUND 1', 'FIRST TO 7', 'SIROCCO · BOMB DEFUSAL', 'YOUR SQUAD', 'HOSTILES', 'Dagger', 'Viper', 'PISTOL ROUND']) {
+  for (const text of ['Attack', 'Defend', 'Buy phase', '$800', 'Round 1', 'First to 7', 'Sirocco · bomb defusal', 'Your squad', 'Hostiles', 'Dagger', 'Viper', 'Pistol round']) {
     assert.ok(html.includes(text), `HUD shows ${text}`);
   }
-  assert.match(html, /HOLD: PLANT/, 'round-1 controls strip teaches the attacker keys');
+  assert.match(html, /Hold to plant/, 'round-1 controls strip teaches the attacker keys');
   assert.ok(!html.includes('df-c4'), 'no bomb clock before a plant');
 });
 
@@ -67,15 +67,15 @@ test('a planted bomb replaces the round clock and is announced', () => {
   mode.plantBomb(planter, new THREE.Vector3(30.5, 0, -31.6));
   const html = renderToStaticMarkup(React.createElement(DefusalHudLayer, { hud: hudOf(mode.hud()), showBoard: false }));
   assert.match(html, /df-clock planted/);
-  assert.match(html, /BOMB PLANTED/);
-  assert.match(html, /SITE B/);
+  assert.match(html, /Bomb planted/);
+  assert.match(html, /Site B/);
 });
 
 test('buy menu lists prices, locks the enemy rifle, and auto-buy picks a sane package', () => {
   const mode = makeMode('defend');
   const df = { ...mode.hud(), money: 5200, inv: { ...freshInventory(5200) } };
   const html = renderToStaticMarkup(React.createElement(BuyMenu, { df, owned: ['m4a1'], onBuy: () => ({ ok: true }), onClose() {} }));
-  for (const text of ['BUY MENU', '$5,200', 'Rifles', 'M416', 'YOUR BUILD', 'Attackers only', 'YOUR ROUND LOADOUT', 'AUTO-BUY', 'DEFUSE KIT']) {
+  for (const text of ['Buy menu', '$5,200', 'Rifles', 'M416', 'Your build', 'Attackers only', 'Your round loadout', 'Auto-buy', 'Defuse kit']) {
     assert.ok(html.includes(text), `buy menu shows ${text}`);
   }
   // $5,200: M416 (3,100) → helmet (1,000) → kit (400) → smoke (300) → flash (200) → the frag no longer fits → second flash (200).
@@ -86,10 +86,14 @@ test('buy menu lists prices, locks the enemy rifle, and auto-buy picks a sane pa
 test('Arena Mode offers Sirocco Bomb Defusal next to Warehouse TDM', () => {
   const html = renderToStaticMarkup(React.createElement(MainMenu, {
     s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {}, initialView: 'arena',
-    defusal: { side: 'defend', format: 'long' }, onDefusal() {},
   }));
-  for (const text of ['SIROCCO', 'BOMB DEFUSAL', 'WAREHOUSE', 'TEAM DEATHMATCH', 'NEW MODE', 'ATTACK', 'DEFEND', 'FIRST TO 13', 'Play']) {
+  for (const text of ['Sirocco', 'Bomb defusal', 'Warehouse', 'Team deathmatch', 'first to 7', 'Play']) {
     assert.ok(html.includes(text), `arena screen shows ${text}`);
+  }
+  // The match is fixed at first to 7 and the side is a coin flip at spawn, so the
+  // side/length pickers and the rules strip are gone from this screen entirely.
+  for (const gone of ['df-options', 'df-rules', 'first to 13', 'Random', 'map2-num']) {
+    assert.ok(!html.includes(gone), `arena screen no longer shows ${gone}`);
   }
 });
 
@@ -105,7 +109,7 @@ test('the debrief tells the defusal story: score, round strip and standings', ()
     cash: 2500, cashLog: [{ reason: 'round', amount: 150, t: 1 }, { reason: 'plant', amount: 150, t: 2 }], difficultyMul: 1, defusal: res,
   };
   const html = renderToStaticMarkup(React.createElement(ResultsScreen, { r, wallet: { before: 0, after: 2650, gradeBonus: 0, earned: 2650 }, onRedeploy() {}, onMenu() {}, onArmory() {} }));
-  for (const text of ['Victory 7 — 3', 'Round history', 'Final standings', 'Rounds won', 'Bombs planted', 'YOUR SQUAD']) {
+  for (const text of ['Victory 7 — 3', 'Round history', 'Final standings', 'Rounds won', 'Bombs planted', 'Your squad']) {
     assert.ok(html.includes(text), `debrief shows ${text}`);
   }
   assert.equal((html.match(/df-hcell/g) ?? []).length, 10, 'one history cell per round played');

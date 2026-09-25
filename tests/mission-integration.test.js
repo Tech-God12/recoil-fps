@@ -146,12 +146,16 @@ test('SSR output exposes the mission verbs, actual objective progress, and a nor
   // The home menu is the sketch layout: title + Missions/Loadout/Settings only.
   // Maps are deliberately NOT shown until the player enters Missions.
   const menu = renderToStaticMarkup(React.createElement(MainMenu, { s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {} }));
-  assert.ok(menu.includes('RECOIL'));
+  assert.ok(menu.includes('Recoil'));
   assert.match(menu, /MISSIONS/i);
   assert.match(menu, /LOADOUT/i);
   assert.match(menu, /SETTINGS/i);
   assert.ok(!menu.includes('Sandblast'), 'map selection must not leak onto the home menu');
   assert.ok(!menu.includes('21 HOSTILES'));
+  // The home menu carries no decorative 01/02/03 index badges and no all-caps
+  // kicker sentences ("DEPLOYMENT TERMINAL", "DESERT OPERATIONS").
+  assert.ok(!menu.includes('rm-idx'), 'home menu nav has no numbered index badges');
+  assert.doesNotMatch(menu, /DEPLOYMENT TERMINAL|DESERT OPERATIONS/);
   // The cinematic boot screen names the operation and its first objective.
   const boot = renderToStaticMarkup(React.createElement(BootScreen, { map: 'alrasul' }));
   assert.ok(boot.includes(mission.definition.name), 'boot screen names the operation');

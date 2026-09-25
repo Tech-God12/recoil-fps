@@ -31,14 +31,11 @@ import type { TDMOutcome } from '../game/tdm';
 
 export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: mapKasbah, arena: mapArena, sirocco: mapSirocco };
 
-/** Arena Mode → Bomb Defusal launch options (persisted by App). */
-export interface DefusalMenuOptions { side: 'attack' | 'defend' | 'random'; format: 'short' | 'long' }
-
 /* Theater cards: Town + Sandblast are live operations, Ridgeline is locked intel. */
 const THEATERS = [
-  { num: '01', code: 'TOWN', id: 'kasbah' as MapId | null, type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E', locked: false },
-  { num: '02', code: 'SANDBLAST', id: 'alrasul' as MapId | null, type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E', locked: false },
-  { num: '03', code: 'RIDGELINE', id: null, type: 'MOUNTAIN OUTPOST', art: ridgeArt, lat: '33.8812° N', lon: '42.7732° E', locked: true },
+  { code: 'Town', id: 'kasbah' as MapId | null, type: 'Fortified market town', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E', locked: false },
+  { code: 'Sandblast', id: 'alrasul' as MapId | null, type: 'Desert river valley', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E', locked: false },
+  { code: 'Ridgeline', id: null, type: 'Mountain outpost', art: ridgeArt, lat: '33.8812° N', lon: '42.7732° E', locked: true },
 ];
 
 export interface Results {
@@ -84,17 +81,10 @@ const FragIcon = () => (
 );
 
 
-const INTEL_TABS = [
-  { id: 'people', label: 'PEOPLE' },
-  { id: 'terrain', label: 'TERRAIN' },
-  { id: 'objectives', label: 'OBJECTIVES' },
-  { id: 'results', label: 'RESULTS' },
-] as const;
-
 /* ================================================================
    TACTICAL HOME — full-bleed operations interface.
    Left: wordmark + stacked deploy nav. Center: torn-paper AO slice.
-   Right: wallet + operator chip, intel tabs, loadout card, motto.
+   Right: wallet + operator chip and the current loadout card.
    Fully interactive: mouse + WASD/arrows + Enter + Tab profile.
    ================================================================ */
 function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings, onRanked }: {
@@ -102,7 +92,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void; onRanked?: () => void;
 }) {
   const [sel, setSel] = useState(0);
-  const [intel, setIntel] = useState(2);
   const [profileOpen, setProfileOpen] = useState(false);
   const [cashShown, setCashShown] = useState(0);
   const [thumbs, setThumbs] = useState<{ primary: string; secondary: string }>({ primary: '', secondary: '' });
@@ -111,13 +100,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const rootRef = useRef<HTMLElement | null>(null);
   const cashTarget = prof.cash;
   const level = 13 + prof.missions;
-  const phaseCount = getMission('kasbah').phases.length + getMission('alrasul').phases.length;
-  const intelReadouts = [
-    '1 OPERATOR · RECOIL_01',
-    'DESERT VALLEY · GRID 39S',
-    `2 ARENAS · ${phaseCount} PHASES`,
-    prof.missions > 0 || prof.kills > 0 ? `${prof.missions} OPS · ${prof.kills} KILLS` : 'AWAITING DEPLOYMENT',
-  ];
 
   // Wallet ticker — rolls up fast on mount.
   useEffect(() => {
@@ -146,11 +128,11 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   }, [primaryId, secondaryId]);
 
   const items = [
-    { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
-    { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 · BOMB DEFUSAL · TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'ranked', idx: '03', title: 'OPERATION BLACKOUT', sub: 'RANKED SEARCH & DESTROY', action: () => onRanked?.() },
-    { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
-    { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
+    { id: 'missions', title: 'Missions', sub: 'Choose a battlefield and deploy', action: () => onSelect('maps') },
+    { id: 'arena', title: 'Arena mode', sub: '5v5 bomb defusal and team deathmatch', action: () => onSelect('arena') },
+    { id: 'ranked', title: 'Operation Blackout', sub: 'Ranked search and destroy', action: () => onRanked?.() },
+    { id: 'loadout', title: 'Loadout', sub: 'Weapons, armor and customization', action: onArmory },
+    { id: 'settings', title: 'Settings', sub: 'Video, audio and controls', action: onSettings },
   ];
   const activate = useCallback((i: number) => { items[i]?.action(); }, [items]);
 
@@ -161,8 +143,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
       if (profileOpen) return;
       if (e.code === 'KeyW' || e.code === 'ArrowUp') { e.preventDefault(); setSel(s => menuStep(s, -1, items.length)); }
       else if (e.code === 'KeyS' || e.code === 'ArrowDown') { e.preventDefault(); setSel(s => menuStep(s, 1, items.length)); }
-      else if (e.code === 'KeyA' || e.code === 'ArrowLeft') { setIntel(v => (v + 3) % 4); }
-      else if (e.code === 'KeyD' || e.code === 'ArrowRight') { setIntel(v => (v + 1) % 4); }
       else if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); activate(sel); }
     };
     window.addEventListener('keydown', onKey);
@@ -199,9 +179,8 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
       <div className="rm-layout">
         <div className="rm-left">
           <div className="rm-titleblock seq" style={{ animationDelay: '.02s' }}>
-            <span className="rm-kicker">DEPLOYMENT TERMINAL<br />V1.1.0</span>
-            <h1 className="rm-title">RECOIL<sup>®</sup></h1>
-            <span className="rm-subtitle">DESERT OPERATIONS&nbsp;&nbsp;•&nbsp;&nbsp;SINGLE OPERATOR</span>
+            <h1 className="rm-title">Recoil</h1>
+            <span className="rm-subtitle">Desert operations&nbsp;&nbsp;·&nbsp;&nbsp;single operator</span>
             <i className="rm-goldrule" aria-hidden="true" />
           </div>
 
@@ -217,7 +196,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
                 onClick={() => activate(i)}
                 aria-current={i === sel ? 'true' : undefined}
               >
-                <span className="rm-idx mono">{it.idx}</span>
                 <span className="rm-item-body"><b>{it.title}</b><em>{it.sub}</em></span>
                 <span className="rm-arrow"><Arrow /></span>
               </button>
@@ -234,33 +212,14 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
             </span>
             <button type="button" className="rm-op" onClick={() => setProfileOpen(true)} title="Open player profile (Tab)">
               <RankIcon />
-              <span className="rm-op-body"><em>OPERATOR</em><b>RECOIL_01</b><i>LVL {level}</i></span>
+              <span className="rm-op-body"><em>Operator</em><b>Recoil_01</b><i>Level {level}</i></span>
             </button>
           </div>
 
-          <div className="rm-intel seq" style={{ animationDelay: '.14s' }} role="tablist" aria-label="Field intel">
-            {INTEL_TABS.map((t, i) => (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={i === intel}
-                className={`rm-intel-tab${i === intel ? ' on' : ''}`}
-                onMouseEnter={() => setIntel(i)}
-                onFocus={() => setIntel(i)}
-                onClick={() => setIntel(i)}
-              >
-                {t.label}
-              </button>
-            ))}
-            <span className="rm-intel-readout mono">{intelReadouts[intel]}</span>
-            <i className="rm-goldrule sm right" aria-hidden="true" />
-          </div>
-
           <button type="button" className="rm-loadout seq" style={{ animationDelay: '.2s' }} onClick={onArmory} title="Open loadout">
-            <span className="rm-lo-kicker">CURRENT LOADOUT</span>
+            <span className="rm-lo-kicker">Current loadout</span>
             <span className="rm-lo-main">
-              <span className="rm-lo-tag mono">PRIMARY</span>
+              <span className="rm-lo-tag mono">Primary</span>
               <b className="rm-lo-name">{primaryName}</b>
               {thumbs.primary
                 ? <img src={thumbs.primary} alt="" draggable={false} className="rm-lo-gun" />
@@ -269,19 +228,19 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
             <span className="rm-lo-div" aria-hidden="true" />
             <span className="rm-lo-slots">
               <span className="rm-lo-slot">
-                <span className="rm-lo-tag mono">SIDEARM</span>
+                <span className="rm-lo-tag mono">Sidearm</span>
                 {thumbs.secondary
                   ? <img src={thumbs.secondary} alt="" draggable={false} className="rm-lo-gun sm" />
                   : <PistolIcon />}
                 <em>{secondaryName}</em>
               </span>
               <span className="rm-lo-slot">
-                <span className="rm-lo-tag mono">TACTICAL</span>
+                <span className="rm-lo-tag mono">Tactical</span>
                 <FragIcon />
-                <em>FRAG ×2</em>
+                <em>Frag ×2</em>
               </span>
             </span>
-            <span className="rm-lo-foot"><em>EDIT IN ARMORY</em><Arrow /></span>
+            <span className="rm-lo-foot"><em>Edit in armory</em><Arrow /></span>
           </button>
         </div>
       </div>
@@ -291,29 +250,28 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
           <span className="rm-key">W</span><span className="rm-key">A</span><span className="rm-key">S</span><span className="rm-key">D</span>
         </span>
         <span className="rm-sep" aria-hidden="true" />
-        <span className="rm-keys"><span className="rm-key wide">ENTER</span></span>
+        <span className="rm-keys"><span className="rm-key wide">Enter</span></span>
         <span className="rm-sep" aria-hidden="true" />
-        <span className="rm-keys"><span className="rm-key wide">TAB</span></span>
-        <span className="rm-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
+        <span className="rm-keys"><span className="rm-key wide">Tab</span></span>
       </footer>
 
       {profileOpen && (
         <div className="rm-profile-scrim" onClick={() => setProfileOpen(false)}>
           <aside className="rm-profile" role="dialog" aria-label="Player profile" onClick={e => e.stopPropagation()}>
             <div className="rm-profile-head">
-              <span>OPERATOR FILE</span>
+              <span>Operator file</span>
               <button type="button" onClick={() => setProfileOpen(false)} aria-label="Close profile">✕</button>
             </div>
-            <div className="rm-profile-callsign">RECOIL_01</div>
-            <div className="rm-profile-lvl">LVL {level} · DESERT OPERATIONS</div>
+            <div className="rm-profile-callsign">Recoil_01</div>
+            <div className="rm-profile-lvl">Level {level}</div>
             <div className="rm-profile-rows">
-              <div><span>MISSIONS</span><b className="tabular">{prof.missions}</b></div>
-              <div><span>ELIMINATIONS</span><b className="tabular">{prof.kills}</b></div>
-              <div><span>WALLET</span><b className="tabular">${prof.cash.toLocaleString('en-US')}</b></div>
-              <div><span>PRIMARY</span><b>{primaryName}</b></div>
-              <div><span>SECONDARY</span><b>{secondaryName}</b></div>
+              <div><span>Missions</span><b className="tabular">{prof.missions}</b></div>
+              <div><span>Eliminations</span><b className="tabular">{prof.kills}</b></div>
+              <div><span>Wallet</span><b className="tabular">${prof.cash.toLocaleString('en-US')}</b></div>
+              <div><span>Primary</span><b>{primaryName}</b></div>
+              <div><span>Secondary</span><b>{secondaryName}</b></div>
             </div>
-            <div className="rm-profile-foot">TAB / ESC — CLOSE</div>
+            <div className="rm-profile-foot">Tab or Esc to close</div>
           </aside>
         </div>
       )}
@@ -324,27 +282,15 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
 /* ================================================================
    ARENA MODE — two 5v5 modes. Hovering a card turns the whole screen into a
    live 3D orbit of that arena (same MapFlyover tech as theater select).
-     01 WAREHOUSE · Team Deathmatch (respawns, 2:30)
-     02 SIROCCO   · Bomb Defusal (CS2-style rounds, economy, plant/defuse)
+     Warehouse · Team Deathmatch (respawns, 2:30)
+     Sirocco   · Bomb Defusal (CS2-style rounds, economy, plant/defuse)
+   The match settings are fixed — first to 7, and your starting side is a coin
+   flip at spawn — so this screen is just "pick a mode and press Play".
    ================================================================ */
-const SEG = <T extends string,>({ value, options, onChange, label }: { value: T; options: { id: T; label: string; sub?: string }[]; onChange: (v: T) => void; label: string }) => (
-  <div className="df-opt" role="radiogroup" aria-label={label}>
-    <span className="df-opt-k mono">{label}</span>
-    <div className="df-seg">
-      {options.map(o => (
-        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} className={value === o.id ? 'on' : ''} onClick={() => onChange(o.id)}>
-          <b>{o.label}</b>{o.sub && <em>{o.sub}</em>}
-        </button>
-      ))}
-    </div>
-  </div>
-);
-
-function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup, defusal, onDefusal }: {
+function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup }: {
   primaryName: string; secondaryName: string;
   onBack: () => void; onMap: (map: GameSettings['map']) => void;
   onDeploy: (map?: GameSettings['map']) => void; onArenaSetup?: () => void;
-  defusal: DefusalMenuOptions; onDefusal: (o: DefusalMenuOptions) => void;
 }) {
   const [mode, setMode] = useState<'defusal' | 'tdm'>('defusal');
   const [hovered, setHovered] = useState<MapId | null>(null);
@@ -365,8 +311,8 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
   }, [isDf]);
   const play = () => { const m: MapId = isDf ? 'sirocco' : 'arena'; onMap(m); onDeploy(m); };
   const cards = [
-    { id: 'sirocco' as MapId, mode: 'defusal' as const, num: '01', name: 'SIROCCO', kind: 'BOMB DEFUSAL', meta: `5V5 · FIRST TO ${defusal.format === 'long' ? 13 : 7} · NO RESPAWNS`, fresh: true },
-    { id: 'arena' as MapId, mode: 'tdm' as const, num: '02', name: 'WAREHOUSE', kind: 'TEAM DEATHMATCH', meta: '5V5 · 2:30 MATCH · 5S RESPAWN', fresh: false },
+    { id: 'sirocco' as MapId, mode: 'defusal' as const, name: 'Sirocco', kind: 'Bomb defusal', meta: '5v5 · first to 7 · no respawns' },
+    { id: 'arena' as MapId, mode: 'tdm' as const, name: 'Warehouse', kind: 'Team deathmatch', meta: '5v5 · 2:30 match · 5s respawn' },
   ];
   return (
     <main className="tx-root arena2-root">
@@ -383,16 +329,12 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
       <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
         <TxBack onClick={onBack} />
         <div className="map2-titleblock">
-          <span className="map2-kicker">ARENA MODE<br />{isDf ? 'BOMB DEFUSAL' : 'TEAM DEATHMATCH'}</span>
-          <h1 className="map2-title">{isDf ? 'SIROCCO' : 'WAREHOUSE'}</h1>
-          <span className="map2-sub">{isDf ? `5V5 · ${defusal.format === 'long' ? 'FIRST TO 13 · 24 ROUNDS' : 'FIRST TO 7 · 12 ROUNDS'} · HALFTIME SWAP` : '5V5 · 2:30 MATCH · 5S RESPAWN'}</span>
+          <span className="map2-kicker">Arena mode</span>
+          <h1 className="map2-title">{isDf ? 'Sirocco' : 'Warehouse'}</h1>
+          <span className="map2-sub">{isDf ? '5v5 bomb defusal · first to 7 rounds · halftime side swap' : '5v5 team deathmatch · 2:30 match · 5s respawn'}</span>
           <i className="tx-rule" aria-hidden="true" />
         </div>
         <TxCoords lat="33.7731° N" lon="44.4208° E" />
-        <div className="map2-brand">
-          <b>RECOIL</b>
-          <em>{isDf ? 'BUY EACH ROUND · YOUR ARMORY BUILDS' : `${primaryName}  //  ${secondaryName}`}</em>
-        </div>
       </header>
 
       <div className="arena2-cards arena2-cards--two" role="listbox" aria-label="Choose a mode">
@@ -414,8 +356,6 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
           >
             <img src={MAP_ART[c.id]} alt="" draggable={false} className="map2-art" />
             <span className="map2-shade" aria-hidden="true" />
-            <span className="map2-num mono">{c.num}</span>
-            {c.fresh && <span className="map2-new mono">NEW MODE</span>}
             <span className="map2-info">
               <b>{c.name}</b>
               <em>{c.kind}</em>
@@ -425,52 +365,19 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
           </button>
         ))}
       </div>
-      <p className="map2-hint mono" role="status">
-        HOVER A CARD FOR A LIVE FLYOVER · CLICK TO SELECT · DOUBLE-CLICK TO PLAY
-      </p>
 
       <div className="arena2-cta seq" style={{ animationDelay: '.2s' }}>
-        {isDf ? (
-          <>
-            <div className="df-options">
-              <SEG label="SIDE" value={defusal.side} onChange={side => onDefusal({ ...defusal, side })}
-                options={[{ id: 'attack', label: 'ATTACK', sub: 'plant the bomb' }, { id: 'defend', label: 'DEFEND', sub: 'hold the sites' }, { id: 'random', label: 'RANDOM', sub: 'coin flip' }]} />
-              <SEG label="MATCH" value={defusal.format} onChange={format => onDefusal({ ...defusal, format })}
-                options={[{ id: 'short', label: 'SHORT', sub: 'first to 7' }, { id: 'long', label: 'FULL', sub: 'first to 13' }]} />
-            </div>
-            <button className="deploy-btn" onClick={play}>
-              <span>Play</span>
-              <span className="hint">Sirocco · Bomb Defusal</span>
-              <Arrow />
-            </button>
-          </>
-        ) : (
-          <>
-            <button className="deploy-btn" onClick={play}>
-              <span>Play</span>
-              <span className="hint">Warehouse · 5v5 TDM</span>
-              <Arrow />
-            </button>
-            <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
-              Set up loadout <span>armor + weapon</span>
-            </button>
-          </>
+        <button className="deploy-btn" onClick={play}>
+          <span>Play</span>
+          <span className="hint">{isDf ? 'Sirocco · bomb defusal' : 'Warehouse · team deathmatch'}</span>
+          <Arrow />
+        </button>
+        {!isDf && (
+          <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
+            Set up loadout <span>{primaryName} + {secondaryName}</span>
+          </button>
         )}
       </div>
-      {isDf && (
-        <ul className="df-rules seq" style={{ animationDelay: '.26s' }} aria-label="Bomb defusal rules">
-          <li><b>BUY</b><span>$800 start · CS2 economy · win, loss &amp; kill bonuses</span></li>
-          <li><b>PLANT</b><span>Attackers carry the bomb to A or B · hold X for 3.2s</span></li>
-          <li><b>DEFUSE</b><span>40s fuse · 10s defuse · 5s with a kit</span></li>
-          <li><b>SURVIVE</b><span>No respawns · keep your gun if you live</span></li>
-          <li><b>COMMAND</b><span>6 / 7 call A / B · 8 follow me · 5 drop bomb</span></li>
-        </ul>
-      )}
-
-      <footer className="map2-foot mono">
-        <span>YOUR SQUAD 5&nbsp;&nbsp;//&nbsp;&nbsp;HOSTILES 5</span>
-        <span className="map2-foot-right">V1.2.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
-      </footer>
     </main>
   );
 }
@@ -488,10 +395,9 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, defusal, onDefusal, onRanked }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, onRanked }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
   onArmory?: () => void; onArenaSetup?: () => void; onRanked?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
-  defusal?: DefusalMenuOptions; onDefusal?: (o: DefusalMenuOptions) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
@@ -547,7 +453,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
     const activateTheater = (index: number) => {
       const t = THEATERS[index];
       if (t.locked || !t.id) {
-        setDenied('RIDGELINE THEATER LOCKED — INTEL PENDING');
+        setDenied('Ridgeline is locked — intel pending');
         return;
       }
       onMap(t.id);
@@ -575,19 +481,12 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
           <TxBack onClick={() => setView('home')} />
           <div className="map2-titleblock">
-            <span className="map2-kicker">OPERATIONS COMMAND<br />THEATER SELECT</span>
-            <h1 className="map2-title">SELECT AREA OF OPERATIONS</h1>
-            <span className="map2-sub">DEPLOY TO A THEATER.</span>
+            <span className="map2-kicker">Theater select</span>
+            <h1 className="map2-title">Choose an area of operations</h1>
+            <span className="map2-sub">Pick a battlefield, then deploy.</span>
             <i className="tx-rule" aria-hidden="true" />
           </div>
           <TxCoords lat="33.7731° N" lon="44.4208° E" />
-          <div className="map2-brand">
-            <b>RECOIL</b>
-            <em>DESERT OPERATIONS&nbsp;&nbsp;//&nbsp;&nbsp;GLOBAL REACH</em>
-            <div className="map2-intel" aria-hidden="true">
-              <span>PEOPLE</span><span>TERRAIN</span><span>OBJECTIVES</span><span>RESULTS</span>
-            </div>
-          </div>
         </header>
 
         <div className="map2-cards" role="listbox" aria-label="Choose a theater">
@@ -613,15 +512,14 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
               >
                 <img src={t.art} alt="" draggable={false} className="map2-art" />
                 <span className="map2-shade" aria-hidden="true" />
-                <span className="map2-num mono">{t.num}</span>
                 <span className="map2-cardcoords mono">{t.lat}<br />{t.lon}</span>
                 {t.locked && (
-                  <span className="map2-classified mono"><TxLock size={13} /> CLASSIFIED</span>
+                  <span className="map2-classified mono"><TxLock size={13} /> Locked</span>
                 )}
                 <span className="map2-info">
                   <b>{t.code}</b>
                   <em>{t.type}</em>
-                  <span className="map2-obj mono">{t.locked ? `${obj} OBJECTIVES · CLASSIFIED` : `${obj} OBJECTIVES · ${t.code}`}</span>
+                  <span className="map2-obj mono">{obj} objectives</span>
                 </span>
                 <span className="map2-go"><Arrow /></span>
               </button>
@@ -629,28 +527,8 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
           })}
         </div>
         <p className={`map2-hint mono ${denied ? 'denied' : ''}`} role="status">
-          {denied || 'HOVER A THEATER FOR A LIVE OVERVIEW · CLICK TO VIEW ITS OPERATION'}
+          {denied || 'Hover for a live overview · click to open the operation'}
         </p>
-
-        <div className="map2-features seq" style={{ animationDelay: '.26s' }}>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c-5.5 5-5.5 12 0 17M12 3.5c5.5 5 5.5 12 0 17" /></svg>
-            <span><b>THREE THEATERS</b><em>UNIQUE ENVIRONMENTS</em></span>
-          </div>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="8.5" cy="8" r="3" /><circle cx="16" cy="9.5" r="2.4" /><path d="M3 20c0-3.3 2.5-5.5 5.5-5.5S14 16.7 14 20M15 14.7c2.8.2 5 2.2 5 5.3" /></svg>
-            <span><b>DIFFERENT THREATS</b><em>REAL OPERATIONS</em></span>
-          </div>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" strokeLinejoin="round"><path d="M3 19L10 6l4 7 2.5-4L21 19z" /><path d="M10 6l-2 3.5M12.5 13L11 15.5" /></svg>
-            <span><b>PROVE YOURSELF</b><em>COMPLETE ALL OBJECTIVES</em></span>
-          </div>
-        </div>
-
-        <footer className="map2-foot mono">
-          <span>RECOIL&nbsp;&nbsp;//&nbsp;&nbsp;FIELD NOTES&nbsp;&nbsp;//&nbsp;&nbsp;SURVIVE ADAPT WIN</span>
-          <span className="map2-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
-        </footer>
       </main>
     );
   }
@@ -665,8 +543,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onMap={onMap}
         onDeploy={onDeploy}
         onArenaSetup={onArenaSetup}
-        defusal={defusal ?? { side: 'random', format: 'short' }}
-        onDefusal={o => onDefusal?.(o)}
       />
     );
   }
@@ -688,8 +564,8 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
           <b>Operation {mission.name}</b>
         </span>
         <span className="menu-loadout" aria-label="Equipped loadout">
-          <span><b>1</b> {primaryName}</span>
-          <span><b>2</b> {secondaryName}</span>
+          <span>{primaryName}</span>
+          <span>{secondaryName}</span>
         </span>
       </header>
 
@@ -700,13 +576,12 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         <ol className="msn-list" aria-label="Mission list">
           {mission.phases.map((p, i) => (
             <li key={p.id} className="msn-card seq" style={{ animationDelay: `${0.1 + i * 0.05}s` }}>
-              <span className="msn-idx mono">0{i + 1}</span>
               <span className="msn-verb">{PHASE_VERB[p.type] ?? 'Secure'}</span>
               <span className="msn-body">
                 <b>{p.title}</b>
                 <em>{p.location}</em>
               </span>
-              <span className="msn-status mono">{i === 0 ? 'START' : 'LOCKED'}</span>
+              <span className="msn-status mono">{i === 0 ? 'Start' : 'Locked'}</span>
             </li>
           ))}
         </ol>
@@ -811,10 +686,10 @@ export function PauseMenu({ mission, defusal, streaks, onResume, onRestart, onSe
             <span className="stencil">System pause</span>
             <h2 id="pause-title" className="pause-title">Paused</h2>
             <div className="pause-actions">
-              <button className="pause-action pause-action-primary" onClick={onResume}><span>Resume</span><span className="idx">01</span></button>
-              <button className="pause-action" onClick={onSettings}><span>Settings</span><span className="idx">02</span></button>
-              <button className="pause-action" onClick={onRestart}><span>Restart match</span><span className="idx">03</span></button>
-              <button className="pause-action" onClick={onQuit}><span>Quit to menu</span><span className="idx">04</span></button>
+              <button className="pause-action pause-action-primary" onClick={onResume}><span>Resume</span></button>
+              <button className="pause-action" onClick={onSettings}><span>Settings</span></button>
+              <button className="pause-action" onClick={onRestart}><span>Restart match</span></button>
+              <button className="pause-action" onClick={onQuit}><span>Quit to menu</span></button>
             </div>
             <p className="pause-hint"><span className="keycap">Esc</span> Resume anytime</p>
           </div>
@@ -823,7 +698,7 @@ export function PauseMenu({ mission, defusal, streaks, onResume, onRestart, onSe
               <span>Sirocco <b>Bomb Defusal</b></span>
               <span className="pause-clock tabular">{df.alphaScore} — {df.bravoScore}</span>
             </div>
-            <span className="pause-phase">Round {String(df.round).padStart(2, '0')} / {df.maxRounds} · first to {df.roundsToWin}</span>
+            <span className="pause-phase">Round {df.round} of {df.maxRounds} · first to {df.roundsToWin}</span>
             <h3>{df.alphaSide === 'attack' ? 'Your squad is attacking' : 'Your squad is defending'}</h3>
             <p>{df.alphaSide === 'attack' ? 'Get the bomb onto A or B and hold it until it blows.' : 'Hold both sites. If the bomb goes down, retake and defuse.'}</p>
             <div className="pause-progress"><span style={{ width: `${Math.round((Math.max(df.alphaScore, df.bravoScore) / df.roundsToWin) * 100)}%` }} /></div>
@@ -844,10 +719,10 @@ export function PauseMenu({ mission, defusal, streaks, onResume, onRestart, onSe
           <span className="stencil">System pause</span>
           <h2 id="pause-title" className="pause-title">Paused</h2>
           <div className="pause-actions">
-            <button className="pause-action pause-action-primary" onClick={onResume}><span>Resume</span><span className="idx">01</span></button>
-            <button className="pause-action" onClick={onSettings}><span>Settings</span><span className="idx">02</span></button>
-            <button className="pause-action" onClick={onRestart}><span>Restart</span><span className="idx">03</span></button>
-            <button className="pause-action" onClick={onQuit}><span>Quit to menu</span><span className="idx">04</span></button>
+            <button className="pause-action pause-action-primary" onClick={onResume}><span>Resume</span></button>
+            <button className="pause-action" onClick={onSettings}><span>Settings</span></button>
+            <button className="pause-action" onClick={onRestart}><span>Restart</span></button>
+            <button className="pause-action" onClick={onQuit}><span>Quit to menu</span></button>
           </div>
           <p className="pause-hint"><span className="keycap">Esc</span> Resume anytime</p>
         </div>
@@ -857,7 +732,7 @@ export function PauseMenu({ mission, defusal, streaks, onResume, onRestart, onSe
             <span>Operation <b>{mission?.name ?? 'Ready'}</b></span>
             <span className="pause-clock tabular">{mission ? missionClock(mission.elapsed) : '00:00'}</span>
           </div>
-          <span className="pause-phase">Phase {mission ? `0${mission.index + 1} / 0${mission.phaseCount}` : '—'}</span>
+          <span className="pause-phase">{mission ? `Phase ${mission.index + 1} of ${mission.phaseCount}` : '—'}</span>
           <h3>{mission?.title ?? 'Ready to deploy'}</h3>
           <p>{mission?.brief ?? 'Select resume to continue.'}</p>
           <div className="pause-progress"><span style={{ width: `${Math.round((mission?.progress ?? 0) * 100)}%` }} /></div>
@@ -879,7 +754,7 @@ export function PauseMenu({ mission, defusal, streaks, onResume, onRestart, onSe
                   <span className="keycap">{l.key}</span>
                   <span className="psr-name">{l.name}</span>
                   <span className="psr-cost tabular">{l.cost}</span>
-                  <span className="psr-state">{l.active ? 'LIVE' : l.ready ? 'READY' : l.claimed ? 'USED' : ''}</span>
+                  <span className="psr-state">{l.active ? 'Live' : l.ready ? 'Ready' : l.claimed ? 'Used' : ''}</span>
                 </div>
               ))}
               <p className="pause-streaks-foot">Kills 100 · headshots 150 · objectives 250. Streak kills never chain. Progress resets on death; armed streaks are kept.</p>
@@ -961,17 +836,17 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
           <div className="results-header">
             <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
             <div className="results-titleblock">
-              <div className="stamp-label">BLACKOUT REPORT</div>
-              <h1>OPERATION BLACKOUT</h1>
-              <p className="mono">RANKED SEARCH &amp; DESTROY · WAREHOUSE COMPLEX · {missionClock(r.timeSec)}</p>
+              <div className="stamp-label">Blackout report</div>
+              <h1>Operation Blackout</h1>
+              <p className="mono">Ranked search and destroy · Warehouse · {missionClock(r.timeSec)}</p>
             </div>
           </div>
           <CompDebriefPanel report={r.comp} />
           <CashCard r={r} cashRows={cashRows} wallet={wallet} grade={grade} />
           <div className="results-actions">
-            <button className="deploy-btn" onClick={onRedeploy}>RE-QUEUE</button>
-            <button className="menu-secondary-btn" onClick={onArmory}>ARMORY (+${Math.round(wallet.earned)})</button>
-            <button className="menu-secondary-btn" onClick={onMenu}>BACK TO MENU</button>
+            <button className="deploy-btn" onClick={onRedeploy}>Queue again</button>
+            <button className="menu-secondary-btn" onClick={onArmory}>Armory <span>+${Math.round(wallet.earned)}</span></button>
+            <button className="menu-secondary-btn" onClick={onMenu}>Back to menu</button>
           </div>
         </div>
       </main>
@@ -990,7 +865,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
             <p className="results-sub">{df
               ? `Sirocco bomb defusal — you started on ${df.startSide === 'attack' ? 'attack' : 'defense'} · ${df.rounds} rounds · ${df.plants} plant${df.plants === 1 ? '' : 's'} · ${df.defuses} defuse${df.defuses === 1 ? '' : 's'} · ${df.mvps} MVP${df.mvps === 1 ? '' : 's'}.`
               : tdm
-              ? `Warehouse TDM — final score ALPHA ${tdm.alphaScore} : ${tdm.bravoScore} BRAVO. You dropped ${tdm.playerKills} of Alpha's ${tdm.alphaScore}.`
+              ? `Warehouse team deathmatch — final score Alpha ${tdm.alphaScore} : ${tdm.bravoScore} Bravo. You dropped ${tdm.playerKills} of Alpha's ${tdm.alphaScore}.`
               : `${r.mission.name} — ${r.win
                 ? 'You completed the operation and reached the pickup.'
                 : `Operation ended during ${r.mission.phases.find(p => !p.complete)?.title.toLowerCase() ?? 'extraction'}.`}`}</p>
@@ -998,7 +873,7 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
         </div>
         {df && (
           <section className="df-debrief" aria-label="Round history and standings">
-            <div className="sec-label"><span>Round history</span><span className="mono">☠ ELIM · ✹ BOMB · ✂ DEFUSE · ◷ TIME</span></div>
+            <div className="sec-label"><span>Round history</span><span className="mono">☠ Elimination · ✹ Bomb · ✂ Defuse · ◷ Time</span></div>
             <div className="df-history big">
               {df.history.map((h, i) => (
                 <span key={h.round} className={`df-hcell ${h.winner === 'alpha' ? 'win' : 'loss'} ${i > 0 && h.half !== df.history[i - 1].half ? 'half' : ''}`} title={`Round ${h.round}`}>
@@ -1012,8 +887,8 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
                 <span className="rank mono">{i + 1}</span>
                 <span className="who">
                   {p.mvps > 0 && <i className="mvp">★{p.mvps > 1 ? p.mvps : ''}</i>}
-                  {p.name}{p.you ? ' (YOU)' : ''}
-                  <b className={`side ${p.team}`}>{p.team === 'alpha' ? 'YOUR SQUAD' : 'HOSTILES'}</b>
+                  {p.name}
+                  <b className={`side ${p.team}`}>{p.team === 'alpha' ? 'Your squad' : 'Hostiles'}</b>
                 </span>
                 <span className="mono tabular">{p.kills}</span>
                 <span className="mono tabular dim">{p.assists}</span>
@@ -1038,8 +913,8 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
                   <span className="who">
                     {mvpKills > 0 && p.kills === mvpKills && <i className="mvp">★</i>}
                     <em aria-hidden="true">{p.armorIcon}</em>
-                    {p.name}{p.you ? ' (YOU)' : ''}
-                    <b className={`side ${p.team}`}>{p.team === 'alpha' ? 'ALPHA' : 'BRAVO'}</b>
+                    {p.name}
+                    <b className={`side ${p.team}`}>{p.team === 'alpha' ? 'Alpha' : 'Bravo'}</b>
                   </span>
                   <span className="mono tabular">{p.kills}</span>
                   <span className="mono tabular dim">{p.deaths}</span>
@@ -1086,12 +961,11 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
 
         {!tdm && !df && <section className="timeline" aria-label="Mission timeline">
           <div className="sec-label" style={{ paddingBottom: 10 }}><span>Timeline</span><span className="mono">Elapsed</span></div>
-          {r.mission.phases.map((phase, i) => {
+          {r.mission.phases.map(phase => {
             const isDone = phase.complete;
             const isFail = !isDone && phase.seconds > 0;
             return (
               <div className={`tl-row ${isDone ? 'done' : ''}`} key={phase.id}>
-                <span className="tl-idx tabular">0{i + 1}</span>
                 <div className="tl-body">
                   <div className="tl-title"><strong>{phase.title}</strong><time className="tabular">{missionClock(phase.seconds)}</time></div>
                   <div className="tl-bar"><span style={{ width: `${isDone ? 100 : isFail ? 45 : 0}%`, background: isDone ? 'var(--olive)' : isFail ? 'var(--blood)' : 'var(--steel)', opacity: 0.95 }} /></div>

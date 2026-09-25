@@ -134,7 +134,7 @@ test('sentry, UAV, chopper and airstrike all engage hostiles headlessly and clea
     assert.equal(d.activate('sentry'), false, 'nothing is armed yet');
     d.addPoints(1200);
     assert.ok(d.ladder.has('chopper'));
-    assert.ok(w.messages.some(m => m.includes('ATTACK HELICOPTER READY')), 'arming is announced');
+    assert.ok(w.messages.some(m => m.includes('Attack helicopter ready')), 'arming is announced');
     const before = w.scene.children.length;
     assert.ok(d.activate('uav'));
     assert.ok(d.activate('sentry'));
@@ -196,7 +196,7 @@ test('sentry placement is refused on blocked ground and the streak is kept', () 
     d.addPoints(1000);
     assert.equal(d.activate('sentry'), false);
     assert.ok(d.ladder.has('sentry'), 'a refused placement must not eat the streak');
-    assert.ok(w.messages.some(m => m.includes('NO ROOM')));
+    assert.ok(w.messages.some(m => m.includes('No room')));
   } finally { unmute(); restore(); }
 });
 

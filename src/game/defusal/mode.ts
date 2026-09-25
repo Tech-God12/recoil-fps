@@ -38,7 +38,7 @@ export interface DefusalOptions {
   difficulty: string;
 }
 
-export const SIDE_LABEL: Record<Side, string> = { attack: 'ATTACKERS', defend: 'DEFENDERS' };
+export const SIDE_LABEL: Record<Side, string> = { attack: 'Attackers', defend: 'Defenders' };
 /** Team band colours by side — tan/amber attackers, navy defenders. */
 export const SIDE_TINT: Record<Side, number> = { attack: 0xC7792E, defend: 0x2F6FB0 };
 const ALPHA_NAMES = ['Dagger', 'Havoc', 'Bricks', 'Tundra'];
@@ -315,7 +315,7 @@ export class DefusalMode implements BotSquad {
       alive: true, kills: 0, deaths: 0, assists: 0, headshots: 0, damage: 0, mvps: 0, plants: 0, defuses: 0,
       roundKills: 0, roundDamage: 0, planted: false, defused: false, damageBy: new Map(), modelSide: null,
     });
-    this.player = mk('player', 'YOU', 'alpha', true, 'rifler');
+    this.player = mk('player', 'You', 'alpha', true, 'rifler');
     this.players.push(this.player);
     const roles: BotRole[] = ['entry', 'awper', 'support', 'lurker'];
     ALPHA_NAMES.forEach((n, i) => this.players.push(mk(n, n, 'alpha', false, roles[i])));
@@ -419,7 +419,7 @@ export class DefusalMode implements BotSquad {
     this.rosterVersion++;
     const side = this.playerSide;
     const mp = m.matchPoint();
-    this.setBanner('round', `ROUND ${m.round}`, pistol ? 'PISTOL ROUND · BUY PHASE' : mp.length ? 'MATCH POINT · BUY PHASE' : m.isLastRoundOfHalf ? 'LAST ROUND OF THE HALF · BUY PHASE' : 'BUY PHASE', undefined, side, 3.2);
+    this.setBanner('round', `Round ${m.round}`, pistol ? 'Pistol round · buy phase' : mp.length ? 'Match point · buy phase' : m.isLastRoundOfHalf ? 'Last round of the half · buy phase' : 'Buy phase', undefined, side, 3.2);
     if (this.bomb.carrier?.isPlayer) this.ctx.onRadio('You have the bomb — plant it on A or B (hold X on site).');
     if (swapped) this.ctx.announce('Second half. Switching sides.');
     else if (mp.length) this.ctx.announce('Match point.');
@@ -502,7 +502,7 @@ export class DefusalMode implements BotSquad {
     if (c.isPlayer) { this.ctx.onMoney(ECONOMY.plantPersonal, 'plant', c.inv.money); this.ctx.earnWallet(150, 'plant'); }
     audio.c4Armed();
     this.ctx.announce('Bomb has been planted.');
-    this.setBanner('planted', 'BOMB PLANTED', `SITE ${site} · 40 SECONDS`, undefined, 'attack', 2.6);
+    this.setBanner('planted', 'Bomb planted', `Site ${site} · 40 seconds`, undefined, 'attack', 2.6);
     this.lastSite = site;
     this.onPlanted(site);
   }
@@ -565,8 +565,8 @@ export class DefusalMode implements BotSquad {
       elimination: record.winnerSide === 'attack' ? 'All defenders eliminated' : 'All attackers eliminated',
       bomb: 'The bomb detonated', defuse: 'The bomb has been defused', time: 'Time ran out — the site held',
     };
-    this.setBanner('end', `${SIDE_LABEL[record.winnerSide]} WIN`, reasonText[record.reason], record.winner, record.winnerSide, TIMING.roundEnd - 0.4,
-      mvp ? `${mvp.isPlayer ? 'YOU' : mvp.name.toUpperCase()} — ${record.reason === 'defuse' ? 'defused the bomb' : record.reason === 'bomb' && mvp.planted ? 'planted the bomb' : `${mvp.roundKills} elimination${mvp.roundKills === 1 ? '' : 's'}`}` : undefined);
+    this.setBanner('end', `${SIDE_LABEL[record.winnerSide]} win`, reasonText[record.reason], record.winner, record.winnerSide, TIMING.roundEnd - 0.4,
+      mvp ? `${mvp.isPlayer ? 'You' : mvp.name} — ${record.reason === 'defuse' ? 'defused the bomb' : record.reason === 'bomb' && mvp.planted ? 'planted the bomb' : `${mvp.roundKills} elimination${mvp.roundKills === 1 ? '' : 's'}`}` : undefined);
     this.ctx.announce(record.winnerSide === 'attack' ? 'Attackers win.' : 'Defenders win.');
     if (won) audio.roundWinStinger(); else audio.roundLoseStinger();
     if (record.winnerSide === 'attack' && record.planted && this.bomb.site) this.lastLossSite = this.bomb.site;
@@ -575,13 +575,13 @@ export class DefusalMode implements BotSquad {
   private onTransition(tr: MatchTransition) {
     switch (tr.type) {
       case 'live':
-        this.setBanner('live', 'GO GO GO', this.playerSide === 'attack' ? 'Plant the bomb on A or B' : 'Defend both sites', undefined, this.playerSide, 1.6);
+        this.setBanner('live', 'Go', this.playerSide === 'attack' ? 'Plant the bomb on A or B' : 'Defend both sites', undefined, this.playerSide, 1.6);
         break;
       case 'end':
         this.onRoundEnd(tr.record);
         break;
       case 'halftime':
-        this.setBanner('halftime', 'HALFTIME', `${this.match.score.alpha} — ${this.match.score.bravo} · SWITCHING SIDES`, undefined, undefined, TIMING.halftime);
+        this.setBanner('halftime', 'Halftime', `${this.match.score.alpha} — ${this.match.score.bravo} · switching sides`, undefined, undefined, TIMING.halftime);
         this.ctx.announce('Halftime.');
         break;
       case 'round':
@@ -589,7 +589,7 @@ export class DefusalMode implements BotSquad {
         break;
       case 'ended': {
         const w = this.match.winner;
-        this.setBanner('match', w === 'alpha' ? 'VICTORY' : w === 'draw' ? 'DRAW' : 'DEFEAT', `${this.match.score.alpha} — ${this.match.score.bravo}`, w === 'draw' ? undefined : w ?? undefined, undefined, 4);
+        this.setBanner('match', w === 'alpha' ? 'Victory' : w === 'draw' ? 'Draw' : 'Defeat', `${this.match.score.alpha} — ${this.match.score.bravo}`, w === 'draw' ? undefined : w ?? undefined, undefined, 4);
         if (w === 'alpha') this.ctx.earnWallet(750, 'match');
         this.ctx.onMatchEnd();
         break;
@@ -639,7 +639,7 @@ export class DefusalMode implements BotSquad {
     v.deaths++;
     const pos = this.posOf(v).clone();
     const item = this.resolveItem(weapon);
-    const label = weapon === 'FRAG' || weapon === 'C4' ? weapon : (item?.name ?? weapon).toUpperCase();
+    const label = weapon === 'FRAG' ? 'Frag' : weapon === 'C4' ? 'C4' : (item?.name ?? weapon);
     if (k && k.team !== v.team) {
       k.kills++; k.roundKills++;
       if (headshot) k.headshots++;
@@ -668,7 +668,7 @@ export class DefusalMode implements BotSquad {
     const site = this.siteNear(pos);
     if (site && this.sideOf(v) === 'defend') this.threat[site] += 1.6;
     const zone = siroccoZoneAt(pos.x, pos.z);
-    this.ctx.onFeed(k ? (k.isPlayer ? 'YOU' : k.name) : '', label, v.isPlayer ? 'YOU' : v.name, headshot, k?.team ?? other(v.team), zone);
+    this.ctx.onFeed(k ? (k.isPlayer ? 'You' : k.name) : '', label, v.isPlayer ? 'You' : v.name, headshot, k?.team ?? other(v.team), zone);
     if (v.team === 'alpha' && !v.isPlayer) this.report(`dead-${v.id}`, `${v.name} is down — ${zone}.`, 0);
     this.rosterVersion++;
     this.checkElimination();
@@ -1118,7 +1118,7 @@ export class DefusalMode implements BotSquad {
       }));
     });
     if (this.playerSide === 'attack' && !fromHere) {
-      const names: Record<AttackStyle, string> = { exec: 'EXECUTE', rush: 'RUSH', split: 'SPLIT', default: 'DEFAULT', fake: 'FAKE' };
+      const names: Record<AttackStyle, string> = { exec: 'execute', rush: 'rush', split: 'split', default: 'default', fake: 'fake' };
       this.ctx.onRadio(`Team plan: ${names[this.attack.style]} ${this.attack.style === 'default' ? '— spread for map control' : this.attack.site}.`);
     }
   }
@@ -1535,14 +1535,14 @@ export class DefusalMode implements BotSquad {
     const f = this.ctx.playerFeet();
     if (this.bomb.state === 'carried' && this.bomb.carrier === p) {
       const s = siteAt(f.x, f.z);
-      if (s && m.phase === 'live') return this.bomb.planter === p ? `PLANTING ON ${s}…` : `HOLD X — PLANT THE BOMB ON ${s}`;
+      if (s && m.phase === 'live') return this.bomb.planter === p ? `Planting on ${s}…` : `Hold X to plant the bomb on ${s}`;
     }
     if (this.bomb.state === 'planted' && this.playerSide === 'defend' && d2(f, this.bomb.pos.x, this.bomb.pos.z) < 1.7) {
-      return this.bomb.defuser === p ? `DEFUSING${p.inv.kit ? ' WITH KIT' : ''}…` : `HOLD X — DEFUSE${p.inv.kit ? ' (KIT: 5s)' : ' (10s — BUY A KIT)'}`;
+      return this.bomb.defuser === p ? `Defusing${p.inv.kit ? ' with kit' : ''}…` : `Hold X to defuse${p.inv.kit ? ' (kit: 5s)' : ' (10s — buy a kit)'}`;
     }
     const d = this.nearestDrop(f, 1.9);
-    if (d) return `X — PICK UP ${shopItem(d.weapon)?.name.toUpperCase() ?? d.weapon}`;
-    if (this.canBuyNow() && m.phase === 'freeze') return 'B — OPEN BUY MENU';
+    if (d) return `X to pick up ${shopItem(d.weapon)?.name ?? d.weapon}`;
+    if (this.canBuyNow() && m.phase === 'freeze') return 'B opens the buy menu';
     return null;
   }
 
@@ -1573,12 +1573,12 @@ export class DefusalMode implements BotSquad {
     const knowBomb = b.state === 'planted' || this.playerSide === 'attack';
     const planDesc = (() => {
       if (this.playerSide === 'attack') {
-        if (this.followPlayer) return 'ORDERS: FOLLOWING YOU';
-        const names: Record<AttackStyle, string> = { exec: 'EXECUTE', rush: 'RUSH', split: 'SPLIT', default: 'DEFAULT · MAP CONTROL', fake: 'FAKE & HIT' };
-        return `PLAN: ${names[this.attack.style]}${this.attack.style === 'default' ? '' : ` ${this.attack.site}`}${this.executing ? ' · GOING IN' : ''}`;
+        if (this.followPlayer) return 'Orders: following you';
+        const names: Record<AttackStyle, string> = { exec: 'Execute', rush: 'Rush', split: 'Split', default: 'Default · map control', fake: 'Fake & hit' };
+        return `Plan: ${names[this.attack.style]}${this.attack.style === 'default' ? '' : ` ${this.attack.site}`}${this.executing ? ' · going in' : ''}`;
       }
-      const setupNames: Record<DefenseSetup, string> = { standard: '2-1-2 SETUP', stackA: 'STACK A', stackB: 'STACK B', aggressive: 'AGGRESSIVE' };
-      return this.followPlayer ? 'ORDERS: FOLLOWING YOU' : `SETUP: ${setupNames[this.defense]}${this.rotatedTo ? ` · ROTATED ${this.rotatedTo}` : ''}`;
+      const setupNames: Record<DefenseSetup, string> = { standard: '2-1-2 setup', stackA: 'Stack A', stackB: 'Stack B', aggressive: 'Aggressive' };
+      return this.followPlayer ? 'Orders: following you' : `Setup: ${setupNames[this.defense]}${this.rotatedTo ? ` · rotated ${this.rotatedTo}` : ''}`;
     })();
     return {
       phase: m.phase, clock: Math.max(0, m.clock), round: m.round, maxRounds: m.format.maxRounds,

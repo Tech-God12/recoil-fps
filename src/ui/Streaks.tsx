@@ -18,8 +18,8 @@ export function StreakRail({ st }: { st: StreakHud }) {
               <span className="sk-icon" aria-hidden="true">{l.icon}</span>
               <span className="sk-name">{l.short}</span>
               <span className="sk-cost tabular">{l.cost}</span>
-              {state === 'ready' && <span className="sk-ready-tag">READY</span>}
-              {state === 'active' && <span className="sk-ready-tag live">LIVE</span>}
+              {state === 'ready' && <span className="sk-ready-tag">Ready</span>}
+              {state === 'active' && <span className="sk-ready-tag live">Live</span>}
             </div>
           );
         })}
@@ -28,8 +28,8 @@ export function StreakRail({ st }: { st: StreakHud }) {
         <span className="sk-bar"><i style={{ width: `${(st.next ? st.next.pct : 1) * 100}%` }} /></span>
         <span className="sk-next mono">
           {st.next
-            ? <><b className="tabular">{st.points}</b> / {st.next.cost} · NEXT <em>{st.next.name}</em></>
-            : <><b className="tabular">{st.points}</b> · LADDER COMPLETE</>}
+            ? <><b className="tabular">{st.points}</b> / {st.next.cost} · next <em>{st.next.name}</em></>
+            : <><b className="tabular">{st.points}</b> · ladder complete</>}
         </span>
       </div>
     </div>
@@ -67,13 +67,13 @@ export function StrikeDesignator() {
         <span className="line h" /><span className="line v" />
         <span className="ring" />
       </div>
-      <div className="sk-designate-title">PRECISION AIRSTRIKE</div>
+      <div className="sk-designate-title">Precision airstrike</div>
       <div className="sk-designate-sub mono">
-        <span><span className="keycap">LMB</span> CONFIRM TARGET</span>
+        <span><span className="keycap">LMB</span> Confirm target</span>
         <i />
-        <span><span className="keycap">RMB</span> ABORT</span>
+        <span><span className="keycap">RMB</span> Abort</span>
       </div>
-      <div className="sk-designate-foot mono">FAST MOVERS HOLDING · 7 × MK82 · 30 M LINE · DANGER CLOSE 16 M</div>
+      <div className="sk-designate-foot mono">Fast movers holding · 7 × Mk82 · 30 m line · danger close 16 m</div>
     </div>
   );
 }
@@ -86,9 +86,9 @@ export function NukeCountdown({ t }: { t: number }) {
   return (
     <div className={`sk-nuke ${urgent ? 'urgent' : ''}`} role="alert">
       <span className="sk-nuke-icon" aria-hidden="true">☢</span>
-      <span className="sk-nuke-title">TACTICAL NUKE INBOUND</span>
-      <span className="sk-nuke-count tabular">{Math.ceil(t).toString().padStart(2, '0')}</span>
-      <span className="sk-nuke-sub mono">ALL UNITS — SEEK COVER</span>
+      <span className="sk-nuke-title">Tactical nuke inbound</span>
+      <span className="sk-nuke-count tabular">{Math.ceil(t)}</span>
+      <span className="sk-nuke-sub mono">All units — seek cover</span>
     </div>
   );
 }
@@ -99,7 +99,7 @@ export function NukeCountdown({ t }: { t: number }) {
 export function StreakMessage({ text, tdm }: { text: string; tdm?: boolean }) {
   return (
     <div className={`sk-msg ${tdm ? 'tdm' : ''}`} role="status">
-      <span className="sk-msg-tag">STREAK</span>
+      <span className="sk-msg-tag">Streak</span>
       <span className="sk-msg-text">{text}</span>
     </div>
   );

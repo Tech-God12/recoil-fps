@@ -28,7 +28,7 @@ export default function MissionObjective({ mission }: { mission: MissionHud }) {
   return (
     <>
       <section className={`obj-tracker hud-chip ${warning ? 'objective-warning' : ''}`} aria-label="Current mission objective">
-        <div className="obj-kicker"><span>{mission.name}</span><span>{String(mission.index + 1).padStart(2, '0')} / {String(mission.phaseCount).padStart(2, '0')}</span></div>
+        <div className="obj-kicker"><span>{mission.name}</span><span>Objective {mission.index + 1} of {mission.phaseCount}</span></div>
         <div className="obj-pips" aria-hidden="true">
           {Array.from({ length: mission.phaseCount }, (_, i) => <span key={i} className={i < mission.index ? 'done' : i === mission.index ? 'current' : ''} />)}
         </div>

@@ -37,6 +37,9 @@ import {
   TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL, TDM_SHUTDOWN_CASH, TDM_DRAW_CASH, tdmOutcome,
   type TDMArmor, type TDMBot, type TDMContext, type TDMTeam, type TDMOutcome, type BotHit,
 } from './tdm';
+import { LightBudget } from './light-budget';
+import { hitZone } from './reactions';
+import { fitSunShadow } from './shadow-fit';
 import { DefusalMode, type DefusalHud, type DefusalResult } from './defusal/mode';
 import { armorCovers, hitDamage, modScaleFor, type HitPart, type Inventory } from './defusal/shop';
 import type { MatchFormatId, Side } from './defusal/rules';
@@ -181,6 +184,20 @@ export const DEFAULT_SETTINGS: GameSettings = {
   crosshairDot: true,
 };
 
+/** True when the settings need the off-screen EffectComposer chain. Everything
+ *  else renders straight to the multisampled canvas (cheaper AND antialiased). */
+export function usesPostChain(s: Pick<GameSettings, 'bloom' | 'filmGrain'>): boolean {
+  return s.bloom || s.filmGrain > 0;
+}
+
+/** CSS for the screen-space vignette overlay. Matches the old shader's falloff: clear
+ *  centre, darkening from ~40 % radius to `strength` at the corners. */
+export function vignetteOverlay(vignette: number): string | null {
+  if (vignette <= 0) return null;
+  const a = Math.min(0.7, vignette / 100);
+  return `radial-gradient(ellipse farthest-corner at center, rgba(0,0,0,0) 40%, rgba(0,0,0,${a.toFixed(3)}) 100%)`;
+}
+
 /** Validate persisted and live patches before they reach input, audio or the renderer. */
 export function sanitizeSettings(input: unknown): GameSettings {
   let raw = input;
@@ -262,6 +279,9 @@ export interface HudState {
   enemiesMap: { nx: number; nz: number; yaw: number; hot: boolean }[];
   missionMap?: { nx: number; nz: number; ringPct: number; extract: boolean };
   fps: number;
+  /** Effective render scale in % (resolution slider × adaptive step) — shown next to
+   *  FPS so the player can see the adaptive scaler working instead of guessing. */
+  renderScale: number;
   magSize: number;
   masterkey?: { shells: number; reloading: boolean };
   worldHalf: number;
@@ -534,6 +554,15 @@ export class Engine {
   private pendingResult: Extract<GameEvent, { type: 'end' }> | null = null;
   private onEvent!: (e: GameEvent) => void;
   private composer!: EffectComposer;
+  private lightBudget!: LightBudget;
+  /** Corpse feedback (reactions.ts): body-fall thud + rifle clatter, spatialised. Past
+   *  45 m both are below the HRTF rolloff floor anyway, so skip the node churn. */
+  private readonly deathAudio = {
+    onBodyFall: (at: THREE.Vector3, heavy: boolean) => { if (at.distanceTo(this.pos) < 45) audio.bodyFallSpatial(at.x, at.y, at.z, heavy); },
+    onWeaponDrop: (at: THREE.Vector3) => { if (at.distanceTo(this.pos) < 30) audio.weaponClatterSpatial(at.x, at.y, at.z); },
+  };
+  private readonly sunDir = new THREE.Vector3(0, 1, 0);
+  private readonly shadowFwd = new THREE.Vector3();
   private bloom!: UnrealBloomPass;
   private vignettePass!: ShaderPass;
   private sunLight!: THREE.DirectionalLight;
@@ -747,10 +776,11 @@ export class Engine {
     else sun.position.set(55, 38, -50);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048); // 4x fewer shadow texels than 4096 — big FPS win
-    const shadowSpan = golden ? 62 : 80;   // tighter frustum = crisper shadows on the compact map
-    sun.shadow.camera.left = -shadowSpan; sun.shadow.camera.right = shadowSpan;
-    sun.shadow.camera.top = shadowSpan; sun.shadow.camera.bottom = -shadowSpan;
+    // Frustum extents/placement are owned by shadow-fit.ts (follows the player,
+    // texel-snapped). The sun's authored position above is kept as its DIRECTION.
+    this.sunDir.copy(sun.position).normalize();
     sun.shadow.camera.far = 240;
+    this.scene.add(sun.target);
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.04;
     this.scene.add(sun);
@@ -777,11 +807,18 @@ export class Engine {
     });
     // Warm interior point lights near the map centre (capped at 2 — each one re-lights every merged mesh)
     const spots = [...this.world.lightSpots].sort((a, b) => a.length() - b.length()).slice(0, 2);
+    // Frame budget: every decorative point light (these centre lights, the Warehouse
+    // spawn washes/work lights, Sirocco's tunnel lamps) becomes a virtual source
+    // served by a fixed 2-light pool — see light-budget.ts. Shader light count no
+    // longer grows with map dressing (Warehouse: 8 → 4 evaluated per pixel).
+    this.lightBudget = new LightBudget(this.scene);
     for (const s of spots) {
       const pl = new THREE.PointLight(0xFFD9A0, 14, 16, 1.8);
       pl.position.copy(s);
       this.scene.add(pl);
+      this.lightBudget.adopt(pl);
     }
+    this.lightBudget.adoptAll(this.world.group);
     // ON FIRE marker light for the player — pre-added at intensity 0 so the light
     // count (and therefore every compiled shader program) never changes mid-match.
     if (this.isTDM) {
@@ -988,6 +1025,7 @@ void main(){
 
     // AI Context with full HRTF Spatial Audio Integration
     const ctx: AIContext = {
+      ...this.deathAudio,
       scene: this.scene,
       occluders: this.world.occluders,
       coverNodes: this.world.coverNodes,
@@ -1055,6 +1093,7 @@ void main(){
         playerFeet: () => this.pos.clone(),
         playerAlive: () => !this.dead,
         damagePlayer: (a, f, killer, isHead) => this.damagePlayerTDM(a, f, killer, isHead === true),
+        ...this.deathAudio,
         moveCollide: ctx.moveCollide,
         onCallout: (k, p, team) => {
           if (k === 'onfire' && team === 'alpha') {
@@ -1100,6 +1139,7 @@ void main(){
         playerHp: () => this.hp,
         playerCanSee: p => this.playerCanSee(p),
         damagePlayer: (a, f, k, hit) => this.damagePlayerDefusal(a, f, k, hit),
+        ...this.deathAudio,
         throwGrenade: (from, target, owner, kind) => this.spawnGrenade(from, target, true, kind, owner),
         onBotFire: (p, team) => { audio.enemyFireSpatial(p.x, p.y, p.z); if (team === 'bravo') this.addPing(p); },
         spawnPlayer: (at, yaw, inv) => this.dfSpawnPlayer(at, yaw, inv),
@@ -1131,6 +1171,7 @@ void main(){
         playerFeet: () => this.pos.clone(),
         playerAlive: () => !this.dead,
         damagePlayer: (a, f, killer, isHead) => this.damagePlayerComp(a, f, killer, isHead === true),
+        ...this.deathAudio,
         moveCollide: ctx.moveCollide,
         onCallout: (k, p, team) => {
           // Squad radio for the player's own team, contact barks for the other side.
@@ -2017,6 +2058,8 @@ void main(){
     if (h) {
       if (!d.suppressed) this.effects.tracer(muzzleWorld, h.point);
       const tdmBot = (h.object.userData.tdmBot as TDMBot | undefined);
+      // Reactions (reactions.ts): which way the body flinches/falls and which zone was hit.
+      tdmBot?.noteHit({ from: this.camera.position.clone(), zone: hitZone(h.object.userData.part) });
       if (tdmBot && !tdmBot.dead && this.isDefusal && this.defusal) {
         // CS damage model: per-weapon damage (scaled by armory mods), ×4 head,
         // ×0.75 limbs, and the weapon's armor penetration against kevlar/helmet.
@@ -2085,6 +2128,8 @@ void main(){
         continue;
       }
       const enemy = (h.object.userData.enemy as Enemy | undefined);
+      // Reactions (reactions.ts): which way the body flinches/falls and which zone was hit.
+      enemy?.noteHit({ from: this.camera.position.clone(), zone: hitZone(h.object.userData.part) });
       if (enemy && !enemy.dead) {
         const part = h.object.userData.part as string;
         let dmg = d.damage;
@@ -2357,6 +2402,8 @@ void main(){
       }
       this.effects.tracer(mw, h.point);
       const mkBot = (h.object.userData.tdmBot as TDMBot | undefined);
+      // Reactions (reactions.ts): which way the body flinches/falls and which zone was hit.
+      mkBot?.noteHit({ from: this.camera.position.clone(), zone: hitZone(h.object.userData.part) });
       if (mkBot && !mkBot.dead && this.isDefusal && this.defusal) {
         const raw = h.object.userData.part as string;
         const part: HitPart = raw === 'head' ? 'head' : raw === 'limb' ? 'limb' : 'torso';
@@ -2389,6 +2436,8 @@ void main(){
         continue;
       }
       const enemy = (h.object.userData.enemy as Enemy | undefined);
+      // Reactions (reactions.ts): which way the body flinches/falls and which zone was hit.
+      enemy?.noteHit({ from: this.camera.position.clone(), zone: hitZone(h.object.userData.part) });
       if (!enemy || enemy.dead) continue;
       const part = h.object.userData.part as string;
       let dmg = 12;
@@ -2569,6 +2618,7 @@ void main(){
           if (d >= 7) continue;
           let dmg = d < 2.5 ? 95 : THREE.MathUtils.lerp(95, 0, (d - 2.5) / 4.5);
           if (bot.armor >= 1) dmg *= 0.6;
+          bot.noteHit({ from: g.pos.clone(), explosive: true });
           if (bot.takeDamage(dmg, false, g.owner ?? 'player', false)) {
             if (g.owner) this.defusal.handleKill(g.owner, bot, false, 'FRAG');
             else {
@@ -2592,6 +2642,7 @@ void main(){
           if (d < 7) {
             // scaled for the bigger TDM health pools — a close frag finishes fights
             const dmg = (d < 3.5 ? 170 : THREE.MathUtils.lerp(140, 35, (d - 3.5) / 3.5));
+            bot.noteHit({ from: g.pos.clone(), explosive: true });
             const killed = this.isComp
               ? bot.applyRankedDamage(dmg, false, false, g.owner ?? 'player').killed
               : bot.takeDamage(dmg, false, g.owner ?? 'player');
@@ -2612,6 +2663,7 @@ void main(){
         const d = e.pos.distanceTo(g.pos);
         if (d < 7) {
           const dmg = d < 3.5 ? 130 : THREE.MathUtils.lerp(110, 30, (d - 3.5) / 3.5);
+          e.noteHit({ from: g.pos.clone(), explosive: true });
           const killed = e.takeDamage(dmg, false);
           if (killed && !g.fromAI) {
             this.kills++;
@@ -2676,6 +2728,7 @@ void main(){
           alive: () => !bot.dead,
           damage: (amount, source) => {
             if (bot.dead) return false;
+            bot.noteHit({ explosive: true });
             const killed = bot.takeDamage(amount, false, 'player');
             if (killed) { this.creditStreakKill(bot.name, source, bot); }
             return killed;
@@ -2690,6 +2743,7 @@ void main(){
           alive: () => !e.dead,
           damage: (amount, source) => {
             if (e.dead) return false;
+            e.noteHit({ explosive: true });
             const killed = e.takeDamage(amount, false);
             if (killed) this.creditStreakKill(e.name, source, null);
             return killed;
@@ -3961,6 +4015,9 @@ void main(){
         this.ambientT = 12 + Math.random() * 8;
       }
     }
+    // Light pool follows the eye (flicker below writes the virtual sources; the pool
+    // picks the new intensity up on the next frame — one frame of lag is invisible).
+    this.lightBudget.update(dt, this.camera.position);
     // Arena dressing: flickering work lights + drifting dust motes (warehouse only)
     {
       const fx = this.world.arenaFx;
@@ -4381,7 +4438,15 @@ void main(){
     // rendered once on frame 1 and never again. Refreshing every 10th frame keeps
     // characters grounded at ~6 Hz — imperceptible staleness for ~1/10th of one
     // shadow pass amortised, and still zero cost with shadows off.
-    if (this.frameNo <= 2 || this.frameNo % 10 === 0) this.renderer.shadowMap.needsUpdate = true;
+    if (this.frameNo <= 2 || this.frameNo % 10 === 0) {
+      this.renderer.shadowMap.needsUpdate = true;
+      // Re-aim the shadow box only on frames that re-render it, so the map and the
+      // matrices sampling it always agree.
+      if (this.sunLight?.castShadow) {
+        this.camera.getWorldDirection(this.shadowFwd);
+        fitSunShadow(this.sunLight, this.sunDir, this.camera.position, this.shadowFwd);
+      }
+    }
     if (this.postFxOn) {
       this.composer.render();
     } else {
@@ -4460,10 +4525,15 @@ void main(){
     // Post FX
     this.bloom.enabled = s.bloom;
     this.bloom.strength = s.bloomStrength / 100;
-    this.vignettePass.uniforms.uVignette.value = s.vignette / 100;
+    // The vignette is a CSS overlay now (vignetteOverlay() / App.tsx): it used to be
+    // the ONLY reason the default settings ran the whole off-screen post chain
+    // (full-res render target + 2 fullscreen passes), and that chain renders into a
+    // non-multisampled target — so players paid for canvas MSAA and got an aliased
+    // world. Post now runs only for effects that genuinely need it.
+    this.vignettePass.uniforms.uVignette.value = 0;
     this.vignettePass.uniforms.uGrain.value = s.filmGrain / 100 * 0.06;
-    this.vignettePass.enabled = s.vignette > 0 || s.filmGrain > 0;
-    this.postFxOn = s.bloom || s.vignette > 0 || s.filmGrain > 0;
+    this.vignettePass.enabled = s.filmGrain > 0;
+    this.postFxOn = usesPostChain(s);
     this.renderer.toneMappingExposure = s.brightness / 100;
     this.motionBlurAmount = s.cameraShake / 100;
   }
@@ -4658,6 +4728,7 @@ void main(){
       })(),
       nearest,
       fps: Math.round(this.fps),
+      renderScale: Math.round(this.dynPR / Math.min(window.devicePixelRatio || 1, 1.25) * 100),
       magSize: this.def().magSize,
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
@@ -4684,6 +4755,7 @@ void main(){
 
   dispose() {
     this.disposed = true;
+    this.lightBudget?.dispose();
     this.pendingResult = null;
     // Leaving a mission must not leave wind or queued radio lines playing behind the menu.
     voice.cancel();

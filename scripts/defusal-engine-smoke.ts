@@ -120,7 +120,7 @@ async function main() {
   let engine: any = await Engine.create(canvas, 'Normal', (e: any) => {
     events[e.type] = (events[e.type] ?? 0) + 1;
     if (e.type === 'end') ended = e;
-  }, 'sirocco', DEFAULT_PROFILE.loadout, 1, { side: 'attack', format: 'short', builds });
+  }, 'sirocco', DEFAULT_PROFILE.loadout, 1, { mode: 'defusal', side: 'attack', format: 'short', builds });
   clearInterval(pump);
   console.log(`ENGINE UP in ${Date.now() - t0} ms — weapons cached: ${engine.dfWeaponCache.size}`);
   engine.applySettings((await import('../src/game/engine')).DEFAULT_SETTINGS);
@@ -181,7 +181,7 @@ async function main() {
   // ================= SCENARIO B: defender defuse + pickup =================
   const engine2: any = await (async () => {
     const pump2 = setInterval(() => { const q = rafQueue; rafQueue = []; for (const fn of q) fn(performance.now()); }, 1);
-    const e2 = await Engine.create(canvas, 'Normal', (e: any) => { events[e.type] = (events[e.type] ?? 0) + 1; }, 'sirocco', DEFAULT_PROFILE.loadout, 1, { side: 'defend', format: 'short', builds });
+    const e2 = await Engine.create(canvas, 'Normal', (e: any) => { events[e.type] = (events[e.type] ?? 0) + 1; }, 'sirocco', DEFAULT_PROFILE.loadout, 1, { mode: 'defusal', side: 'defend', format: 'short', builds });
     clearInterval(pump2);
     return e2;
   })();
@@ -240,7 +240,7 @@ async function main() {
   // ================= free play on a fresh match =================
   {
     const pump3 = setInterval(() => { const q = rafQueue; rafQueue = []; for (const fn of q) fn(performance.now()); }, 1);
-    engine = await Engine.create(canvas, 'Normal', (e: any) => { events[e.type] = (events[e.type] ?? 0) + 1; if (e.type === 'end') ended = e; }, 'sirocco', DEFAULT_PROFILE.loadout, 1, { side: 'attack', format: 'short', builds });
+    engine = await Engine.create(canvas, 'Normal', (e: any) => { events[e.type] = (events[e.type] ?? 0) + 1; if (e.type === 'end') ended = e; }, 'sirocco', DEFAULT_PROFILE.loadout, 1, { mode: 'defusal', side: 'attack', format: 'short', builds });
     clearInterval(pump3);
     engine.applySettings((await import('../src/game/engine')).DEFAULT_SETTINGS);
     engine.start();

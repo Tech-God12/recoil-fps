@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Engine, sanitizeSettings, type GameEvent, type GameSettings, type HudState } from './game/engine';
+import { Engine, sanitizeSettings, vignetteOverlay, type GameEvent, type GameSettings, type HudState } from './game/engine';
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
 import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results, type DefusalMenuOptions } from './ui/Screens';
@@ -40,7 +40,7 @@ const DEFAULT_HUD: HudState = {
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
-  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
+  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, renderScale: 100, worldHalf: 104,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, nukeFlash: null });
 
@@ -409,9 +409,15 @@ export default function App() {
     updateProfile(resetCurrentCash(profileRef.current));
   };
 
+  // Built once per render (the App re-renders ~20×/s with the HUD tick).
+  const vignetteBg = vignetteOverlay(settings.vignette);
   return (
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
+      {/* Screen vignette as a compositor overlay — free, instead of a post pass (engine.ts usesPostChain). */}
+      {(phase === 'playing' || phase === 'paused') && vignetteBg && (
+        <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: vignetteBg }} />
+      )}
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
       {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} onRanked={() => changePhase('ranked-setup')} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (

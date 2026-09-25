@@ -2452,7 +2452,7 @@ span.arm2-thumb { display: inline-block; }
 .kits-arrow.prev { left: 14px; } .kits-arrow.next { right: 14px; }
 
 /* ---- bottom: cards | action ---- */
-.kits-bottom { display: grid; grid-template-columns: minmax(0, 1fr) clamp(240px, 26vw, 340px); align-items: end; gap: clamp(12px, 2vw, 28px); }
+.kits-bottom { display: grid; grid-template-columns: minmax(0, 1fr) clamp(240px, 26vw, 340px); align-items: stretch; gap: clamp(12px, 2vw, 28px); }
 .kits-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(8px, 1vw, 12px); }
 .kits-card {
   position: relative; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 14px; text-align: left; cursor: pointer;
@@ -2474,7 +2474,8 @@ span.arm2-thumb { display: inline-block; }
 .kits-card.owned .kits-card-tag { color: var(--bone-dim); }
 .kits-card .dot { width: 6px; height: 6px; }
 
-.kits-action { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.kits-action { display: flex; }
+.kits-action .kits-cta { flex: 1; }
 .kits-cta {
   position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: clamp(14px, 2vh, 18px) 20px; border-radius: 10px; cursor: pointer;
   font: 800 clamp(17px, 1.7vw, 22px)/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid transparent; white-space: nowrap;

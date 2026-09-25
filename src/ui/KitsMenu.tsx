@@ -3,7 +3,7 @@
 // along the bottom, and the buy/equip action bottom-right. The equipped kit is
 // locked in when a game starts; this screen is the only place to change it.
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { KIT_DEFS, KIT_IDS, KIT_KEY, KIT_TUNING, type KitId } from '../game/kits';
+import { KIT_DEFS, KIT_IDS, KIT_KEY, type KitId } from '../game/kits';
 import { buyKit, equipKit } from '../game/economy/kit-shop';
 import type { PlayerProfile } from '../game/economy/profile';
 import { audio } from '../game/audio';
@@ -142,9 +142,6 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
             <span>{cta.label}</span>
             {cta.cls !== 'locked' && <span className="keycap">Enter</span>}
           </button>
-          <span className="kits-note mono">
-            {equipped ? 'Press Enter to unequip' : `Locked in when the game starts · kills −${Math.round(KIT_TUNING.killRefund * 100)}% cooldown`}
-          </span>
         </div>
       </footer>
 

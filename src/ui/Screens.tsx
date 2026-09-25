@@ -210,9 +210,9 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
               >
                 <span className="rm-idx mono">{it.idx}</span>
                 <span className="rm-item-body"><b>{it.title}</b><em>{it.sub}</em></span>
-                {it.id === 'kits' && (
-                  <span className={`rm-kit-badge ${prof.equippedKit ? `kit-${prof.equippedKit}` : 'new'}`} aria-hidden="true">
-                    {prof.equippedKit ? <KitIcon id={prof.equippedKit} size={16} /> : 'NEW'}
+                {it.id === 'kits' && prof.equippedKit && (
+                  <span className={`rm-kit-badge kit-${prof.equippedKit}`} aria-hidden="true">
+                    <KitIcon id={prof.equippedKit} size={16} />
                   </span>
                 )}
                 <span className="rm-arrow"><Arrow /></span>

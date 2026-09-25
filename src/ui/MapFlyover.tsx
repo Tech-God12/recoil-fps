@@ -19,13 +19,14 @@ function buildSlot(mapId: MapId): Slot {
   if (hit) return hit;
   const scene = new THREE.Scene();
   // Per-arena grade: alrasul desert noon, kasbah overcast stone, arena warm dusk.
-  const sky = mapId === 'alrasul' ? 0xC9BB9E : mapId === 'arena' ? 0xD8B98E : 0xAEBAC0;
-  const haze = mapId === 'alrasul' ? 0xC6B89C : mapId === 'arena' ? 0xC9A87E : 0xB4C0C5;
+  const warm = mapId === 'arena' || mapId === 'sirocco';
+  const sky = mapId === 'alrasul' ? 0xC9BB9E : mapId === 'sirocco' ? 0xE3C597 : mapId === 'arena' ? 0xD8B98E : 0xAEBAC0;
+  const haze = mapId === 'alrasul' ? 0xC6B89C : mapId === 'sirocco' ? 0xD9B98A : mapId === 'arena' ? 0xC9A87E : 0xB4C0C5;
   scene.background = new THREE.Color(sky);
   scene.fog = new THREE.Fog(haze, 160, 520);
-  scene.add(new THREE.HemisphereLight(mapId === 'arena' ? 0xF2D9B0 : 0xCFE0EE, 0x8C765A, 0.85));
-  const sun = new THREE.DirectionalLight(mapId === 'arena' ? 0xFFC98A : 0xFFE4BE, 2.6);
-  sun.position.set(-65, 80, 40);
+  scene.add(new THREE.HemisphereLight(warm ? 0xF2D9B0 : 0xCFE0EE, 0x8C765A, 0.85));
+  const sun = new THREE.DirectionalLight(warm ? 0xFFC98A : 0xFFE4BE, 2.6);
+  if (mapId === 'sirocco') sun.position.set(-70, 45, 30); else sun.position.set(-65, 80, 40);
   scene.add(sun);
   scene.add(new THREE.AmbientLight(0x8A7A60, 0.2));
   const world = buildWorld(scene, mapId);
@@ -82,7 +83,7 @@ export default function MapFlyover({ mapId, active }: { mapId: MapId; active: bo
         const t = (performance.now() - t0) / 1000;
         const a = t * 0.045; // slow drift around the arena
         const r = slot.world.half * 0.72;
-        camera.position.set(Math.sin(a) * r, 74 + Math.sin(t * 0.11) * 5, Math.cos(a) * r);
+        camera.position.set(Math.sin(a) * r, (mapId === 'sirocco' ? 54 : 74) + Math.sin(t * 0.11) * 5, Math.cos(a) * r);
         camera.lookAt(0, 4, 0);
         renderer.render(slot.scene, camera);
         mount.dataset.live = 'true';

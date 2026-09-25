@@ -78,7 +78,7 @@ class VoiceManager {
     } catch { /* noop */ }
   }
 
-  // ---------- Announcer (match + multi-kills) ----------
+  // ---------- Announcer (match + streaks) ----------
   objective(text: string) {
     // Keep announcer lines short and infrequent so they never feel like noise.
     const short = text.length > 180 ? text.slice(0,180).replace(/\s+\S*$/, '') + '.' : text;
@@ -104,7 +104,7 @@ class VoiceManager {
     };
     this.speak(map[label] ?? label, 'announcer', { key: `streak:${label}`, cooldownMs: 1500, rate: 1.1 });
   }
-  /** General announcer line (kit and match callouts). Interrupts nothing important. */
+  /** Scorestreak announcer: "UAV online", "Enemy sentry destroyed", etc. Interrupts nothing important. */
   announce(text: string) {
     this.speak(text, 'announcer', { key: `announce:${text}`, cooldownMs: 1200, rate: 1.05, volume: 0.85 });
   }

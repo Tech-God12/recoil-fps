@@ -1,19 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Engine, DEFAULT_SETTINGS, sanitizeSettings, type GameEvent, type GameSettings, type HudState } from './game/engine';
+import { Engine, sanitizeSettings, vignetteOverlay, type GameEvent, type GameSettings, type HudState } from './game/engine';
 import Hud, { type HudFx } from './ui/Hud';
 import Settings from './ui/Settings';
-import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results } from './ui/Screens';
+import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results, type DefusalMenuOptions } from './ui/Screens';
+import BuyMenu from './ui/BuyMenu';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
-import KitsMenu from './ui/KitsMenu';
-import { developmentCashGrant, grantCash, loadProfile, resetCurrentCash, saveProfile, type PlayerProfile } from './game/economy/profile';
+import { buildForWeapon, developmentCashGrant, grantCash, loadProfile, resetCurrentCash, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { settleResult } from './game/economy/settlement';
+import { rankFor } from './game/economy/rank';
+import { RankedSetup } from './ui/Competitive';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'kits';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'ranked-setup';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const LEGACY_WALLET_NOTICE_THRESHOLD = 9_000_000;
+const DEFUSAL_KEY = 'recoilfps.defusal.v1';
+function loadDefusalOptions(): DefusalMenuOptions {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DEFUSAL_KEY) ?? '{}');
+    return {
+      side: raw.side === 'attack' || raw.side === 'defend' ? raw.side : 'random',
+      format: raw.format === 'long' ? 'long' : 'short',
+    };
+  } catch { return { side: 'random', format: 'short' }; }
+}
 
 /**
  * Resolves once the browser has painted. Two animation frames, because the first one
@@ -28,16 +40,15 @@ const DEFAULT_HUD: HudState = {
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
-  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
+  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, renderScale: 100, worldHalf: 104,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, nukeFlash: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
 function loadSettings(): GameSettings {
-  try {
-    return sanitizeSettings(localStorage.getItem(SETTINGS_KEY));
-  } catch { return { ...DEFAULT_SETTINGS }; }
+  const s = sanitizeSettings(localStorage.getItem(SETTINGS_KEY));
+  return { ...s, map: s.map === 'kasbah' || s.map === 'arena' || s.map === 'sirocco' ? s.map : 'alrasul' };
 }
 
 export default function App() {
@@ -64,6 +75,11 @@ export default function App() {
   // Which MainMenu screen to show when phase returns to 'menu' (so leaving the
   // TDM loadout screen lands back on Arena Mode, not the home screen).
   const [menuView, setMenuView] = useState<'home' | 'arena'>('home');
+  const [defusalOpts, setDefusalOpts] = useState<DefusalMenuOptions>(loadDefusalOptions);
+  // Buy menu (Bomb Defusal): the pointer is released while it is open, which must
+  // NOT be read as "the player paused" by the pointer-lock watcher below.
+  const [buyOpen, setBuyOpen] = useState(false);
+  const buyOpenRef = useRef(false);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -110,7 +126,29 @@ export default function App() {
     engineRef.current?.applySettings(settings);
   }, [settings]);
   const set = useCallback((patch: Partial<GameSettings>) => setSettings(previous => sanitizeSettings({ ...previous, ...patch })), []);
+  useEffect(() => {
+    try { localStorage.setItem(DEFUSAL_KEY, JSON.stringify(defusalOpts)); } catch { /* Storage is optional. */ }
+  }, [defusalOpts]);
 
+  const openBuy = useCallback(() => {
+    buyOpenRef.current = true;
+    setBuyOpen(true);
+    engineRef.current?.setBuyMenuOpen(true);
+    if (document.pointerLockElement) document.exitPointerLock();
+  }, []);
+  /** Close the buy menu. `relock` comes from a real gesture (B / click); Esc pauses instead. */
+  const closeBuy = useCallback((relock: boolean) => {
+    buyOpenRef.current = false;
+    setBuyOpen(false);
+    const engine = engineRef.current;
+    engine?.setBuyMenuOpen(false);
+    if (!engine) return;
+    if (relock) {
+      engine.requestLock().catch(() => { engine.setPaused(true); setHud(engine.hud()); changePhase('paused'); setError('Click Resume to capture the mouse again.'); });
+    } else {
+      engine.setPaused(true); setHud(engine.hud()); changePhase('paused');
+    }
+  }, [changePhase]);
   const onEvent = useCallback((event: GameEvent) => {
     const id = ++ids.current;
     switch (event.type) {
@@ -165,19 +203,23 @@ export default function App() {
         setFx(f => ({ ...f, banner: { id, label: event.label } }));
         later(() => setFx(f => f.banner?.id === id ? { ...f, banner: null } : f), 1600);
         break;
-      case 'kitfx':
-        setFx(f => ({ ...f, kitFx: { id, kind: event.kind } }));
-        later(() => setFx(f => f.kitFx?.id === id ? { ...f, kitFx: null } : f), 900);
+      case 'streakmsg':
+        setFx(f => ({ ...f, streakMsg: { id, text: event.text } }));
+        later(() => setFx(f => f.streakMsg?.id === id ? { ...f, streakMsg: null } : f), 3600);
         break;
-      case 'kitmsg':
-        setFx(f => ({ ...f, kitMsg: { id, text: event.text } }));
-        later(() => setFx(f => f.kitMsg?.id === id ? { ...f, kitMsg: null } : f), 2800);
+      case 'nuke':
+        setFx(f => ({ ...f, nukeFlash: id }));
+        later(() => setFx(f => f.nukeFlash === id ? { ...f, nukeFlash: null } : f), 5200);
+        break;
+      case 'buymenu':
+        if (event.open) openBuy();
         break;
       case 'objective':
         setFx(f => ({ ...f, missionBanner: { id, title: event.phase.title, index: event.index } }));
         later(() => setFx(f => f.missionBanner?.id === id ? { ...f, missionBanner: null } : f), 2600);
         break;
       case 'end': {
+        buyOpenRef.current = false; setBuyOpen(false);
         engineRef.current?.setPaused(true);
         const settled = settleResult(profileRef.current, event);
         updateProfile(settled.profile);
@@ -188,7 +230,7 @@ export default function App() {
         break;
       }
     }
-  }, [changePhase, later, updateProfile]);
+  }, [changePhase, later, updateProfile, openBuy]);
 
   useEffect(() => {
     if (phase !== 'playing') return;
@@ -202,6 +244,8 @@ export default function App() {
     const lockChanged = () => {
       const engine = engineRef.current;
       if (!engine || phaseRef.current === 'results' || phaseRef.current === 'menu' || phaseRef.current === 'armory' || phaseRef.current === 'tdm-setup') return;
+      // Releasing the pointer to shop is not a pause: the round keeps running.
+      if (buyOpenRef.current && document.pointerLockElement !== canvasRef.current) return;
       if (document.pointerLockElement === canvasRef.current) {
         engine.setPaused(false);
         changePhase('playing');
@@ -214,6 +258,7 @@ export default function App() {
     };
     const lockError = () => { engineRef.current?.setPaused(true); if(engineRef.current)setHud(engineRef.current.hud()); changePhase('paused'); setError('Mouse capture was blocked. Select Resume to try again.'); };
     const blur = () => {
+      if (buyOpenRef.current) { buyOpenRef.current = false; setBuyOpen(false); engineRef.current?.setBuyMenuOpen(false); }
       if (phaseRef.current !== 'playing') return;
       engineRef.current?.setPaused(true);
       if(engineRef.current)setHud(engineRef.current.hud());
@@ -241,14 +286,35 @@ export default function App() {
    * loadout screen is reached explicitly via "Set up loadout" in Arena Mode.
    * `mapOverride` beats the (possibly not-yet-committed) settings state so
    * "Play" in Arena Mode can never race the map selection. */
+  // The mode of the live (or most recent) deployment. Pause → Restart replays the
+  // SAME mode: restarting a ranked match must not silently drop you into a
+  // story mission (audit U2 — newly reachable now that BLACKOUT deploys). The
+  // map follows the live setting, so a map change in pause Settings is honored.
+  const launchMode = useRef<'mission' | 'tdm' | 'comp' | 'defusal'>('mission');
+
   const deploy = async (mapOverride?: GameSettings['map']) => {
     await launch(mapOverride, 'mission');
   };
 
-  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' = 'mission') => {
+  const restart = () => {
+    const mode = launchMode.current;
+    if (mode === 'comp') { void deployRanked(); }
+    else if (mode === 'tdm') { void launch('arena', 'tdm'); }
+    else if (mode === 'defusal') { void launch('sirocco', 'defusal'); }
+    else { void deploy(); }
+  };
+
+  /** OPERATION BLACKOUT: always the warehouse, always ranked. */
+  const deployRanked = async () => {
+    if (settings.map !== 'arena') set({ map: 'arena' });
+    await launch('arena', 'comp');
+  };
+
+  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' | 'comp' | 'defusal' = 'mission') => {
     if (!canvasRef.current || launching) return;
     const map = mapOverride ?? settings.map;
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
+    launchMode.current = mode;
     const epoch = ++session.current;
     clearTimers();
     setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
@@ -262,10 +328,15 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, profileRef.current.loadout, tdmArmor,
-        // The kit is whatever the player bought and equipped in KITS — none means none.
-        // It is fixed for the whole deployment; changing it means ending the game.
-        { mode, kit: profileRef.current.equippedKit });
+      // Bomb Defusal fields your own armory builds; ranked deploys the ladder state.
+      const prof = profileRef.current;
+      const launchOptions = map === 'sirocco'
+        ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
+        : mode === 'comp'
+          ? { mode: 'comp' as const, compBuilds: prof.builds, rankedProfile: prof.ranked }
+          : mode === 'tdm' ? { mode: 'tdm' as const } : { mode: 'mission' as const };
+      buyOpenRef.current = false; setBuyOpen(false);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, launchOptions);
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -305,7 +376,8 @@ export default function App() {
   const quit = () => {
     session.current++; clearTimers(); engineRef.current?.dispose(); engineRef.current = null;
     // Leaving an arena match returns to the Arena Mode screen, not the home menu.
-    setMenuView(settings.map === 'arena' ? 'arena' : 'home');
+    setMenuView(settings.map === 'arena' || settings.map === 'sirocco' ? 'arena' : 'home');
+    buyOpenRef.current = false; setBuyOpen(false);
     changePhase('menu'); setShowSettings(false); setError(''); setFx(emptyFx()); setHud(DEFAULT_HUD);
     if (document.pointerLockElement) document.exitPointerLock();
   };
@@ -316,14 +388,6 @@ export default function App() {
     setShowSettings(false);
     changePhase('armory');
     if (document.pointerLockElement) document.exitPointerLock();
-  };
-  // KITS opens from the home menu or the TDM loadout screen and returns there.
-  const [kitsFrom, setKitsFrom] = useState<'menu' | 'tdm-setup'>('menu');
-  const openKits = (from: 'menu' | 'tdm-setup' = 'menu') => {
-    setKitsFrom(from);
-    if (from === 'menu') setMenuView('home');
-    setShowSettings(false);
-    changePhase('kits');
   };
   const armoryBack = () => {
     changePhase(armoryFrom === 'results' && results ? 'results' : 'menu');
@@ -345,11 +409,17 @@ export default function App() {
     updateProfile(resetCurrentCash(profileRef.current));
   };
 
+  // Built once per render (the App re-renders ~20×/s with the HUD tick).
+  const vignetteBg = vignetteOverlay(settings.vignette);
   return (
     <div className="w-full h-full relative bg-black overflow-hidden app-root">
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
+      {/* Screen vignette as a compositor overlay — free, instead of a post pass (engine.ts usesPostChain). */}
+      {(phase === 'playing' || phase === 'paused') && vignetteBg && (
+        <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: vignetteBg }} />
+      )}
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void deploy(map); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} onKits={openKits} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} onRanked={() => changePhase('ranked-setup')} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>
@@ -362,9 +432,17 @@ export default function App() {
           </div>
         </aside>
       )}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} kit={hud.kit} tdm={hud.tdm} mapName={settings.map === 'arena' ? 'Warehouse · 5v5 TDM' : (MAPS.find(m => m.id === settings.map)?.name ?? '')} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
-      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
-      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
+      {phase === 'playing' && buyOpen && hud.defusal && (
+        <BuyMenu
+          df={hud.defusal}
+          owned={profile.ownedWeapons}
+          onBuy={id => { const r = engineRef.current?.buyItem(id) ?? { ok: false }; if (engineRef.current) setHud(engineRef.current.hud()); return r; }}
+          onClose={closeBuy}
+        />
+      )}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} defusal={hud.defusal} onResume={resume} onRestart={restart} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={restart} onMenu={quit} onArmory={() => openArmory('results')} />}
+      {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : settings.map === 'sirocco' ? 'SIROCCO · BOMB DEFUSAL' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
         <TdmSetup
           profile={profile}
@@ -373,12 +451,16 @@ export default function App() {
           onArmor={setTdmArmor}
           onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
-          kit={profile.equippedKit}
-          onKits={() => openKits('tdm-setup')}
         />
       )}
-      {phase === 'kits' && (
-        <KitsMenu profile={profile} onProfile={updateProfile} onBack={() => changePhase(kitsFrom)} />
+      {phase === 'ranked-setup' && !launching && (
+        <RankedSetup
+          rank={rankFor(profile.ranked.rating, profile.ranked)}
+          rating={profile.ranked.rating}
+          record={profile.ranked}
+          onDeploy={() => { void deployRanked(); }}
+          onBack={() => { setMenuView('home'); changePhase('menu'); }}
+        />
       )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">

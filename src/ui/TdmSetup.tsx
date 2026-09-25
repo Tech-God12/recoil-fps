@@ -17,8 +17,6 @@ import {
   ArmorIcon, CALIBER, CLASS_LABEL, HardpointRows, OrangeDeploy, PartsPanel, StatBars,
   TxBack, TxCheck, TxCoords, TxLock, txFmt, weaponTags,
 } from './tactical';
-import { KitEquipButton } from './Kits';
-import type { KitId } from '../game/kits';
 import mapArena from '../assets/map-arena.jpg';
 import tdmBackdrop from '../assets/tdm-backdrop.jpg';
 
@@ -29,15 +27,11 @@ interface TdmSetupProps {
   onArmor: (a: TDMArmor) => void;
   onDeploy: () => void;
   onBack: () => void;
-  /** Equipped field kit carried into the match (ability on Z); null = none bought/equipped. */
-  kit?: KitId | null;
-  /** Opens the KITS menu (the kit itself is bought and equipped there). */
-  onKits?: () => void;
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
-export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy, onBack, kit, onKits }: TdmSetupProps) {
+export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy, onBack }: TdmSetupProps) {
   const [selected, setSelected] = useState<WeaponId>(profile.loadout.primary.weapon);
   const [gridTab, setGridTab] = useState<SlotId>(weaponById(profile.loadout.primary.weapon)?.slot ?? 'primary');
   const [menuSlot, setMenuSlot] = useState<AttachSlot | null>(null);
@@ -260,7 +254,6 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
                 <p>▸ Armor cuts head and body damage — check Bravo's kit.</p>
                 <p>▸ Respawn in <b>5s</b> at your protected yard.</p>
                 <p>▸ Most kills at <b>2:30</b> wins the match.</p>
-                <p>▸ Kit on <b>Z</b>: each kill cuts <b>8%</b> off its cooldown.</p>
               </div>
               <p className="tx-hint mono">CLICK A HARDPOINT OR THE GUN TO FIT PARTS</p>
             </>
@@ -278,7 +271,6 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
           {TDM_ARMOR_NAMES[armor].toUpperCase()} ARMOR · {TDM_BASE_HP + armor * TDM_HP_PER_ARMOR} HP
           &nbsp;·&nbsp; 1 {weaponById(profile.loadout.primary.weapon)?.short} · 2 {weaponById(profile.loadout.secondary.weapon)?.short}
         </div>
-        <KitEquipButton kit={kit ?? null} onOpen={onKits} compact />
         <OrangeDeploy title="PLAY" hint="WAREHOUSE · 5V5 TDM" onClick={onDeploy} />
       </footer>
 

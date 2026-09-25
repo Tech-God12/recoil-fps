@@ -88,7 +88,7 @@ test('the engine rejects victory before extraction, irrespective of enemy count'
   assert.equal(engine.ended, false);
   const source = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /aliveCount\(\)\s*===\s*0\)\s*this\.endMatch/);
-  assert.equal((source.match(/this\.ai = new AIManager\(ctx, \[\]\);/g) ?? []).length, 2, 'both modes start with empty AI rosters');
+  assert.equal((source.match(/this\.ai = new AIManager\(ctx, \[\]\);/g) ?? []).length, 4, 'every mode (story, TDM, ranked, defusal) starts with an empty AI roster');
   assert.match(source, /this\.ai = new AIManager\(ctx, \[\]\);\s*this\.missionRuntime = new MissionRuntime/, 'story insertion remains mission-driven');
   assert.equal((source.match(/pattern: \[\[0, 0\]\]/g) ?? []).length, 4, 'only the explicitly reworked MP changes its recoil pattern');
 });

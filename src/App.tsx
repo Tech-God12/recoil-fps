@@ -30,7 +30,7 @@ const DEFAULT_HUD: HudState = {
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, worldHalf: 104,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, kitMsg: null, kitFx: null, nukeFlash: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
@@ -172,14 +172,6 @@ export default function App() {
       case 'kitmsg':
         setFx(f => ({ ...f, kitMsg: { id, text: event.text } }));
         later(() => setFx(f => f.kitMsg?.id === id ? { ...f, kitMsg: null } : f), 2800);
-        break;
-      case 'streakmsg':
-        setFx(f => ({ ...f, streakMsg: { id, text: event.text } }));
-        later(() => setFx(f => f.streakMsg?.id === id ? { ...f, streakMsg: null } : f), 3600);
-        break;
-      case 'nuke':
-        setFx(f => ({ ...f, nukeFlash: id }));
-        later(() => setFx(f => f.nukeFlash === id ? { ...f, nukeFlash: null } : f), 5200);
         break;
       case 'objective':
         setFx(f => ({ ...f, missionBanner: { id, title: event.phase.title, index: event.index } }));
@@ -370,7 +362,7 @@ export default function App() {
           </div>
         </aside>
       )}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} streaks={hud.streaks} kit={hud.kit} tdm={hud.tdm} mapName={settings.map === 'arena' ? 'Warehouse · 5v5 TDM' : (MAPS.find(m => m.id === settings.map)?.name ?? '')} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} kit={hud.kit} tdm={hud.tdm} mapName={settings.map === 'arena' ? 'Warehouse · 5v5 TDM' : (MAPS.find(m => m.id === settings.map)?.name ?? '')} onResume={resume} onRestart={() => { void deploy(); }} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={() => { void deploy(); }} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (

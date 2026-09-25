@@ -21,7 +21,6 @@ import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
 import { KitDirector, type KitContext, type KitFxKind, type KitHostile, type KitHud, type KitId } from './kits';
-import { StreakDirector, STREAK_POINTS, type StreakContext, type StreakHud, type StreakId, type StreakTarget } from './streaks';
 import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './ai';
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
 import type { MissionReport, MissionPhase } from './systems/mission';
@@ -185,8 +184,6 @@ export interface HudState {
   nearest?: { angle: number; dist: number; above: number };
   mission?: MissionHud;
   tdm?: TdmHud;
-  /** Scorestreak rail: progress, armed streaks, live entities, designation mode. */
-  streaks?: StreakHud;
   /** Field kit: ability charge, live gadgets, sonar tags, onboarding prompt. */
   kit?: KitHud;
 }
@@ -225,10 +222,8 @@ export type GameEvent =
   | { type: 'flash'; power: number }
   | { type: 'callout'; text: string }
   | { type: 'streak'; label: string }
-  | { type: 'streakmsg'; text: string }
   | { type: 'kitmsg'; text: string }
   | { type: 'kitfx'; kind: KitFxKind }
-  | { type: 'nuke' }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
   | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string }
@@ -312,7 +307,7 @@ function nextFrame(): Promise<void> {
  * player shoots first — you do not get to fire into a crowd and still be "unseen".
  */
 const OPENING_GRACE = 8;
-/** Hostiles inside this range always show on the radar; beyond it they must be engaging or UAV-painted. */
+/** Hostiles inside this range always show on the radar; beyond it they must be engaging or kit-revealed. */
 const RADAR_NEAR = 22;
 /** Capsule heights used for AI movement. The crouch height is what lets a squad duck
  *  under a bridge deck instead of jamming on its underside. */
@@ -354,14 +349,11 @@ export class Engine {
   private effects!: Effects;
   private ai!: AIManager;
   private missionRuntime!: MissionRuntime;
-  // ---- Scorestreaks (UAV / airstrike / sentry / chopper / nuke) ----
-  private streaks!: StreakDirector;
-  // ---- Field kits (Recon dart / Bulwark barricade / Phantom decoy) ----
+  // ---- Kits (Radar / Barricade / Decoy / Mine / Medkit) ----
   // Null when no kit was bought/equipped.
   private kits: KitDirector | null = null;
   private kitKillsSeen = 0;
   private kitLureT = 0;
-  private nukeWin = false;
   // ---- Warehouse 5v5 TDM (arena map only) ----
   private isTDM = false;
   private tdm: TDMManager | null = null;
@@ -923,7 +915,7 @@ void main(){
         if (text !== this.missionRuntime.mission.current.brief) this.onEvent({ type: 'callout', text });
       },
       resupply: () => { this.hp = 100; this.frags = 5; this.flashes = 2; },
-      scoreBonus: pts => { this.score += pts; this.earnCash(REWARDS.phase, 'phase'); this.streaks?.addPoints(STREAK_POINTS.objective); },
+      scoreBonus: pts => { this.score += pts; this.earnCash(REWARDS.phase, 'phase'); },
       detonate: at => {
         // Use the existing blast resolution for damage, glass, particles and spatial audio.
         this.explode({ mesh: this.missionRuntime.markers.cache, pos: at, vel: new THREE.Vector3(), fuse: 0, kind: 'frag', fromAI: false });
@@ -946,9 +938,7 @@ void main(){
     this.rebuildHittables();
     }
 
-    this.streaks = new StreakDirector(this.streakContext());
     if (options.kit) this.kits = new KitDirector(this.kitContext(), options.kit);
-    if (this.weapons.length > 2) this.streaks.keyLabels = { uav: '6', airstrike: '7', sentry: '8', chopper: '9', nuke: '0' };
 
     this.bindInput();
     this.resize();
@@ -976,11 +966,6 @@ void main(){
     if (this.dead) return;
 
     if (e.code === 'KeyR') this.startReload();
-    {
-      const streak = this.streakForKey(e.code);
-      if (streak) { this.streaks.activate(streak); return; }
-      // Escape-free abort for designation: tapping the strike key again cancels it.
-    }
     if (e.code === 'KeyZ' && this.kits) { this.kits.activate(); return; }
     if (e.code === 'Digit1') this.switchWeapon(0);
     if (e.code === 'Digit2') this.switchWeapon(1);
@@ -1061,7 +1046,6 @@ void main(){
     if (document.pointerLockElement !== this.canvas || this.paused || this.scopeAdjusting) return;
     if (this.dead) return;
     if (e.button === 0) {
-      if (this.streaks.designating) { this.streaks.confirmStrike(); return; }
       this.triggerHeld = true;
       this.tryFire();
     }
@@ -1072,7 +1056,6 @@ void main(){
   };
 
   private onMouseDown2 = (e: MouseEvent) => {
-    if (e.button === 2 && this.streaks?.designating) { this.streaks.cancelDesignation(); this.onEvent({ type: 'streakmsg', text: 'STRIKE ABORTED — PACKAGE HELD' }); return; }
     if (e.button === 2 && !this.scopeAdjusting && !this.paused && !this.dead && !this.ended && document.pointerLockElement === this.canvas) {
       // ADS toggle mode: MMB click keeps the scope in until the next MMB click.
       const want = this.adsToggle ? !this.rmb : true;
@@ -1707,7 +1690,6 @@ void main(){
         if (killed) {
           if (part === 'head') { this.headshots++; voice.headshot(); }
           this.creditTdmKill(tdmBot, part === 'head', d.name, part === 'head' ? 150 : 100);
-          this.streaks.addPoints(part === 'head' ? STREAK_POINTS.headshot : STREAK_POINTS.kill);
           this.onEvent({ type: 'hit', kill: true });
           this.rebuildHittables();
         } else {
@@ -1736,7 +1718,6 @@ void main(){
           // Matches the HUD score popups exactly: 100 per elimination, 150 for a headshot.
           this.score += part === 'head' ? 150 : 100;
           this.earnCash(part === 'head' ? REWARDS.headshot : REWARDS.kill, part === 'head' ? 'headshot' : 'kill');
-          this.streaks.addPoints(part === 'head' ? STREAK_POINTS.headshot : STREAK_POINTS.kill);
           audio.killConfirm();
           const isHead = part === 'head';
           if (isHead) {
@@ -2135,7 +2116,6 @@ void main(){
               if (g.owner) this.tdm.handleKill(g.owner, bot, false, 'FRAG');
               else {
                 this.creditTdmKill(bot, false, 'FRAG', 100);
-                this.streaks.addPoints(STREAK_POINTS.kill);
                 this.onEvent({ type: 'hit', kill: true });
               }
               this.rebuildHittables();
@@ -2157,7 +2137,6 @@ void main(){
             this.kills++;
             this.score += 100;
             this.earnCash(REWARDS.grenadeKill, 'grenade');
-            this.streaks.addPoints(STREAK_POINTS.kill);
             if (this.kills === 1) voice.firstBlood();
             if (this.kills % 3 === 0) {
               this.frags = Math.min(5, this.frags + 1);
@@ -2222,11 +2201,27 @@ void main(){
     const out: KitHostile[] = [];
     if (this.isTDM && this.tdm) {
       for (const b of this.tdm.bots) {
-        if (!b.dead && b.team === 'bravo') out.push({ ref: b, pos: b.pos, alive: () => !b.dead, stun: t => b.applyStun(t), crouched: () => b.isCrouched });
+        if (!b.dead && b.team === 'bravo') out.push({
+          ref: b, pos: b.pos, alive: () => !b.dead, stun: t => b.applyStun(t), crouched: () => b.isCrouched,
+          damage: (amount, weapon) => {
+            if (b.dead) return false;
+            const killed = b.takeDamage(amount, false, 'player');
+            if (killed) this.creditKitKill(b.name, weapon, b);
+            return killed;
+          },
+        });
       }
     } else {
       for (const e of this.ai.enemies) {
-        if (!e.dead && !e.dormant) out.push({ ref: e, pos: e.pos, alive: () => !e.dead, stun: t => e.applyStun(t), crouched: () => e.isCrouched });
+        if (!e.dead && !e.dormant) out.push({
+          ref: e, pos: e.pos, alive: () => !e.dead, stun: t => e.applyStun(t), crouched: () => e.isCrouched,
+          damage: (amount, weapon) => {
+            if (e.dead) return false;
+            const killed = e.takeDamage(amount, false);
+            if (killed) this.creditKitKill(e.name, weapon, null);
+            return killed;
+          },
+        });
       }
     }
     return out;
@@ -2281,6 +2276,15 @@ void main(){
         if (i >= 0) this.world.solids.splice(i, 1);
         this.kitSolidsChanged();
       },
+      healPlayer: amount => {
+        if (this.dead || this.ended) return 0;
+        const max = this.isTDM ? TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR : 100;
+        const before = this.hp;
+        this.hp = Math.min(max, this.hp + amount);
+        if (this.onFire) this.endPlayerFire(); // the med field puts you out
+        return this.hp - before;
+      },
+      playerHealth: () => ({ hp: this.hp, max: this.isTDM ? TDM_BASE_HP + this.tdmArmor * TDM_HP_PER_ARMOR : 100 }),
       moveCollide: (p, dx, dz, r) => { this.moveAxis(p, dx, dz, r, AI_STAND_HEIGHT); p.y = this.supportHeight(p, r); },
       alertAt: (p, r) => { this.ai.notifyGunshot(p, r); this.tdm?.notifyGunshot(p, r); },
       announce: (text, spoken) => {
@@ -2290,7 +2294,7 @@ void main(){
       feedback: (kind, at) => {
         this.onEvent({ type: 'kitfx', kind });
         // Camera weight for physical events, scaled by distance (full at 0 m, none past 14 m).
-        const base = kind === 'slam' ? 0.32 : kind === 'break' ? 0.4 : kind === 'burst' ? 0.5 : kind === 'recall' ? 0.12 : 0;
+        const base = kind === 'slam' ? 0.32 : kind === 'break' ? 0.4 : kind === 'burst' ? 0.5 : kind === 'blast' ? 0.7 : kind === 'recall' ? 0.12 : 0;
         if (base > 0) {
           const d = at ? at.distanceTo(this.pos) : 0;
           this.shake = Math.max(this.shake, base * Math.max(0, 1 - d / 14));
@@ -2299,47 +2303,8 @@ void main(){
     };
   }
 
-  // ==================== SCORESTREAKS ====================
-  /** Every hostile a streak may engage, wrapped so sentry/chopper code is mode-agnostic. */
-  private streakTargets(): StreakTarget[] {
-    const out: StreakTarget[] = [];
-    if (this.isTDM && this.tdm) {
-      for (const bot of this.tdm.bots) {
-        if (bot.dead || bot.team !== 'bravo') continue;
-        out.push({
-          pos: bot.pos,
-          alive: () => !bot.dead,
-          damage: (amount, source) => {
-            if (bot.dead) return false;
-            const killed = bot.takeDamage(amount, false, 'player');
-            if (killed) { this.creditStreakKill(bot.name, source, bot); }
-            return killed;
-          },
-        });
-      }
-    } else {
-      for (const e of this.ai.enemies) {
-        if (e.dead || e.dormant) continue;
-        out.push({
-          pos: e.pos,
-          alive: () => !e.dead,
-          damage: (amount, source) => {
-            if (e.dead) return false;
-            const killed = e.takeDamage(amount, false);
-            if (killed) this.creditStreakKill(e.name, source, null);
-            return killed;
-          },
-        });
-      }
-    }
-    return out;
-  }
-
-  private static readonly STREAK_WEAPON: Record<StreakId, string> = { uav: 'UAV', airstrike: 'AIRSTRIKE', sentry: 'SENTRY', chopper: 'GUNSHIP', nuke: 'NUKE' };
-
-  /** A streak killed something: score, cash, feed. Deliberately NO streak points — streaks don't chain. */
-  private creditStreakKill(name: string, source: StreakId, bot: TDMBot | null) {
-    const weapon = Engine.STREAK_WEAPON[source];
+  /** A kit (the Mine) killed something: score, cash and a feed entry with the kit's name. */
+  private creditKitKill(name: string, weapon: string, bot: TDMBot | null) {
     const killsBefore = this.kills;
     if (this.isTDM && this.tdm && bot) {
       this.creditTdmKill(bot, false, weapon, 100);
@@ -2351,102 +2316,9 @@ void main(){
       audio.killConfirm();
       this.onEvent({ type: 'kill', name, weapon, headshot: false });
     }
-    // Streak kills don't refund the field kit either: mark them as already seen.
+    // A kit kill must not refund the kit that made it: mark it as already seen.
     this.kitKillsSeen += this.kills - killsBefore;
     this.rebuildHittables();
-  }
-
-  /** Bomb / shell impact: hurts everyone inside the radius, including the player. */
-  private streakBlast(pos: THREE.Vector3, radius: number, maxDamage: number, source: StreakId) {
-    const distP = pos.distanceTo(this.eyePos());
-    this.kits?.blast(pos, radius);
-    this.effects.explosion(pos);
-    if (this.world.glass) {
-      const m = new THREE.Matrix4(), p = new THREE.Vector3();
-      for (let i = 0; i < this.world.glass.count; i++) {
-        this.world.glass.getMatrixAt(i, m); p.setFromMatrixPosition(m);
-        if (p.distanceTo(pos) < radius + 2) { const c = this.world.breakGlass(i); if (c) this.effects.glassShatter(c); }
-      }
-    }
-    audio.explosionSpatial(pos.x, pos.y, pos.z, distP);
-    this.shake = Math.max(this.shake, Math.min(1.4, 14 / Math.max(2.5, distP)));
-    if (distP < radius && !this.dead) {
-      const dmg = THREE.MathUtils.lerp(maxDamage * 0.6, 15, distP / radius);
-      if (this.isTDM) this.damagePlayerTDM(dmg, pos, null); else this.damagePlayer(dmg, pos);
-    }
-    for (const t of this.streakTargets()) {
-      if (!t.alive()) continue;
-      const d = t.pos.distanceTo(pos);
-      if (d < radius) t.damage(d < radius * 0.4 ? maxDamage : THREE.MathUtils.lerp(maxDamage, 35, (d - radius * 0.4) / (radius * 0.6)), source);
-    }
-  }
-
-  /** World point under the crosshair (ground or building), for strike designation. */
-  private streakAimPoint(): THREE.Vector3 | null {
-    const origin = this.camera.position.clone();
-    const dir = this.camDir();
-    this.raycaster.set(origin, dir);
-    this.raycaster.far = 220;
-    const hits = this.raycaster.intersectObjects(this.world.occluders, false);
-    if (hits.length) return hits[0].point.clone();
-    // No building hit: intersect the ground plane at the local terrain height
-    if (dir.y >= -0.02) return null;
-    const t = (this.pos.y - origin.y) / dir.y;
-    const p = origin.addScaledVector(dir, t);
-    const lim = this.world.half - 2;
-    if (Math.abs(p.x) > lim || Math.abs(p.z) > lim) return null;
-    p.y = this.world.groundHeight(p.x, p.z);
-    return p;
-  }
-
-  private streakContext(): StreakContext {
-    return {
-      scene: this.scene,
-      effects: this.effects,
-      occluders: this.world.occluders,
-      half: this.world.half,
-      isTDM: this.isTDM,
-      groundHeight: (x, z) => this.world.groundHeight(x, z),
-      playerFeet: () => this.pos.clone(),
-      playerEye: () => this.eyePos(),
-      playerDir: () => this.camDir(),
-      playerAlive: () => !this.dead && !this.ended,
-      targets: () => this.streakTargets(),
-      blast: (pos, radius, maxDamage, source) => this.streakBlast(pos, radius, maxDamage, source),
-      aimPoint: () => this.streakAimPoint(),
-      canPlace: p => !this.pointInSolid(this._t1.set(p.x, p.y + 0.5, p.z), 0.55),
-      announce: (text, spoken) => {
-        this.onEvent({ type: 'streakmsg', text });
-        if (spoken) voice.announce(spoken);
-      },
-      shake: a => { this.shake = Math.max(this.shake, a); },
-      onNuke: () => this.resolveNuke(),
-    };
-  }
-
-  /** The nuke lands: everything hostile dies. In the arena that is the match. */
-  private resolveNuke() {
-    this.onEvent({ type: 'nuke' });
-    for (const t of this.streakTargets()) if (t.alive()) t.damage(99999, 'nuke');
-    if (this.isTDM && this.tdm) {
-      this.nukeWin = true;
-      this.onEvent({ type: 'streak', label: 'TACTICAL NUKE' });
-      voice.announce('Tactical nuke detonated. Game over.');
-      this.endTDMMatch();
-    } else {
-      this.onEvent({ type: 'streak', label: 'TACTICAL NUKE' });
-      voice.announce('Tactical nuke detonated. Sector cleared.');
-    }
-  }
-
-  /** Streak hotkeys: 3-7 with an armory loadout (two guns), 6-9/0 in the legacy five-gun kit. */
-  private streakForKey(code: string): StreakId | null {
-    const order: StreakId[] = ['uav', 'airstrike', 'sentry', 'chopper', 'nuke'];
-    const codes = this.weapons.length <= 2
-      ? ['Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7']
-      : ['Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
-    const i = codes.indexOf(code);
-    return i >= 0 ? order[i] : null;
   }
 
   private updateGrenades(dt: number) {
@@ -2639,7 +2511,6 @@ void main(){
       this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
       this.sprinting = false; this.sliding = false; this.crouched = false;
       this.endPlayerFire();
-      this.streaks.onPlayerDeath();
       if (this.tdm && killer) this.tdm.handleKill(killer, 'player', isHead, 'RIFLE');
       voice.defeat();
     }
@@ -2688,9 +2559,7 @@ void main(){
         ],
       },
     };
-    // A nuke ending gets a longer beat so the whiteout and banner land before the debrief.
-    this.finishDelay = this.nukeWin ? 3.4 : 1.2;
-    this.streaks?.quiet();
+    this.finishDelay = 1.2;
     this.kits?.quiet();
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Match over. Alpha squad takes the yard.');
@@ -2714,7 +2583,6 @@ void main(){
       mission, pressure: this.missionRuntime.pressure.stats(),
     };
     this.finishDelay = win ? 0.6 : 0.8;
-    this.streaks?.quiet();
     this.kits?.quiet();
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Extraction complete. Nomad has you.');
@@ -3034,7 +2902,6 @@ void main(){
 
     this.updateGrenades(dt);
     this.ai.update(dt);
-    this.streaks.update(dt);
     this.updateKits(dt);
     this.effects.update(dt, this.pos);
     this.composeCamera(dt);
@@ -3524,7 +3391,6 @@ void main(){
 
   hud(): HudState {
     const H = this.world.half;
-    const uav = this.streaks.uavActive;
     // Proximity indicator: closest living hostile — screen-relative bearing + range
     let nearest: HudState['nearest'];
     let nd = Infinity;
@@ -3577,17 +3443,17 @@ void main(){
       // Accurate map data (consumed by the HUD tactical radar)
       mapImage: this.mapImage,
       playerMap: { nx: (this.pos.x + H) / (2 * H), nz: (this.pos.z + H) / (2 * H) },
-      // Arena TDM keeps the CoD radar rules — engaging, close enough to hear, or a UAV overhead.
+      // Arena TDM keeps the CoD radar rules — engaging, close enough to hear, or revealed by a kit.
       enemiesMap: this.isTDM && this.tdm
         ? this.tdm.bots
-          .filter(b => !b.dead && b.team === 'bravo' && (uav || this.kits?.isRevealed(b) || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR))
+          .filter(b => !b.dead && b.team === 'bravo' && (this.kits?.isRevealed(b) || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR))
           .map(b => ({
             nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H),
             yaw: -b.yaw * 180 / Math.PI,
             hot: b.onFire || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK',
           }))
         : this.ai.enemies
-          .filter(e => !e.dead && (uav || this.kits?.isRevealed(e) || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR))
+          .filter(e => !e.dead && (this.kits?.isRevealed(e) || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR))
           .map(e => ({
             nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H),
             // Heading (deg) + engagement state let the radar draw directional
@@ -3610,7 +3476,6 @@ void main(){
       magSize: this.def().magSize,
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
-      streaks: this.streaks.hud(),
       kit: this.kits?.hud(),
       mission: this.isTDM ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
       tdm: this.isTDM && this.tdm ? {
@@ -3660,7 +3525,6 @@ void main(){
       material.dispose();
     }
     for(const texture of textures) texture.dispose();
-    this.streaks?.dispose();
     this.kits?.dispose();
     this.missionRuntime?.dispose();
     this.tdm?.dispose();

@@ -56,7 +56,7 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
       if (e.code === 'Escape' || e.code === 'Backspace') { e.preventDefault(); onBack(); }
       else if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); setSel(KIT_IDS[(i + 1) % KIT_IDS.length]); }
       else if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); setSel(KIT_IDS[(i + KIT_IDS.length - 1) % KIT_IDS.length]); }
-      else if (/^Digit[1-3]$/.test(e.code)) setSel(KIT_IDS[Number(e.code.slice(5)) - 1]);
+      else if (/^Digit[1-5]$/.test(e.code)) setSel(KIT_IDS[Number(e.code.slice(5)) - 1]);
       else if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); act(); }
     };
     window.addEventListener('keydown', onKey);

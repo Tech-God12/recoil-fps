@@ -8,18 +8,27 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { KitId } from '../game/kits';
 import {
-  buildBarricade, buildDart, buildDecoy, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
-  type BarricadeModel, type DartModel, type DecoyModel, type TagGhost,
+  buildBarricade, buildDart, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
+  disposeMedkit, disposeMine, type BarricadeModel, type DartModel, type DecoyModel, type MedkitModel, type MineModel, type TagGhost,
 } from '../game/kit-models';
 
-const ACCENT: Record<KitId, number> = { recon: 0x5fe3ff, bulwark: 0xff8a3d, phantom: 0x7cf5d8 };
+const ACCENT: Record<KitId, number> = { recon: 0x5fe3ff, bulwark: 0xff8a3d, phantom: 0x7cf5d8, mine: 0xff4a3a, medic: 0x6cff9a };
 /** Demo loop length per kit (s). */
-const LOOP: Record<KitId, number> = { recon: 5, bulwark: 5, phantom: 5 };
+const LOOP: Record<KitId, number> = { recon: 5, bulwark: 5, phantom: 5, mine: 5.5, medic: 5 };
 
 type Rig =
   | { id: 'recon'; m: DartModel; root: THREE.Group; ghosts: TagGhost[] }
   | { id: 'bulwark'; m: BarricadeModel; root: THREE.Group }
-  | { id: 'phantom'; m: DecoyModel; root: THREE.Group };
+  | { id: 'phantom'; m: DecoyModel; root: THREE.Group }
+  | { id: 'mine'; m: MineModel; root: THREE.Group; walker: TagGhost; flash: THREE.Mesh }
+  | { id: 'medic'; m: MedkitModel; root: THREE.Group };
+
+/** Mine demo: the canister is 20 cm across, shown 3.5× so it reads; the ring stays true to scale/2. */
+const MINE_SHOW = 3.5;
+const MINE_RING = 1.3;
+/** Medkit demo scale, and the field radius shown in the menu (world metres). */
+const MED_SHOW = 2;
+const MED_RING = 1.5;
 
 function buildRig(id: KitId): Rig {
   const root = new THREE.Group();
@@ -44,6 +53,28 @@ function buildRig(id: KitId): Rig {
     root.add(m.group);
     return { id, m, root };
   }
+  if (id === 'mine') {
+    const m = buildMine();
+    m.body.scale.setScalar(MINE_SHOW);
+    m.ring.scale.setScalar(MINE_RING); m.laser.scale.setScalar(MINE_RING);
+    root.add(m.group);
+    // An enemy silhouette (red hologram) walks into the trigger ring.
+    const walker = buildTagGhost(false);
+    walker.mat.uniforms.uColor.value.set(0xff6a50);
+    walker.group.scale.setScalar(0.62);
+    root.add(walker.group);
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    root.add(flash);
+    return { id, m, root, walker, flash };
+  }
+  if (id === 'medic') {
+    const m = buildMedkit();
+    m.group.scale.setScalar(MED_SHOW);
+    m.ring.scale.setScalar(MED_RING / MED_SHOW);
+    root.add(m.group);
+    return { id, m, root };
+  }
   const m = buildDecoy();
   m.group.rotation.y = Math.PI - 0.5; // face the camera (the rig faces -Z), slight three-quarter turn
   root.add(m.group);
@@ -56,7 +87,11 @@ function disposeRig(r: Rig) {
     for (const g of r.ghosts) g.mat.dispose();
   } else if (r.id === 'bulwark') {
     disposeKitObject(r.m.group); r.m.plateMat.dispose(); (r.m.lamp.material as THREE.Material).dispose();
-  } else disposeDecoy(r.m);
+  } else if (r.id === 'mine') {
+    disposeMine(r.m); disposeKitObject(r.walker.group); r.walker.mat.dispose();
+    r.flash.geometry.dispose(); (r.flash.material as THREE.Material).dispose();
+  } else if (r.id === 'medic') disposeMedkit(r.m);
+  else disposeDecoy(r.m);
 }
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
@@ -98,6 +133,52 @@ function animate(r: Rig, t: number, dt: number) {
     r.m.wings[1].rotation.y = -swing;
     g.visible = t < 4.6;
     (r.m.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = Math.sin(t * 9) > 0 ? 3 : 0.4;
+    return;
+  }
+  if (r.id === 'mine') {
+    // plant (0–0.3), arm (0.3–1.5), enemy walks in (2–3.3), trip + jump (3.3–3.65), blast, reset
+    const { m, walker, flash } = r;
+    const led = m.led.material as THREE.MeshStandardMaterial;
+    const ring = m.ring.material as THREE.MeshBasicMaterial;
+    const laser = m.laser.material as THREE.MeshBasicMaterial;
+    const drop = easeOut(t / 0.3);
+    const boom = t >= 3.65;
+    m.group.visible = !boom || t > 5.2;
+    m.body.position.y = t < 3.3 ? (1 - drop) * 0.6 : Math.sin(clamp01((t - 3.3) / 0.35) * Math.PI / 2) * 0.9;
+    m.body.rotation.y = t < 3.3 ? 0.4 : m.body.rotation.y + dt * 20;
+    const arm = clamp01((t - 0.3) / 1.2);
+    m.ring.scale.setScalar(Math.max(0.05, arm) * MINE_RING);
+    ring.opacity = t < 3.3 ? 0.4 * arm : 0.7;
+    laser.opacity = arm >= 1 && t < 3.3 ? 0.18 : 0;
+    m.laser.rotation.z += dt * 3.2;
+    led.emissiveIntensity = t >= 3.3 ? 4 : arm < 1 ? (Math.sin(t * 8) > 0 ? 2 : 0.2) : (Math.sin(t * 14) > 0.4 ? 3 : 0.25);
+    // walker: from 3.2 m out to just inside the ring
+    const w = clamp01((t - 2) / 1.3);
+    walker.group.visible = t > 1.9 && !boom;
+    walker.group.position.set(THREE.MathUtils.lerp(3.2, 0.9, w), 0, THREE.MathUtils.lerp(-1.2, -0.5, w));
+    walker.group.rotation.y = Math.atan2(-0.8, 0.3) + Math.PI / 2;
+    walker.mat.uniforms.uTime.value += dt;
+    walker.mat.opacity = 0.6;
+    // blast: an expanding fireball that fades
+    const b = boom ? clamp01((t - 3.65) / 0.6) : 0;
+    flash.visible = boom && b < 1;
+    flash.position.set(0, 0.9, 0);
+    flash.scale.setScalar(0.2 + easeOut(b) * 2.2);
+    (flash.material as THREE.MeshBasicMaterial).opacity = (1 - b) * 0.85;
+    return;
+  }
+  if (r.id === 'medic') {
+    // drop (0–0.3), open (0.3–0.9), heal field breathing, close (4.3–4.7)
+    const { m } = r;
+    m.group.position.y = (1 - easeOut(t / 0.3)) * 0.8;
+    const open = t < 4.3 ? clamp01((t - 0.3) / 0.6) : 1 - clamp01((t - 4.3) / 0.4);
+    m.setOpen(open);
+    const rr = Math.max(0.05, easeBack(open)) * MED_RING / MED_SHOW;
+    m.ring.scale.setScalar(rr);
+    m.dome.scale.set(rr, rr * 0.55, rr);
+    (m.dome.material as THREE.ShaderMaterial & { opacity: number }).opacity = (0.3 + 0.08 * Math.sin(t * 4)) * open;
+    (m.ring.material as THREE.MeshBasicMaterial).opacity = (0.45 + 0.15 * Math.sin(t * 4)) * open;
+    m.cross.rotation.y += dt * 1.6;
     return;
   }
   const m = r.m;
@@ -187,6 +268,7 @@ export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className
     const box = new THREE.Box3();
     rig.root.traverse(o => { if (o instanceof THREE.Mesh && o.visible && o !== (rig.id === 'recon' ? rig.m.ring : null) && o !== (rig.id === 'recon' ? rig.m.echo : null)) box.expandByObject(o); });
     if (rig.id === 'recon') box.set(new THREE.Vector3(-1.6, 0, -1.8), new THREE.Vector3(1.6, 1.3, 0.4));
+    if (rig.id === 'mine') box.set(new THREE.Vector3(-1.5, 0, -1.6), new THREE.Vector3(2.6, 1.4, 1.2));
     const size = box.getSize(new THREE.Vector3());
     const centre = box.getCenter(new THREE.Vector3());
     const radius = Math.max(size.x, size.y * 1.1, size.z) * 0.62 + 0.25;

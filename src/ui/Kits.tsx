@@ -2,8 +2,8 @@
 // prompt, ticker and screen-space kit effects, the "equipped kit" button on the deploy
 // screens and the read-only pause-menu reference. The full shop/equip screen lives in
 // KitsMenu.tsx. Print-room palette (brass / bone / signal on ink); each kit carries one
-// accent: recon cyan (sonar, never confused with the red UAV), bulwark signal orange,
-// phantom holo teal.
+// accent: radar cyan, barricade signal orange, decoy holo teal, mine warning red,
+// medkit medical green.
 import type { CSSProperties } from 'react';
 import { KIT_DEFS, KIT_KEY, KIT_TUNING, type KitFxKind, type KitHud, type KitId } from '../game/kits';
 
@@ -30,6 +30,26 @@ export function KitIcon({ id, size = 22 }: { id: KitId; size?: number }) {
         <path d="M9 7v11M15 7v11" />
         <path d="M10.5 9.5h3" />
         <path d="M5 18l-1.5 3M19 18l1.5 3" />
+      </svg>
+    );
+  }
+  if (id === 'mine') {
+    return (
+      <svg {...common}>
+        <path d="M4 17h16l-1.5 -4h-13z" />
+        <path d="M12 13V9.5" />
+        <path d="M10 8.5l2 -2 2 2" />
+        <path d="M6.5 5.5l1.5 1.5M17.5 5.5 16 7M12 3v1.5" />
+        <path d="M4 20h16" />
+      </svg>
+    );
+  }
+  if (id === 'medic') {
+    return (
+      <svg {...common}>
+        <rect x="3" y="7" width="18" height="13" rx="2" />
+        <path d="M9 7V5h6v2" />
+        <path d="M12 10.5v6M9 13.5h6" />
       </svg>
     );
   }

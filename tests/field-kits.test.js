@@ -15,7 +15,7 @@ const kits = await import('../src/game/kits.ts');
 const { KitCharge, KitDirector, KIT_TUNING, KIT_DEFS, KIT_IDS, KIT_PRICES, KIT_LURE_BREAK_CHANCE, snapCardinal, barricadePlacement, sonarTagged, chooseLure, isKitId, recallRefundSeconds, burstVictims } = kits;
 const { buyKit, equipKit, readKits } = await import('../src/game/economy/kit-shop.ts');
 const { DEFAULT_PROFILE, migrateProfile } = await import('../src/game/economy/profile.ts');
-const { buildDart, buildBarricade, buildDecoy } = await import('../src/game/kit-models.ts');
+const { buildDart, buildBarricade, buildDecoy, buildMine, buildMedkit } = await import('../src/game/kit-models.ts');
 const { Enemy, NavGrid, Squad } = await import('../src/game/ai.ts');
 const { TDMManager } = await import('../src/game/tdm.ts');
 const { sanitizeSettings, DEFAULT_SETTINGS } = await import('../src/game/engine.ts');
@@ -25,12 +25,14 @@ const { PauseMenu } = await import('../src/ui/Screens.tsx');
 
 // ------------------------------------------------------------------ pure ----
 
-test('exactly three kits, each with a named ability, price, steps, stats and a cooldown that matches the tuning table', () => {
-  assert.deepEqual([...KIT_IDS], ['recon', 'bulwark', 'phantom']);
-  assert.equal(Object.keys(KIT_DEFS).length, 3);
+test('exactly five kits, each with a named ability, price, steps, stats and a cooldown that matches the tuning table', () => {
+  assert.deepEqual([...KIT_IDS], ['recon', 'bulwark', 'phantom', 'mine', 'medic']);
+  assert.equal(Object.keys(KIT_DEFS).length, 5);
   assert.equal(KIT_DEFS.recon.cooldown, 45);
   assert.equal(KIT_DEFS.bulwark.cooldown, 60);
   assert.equal(KIT_DEFS.phantom.cooldown, 50);
+  assert.equal(KIT_DEFS.mine.cooldown, 40);
+  assert.equal(KIT_DEFS.medic.cooldown, 45);
   for (const id of KIT_IDS) {
     const d = KIT_DEFS[id];
     assert.ok(d.ability && d.blurb && d.rule, id);
@@ -152,11 +154,22 @@ test('recall refund and burst victims are pure and bounded', () => {
   assert.deepEqual(burstVictims({ x: 0, z: 0 }, KIT_TUNING.phantom.burstRadius, pts).map(p => pts.indexOf(p)), [0, 2]);
 });
 
+test('mine damage: full inside the core, linear falloff to the edge, nothing beyond', () => {
+  const { mineDamage } = kits;
+  const T = kits.KIT_TUNING.mine;
+  assert.equal(mineDamage(0, T), T.damage);
+  assert.equal(mineDamage(T.coreRadius, T), T.damage);
+  assert.ok(mineDamage((T.coreRadius + T.blastRadius) / 2, T) < T.damage);
+  assert.ok(Math.abs(mineDamage(T.blastRadius, T) - T.edgeDamage) < 1e-9);
+  assert.equal(mineDamage(T.blastRadius + 0.01, T), 0);
+});
+
 test('kit hardware stays inside a small geometry budget', () => {
   // Detailed menu-grade models (bevels, bolts, cylinders) but still a few thousand triangles
   // and well under 100 draws each, so several live gadgets cost nothing next to the map.
   for (const [name, group, maxTris, maxDraws] of [
-    ['radar', buildDart().group, 6000, 60], ['barricade', buildBarricade(2.4, 1.4, 0.12).group, 4000, 80], ['decoy', buildDecoy().group, 16000, 60], // decoy counts twice: depth pre-pass re-draws the same geometry
+    ['radar', buildDart().group, 6000, 60], ['barricade', buildBarricade(2.4, 1.4, 0.12).group, 4000, 80], ['decoy', buildDecoy().group, 16000, 60],
+    ['mine', buildMine().group, 4000, 40], ['medkit', buildMedkit().group, 5000, 50], // decoy counts twice: depth pre-pass re-draws the same geometry
   ]) {
     const b = geometryBudget(group);
     assert.ok(b.triangles < maxTris, `${name}: ${b.triangles} triangles`);
@@ -529,7 +542,7 @@ test('HUD slot, prompt, fx, equipped-kit button, read-only pause card and KITS m
   // KITS menu: three cards, the price on the buy button, the wallet on screen
   const shop = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, cash: 5000 }, onProfile: noop, onBack: noop }));
   assert.match(shop, />Kits</);
-  assert.equal((shop.match(/role="tab"/g) ?? []).length, 3);
+  assert.equal((shop.match(/role="tab"/g) ?? []).length, 5);
   assert.match(shop, /Buy · \$4,500/, 'recon is affordable at $5,000');
   assert.match(shop, /\$5,000/);
   const owned = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, ownedKits: ['recon'], equippedKit: 'recon' }, onProfile: noop, onBack: noop }));

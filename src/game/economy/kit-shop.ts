@@ -6,8 +6,8 @@
 // ability until one is bought in the KITS menu. Ownership is permanent; the
 // equipped kit is locked for the whole deployment (no mid-match swapping).
 
-export type KitId = 'recon' | 'bulwark' | 'phantom';
-export const KIT_IDS: readonly KitId[] = ['recon', 'bulwark', 'phantom'];
+export type KitId = 'recon' | 'bulwark' | 'phantom' | 'mine' | 'medic';
+export const KIT_IDS: readonly KitId[] = ['recon', 'bulwark', 'phantom', 'mine', 'medic'];
 
 export function isKitId(v: unknown): v is KitId {
   return typeof v === 'string' && (KIT_IDS as readonly string[]).includes(v);
@@ -21,10 +21,14 @@ export function isKitId(v: unknown): v is KitId {
  *   PHANTOM $6,000 — wins one fight outright when used well: ~1.8 runs.
  *   BULWARK $7,500 — permanent-feeling cover that also blocks AI pathing and can
  *                    be recalled: the strongest, ~2.2 runs.
- * All three together ($18,000) cost less than a third of the weapon catalog.
+ *   MEDKIT  $5,000 — sustain, not a fight-winner: it refills you between fights.
+ *   MINE    $5,500 — a lane you no longer have to watch, and a likely kill.
+ * All five together ($28,500) still cost less than half of the weapon catalog.
  */
 export const KIT_PRICES: Record<KitId, number> = {
   recon: 4500,
+  medic: 5000,
+  mine: 5500,
   phantom: 6000,
   bulwark: 7500,
 };

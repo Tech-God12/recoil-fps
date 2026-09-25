@@ -5,7 +5,6 @@ import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
 import { MAPS, type MapId } from '../game/world';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
-import type { StreakHud } from '../game/streaks';
 import type { KitHud } from '../game/kits';
 import { KitEquipButton, KitIcon, KitPauseCard } from './Kits';
 import { KIT_DEFS } from '../game/kits';
@@ -139,7 +138,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
     { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'kits', idx: '03', title: 'KITS', sub: prof.equippedKit ? `${KIT_DEFS[prof.equippedKit].name.toUpperCase()} EQUIPPED` : 'RADAR · BARRICADE · DECOY', action: onKits },
+    { id: 'kits', idx: '03', title: 'KITS', sub: prof.equippedKit ? `${KIT_DEFS[prof.equippedKit].name.toUpperCase()} EQUIPPED` : 'RADAR · BARRICADE · DECOY · MINE · MEDKIT', action: onKits },
     { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
     { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
   ];
@@ -714,8 +713,8 @@ const PZ_ICONS: Record<string, React.ReactNode> = {
   quit: <><path d="M14 4h5v16h-5" /><path d="M10 8l-4 4 4 4M6 12h10" /></>,
 };
 
-export function PauseMenu({ mission, streaks, kit, tdm, mapName, onResume, onRestart, onSettings, onQuit }: {
-  mission?: MissionHud; streaks?: StreakHud; kit?: KitHud; tdm?: TdmHud; mapName?: string;
+export function PauseMenu({ mission, kit, tdm, mapName, onResume, onRestart, onSettings, onQuit }: {
+  mission?: MissionHud; kit?: KitHud; tdm?: TdmHud; mapName?: string;
   onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
 }) {
   const readout = mission && !tdm ? objectiveReadout(mission) : undefined;
@@ -806,22 +805,6 @@ export function PauseMenu({ mission, streaks, kit, tdm, mapName, onResume, onRes
             <KitPauseCard kit={kit} />
           </div>
 
-          {streaks && (
-            <div className="pz-panel pz-streaks" style={{ animationDelay: '200ms' }} aria-label="Scorestreaks">
-              <div className="pz-panel-head mono"><span>SCORESTREAKS</span><span className="tabular">{streaks.points} PTS THIS LIFE</span></div>
-              <div className="pz-streak-grid">
-                {streaks.ladder.map(l => (
-                  <div key={l.id} className={`pz-streak ${l.ready ? 'ready' : ''} ${l.active ? 'live' : ''} ${l.claimed && !l.ready ? 'used' : ''}`}>
-                    <span className="keycap">{l.key}</span>
-                    <b>{l.name}</b>
-                    <span className="pz-streak-cost tabular">{l.cost}</span>
-                    <i style={{ width: `${Math.min(100, Math.round(streaks.points / l.cost * 100))}%` }} />
-                  </div>
-                ))}
-              </div>
-              <p className="pz-foot">Kills 100 · headshots 150 · objectives 250. Progress resets on death; armed streaks are kept.</p>
-            </div>
-          )}
         </div>
       </div>
     </section>
@@ -835,7 +818,7 @@ export type ResultsWallet = { before: number; after: number; gradeBonus: number;
 
 const CASH_REASONS: Record<string, string> = {
   kill: 'Eliminations', headshot: 'Headshots', grenade: 'Grenade kills',
-  streak: 'Streak bonuses', shutdown: 'Momentum stopped', draw: 'Match draw', phase: 'Phases secured', extraction: 'Extraction',
+  streak: 'Multi-kill bonuses', shutdown: 'Momentum stopped', draw: 'Match draw', phase: 'Phases secured', extraction: 'Extraction',
 };
 
 export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {

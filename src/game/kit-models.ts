@@ -669,9 +669,179 @@ export function buildDecoy(): DecoyModel {
 }
 
 // ---------------------------------------------------------------------------------
+// Mine: bounding proximity mine — olive canister, fuze prongs, red eye, trigger ring
+// ---------------------------------------------------------------------------------
+export interface MineModel {
+  group: THREE.Group;
+  /** The canister (jumps up out of the ground when tripped). */
+  body: THREE.Group;
+  /** Red status eye (own material — blinks faster once armed). */
+  led: THREE.Mesh;
+  /** Ground ring at the trigger radius (own material; radius 1, scaled by the owner). */
+  ring: THREE.Mesh;
+  /** Thin laser fan lines sweeping from the fuze (own material). */
+  laser: THREE.Mesh;
+}
+
+export function buildMine(): MineModel {
+  const m = M();
+  const group = new THREE.Group();
+  const body = new THREE.Group();
+  group.add(body);
+  const p = new Parts()
+    // canister: slightly tapered, rubber base ring, ribbed band, dark lid
+    .cyl(0.095, 0.105, 0.075, m.olive, 0, 0.045, 0, 0, 0, 0, 20)
+    .add(new THREE.TorusGeometry(0.103, 0.012, 6, 20), m.rubber, 0, 0.012, 0, Math.PI / 2)
+    .cyl(0.1, 0.1, 0.012, m.gunmetal, 0, 0.062, 0, 0, 0, 0, 20)
+    .cyl(0.085, 0.092, 0.018, m.dark, 0, 0.09, 0, 0, 0, 0, 20)
+    // fuze well + three prongs + pull ring
+    .cyl(0.028, 0.032, 0.03, m.gunmetal, 0, 0.112, 0, 0, 0, 0, 12)
+    .add(new THREE.TorusGeometry(0.02, 0.003, 5, 14), m.steel, 0.045, 0.1, 0, Math.PI / 2);
+  for (let i = 0; i < 3; i++) {
+    const a = i * Math.PI * 2 / 3;
+    p.cyl(0.0035, 0.0035, 0.05, m.steel, Math.sin(a) * 0.012, 0.15, Math.cos(a) * 0.012, 0, 0, 0, 5);
+    p.sphere(0.006, m.steel, Math.sin(a) * 0.012, 0.176, Math.cos(a) * 0.012, 1, 1, 1, 6);
+  }
+  for (let i = 0; i < 6; i++) { // lid bolts
+    const a = i * Math.PI / 3 + 0.3;
+    p.cyl(0.006, 0.006, 0.006, m.steel, Math.sin(a) * 0.07, 0.1, Math.cos(a) * 0.07, 0, 0, 0, 6);
+  }
+  p.box(0.05, 0.02, 0.003, m.hazard, 0, 0.045, 0.101); // hazard band on the side
+  p.build(body);
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.011, 10, 6),
+    new THREE.MeshStandardMaterial({ color: 0xff3b2f, emissive: 0xff3b2f, emissiveIntensity: 2.5, roughness: 0.3 }));
+  led.position.set(-0.045, 0.1, 0.03);
+  body.add(led);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.96, 1, 64),
+    new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.015;
+  group.add(ring);
+  // laser fan: a thin flat wedge of red light that sweeps around (tripwire read)
+  const laser = new THREE.Mesh(new THREE.CircleGeometry(1, 16, -0.05, 0.1),
+    new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  laser.rotation.x = -Math.PI / 2; laser.position.y = 0.02;
+  group.add(laser);
+  return { group, body, led, ring, laser };
+}
+
+/** Disposes the mine's own materials (geometry via disposeKitObject). */
+export function disposeMine(mm: MineModel) {
+  disposeKitObject(mm.group);
+  for (const o of [mm.led, mm.ring, mm.laser]) (o.material as THREE.Material).dispose();
+}
+
+// ---------------------------------------------------------------------------------
+// Medkit: rugged med case that opens into a healing station with a holo cross
+// ---------------------------------------------------------------------------------
+export interface MedkitModel {
+  group: THREE.Group;
+  /** 0 = closed case, 1 = lid open, emitter up, cross lit. */
+  setOpen(k: number): void;
+  /** Spinning holo cross above the case. */
+  cross: THREE.Group;
+  /** Cross + vial glow (own material). */
+  glow: THREE.MeshStandardMaterial;
+  /** Ground ring at the heal radius (own material; radius 1, scaled by the owner). */
+  ring: THREE.Mesh;
+  /** Soft dome showing the field (own material; radius 1, scaled by the owner). */
+  dome: THREE.Mesh;
+}
+
+let medTex: THREE.CanvasTexture | null | undefined;
+/** Off-white case paint with a green medical cross and light grime. */
+function medPaint(): THREE.CanvasTexture | null {
+  if (medTex !== undefined) return medTex;
+  const cg = canvas(128, 128);
+  if (!cg) return (medTex = null);
+  const [c, g] = cg;
+  g.fillStyle = '#d9d6cc'; g.fillRect(0, 0, 128, 128);
+  const r = rng(11);
+  for (let i = 0; i < 300; i++) { g.fillStyle = `rgba(90,85,70,${0.05 + r() * 0.08})`; g.fillRect(r() * 128, r() * 128, 1 + r() * 4, 1 + r() * 4); }
+  g.fillStyle = '#1f9c5a'; g.fillRect(52, 28, 24, 72); g.fillRect(28, 52, 72, 24);
+  g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 3; g.strokeRect(4, 4, 120, 120);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return (medTex = t);
+}
+let medMat: THREE.MeshStandardMaterial | null = null;
+
+export function buildMedkit(): MedkitModel {
+  const m = M();
+  medMat ??= new THREE.MeshStandardMaterial({ color: 0xffffff, map: medPaint(), roughness: 0.6, metalness: 0.15 });
+  const group = new THREE.Group();
+  const W = 0.5, H = 0.13, D = 0.34;
+  // base tray: painted shell, rubber corners, handle and latches
+  const base = new Parts()
+    .rbox(W, H, D, 0.03, m.dark, 0, H / 2, 0)
+    .rbox(W - 0.02, 0.012, D - 0.02, 0.005, m.gunmetal, 0, H + 0.001, 0)
+    .rbox(W * 0.9, 0.03, D * 0.85, 0.01, m.rubber, 0, H - 0.01, 0);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) base.rbox(0.05, H + 0.012, 0.05, 0.015, m.rubber, sx * (W / 2 - 0.02), H / 2, sz * (D / 2 - 0.02));
+  for (const sx of [-1, 1]) base.box(0.04, 0.03, 0.012, m.steel, sx * 0.14, H - 0.02, D / 2 + 0.004);
+  base.cyl(0.012, 0.012, 0.16, m.gunmetal, 0, H * 0.6, D / 2 + 0.03, 0, 0, Math.PI / 2, 8);
+  // insides: foam bed with vials and a bandage roll
+  base.box(W - 0.06, 0.01, D - 0.06, m.rubber, 0, H - 0.005, 0);
+  base.cyl(0.035, 0.035, 0.07, medMat, 0.14, H + 0.02, -0.06, 0, 0, Math.PI / 2, 12);
+  base.build(group);
+  const glow = new THREE.MeshStandardMaterial({ color: 0x6cff9a, emissive: 0x3cff7a, emissiveIntensity: 2.2, roughness: 0.3, transparent: true, opacity: 0.95 });
+  const vials = new Parts();
+  for (let i = 0; i < 4; i++) vials.cyl(0.014, 0.014, 0.07, glow, -0.17 + i * 0.045, H + 0.025, 0.05, 0, 0, 0, 8);
+  vials.build(group);
+  // lid: painted panel with the cross, hinged on the back edge
+  const lid = new THREE.Group();
+  lid.position.set(0, H, -D / 2);
+  group.add(lid);
+  new Parts()
+    .rbox(W, 0.05, D, 0.025, m.dark, 0, 0.025, D / 2)
+    .add(new THREE.PlaneGeometry(W * 0.62, D * 0.8), medMat, 0, 0.0515, D / 2, -Math.PI / 2)
+    .build(lid);
+  // emitter mast + holo cross
+  const mast = new THREE.Group();
+  mast.position.set(0, H, 0.02);
+  group.add(mast);
+  new Parts()
+    .cyl(0.03, 0.036, 0.03, m.gunmetal, 0, 0.015, 0, 0, 0, 0, 12)
+    .cyl(0.01, 0.012, 0.36, m.steel, 0, 0.2, 0, 0, 0, 0, 8)
+    .build(mast);
+  const cross = new THREE.Group();
+  cross.position.y = 0.52;
+  mast.add(cross);
+  new Parts()
+    .rbox(0.07, 0.22, 0.03, 0.01, glow, 0, 0, 0)
+    .rbox(0.22, 0.07, 0.03, 0.01, glow, 0, 0, 0)
+    .build(cross);
+  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.006, 6, 40), glow);
+  cross.add(halo);
+
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.97, 1, 72),
+    new THREE.MeshBasicMaterial({ color: 0x6cff9a, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.015;
+  group.add(ring);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), fresnelShell(0x6cff9a));
+  group.add(dome);
+
+  const setOpen = (k: number) => {
+    const e = Math.max(0, Math.min(1, k));
+    lid.rotation.x = -e * 1.9; // swings up and back past vertical
+    const up = Math.max(0, Math.min(1, (e - 0.3) / 0.7));
+    mast.scale.set(1, Math.max(0.02, up), 1);
+    cross.scale.setScalar(Math.max(0.02, up));
+    glow.emissiveIntensity = 0.3 + up * 1.9;
+  };
+  setOpen(0);
+  return { group, setOpen, cross, glow, ring, dome };
+}
+
+/** Disposes the medkit's own materials (geometry via disposeKitObject). */
+export function disposeMedkit(mk: MedkitModel) {
+  disposeKitObject(mk.group);
+  mk.glow.dispose();
+  (mk.ring.material as THREE.Material).dispose();
+  (mk.dome.material as THREE.Material).dispose();
+}
+
+// ---------------------------------------------------------------------------------
 // Reveal marker (through-wall radar tag)
 // ---------------------------------------------------------------------------------
-/** Cyan hollow diamond, distinct from the red UAV marker so the two intel sources never blur. */
+/** Cyan hollow diamond: reads as "radar contact" at a glance. */
 export function makeSonarMarkerMaterial(): THREE.SpriteMaterial {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 64;

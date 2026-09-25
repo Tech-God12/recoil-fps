@@ -1,3 +1,9 @@
+## 2026-09-25 — Scorestreaks removed, Mine and Medkit kits, bigger Warehouse
+
+Removed the whole scorestreak system (UAV, sentry, airstrike, chopper, nuke): streaks.ts, streak-models.ts, Streaks.tsx, its HUD, pause grid, sounds, CSS, tests and docs. Added two kits: Mine (a jumping proximity mine, 150 damage close in, marks survivors, chain-detonates) and Medkit (a med station that heals 14 HP/s inside 4 m for 8 s). Both have models, sounds, effects, turntable demos, icons and tests. The Kits menu now shows five cards (keys 1-5). The Warehouse grew from 92 m to 112 m: rail sidings with boxcars and a flatcar overlook on both flanks, truck bays and a low barrier screen behind each spawn, spawns moved back 10 m, bots path through the new flanks.
+
+Verification: 152/152 tests, 34/34 mutations, lint, typecheck, build, headless TDM smoke (no stuck bots).
+
 ## 2026-09-25 — Kits screen rebuilt as a proper layout; new Radar and Decoy models
 
 The Kits screen now uses a real grid layout: details on the left, a framed 3D stage on the right, kit cards and the Buy/Equip button along the bottom. Nothing overlaps at any window size; on short screens the extra text hides first. Stats are compact tiles, and the stage has prev/next arrows. The Radar is now a rugged case on fold-out legs with a glowing array panel. The Decoy hologram shows only its outer surface (no more limbs glowing through each other), and both hands now hold the rifle properly.

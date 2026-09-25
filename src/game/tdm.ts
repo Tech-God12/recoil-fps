@@ -84,12 +84,12 @@ export const BRAVO_ROSTER: { name: string; armor: TDMArmor }[] = [
   { name: 'Viper', armor: 2 }, { name: 'Reaper', armor: 1 }, { name: 'Ghost', armor: 2 }, { name: 'Specter', armor: 0 }, { name: 'Wraith', armor: 1 },
 ];
 
-const ALPHA_SPAWNS: [number, number][] = [[0, 34], [-12, 37], [12, 37], [-4, 40], [4, 40]];
+const ALPHA_SPAWNS: [number, number][] = [[0, 44], [-12, 47], [12, 47], [-4, 50], [4, 50]];
 const BRAVO_SPAWNS: [number, number][] = ALPHA_SPAWNS.map(([x, z]) => [-x, -z]);
 /** Contested waypoints: the warehouse doors and interiors, both container yards,
- * and the mid lanes. Kept in sync with the arena layout in world.ts (half 46). */
+ * and the mid lanes. Kept in sync with the arena layout in world.ts (half 56). */
 const MID_POINTS: [number, number][] = [
-  [0, 0], [0, 14], [0, -14], [-28, 0], [28, 0], [-10.5, 0], [10.5, 0], [-22, 16], [22, -16], [-28, -12], [28, 12],
+  [0, 0], [0, 14], [0, -14], [-28, 0], [28, 0], [-10.5, 0], [10.5, 0], [-22, 16], [22, -16], [-28, -12], [28, 12], [-45, 22], [45, -22], [-45, 0], [45, 0],
 ];
 
 /** Shared floating team marker so the player can tell allies apart at a glance. */

@@ -13,8 +13,12 @@
 //   PHANTOM · Holo-Decoy  — a hologram that runs ahead firing blanks; hostiles who
 //                           see it shoot it instead of you. When it dies it bursts,
 //                           stunning everyone standing close to it.
+//   MINE    · Mine        — a bounding proximity mine that guards a lane. It arms after
+//                           a moment, jumps when a hostile walks in and marks survivors.
+//   MEDIC   · Medkit      — a med case that opens into a healing field for 8 s and puts
+//                           out fire; heals only the player.
 //
-// The director is mode-agnostic in the same way the scorestreak director is: it talks
+// The director is mode-agnostic: it talks
 // to the engine only through `KitContext`, so missions and Warehouse TDM share every
 // line of it. The AI side (mission `Enemy`, TDM `TDMBot`) sees kits through two tiny
 // hooks: `KitLure` (who to shoot instead of the player) and `userData.kitHit` on
@@ -25,8 +29,9 @@ import type { Effects } from './effects';
 import type { AABB } from './world';
 import { audio } from './audio';
 import {
-  buildBarricade, buildDart, buildDecoy, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
-  makeSonarMarkerMaterial, type BarricadeModel, type DartModel, type DecoyModel, type TagGhost,
+  buildBarricade, buildDart, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
+  disposeMedkit, disposeMine, makeSonarMarkerMaterial,
+  type BarricadeModel, type DartModel, type DecoyModel, type MedkitModel, type MineModel, type TagGhost,
 } from './kit-models';
 import { KIT_IDS, KIT_PRICES, isKitId, type KitId } from './economy/kit-shop';
 
@@ -37,8 +42,8 @@ export const KIT_KEY = 'Z';
 // Every number here was set against the existing combat model:
 //   * mission hostile hit = 7–14 dmg (avg 10.5), TDM bot hit = 18–24 (avg 21);
 //   * a TDM match is 150 s with a 5 s respawn; a mission phase runs 60–120 s;
-//   * the UAV streak (400 pts ≈ 4 kills) paints the whole map for 30 s.
-// Kits must be worth pressing every fight but never replace a streak. Playtest
+//   * player HP is 100 in missions (regen to 50) and 100 + armour in TDM (regen to 40 %).
+// Kits must be worth pressing every fight but never win a match on their own. Playtest
 // feedback on the first pass: kills refunded the kit in a few seconds, so the
 // cooldowns went up by ~50 % and kill refunds went from 20 % to 8 % with a cap.
 export const KIT_TUNING = {
@@ -134,6 +139,47 @@ export const KIT_TUNING = {
     /** Materialise animation (s): the decoy can be targeted from the first frame anyway. */
     materialize: 0.35,
   },
+  mine: {
+    /** 40 s: one lane locked down per fight. It lives 45 s, so at most one is ever out. */
+    cooldown: 40,
+    life: 45,
+    /** Planted this far ahead of the feet, on the ground (never inside a wall). */
+    placeDist: 1.1,
+    /** 1.2 s to arm: long enough that you can't drop it on someone mid-fight as a grenade. */
+    armDelay: 1.2,
+    /** A hostile within 2.4 m (flat) trips it: a doorway or a corridor width. */
+    triggerRadius: 2.4,
+    /** Bounding: jumps to 0.9 m (waist) over 0.35 s, then detonates. The beep is the tell. */
+    jumpHeight: 0.9,
+    jumpTime: 0.35,
+    fuse: 0.05,
+    /**
+     * 150 at the core (inside 1.5 m) kills any mission hostile (100 HP) and most TDM bots;
+     * it falls to 40 at 5 m. A frag does 260 at the centre, so the mine is a smaller,
+     * patient frag that trades raw damage for not needing you there.
+     */
+    damage: 150,
+    edgeDamage: 40,
+    coreRadius: 1.5,
+    blastRadius: 5,
+    /** Survivors within 10 m are revealed for 4 s (same silhouette as the Radar). */
+    markRadius: 10,
+    markFor: 4,
+    /** The bang is heard like a frag. */
+    noiseRadius: 40,
+  },
+  medic: {
+    /** 45 s: roughly one refill per fight. */
+    cooldown: 45,
+    /** The field runs 8 s: 8 × 14 = 112 HP, a full mission refill if you stay inside. */
+    life: 8,
+    healPerSec: 14,
+    /** 4 m: room to keep fighting from inside the field instead of hiding on the case. */
+    radius: 4,
+    /** Dropped this far ahead; the case takes 0.6 s to open before it heals. */
+    placeDist: 1.0,
+    open: 0.6,
+  },
   /** Every kill knocks 8 % of the full cooldown off (3.6 s on Recon)… */
   killRefund: 0.08,
   /** …but no more than 30 % of one cooldown per charge, so a multi-kill can't chain kits. */
@@ -198,6 +244,32 @@ export const KIT_DEFS: Record<KitId, KitDef> = {
       { label: 'RANGE', value: '32 m', bar: 0.9 },
       { label: 'STUN', value: '6 m', bar: 0.6 },
       { label: 'COOLDOWN', value: '50 s', bar: 0.35 },
+    ],
+  },
+  mine: {
+    id: 'mine', name: 'Mine', ability: 'Mine', role: 'Trap',
+    blurb: 'Plant a jumping mine on the ground. When an enemy walks close it pops up and explodes.',
+    rule: 'Arms after 1 s. Deals up to 150 damage within 5 m, and marks enemies within 10 m for 4 s so you can finish them.',
+    steps: ['Plant it in a doorway or on a path.', 'Watch another angle while it guards this one.', 'When it goes off, push the marked enemies.'],
+    cooldown: KIT_TUNING.mine.cooldown,
+    price: KIT_PRICES.mine,
+    stats: [
+      { label: 'DAMAGE', value: '150', bar: 0.75 },
+      { label: 'TRIGGER', value: '2.4 m', bar: 0.45 },
+      { label: 'COOLDOWN', value: '40 s', bar: 0.55 },
+    ],
+  },
+  medic: {
+    id: 'medic', name: 'Medkit', ability: 'Medkit', role: 'Healing',
+    blurb: 'Drop a med case that opens into a healing field. Stand inside it to heal quickly.',
+    rule: 'Heals 14 HP per second for 8 s inside 4 m. It also puts out fire. Only heals you.',
+    steps: ['Drop it behind cover after a fight.', 'Stay inside the green ring to heal.', 'You can keep shooting while you heal.'],
+    cooldown: KIT_TUNING.medic.cooldown,
+    price: KIT_PRICES.medic,
+    stats: [
+      { label: 'HEALS', value: '112 HP', bar: 0.9 },
+      { label: 'RADIUS', value: '4 m', bar: 0.5 },
+      { label: 'COOLDOWN', value: '45 s', bar: 0.45 },
     ],
   },
 };
@@ -327,10 +399,12 @@ export interface KitHostile {
   stun?(seconds: number): void;
   /** Crouched right now (the sonar silhouette drops to crouch height). */
   crouched?(): boolean;
+  /** Kit damage from the player (the Mine). `weapon` names the kill in the feed. True = killed. */
+  damage?(amount: number, weapon: string): boolean;
 }
 
 /** Screen/camera feedback the engine turns into a HUD overlay and camera shake. */
-export type KitFxKind = 'ping' | 'slam' | 'recall' | 'decoy' | 'burst' | 'break' | 'ready';
+export type KitFxKind = 'ping' | 'slam' | 'recall' | 'decoy' | 'burst' | 'break' | 'ready' | 'blast' | 'heal';
 
 export interface KitContext {
   scene: THREE.Scene;
@@ -353,11 +427,14 @@ export interface KitContext {
   /** Make noise at a point: hostiles in the radius investigate it. */
   alertAt(pos: THREE.Vector3, radius: number): void;
   announce(text: string, spoken?: string): void;
+  /** Heal the player by `amount` (capped at max HP); returns what was actually healed. */
+  healPlayer?(amount: number): number;
+  playerHealth?(): { hp: number; max: number };
   /** Optional HUD / camera feedback (overlay flash, shake). */
   feedback?(kind: KitFxKind, at?: THREE.Vector3): void;
 }
 
-export interface KitLiveHud { kind: 'dart' | 'barricade' | 'decoy'; label: string; timeLeft: number; total: number; detail?: string; health?: number }
+export interface KitLiveHud { kind: 'dart' | 'barricade' | 'decoy' | 'mine' | 'medkit'; label: string; timeLeft: number; total: number; detail?: string; health?: number }
 
 export interface KitHud {
   id: KitId;
@@ -873,6 +950,215 @@ class HoloDecoy implements KitLure {
   }
 }
 
+// ---------------------------------------------------------------- mine ----
+class ProximityMine {
+  model: MineModel;
+  pos: THREE.Vector3;
+  age = 0;
+  life: number = KIT_TUNING.mine.life;
+  done = false;
+  /** -1 until tripped, then seconds since the trip. */
+  private tripT = -1;
+  /** Hostiles killed / hurt by this mine (tests + debrief). */
+  kills = 0;
+  hurt = 0;
+  marked = 0;
+  private armedSaid = false;
+
+  constructor(private ctx: KitContext, private dir: KitDirector, at: THREE.Vector3) {
+    this.model = buildMine();
+    this.pos = at.clone();
+    this.model.group.position.copy(this.pos);
+    this.model.ring.scale.setScalar(KIT_TUNING.mine.triggerRadius);
+    this.model.laser.scale.setScalar(KIT_TUNING.mine.triggerRadius);
+    ctx.scene.add(this.model.group);
+    audio.minePlant(at.x, at.y, at.z);
+    ctx.effects.footDust(at);
+  }
+
+  get armed(): boolean { return this.age >= KIT_TUNING.mine.armDelay; }
+  get tripped(): boolean { return this.tripT >= 0; }
+  get active(): boolean { return !this.done && !this.tripped; }
+
+  /** Something hostile stepped in: beep, then jump and blow (the short beep is the tell). */
+  trip() {
+    if (this.tripT >= 0 || this.done) return;
+    this.tripT = 0;
+    audio.mineTrip(this.pos.x, this.pos.y, this.pos.z);
+  }
+
+  update(dt: number) {
+    if (this.done) return;
+    const T = KIT_TUNING.mine;
+    this.age += dt;
+    const led = this.model.led.material as THREE.MeshStandardMaterial;
+    const ring = this.model.ring.material as THREE.MeshBasicMaterial;
+    const laser = this.model.laser.material as THREE.MeshBasicMaterial;
+    if (this.tripT >= 0) {
+      this.tripT += dt;
+      // Bounding charge: the canister kicks up to waist height before it detonates.
+      const k = Math.min(1, this.tripT / T.jumpTime);
+      this.model.body.position.y = Math.sin(k * Math.PI * 0.5) * T.jumpHeight;
+      this.model.body.rotation.y += dt * 20;
+      led.emissiveIntensity = 4;
+      ring.opacity = 0.6; laser.opacity = 0;
+      if (this.tripT >= T.fuse && this.tripT - dt < T.fuse) this.ctx.effects.mineKick(this.pos);
+      if (k >= 1) this.detonate();
+      return;
+    }
+    this.life -= dt;
+    if (!this.armed) {
+      // Arming: slow blink, faint ring growing out to the trigger radius.
+      const a = this.age / T.armDelay;
+      led.emissiveIntensity = Math.sin(this.age * 8) > 0 ? 2 : 0.2;
+      this.model.ring.scale.setScalar(Math.max(0.05, a) * T.triggerRadius);
+      ring.opacity = 0.35 * a; laser.opacity = 0;
+      return;
+    }
+    if (!this.armedSaid) {
+      this.armedSaid = true;
+      this.model.ring.scale.setScalar(T.triggerRadius);
+      audio.mineArm(this.pos.x, this.pos.y, this.pos.z);
+      this.ctx.announce('MINE ARMED');
+    }
+    // Armed: quick blink, laser fan sweeping, ring breathing.
+    led.emissiveIntensity = Math.sin(this.age * 14) > 0.4 ? 3 : 0.25;
+    this.model.laser.rotation.z += dt * 3.2;
+    laser.opacity = 0.14;
+    ring.opacity = 0.16 + 0.08 * Math.sin(this.age * 3);
+    // Fade out over the last 2 s so the player sees it disarm.
+    if (this.life < 2) { ring.opacity *= this.life / 2; laser.opacity *= this.life / 2; }
+    for (const h of this.ctx.hostiles()) {
+      if (!h.alive()) continue;
+      if (Math.hypot(h.pos.x - this.pos.x, h.pos.z - this.pos.z) <= T.triggerRadius && Math.abs(h.pos.y - this.pos.y) < 1.6) { this.trip(); break; }
+    }
+    if (this.life <= 0) this.done = true; // disarms silently
+  }
+
+  private detonate() {
+    const T = KIT_TUNING.mine;
+    this.done = true;
+    const c = tmpA.set(this.pos.x, this.pos.y + T.jumpHeight, this.pos.z).clone();
+    this.ctx.effects.explosion(c);
+    audio.explosionSpatial(c.x, c.y, c.z, c.distanceTo(this.ctx.playerEye()));
+    this.ctx.feedback?.('blast', c);
+    this.ctx.alertAt(c, T.noiseRadius);
+    this.dir.blast(c, T.blastRadius);
+    let kills = 0, hurt = 0;
+    for (const h of this.ctx.hostiles()) {
+      if (!h.alive()) continue;
+      const d = h.pos.distanceTo(this.pos);
+      const dmg = mineDamage(d);
+      if (dmg <= 0) continue;
+      hurt++;
+      if (h.damage?.(dmg, 'MINE')) kills++;
+    }
+    // The blast also marks every survivor within 10 m for 4 s: finish them.
+    const survivors = sonarTagged(this.pos, T.markRadius, this.ctx.hostiles().filter(h => h.alive()));
+    for (const h of survivors) this.dir.tag(h.ref, T.markFor);
+    if (survivors.length) this.dir.pulseFlash();
+    this.kills = kills; this.hurt = hurt; this.marked = survivors.length;
+    this.ctx.announce(kills ? `MINE — ${kills} KILL${kills > 1 ? 'S' : ''}` : hurt ? `MINE — ${hurt} HIT` : 'MINE WENT OFF');
+  }
+
+  /** Hard stop (match end). */
+  kill() { this.done = true; }
+
+  dispose() {
+    this.ctx.scene.remove(this.model.group);
+    disposeMine(this.model);
+  }
+}
+
+/**
+ * Mine damage at `d` m from the canister (pure). Full damage inside the core radius,
+ * falling linearly to `edgeDamage` at the blast radius, nothing beyond.
+ */
+export function mineDamage(d: number, cfg: { blastRadius: number; coreRadius: number; damage: number; edgeDamage: number } = KIT_TUNING.mine): number {
+  if (d > cfg.blastRadius) return 0;
+  if (d <= cfg.coreRadius) return cfg.damage;
+  return THREE.MathUtils.lerp(cfg.damage, cfg.edgeDamage, (d - cfg.coreRadius) / (cfg.blastRadius - cfg.coreRadius));
+}
+
+// -------------------------------------------------------------- medkit ----
+class MedStation {
+  model: MedkitModel;
+  pos: THREE.Vector3;
+  age = 0;
+  life: number = KIT_TUNING.medic.life;
+  done = false;
+  healed = 0;
+  private tickT = 0;
+  private moteT = 0;
+  private closing = -1;
+
+  constructor(private ctx: KitContext, at: THREE.Vector3, yaw: number) {
+    this.model = buildMedkit();
+    this.pos = at.clone();
+    this.model.group.position.copy(this.pos);
+    this.model.group.rotation.y = yaw;
+    this.model.ring.scale.setScalar(0.05);
+    this.model.dome.scale.setScalar(0.05);
+    ctx.scene.add(this.model.group);
+    audio.medkitDeploy(at.x, at.y, at.z);
+    ctx.feedback?.('heal', at);
+  }
+
+  get active(): boolean { return !this.done && this.closing < 0; }
+
+  update(dt: number) {
+    if (this.done) return;
+    const T = KIT_TUNING.medic;
+    const m = this.model;
+    const domeMat = m.dome.material as THREE.ShaderMaterial & { opacity: number };
+    const ringMat = m.ring.material as THREE.MeshBasicMaterial;
+    if (this.closing >= 0) {
+      this.closing += dt;
+      const k = Math.min(1, this.closing / 0.4);
+      m.setOpen(1 - k);
+      domeMat.opacity = 0.35 * (1 - k); ringMat.opacity = 0.45 * (1 - k);
+      if (k >= 1) this.done = true;
+      return;
+    }
+    this.age += dt; this.life -= dt;
+    const open = Math.min(1, this.age / T.open);
+    m.setOpen(open);
+    const r = T.radius * easeOutBack(open);
+    m.ring.scale.setScalar(Math.max(0.05, r));
+    m.dome.scale.set(Math.max(0.05, r), Math.max(0.05, r) * 0.55, Math.max(0.05, r));
+    m.cross.rotation.y += dt * 1.6;
+    m.cross.position.y = 0.52 + Math.sin(this.age * 2.4) * 0.03;
+    const fade = Math.min(1, this.life / 1.5);
+    domeMat.opacity = (0.28 + 0.08 * Math.sin(this.age * 4)) * fade;
+    ringMat.opacity = (0.4 + 0.15 * Math.sin(this.age * 4)) * fade;
+    this.moteT -= dt;
+    if (this.moteT <= 0) { this.moteT = 0.35; this.ctx.effects.healMotes(tmpA.set(this.pos.x, this.pos.y + 0.3, this.pos.z)); }
+    // Heal the player while inside the field (flat distance, a step of height either way).
+    if (open >= 1) {
+      const feet = this.ctx.playerFeet();
+      const inside = Math.hypot(feet.x - this.pos.x, feet.z - this.pos.z) <= T.radius && Math.abs(feet.y - this.pos.y) < 2;
+      if (inside && this.ctx.playerAlive()) {
+        const got = this.ctx.healPlayer?.(T.healPerSec * dt) ?? 0;
+        this.healed += got;
+        this.tickT -= dt;
+        if (got > 0 && this.tickT <= 0) {
+          this.tickT = 0.5;
+          const h = this.ctx.playerHealth?.();
+          audio.medkitTick(h ? h.hp / h.max : 1);
+        }
+      }
+    }
+    if (this.life <= 0) { this.closing = 0; audio.barricadeFold(this.pos.x, this.pos.y + 0.1, this.pos.z); }
+  }
+
+  kill() { this.done = true; }
+
+  dispose() {
+    this.ctx.scene.remove(this.model.group);
+    disposeMedkit(this.model);
+  }
+}
+
 // ------------------------------------------------------------ director ----
 /** Tagged-hostile markers pooled at 16 — more than any squad the game fields at once. */
 const TAG_POOL = 16;
@@ -883,10 +1169,12 @@ export class KitDirector {
   uses = 0;
   elapsed = 0;
   /** Lifetime stats for the debrief / tests. */
-  stats = { darts: 0, tags: 0, barricades: 0, barricadeDamage: 0, recalls: 0, decoys: 0, decoyHits: 0, stunned: 0 };
+  stats = { darts: 0, tags: 0, barricades: 0, barricadeDamage: 0, recalls: 0, decoys: 0, decoyHits: 0, stunned: 0, mines: 0, mineKills: 0, healed: 0, medkits: 0 };
   private darts: SonarDart[] = [];
   private walls: Barricade[] = [];
   private decoys: HoloDecoy[] = [];
+  private mines: ProximityMine[] = [];
+  private meds: MedStation[] = [];
   private tags = new Map<object, number>();
   private markers: THREE.Sprite[] = [];
   private markerMat: THREE.SpriteMaterial;
@@ -941,7 +1229,9 @@ export class KitDirector {
     let ok = false;
     if (this.kit === 'recon') ok = this.throwDart();
     else if (this.kit === 'bulwark') ok = this.plantBarricade();
-    else ok = this.sendDecoy();
+    else if (this.kit === 'phantom') ok = this.sendDecoy();
+    else if (this.kit === 'mine') ok = this.plantMine();
+    else ok = this.dropMedkit();
     if (!ok) { audio.kitDenied(); return false; }
     this.charge.spend();
     this.uses++;
@@ -1009,6 +1299,39 @@ export class KitDirector {
     return true;
   }
 
+  /** Ground point `dist` ahead of the feet, pulled back if a wall is in the way. */
+  private groundAhead(dist: number): THREE.Vector3 | null {
+    const feet = this.ctx.playerFeet();
+    const dir = this.ctx.playerDir();
+    const l = Math.hypot(dir.x, dir.z);
+    if (l < 0.05) return feet.clone();
+    const p = feet.clone();
+    // moveCollide slides against solids, so the point never ends up inside a wall.
+    this.ctx.moveCollide(p, (dir.x / l) * dist, (dir.z / l) * dist, 0.2);
+    return p;
+  }
+
+  private plantMine(): boolean {
+    const at = this.groundAhead(KIT_TUNING.mine.placeDist);
+    if (!at) return false;
+    for (const m of this.mines) m.kill(); // one mine at a time
+    this.mines.push(new ProximityMine(this.ctx, this, at));
+    this.stats.mines++;
+    this.ctx.announce('MINE PLANTED');
+    return true;
+  }
+
+  private dropMedkit(): boolean {
+    const at = this.groundAhead(KIT_TUNING.medic.placeDist);
+    if (!at) return false;
+    const d = this.ctx.playerDir();
+    for (const m of this.meds) m.kill(); // one station at a time
+    this.meds.push(new MedStation(this.ctx, at, Math.atan2(-d.x, -d.z) + Math.PI));
+    this.stats.medkits++;
+    this.ctx.announce('MEDKIT DOWN — STAND IN THE RING');
+    return true;
+  }
+
   /** A kill landed: shave the cooldown (8 % each, capped at 30 % per charge). */
   onKill(count = 1) {
     for (let i = 0; i < count; i++) this.charge.refund(KIT_TUNING.killRefund, KIT_TUNING.refundCap);
@@ -1051,6 +1374,8 @@ export class KitDirector {
       if (d < radius) w.damage(T.blastDamage * THREE.MathUtils.lerp(1, 0.4, d / radius));
     }
     for (const d of this.decoys) if (d.active() && d.eye.distanceTo(pos) < radius) d.hit(KIT_TUNING.phantom.hp);
+    // A blast sets off any armed mine it reaches (chain reactions are part of the trap).
+    for (const m of this.mines) if (m.active && m.armed && m.pos.distanceTo(pos) < radius * 0.6) m.trip();
   }
 
   update(dt: number) {
@@ -1067,9 +1392,13 @@ export class KitDirector {
     for (const d of this.darts) d.update(dt);
     for (const w of this.walls) w.update(dt);
     for (const d of this.decoys) d.update(dt);
+    for (const m of this.mines) m.update(dt);
+    for (const m of this.meds) m.update(dt);
     this.darts = this.reap(this.darts);
     this.walls = this.reap(this.walls, w => { this.stats.barricadeDamage += w.damageTaken; });
     this.decoys = this.reap(this.decoys, d => { this.stats.decoyHits += d.hitsTaken; this.stats.stunned += d.stunned; });
+    this.mines = this.reap(this.mines, m => { this.stats.mineKills += m.kills; });
+    this.meds = this.reap(this.meds, m => { this.stats.healed += m.healed; });
     // tags + through-wall silhouettes and markers
     for (const [ref, t] of this.tags) {
       const left = t - dt;
@@ -1108,13 +1437,16 @@ export class KitDirector {
   }
 
   /** Number of live kit entities (tests + HUD). */
-  get liveCount(): number { return this.darts.length + this.walls.length + this.decoys.length; }
+  get liveCount(): number { return this.darts.length + this.walls.length + this.decoys.length + this.mines.length + this.meds.length; }
 
   hud(): KitHud {
     const live: KitLiveHud[] = [];
     const R = KIT_TUNING.recon, B = KIT_TUNING.bulwark, P = KIT_TUNING.phantom;
     for (const d of this.darts) live.push({ kind: 'dart', label: 'RADAR', timeLeft: d.timeLeft, total: SonarDart.LIFE, detail: d.stuck ? `SCAN ${d.pulsesFired}/${R.pulses}` : 'THROWN' });
     for (const w of this.walls) if (w.active) live.push({ kind: 'barricade', label: 'BARRICADE', timeLeft: Math.max(0, w.life), total: B.life, health: Math.max(0, w.hp / B.hp), detail: `${Math.max(0, Math.ceil(w.hp))} HP` });
+    const Mi = KIT_TUNING.mine, Me = KIT_TUNING.medic;
+    for (const m of this.mines) if (m.active) live.push({ kind: 'mine', label: 'MINE', timeLeft: Math.max(0, m.life), total: Mi.life, detail: m.armed ? 'ARMED' : 'ARMING' });
+    for (const m of this.meds) if (m.active) live.push({ kind: 'medkit', label: 'MEDKIT', timeLeft: Math.max(0, m.life), total: Me.life, detail: `+${Math.round(m.healed)} HP` });
     for (const d of this.decoys) if (d.active()) live.push({ kind: 'decoy', label: 'DECOY', timeLeft: Math.max(0, d.life), total: P.life, health: Math.max(0, d.hp / P.hp), detail: `${d.hitsTaken} HITS TAKEN` });
     let tagged = 0;
     for (const t of this.tags.values()) if (t > 0) tagged++;
@@ -1136,7 +1468,11 @@ export class KitDirector {
     for (const w of this.walls) w.kill();
     for (const d of this.decoys) d.kill();
     for (const d of this.darts) d.done = true;
+    for (const m of this.mines) m.kill();
+    for (const m of this.meds) m.kill();
     this.darts = this.reap(this.darts);
+    this.mines = this.reap(this.mines);
+    this.meds = this.reap(this.meds);
     this.walls = this.reap(this.walls);
     this.decoys = this.reap(this.decoys);
   }

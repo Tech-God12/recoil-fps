@@ -206,6 +206,16 @@ export class Effects {
     this.kitFlash(pos, 0x6FE8FF, big ? 26 : 10, big ? 0.22 : 0.12);
   }
 
+  /** Mine jumps out of the ground: a puff of dirt before the blast. */
+  mineKick(pos: THREE.Vector3) {
+    this.burst(pos, 16, 0x8C7A58, 2.8, 0.6, 5, 0.08, 1.2);
+  }
+
+  /** Med field pulse: green motes drifting up out of the ring. */
+  healMotes(pos: THREE.Vector3) {
+    this.burst(pos, 12, 0x6CFF9A, 1.1, 1.2, -1.2, 0.05, 2.4);
+  }
+
   /** Coloured point-light pop for kit events (shares the muzzle/explosion light). */
   kitFlash(pos: THREE.Vector3, color: number, intensity: number, seconds: number) {
     this.flashLight.position.copy(pos);

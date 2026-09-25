@@ -211,7 +211,21 @@ export class GunBuilder {
   }
 
   cyl(rt: number, rb: number, h: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, seg = 28, open = false) {
-    const segments = Math.max(seg, Math.max(rt, rb) >= 0.009 ? 36 : seg);
+    // Segment budget: small detail cylinders (selector pins, screws, rivets) used
+    // to carry 20–28 segments for a 3 mm radius — sub-pixel at viewmodel distance.
+    // Auto-scale by radius when the caller uses the default 28, and clamp explicit
+    // large segment counts down for tiny radii (e.g. 0.003 r + 20 seg → 12).
+    let segments = seg;
+    const r = Math.max(rt, rb);
+    if (seg === 28) {
+      if (r < 0.005) segments = 12;
+      else if (r < 0.009) segments = 16;
+      else if (r < 0.015) segments = 24;
+      else segments = 28;
+    } else if (r < 0.005 && seg > 12) segments = 12;
+    else if (r < 0.009 && seg > 16) segments = 16;
+    if (r >= 0.018) segments = Math.max(segments, 28);
+    if (r >= 0.009) segments = Math.max(segments, 24);
     const edge = Math.min(rt, rb, h * 0.2, 0.0007);
     const geo = !open && edge > 0.0003
       ? new THREE.LatheGeometry([[0, -h / 2], [rb - edge, -h / 2], [rb, -h / 2 + edge], [rt, h / 2 - edge], [rt - edge, h / 2], [0, h / 2]].map(([r, y]) => new THREE.Vector2(r, y)), segments)
@@ -221,7 +235,11 @@ export class GunBuilder {
   }
 
   sph(r: number, mat: THREE.Material, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1) {
-    const geo = new THREE.SphereGeometry(r, 16, 10);
+    // Rivets (r=0.0027) previously used 16×10 = 160 tris for a 2 mm bump that
+    // is <3 pixels at viewmodel distance — 8×6 (48 tris) reads identically.
+    const segW = r < 0.005 ? 8 : r < 0.012 ? 12 : 16;
+    const segH = r < 0.005 ? 6 : r < 0.012 ? 8 : 10;
+    const geo = new THREE.SphereGeometry(r, segW, segH);
     geo.scale(sx, sy, sz);
     return this.put(geo, mat, x, y, z);
   }
@@ -315,7 +333,13 @@ export class GunBuilder {
   tube(outer: number, inner: number, length: number, mat: THREE.Material, x: number, y: number, z: number, rx = Math.PI / 2, ry = 0, rz = 0, segments = 24) {
     const h = length / 2, edge = Math.min((outer - inner) * 0.22, length * 0.1, 0.0005);
     const points = [[inner, -h + edge], [inner + edge, -h], [outer - edge, -h], [outer, -h + edge], [outer, h - edge], [outer - edge, h], [inner + edge, h], [inner, h - edge], [inner, -h + edge]];
-    const geo = new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), Math.max(segments, outer > 0.012 ? 40 : outer > 0.006 ? 28 : 16));
+    // Clamp explicit 24-seg tubes with small outer radius down to 16 — a 6 mm tube
+    // at 28 segs is 56 triangles per ring for zero visual gain.
+    let seg = segments;
+    if (outer < 0.006 && seg > 16) seg = 16;
+    else if (outer < 0.010 && seg > 20) seg = 20;
+    else if (outer > 0.012) seg = Math.max(seg, 28);
+    const geo = new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), seg);
     wearMask(geo, 'y');
     return this.put(geo, mat, x, y, z, rx, ry, rz);
   }

@@ -180,6 +180,7 @@ export interface HudState {
   enemiesLeft: number;
   cooking: boolean;
   sprinting: boolean;
+  sprintLock: number; // G3: 0..0.2 s sprint-to-fire delay remaining (HUD shows “RECOVERING”)
   canVault: boolean;
   ads: number;
   spread: number;
@@ -211,6 +212,8 @@ export interface HudState {
   masterkey?: { shells: number; reloading: boolean };
   worldHalf: number;
   nearest?: { angle: number; dist: number; above: number };
+  // Landmark read (M2): nearest named landmark for the compass strip (“SOUK  42 m”)
+  landmark?: { name: string; dist: number; angle: number } | null;
   mission?: MissionHud;
   tdm?: TdmHud;
   /** Field kit: ability charge, live gadgets, sonar tags, onboarding prompt. */
@@ -257,7 +260,7 @@ export interface TdmRosterEntry {
 
 export type GameEvent =
   | { type: 'graphics'; text: string }
-  | { type: 'hit'; kill: boolean }
+  | { type: 'hit'; kill: boolean; headshot?: boolean }
   | { type: 'kill'; name: string; weapon: string; headshot: boolean }
   | { type: 'damage'; dir: number; amount: number }
   | { type: 'flash'; power: number }
@@ -469,6 +472,16 @@ export class Engine {
   };
   private readonly sunDir = new THREE.Vector3(0, 1, 0);
   private readonly shadowFwd = new THREE.Vector3();
+  // Shadow dirty-flag: the 10-frame cadence is kept, but frames where nobody
+  // moved skip the re-render — six hitches/s becomes one hitch/s when holding
+  // an angle (exactly when the player is trying to aim).
+  private lastShadowEye = new THREE.Vector3(Infinity, Infinity, Infinity);
+  private lastShadowHash = '';
+  // HUD allocation scratch — hud() is called 20×/s, so we reuse the inner arrays
+  // instead of allocating 400 small objects/s that tick the GC (F4).
+  private _hudPingsScratch: { dir: number; age: number }[] = [];
+  private _hudEnemiesScratch: { nx: number; nz: number; yaw: number; hot: boolean }[] = [];
+  private _hudPlayerMapScratch = { nx: 0.5, nz: 0.5 };
   private bloom!: UnrealBloomPass;
   private vignettePass!: ShaderPass;
   private sunLight!: THREE.DirectionalLight;
@@ -494,6 +507,7 @@ export class Engine {
   private lean = 0; // -1 (Left), 0 (Center), +1 (Right)
   private leanTarget = 0;
   private ads = 0;
+  private adsVel = 0; // spring velocity for ADS overshoot (G1)
   private sprinting = false;
   private sprintToFireDelay = 0;
   private sprintToAdsDelay = 0;
@@ -567,6 +581,8 @@ export class Engine {
   private vmKickRot = 0;
   private muzzleFlash!: THREE.Mesh;
   private vmLight!: THREE.PointLight;
+  private vmFill!: THREE.DirectionalLight;
+  private vmRimBoost = 0; // W3 material read: post-fire rim lift for 16 frames
 
   // Grenades
   private frags = 5;
@@ -780,10 +796,13 @@ void main(){
     this.vmScene.add(vmSun);
     // Cool camera-side fill: with the warm key alone the gun went near-black on
     // the cool Town map (audit G4). The key stays dominant; this only lifts the
-    // shadow side so materials keep reading.
-    const vmFill = new THREE.DirectionalLight(0xB9C8E8, 0.9);
+    // shadow side so materials keep reading. Bumped 0.9→1.05 (W3) so metal vs
+    // polymer read on the warm map too; a 16-frame rim after each shot sells the
+    // flash against the viewmodel without washing the world.
+    const vmFill = new THREE.DirectionalLight(0xB9C8E8, 1.05);
     vmFill.position.set(-1.5, 0.8, 1.5);
     this.vmScene.add(vmFill);
+    this.vmFill = vmFill;
     this.vmLight = new THREE.PointLight(0xFFC070, 0, 4);
     this.vmScene.add(this.vmLight);
 
@@ -1796,7 +1815,10 @@ void main(){
     this.mags[this.cur]--;
     this.fireCD = 60 / d.rpm;
     this.shots++;
-    if (d.boltAction ?? this.cur === 3) { this.boltCycle = 1.25; this.rmb = false; }
+    // G4: Bolt-actions keep ADS if the player is still holding RMB — the 1.25 s
+    // bolt cycle already blocks aim via `wantAds: rmb && boltCycle<=0`, so forcing
+    // rmb=false only made the felt TTK ~2 s and hid recoil. Keep the hold.
+    if (d.boltAction ?? this.cur === 3) { this.boltCycle = 1.25; /* keep rmb — let boltCycle gate ADS */ }
     this.shotResetT = 0.28;
     if (d.pumpShotgun) {
       this.pumpT = 0.5;
@@ -1888,11 +1910,11 @@ void main(){
           audio.killConfirm();
           this.defusal.handleKill('player', tdmBot, part === 'head', wid);
           this.hitstopT = HITSTOP_KILL_SECONDS;
-          this.onEvent({ type: 'hit', kill: true });
+          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head' });
           this.rebuildHittables();
         } else {
           audio.hitMarker();
-          this.onEvent({ type: 'hit', kill: false });
+          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head' });
         }
         continue;
       }
@@ -1915,11 +1937,11 @@ void main(){
           if (part === 'head') { this.headshots++; voice.headshot(); }
           this.creditTdmKill(tdmBot, part === 'head', d.name, part === 'head' ? 150 : 100);
           this.hitstopT = HITSTOP_KILL_SECONDS;
-          this.onEvent({ type: 'hit', kill: true });
+          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head' });
           this.rebuildHittables();
         } else {
           audio.hitMarker();
-          this.onEvent({ type: 'hit', kill: false });
+          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head' });
         }
         continue;
       }
@@ -1976,12 +1998,12 @@ void main(){
             }
           }
           this.hitstopT = HITSTOP_KILL_SECONDS;
-          this.onEvent({ type: 'hit', kill: true });
+          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head' });
           this.onEvent({ type: 'kill', name: enemy.name, weapon: d.name, headshot: part === 'head' });
           this.rebuildHittables();
         } else {
           audio.hitMarker();
-          this.onEvent({ type: 'hit', kill: false });
+          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head' });
         }
       } else {
         const n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : dir.clone().negate();
@@ -2032,6 +2054,7 @@ void main(){
     // is 1.35 instead of 1.95 (linear ratio would be 1.11; a touch bigger sells it).
     this.muzzleFlash.scale.setScalar((0.85 + Math.random() * 0.5) * (d.suppressed ? 0.45 : 1.2) * (d.flashMul ?? 1));
     this.vmLight.intensity = d.suppressed ? 1.2 : 3.5;
+    this.vmRimBoost = 1.0; // W3 material rim boost
     // One scratch vector feeds the muzzle light, the hanging smoke puff and the
     // brass origin — no per-shot allocation on top of the existing pellet math.
     // Smoke fires even suppressed (cans trap gas and puff harder); only the light
@@ -3208,12 +3231,26 @@ void main(){
     this.sprintToAdsDelay = Math.max(0, this.sprintToAdsDelay - dt);
     this.sprintToFireDelay = Math.max(0, this.sprintToFireDelay - dt);
 
-    // Smooth, frame-rate independent scope-in/out (fast attack, soft settle — no linear snap)
+    // ADS spring: under-damped 2nd-order so the optic has 6–8% overshoot + 90 ms
+    // settle instead of a UI tween. Feels like a mass seating against the eye
+    // (G1). Tuned against recoilRecovery(0.155) so bursts still stack climb.
     {
       const target = wantAds && this.sprintToAdsDelay <= 0 ? 1 : 0;
-      const rate = target ? 3.2 / (this.def().adsTime ?? 0.22) : 18;
-      this.ads += (target - this.ads) * (1 - Math.exp(-dt * rate));
-      if (Math.abs(target - this.ads) < 0.004) this.ads = target;
+      // Fast-in (scope) gets a spring, fast-out (unscope) stays snappy
+      if (target === 1) {
+        const k = 92, d = 15, maxVel = 4;
+        this.adsVel += (target - this.ads) * k * dt - this.adsVel * d * dt;
+        this.adsVel = Math.max(-maxVel, Math.min(maxVel, this.adsVel));
+        this.ads += this.adsVel * dt;
+        this.ads = Math.max(0, Math.min(1.08, this.ads)); // allow 8% overshoot
+        if (this.ads > 1 && this.adsVel > 0) this.adsVel *= 0.55; // soft cap
+        if (Math.abs(target - this.ads) < 0.004 && Math.abs(this.adsVel) < 0.015) { this.ads = target; this.adsVel = 0; }
+      } else {
+        const rate = 18;
+        this.ads += (target - this.ads) * (1 - Math.exp(-dt * rate));
+        this.adsVel *= Math.max(0, 1 - dt * 22);
+        if (Math.abs(target - this.ads) < 0.004) { this.ads = target; this.adsVel = 0; }
+      }
     }
 
     // ==================== MOVEMENT SPEED & SPRINT DELAYS ====================
@@ -3525,9 +3562,12 @@ void main(){
     const sway=(this.ads>.5 ? this.ads : 0) * (weapon.swayMul??1) * (this.crouched ? (weapon.swayMulCrouched??1)*.65 : 1) * (this.bipodDeployed() ? .55 : 1);
     const swayPitch=Math.sin(time*1.53)*.00095*sway, swayYaw=Math.sin(time*1.17+.7)*.00065*sway;
     this.camera.position.copy(eye);
+    // Camera recoil now respects ADS (×0.65) so the sight stays on target (G2).
+    // Viewmodel kick already halves; without this the world jolted more than the gun.
+    const adsRecoil = 1 - this.ads * 0.35;
     this.camera.rotation.set(
-      this.pitch + this.recoilP + swayPitch + (this.sprinting ? -0.02 : 0) + (this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.05 * this.motionBlurAmount : 0),
-      this.yaw + this.recoilY + swayYaw,
+      this.pitch + this.recoilP * adsRecoil + swayPitch + (this.sprinting ? -0.02 : 0) + (this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.05 * this.motionBlurAmount : 0),
+      this.yaw + this.recoilY * adsRecoil + swayYaw,
       roll
     );
 
@@ -3719,6 +3759,11 @@ void main(){
     d.model.muzzle.getWorldPosition(mw);
     this.muzzleFlash.position.copy(mw);
     this.vmLight.position.copy(mw);
+    // W3 rim: 16-frame cool rim after each shot so the gun flash reads on both maps
+    if (this.vmFill) {
+      this.vmRimBoost = Math.max(0, this.vmRimBoost - dt * 6);
+      this.vmFill.intensity = 1.05 + this.vmRimBoost * 0.85;
+    }
     this.updateTactical(d);
   }
   /** Rail laser dot + weapon flashlight, driven by the fitted rail box. */
@@ -3802,13 +3847,27 @@ void main(){
     // rendered once on frame 1 and never again. Refreshing every 10th frame keeps
     // characters grounded at ~6 Hz — imperceptible staleness for ~1/10th of one
     // shadow pass amortised, and still zero cost with shadows off.
+    // Dirty-flag: skip the re-render if the player and every living enemy/bot
+    // have been still (±0.5 m player, ±0.8 m enemies) since the last shadow frame.
+    // Six hitches/s collapses to ~1/s when holding an angle — exactly when the
+    // player is trying to aim (R1).
     if (this.frameNo <= 2 || this.frameNo % 10 === 0) {
-      this.renderer.shadowMap.needsUpdate = true;
-      // Re-aim the shadow box only on frames that re-render it, so the map and the
-      // matrices sampling it always agree.
-      if (this.sunLight?.castShadow) {
-        this.camera.getWorldDirection(this.shadowFwd);
-        fitSunShadow(this.sunLight, this.sunDir, this.camera.position, this.shadowFwd);
+      const q = (v: number) => Math.round(v / 0.8);
+      let curHash = `${q(this.pos.x)},${q(this.pos.z)}|`;
+      if (this.ai) for (const e of this.ai.enemies) if (!e.dead) curHash += `${e.id}:${q(e.pos.x)},${q(e.pos.z)};`;
+      if (this.tdm) for (const b of this.tdm.bots) if (!b.dead) curHash += `b${b.name}:${q(b.pos.x)},${q(b.pos.z)};`;
+      if (this.defusal) for (const c of this.defusal.players) if (c.alive && c.bot) curHash += `d${c.id}:${q(c.bot.pos.x)},${q(c.bot.pos.z)};`;
+      const eyeMoved = this.pos.distanceTo(this.lastShadowEye) > 0.5;
+      const hashMoved = curHash !== this.lastShadowHash;
+      const dirty = this.frameNo <= 2 || eyeMoved || hashMoved;
+      if (dirty) {
+        this.renderer.shadowMap.needsUpdate = true;
+        if (this.sunLight?.castShadow) {
+          this.camera.getWorldDirection(this.shadowFwd);
+          fitSunShadow(this.sunLight, this.sunDir, this.camera.position, this.shadowFwd);
+        }
+        this.lastShadowEye.copy(this.pos);
+        this.lastShadowHash = curHash;
       }
     }
     if (this.postFxOn) {
@@ -4001,6 +4060,13 @@ void main(){
         if (d < nd) { nd = d; nearest = { angle: this.dirToScreenDeg(b.pos), dist: d, above: b.pos.y - this.pos.y }; }
       }
     }
+    // Landmark read (M2): closest named landmark within 80 m, for the compass strip
+    let landmark: HudState['landmark'] = null;
+    let bestDist = Infinity;
+    for (const lm of this.world.landmarks) {
+      const d = lm.at.distanceTo(this.pos);
+      if (d < bestDist && d < 80) { bestDist = d; landmark = { name: lm.name, dist: Math.round(d), angle: this.dirToScreenDeg(lm.at) }; }
+    }
     return {
       hp: Math.round(this.hp),
       mag: this.mags[this.cur],
@@ -4041,34 +4107,59 @@ void main(){
         : this.isTDM && this.tdm ? this.tdm.aliveCount('bravo') : this.ai.aliveCount(),
       cooking: this.cooking,
       sprinting: this.sprinting,
+      sprintLock: this.sprintToFireDelay,
       ads: this.ads,
       spread: this.spreadNow,
-      pings: this.pings.map(p => ({ dir: p.dir, age: p.age })),
+      // HUD scratch reuse (F4) — pings/playerMap/enemiesMap are the only per-frame
+      // allocations in hud(); reusing the backing arrays cuts ~400 small objects/s.
+      // We still return a new outer HudState each call, but the inner arrays and
+      // their element objects are recycled (only grown, never re-allocated).
+      pings: (() => {
+        const src = this.pings, dst = this._hudPingsScratch;
+        dst.length = src.length;
+        for (let i = 0; i < src.length; i++) {
+          const s = src[i]; const o = dst[i] as { dir: number; age: number } | undefined;
+          if (!o) dst[i] = { dir: s.dir, age: s.age };
+          else { o.dir = s.dir; o.age = s.age; }
+        }
+        return dst;
+      })(),
       grenadeDist: this.lastGrenadeDist,
       grenadeAngle: this.lastGrenadeAngle,
       // Accurate map data (consumed by the HUD tactical radar)
       mapImage: this.mapImage,
-      playerMap: { nx: (this.pos.x + H) / (2 * H), nz: (this.pos.z + H) / (2 * H) },
-      enemiesMap: this.defusal
-        // competitive radar: only enemies you or a teammate can actually see
-        ? this.defusal.spottedEnemies().map(b => ({ nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H), yaw: -b.yaw * 180 / Math.PI, hot: true }))
-        : this.isTDM && this.tdm
-        ? this.tdm.bots
-          .filter(b => !b.dead && b.team === 'bravo' && (this.kits?.isRevealed(b) || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR))
-          .map(b => ({
-            nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H),
-            yaw: -b.yaw * 180 / Math.PI,
-            hot: b.onFire || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK',
-          }))
-        : this.ai.enemies
-          .filter(e => !e.dead && (this.kits?.isRevealed(e) || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR))
-          .map(e => ({
-            nx: (e.pos.x + H) / (2 * H), nz: (e.pos.z + H) / (2 * H),
-            // Heading (deg) + engagement state let the radar draw directional
-            // wedges and burn hostiles red the moment they have eyes on you.
-            yaw: -e.yaw * 180 / Math.PI,
-            hot: e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE',
-          })),
+      playerMap: (() => {
+        this._hudPlayerMapScratch.nx = (this.pos.x + H) / (2 * H);
+        this._hudPlayerMapScratch.nz = (this.pos.z + H) / (2 * H);
+        return this._hudPlayerMapScratch;
+      })(),
+      enemiesMap: (() => {
+        const dst = this._hudEnemiesScratch;
+        let n = 0;
+        const push = (nx: number, nz: number, yaw: number, hot: boolean) => {
+          const o = dst[n] as { nx: number; nz: number; yaw: number; hot: boolean } | undefined;
+          if (!o) dst[n] = { nx, nz, yaw, hot };
+          else { o.nx = nx; o.nz = nz; o.yaw = yaw; o.hot = hot; }
+          n++;
+        };
+        if (this.defusal) {
+          for (const b of this.defusal.spottedEnemies()) push((b.pos.x + H) / (2 * H), (b.pos.z + H) / (2 * H), -b.yaw * 180 / Math.PI, true);
+        } else if (this.isTDM && this.tdm) {
+          for (const b of this.tdm.bots) {
+            if (b.dead || b.team !== 'bravo') continue;
+            if (!(this.kits?.isRevealed(b) || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR)) continue;
+            push((b.pos.x + H) / (2 * H), (b.pos.z + H) / (2 * H), -b.yaw * 180 / Math.PI, !!(b.onFire || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK'));
+          }
+        } else {
+          for (const e of this.ai.enemies) {
+            if (e.dead) continue;
+            if (!(this.kits?.isRevealed(e) || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR)) continue;
+            push((e.pos.x + H) / (2 * H), (e.pos.z + H) / (2 * H), -e.yaw * 180 / Math.PI, !!(e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE'));
+          }
+        }
+        dst.length = n;
+        return dst;
+      })(),
       alliesMap: this.isTDM && this.tdm
         ? this.tdm.bots.filter(b => !b.dead && b.team === 'alpha')
           .map(b => ({ nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H), yaw: -b.yaw * 180 / Math.PI }))
@@ -4084,6 +4175,7 @@ void main(){
         };
       })(),
       nearest,
+      landmark,
       fps: Math.round(this.fps),
       renderScale: Math.round(this.dynPR / Math.min(window.devicePixelRatio || 1, 1.25) * 100),
       magSize: this.def().magSize,

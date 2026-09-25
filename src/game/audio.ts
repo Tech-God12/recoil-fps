@@ -341,6 +341,36 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.025, gain: 0.35, freq: 2600, q: 1.8, when: 0.07 });
   }
 
+  /** Supersonic bullet crack when a round passes <4 m — sharp band-passed snap
+   *  with a whip-like 7 kHz transient. 2-D so it lands in both ears even under HRTF. */
+  bulletCrack() {
+    // G5: the "where did that come from?" cue PUBG/Apex rely on for readable fire.
+    this.burstDirect({ dur: 0.038, gain: 0.68, freq: 7200, q: 1.8, hp: 4200 });
+    this.burstDirect({ dur: 0.05, gain: 0.22, freq: 3800, q: 2.2, when: 0.012, hp: 2000 });
+  }
+  /** 3-D crack placed at the closest approach to the player — so the snap
+   *  pans to the side the round actually passed on. */
+  bulletCrackSpatial(wx: number, wy: number, wz: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    panner.refDistance = 1.2; panner.rolloffFactor = 1.4;
+    const when = ctx.currentTime;
+    const mk = (freq: number, gain: number, dur: number, hp?: number) => {
+      const src = ctx.createBufferSource(); src.buffer = this.noise();
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.8;
+      let out: AudioNode = bp;
+      if (hp) { const h = ctx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; bp.connect(h); out = h; }
+      const g = ctx.createGain(); g.gain.setValueAtTime(gain, when); g.gain.exponentialRampToValueAtTime(0.001, when + dur);
+      src.connect(bp); out.connect(g); g.connect(panner);
+      src.start(when); src.stop(when + dur + 0.02);
+      src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); if (out!==bp) (out as BiquadFilterNode).disconnect(); };
+    };
+    mk(7200, 0.72, 0.04, 4200);
+    mk(3800, 0.26, 0.055, 2000);
+    // auto-clean panner after the transient
+    setTimeout(() => { try { panner.disconnect(); } catch { /* already disconnected */ } }, 300);
+  }
+
   /** Ejected casing: a bright delayed tink ~90 ms after the report, when brass
    *  meets ground. Quiet on purpose — it should be felt, not heard over the gun. */
   fireCasing() {

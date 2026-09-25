@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { buildSoldier, updateWeaponLod, type SoldierModel } from './models';
 import { BodyReactions, surfaceUnder, type HitInfo } from './reactions';
 import type { Effects } from './effects';
+import { audio } from './audio';
 import type { AABB } from './world';
 import { PRESSURE_BUDGET, type ReinforcementBatch } from './systems/reinforcements';
 import type { Position } from './systems/mission';
@@ -518,6 +519,22 @@ export class Enemy {
     } else {
       const miss = (this.hasLOS ? pp : this.lastKnown).clone().add(new THREE.Vector3((Math.random() - .5) * 3, 0.8 + (Math.random() - .3) * 2, (Math.random() - .5) * 3));
       ctx.effects.tracer(muzzle, miss, true);
+      // G5 near-miss crack: the player hears a supersonic snap when a miss
+      // passes within 4 m — Apex/PUBG's primary directional tell for enemy fire.
+      if (this.hasLOS && ctx.playerAlive()) {
+        const dir = tmpV.copy(miss).sub(muzzle).normalize();
+        const toPlayer = pp.clone().sub(muzzle);
+        const proj = toPlayer.dot(dir);
+        // closest point only counts if it's between muzzle and miss and not behind the player
+        if (proj > 0 && proj < muzzle.distanceTo(miss)) {
+          const closest = muzzle.clone().addScaledVector(dir, proj);
+          const side = closest.distanceTo(pp);
+          if (side < 4) {
+            // place the crack at the closest approach so HRTF pans it to the correct ear
+            try { audio.bulletCrackSpatial(closest.x, closest.y, closest.z); } catch { /* audio may be unavailable (headless) */ }
+          }
+        }
+      }
     }
   }
 

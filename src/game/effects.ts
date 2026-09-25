@@ -23,9 +23,10 @@ interface BurstSlot {
   active: boolean;
 }
 
-const decalGeo = new THREE.CircleGeometry(0.035, 8);
+const decalGeo = new THREE.CircleGeometry(0.035, 10);
 const bulletHoleMat = new THREE.MeshBasicMaterial({ color: 0x141210, transparent: true, opacity: 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
 const bloodDecalMat = new THREE.MeshBasicMaterial({ color: 0x7A0A0A, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+const bloodGeo = new THREE.CircleGeometry(1, 10);
 const tracerMat = new THREE.MeshBasicMaterial({ color: 0xFFC46B, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
 const tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 1);
 
@@ -49,10 +50,14 @@ export class Effects {
   private readonly _bp = new THREE.Vector3();
   private tracers: { mesh: THREE.Mesh; life: number; active: boolean; from: THREE.Vector3; direction: THREE.Vector3; distance: number; travel: number; speed: number }[] = [];
   private tracerIdx = 0;
-  private holes: THREE.Mesh[] = [];
+  // Bullet holes + blood are now instanced (2 draws total, not 260). Each instance
+  // is parked at scale 0 below the world when unused, so an empty match costs
+  // zero visible fragments and zero graph traversal.
+  private holesMesh!: THREE.InstancedMesh;
+  private bloodMesh!: THREE.InstancedMesh;
   private holeIdx = 0;
-  private bloods: THREE.Mesh[] = [];
   private bloodIdx = 0;
+  /** Legacy array exposure for any external count checks — kept as getters below. */
   private dust: THREE.Points;
   private dustVel: Float32Array;
   private flashLight: THREE.PointLight;
@@ -60,18 +65,32 @@ export class Effects {
   // scratch (no alloc in hot paths)
   private readonly _v1 = new THREE.Vector3();
   private readonly _v2 = new THREE.Vector3();
+  private readonly _v3 = new THREE.Vector3();
+  private readonly _upZ = new THREE.Vector3(0, 0, 1);
+  private readonly _scale = new THREE.Vector3();
 
   constructor(scene: THREE.Scene) {
-    for (let i = 0; i < 200; i++) {
-      const m = new THREE.Mesh(decalGeo, bulletHoleMat);
-      m.visible = false; m.renderOrder = 2;
-      scene.add(m); this.holes.push(m);
-    }
-    for (let i = 0; i < 60; i++) {
-      const m = new THREE.Mesh(new THREE.CircleGeometry(0.3 + Math.random() * 0.3, 10), bloodDecalMat);
-      m.visible = false; m.renderOrder = 2;
-      scene.add(m); this.bloods.push(m);
-    }
+    // Holes: one InstancedMesh, 200 instances. Hidden instances sit at scale 0
+    // 100 m below the map (never frustum-culled, still batched).
+    this.holesMesh = new THREE.InstancedMesh(decalGeo, bulletHoleMat, 200);
+    this.holesMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.holesMesh.frustumCulled = false;
+    this.holesMesh.renderOrder = 2;
+    this.holesMesh.count = 200;
+    this._m4.compose(this._bp.set(0, -100, 0), this._q.identity(), this._zero);
+    for (let i = 0; i < 200; i++) this.holesMesh.setMatrixAt(i, this._m4);
+    this.holesMesh.instanceMatrix.needsUpdate = true;
+    scene.add(this.holesMesh);
+    // Blood: one InstancedMesh, 60 instances, unit disc scaled per splat so
+    // the random radius (0.3–0.6) lives in the matrix, not in 60 geometries.
+    this.bloodMesh = new THREE.InstancedMesh(bloodGeo, bloodDecalMat, 60);
+    this.bloodMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.bloodMesh.frustumCulled = false;
+    this.bloodMesh.renderOrder = 2;
+    this.bloodMesh.count = 60;
+    for (let i = 0; i < 60; i++) this.bloodMesh.setMatrixAt(i, this._m4);
+    this.bloodMesh.instanceMatrix.needsUpdate = true;
+    scene.add(this.bloodMesh);
     // preallocated burst pool — buffers reused forever, never disposed
     for (let i = 0; i < MAX_BURSTS; i++) this.bursts.push(Effects.makeSlot(scene));
     // dedicated smoke pool — same slot shape, separate ring (see MAX_SMOKES)
@@ -172,22 +191,28 @@ export class Effects {
     this.brassSpin[i] = 8 + Math.random() * 10;
   }
 
-  /** Release the brass instance buffer. (Geometries/materials are owned by the
-   *  engine's dispose traversal; only the InstancedMesh needs an explicit call.) */
+  /** Release instance buffers. Geometries/materials are owned by the engine's
+   *  dispose traversal; only InstancedMeshes need an explicit dispose. */
   dispose() {
     this.brass.dispose();
+    this.holesMesh.dispose();
+    this.bloodMesh.dispose();
   }
 
   impact(pos: THREE.Vector3, normal: THREE.Vector3) {
     this._v1.copy(pos).addScaledVector(normal, 0.03);
     this.burst(this._v1, 8, 0xC8B080, 2.2, 0.4, 4);
     this.burst(this._v1, 5, 0xFFE9B0, 3.4, 0.12, 2, 0.08); // white-hot strike flash
-    const m = this.holes[this.holeIdx];
-    this.holeIdx = (this.holeIdx + 1) % this.holes.length;
-    m.visible = true;
-    m.position.copy(pos).addScaledVector(normal, 0.012);
-    this._v2.copy(pos).add(normal);
-    m.lookAt(this._v2);
+    // orient the disc so its +Z faces the surface normal (CircleGeometry lies in XY)
+    this._v3.copy(pos).addScaledVector(normal, 0.012);
+    // normal may be zero if the caller passed a degenerate — guard against NaN quat
+    const nlen = normal.lengthSq();
+    if (nlen > 1e-6) this._q.setFromUnitVectors(this._upZ, this._v2.copy(normal).normalize());
+    else this._q.identity();
+    this._m4.compose(this._v3, this._q, this._one);
+    this.holesMesh.setMatrixAt(this.holeIdx, this._m4);
+    this.holesMesh.instanceMatrix.needsUpdate = true;
+    this.holeIdx = (this.holeIdx + 1) % 200;
   }
 
   glassShatter(pos: THREE.Vector3) {
@@ -201,11 +226,15 @@ export class Effects {
 
   /** Blood pools on the actual standing surface (crate/roof included), not the ground plane. */
   bloodDecal(pos: THREE.Vector3, surfaceY = 0) {
-    const m = this.bloods[this.bloodIdx];
-    this.bloodIdx = (this.bloodIdx + 1) % this.bloods.length;
-    m.visible = true;
-    m.position.set(pos.x, surfaceY + 0.035, pos.z);
-    m.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI);
+    const r = 0.30 + Math.random() * 0.30;
+    this._v3.set(pos.x, surfaceY + 0.035, pos.z);
+    this._e.set(-Math.PI / 2, 0, Math.random() * Math.PI);
+    this._q.setFromEuler(this._e);
+    this._scale.set(r, r, 1);
+    this._m4.compose(this._v3, this._q, this._scale);
+    this.bloodMesh.setMatrixAt(this.bloodIdx, this._m4);
+    this.bloodMesh.instanceMatrix.needsUpdate = true;
+    this.bloodIdx = (this.bloodIdx + 1) % 60;
   }
 
   enemyMuzzle(pos: THREE.Vector3) {

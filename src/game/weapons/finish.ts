@@ -69,7 +69,7 @@ export class WeaponFinish extends THREE.MeshStandardMaterial {
     this.map = wood ? walnut : kind === 'grip' || kind === 'rubber' ? stipple : metal;
     this.roughnessMap = wood ? walnutRough : metalRough;
     this.bumpMap = kind === 'checkeredWood' ? woodDiamonds : grip ? diamonds : wood ? walnutRough : kind === 'steel' ? metalRough : stipple;
-    this.bumpScale = kind === 'checkeredWood' ? 0.00032 : grip ? 0.00020 : wood ? 0.00008 : kind === 'steel' ? 0.00011 : 0.000065;
+    this.bumpScale = kind === 'checkeredWood' ? 0.00032 : grip ? 0.00020 : wood ? 0.00008 : kind === 'steel' ? 0.00013 : 0.000065; // W3: 0.00011→0.00013 so steel micro-scratch reads at 1.35 scale
     this.userData.finish = {
       kind, tile: wood ? 0.22 : grip ? 0.026 : kind === 'steel' ? 0.14 : 0.17,
       wear: kind === 'steel' ? 0.72 : wood ? 0.16 : kind === 'rubber' ? 0.05 : 0.15,
@@ -81,7 +81,7 @@ export class WeaponFinish extends THREE.MeshStandardMaterial {
     const style = this.userData.finish as FinishStyle;
     shader.uniforms.weaponWearColor = { value: new THREE.Color(style.wearColor) };
     shader.uniforms.weaponDistress = { value: distress };
-    shader.uniforms.weaponScuffAmount = { value: style.kind === 'steel' ? .20 : style.kind === 'polymer' ? .12 : .04 };
+    shader.uniforms.weaponScuffAmount = { value: style.kind === 'steel' ? .22 : style.kind === 'polymer' ? .12 : .04 }; // W3: steel .20→.22 (+10% grain)
     shader.uniforms.weaponWearAmount = { value: style.wear };
     shader.uniforms.weaponCheckering = { value: style.kind === 'checkeredWood' ? 1 : style.kind === 'grip' ? 0.55 : 0 };
     shader.vertexShader = shader.vertexShader

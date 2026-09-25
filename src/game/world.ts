@@ -4,18 +4,22 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { getMaterials, type TextureSet } from './textures';
+import { buildSirocco } from './maps/sirocco-build';
 
 // Install BVH acceleration globally (huge raycast speed-up for merged meshes)
 (THREE.BufferGeometry.prototype as unknown as { computeBoundsTree: typeof computeBoundsTree }).computeBoundsTree = computeBoundsTree;
 (THREE.BufferGeometry.prototype as unknown as { disposeBoundsTree: typeof disposeBoundsTree }).disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type MapId = 'alrasul' | 'kasbah' | 'arena';
+export type MapId = 'alrasul' | 'kasbah' | 'arena' | 'sirocco';
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
   { id: 'alrasul', name: 'Sandblast', desc: 'Two bridges. One dry river. A souk under siege in the shadow of the water tower.' },
   { id: 'kasbah', name: 'Town', desc: 'Six trades beneath a stone crown. Break the citadel, then disappear through the west gate.' },
   { id: 'arena', name: 'Warehouse', desc: '5v5 team deathmatch. Twin steel warehouses, container yards and barricade lines. Most kills in 2:30 wins.' },
+  { id: 'sirocco', name: 'Sirocco', desc: '5v5 bomb defusal. A desert town of three lanes — A long, mid and the B tunnels — around two bomb sites. First to 7 rounds.' },
 ];
+/** Story maps with a mission runtime (theater select, settings map picker). */
+export const isMissionMap = (id: MapId): id is 'alrasul' | 'kasbah' => id === 'alrasul' || id === 'kasbah';
 
 export interface AABB { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
 export interface WindowHole { x: number; y: number; z: number; nx: number; nz: number } // center + outward normal (horizontal)
@@ -583,8 +587,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   }
 
   const playerSpawn = new THREE.Vector3();
-  const half = mapId === 'alrasul' ? 124 : mapId === 'arena' ? 56 : 134;
-  if (mapId !== 'arena') {
+  const half = mapId === 'alrasul' ? 124 : mapId === 'arena' ? 56 : mapId === 'sirocco' ? 44 : 134;
+  if (isMissionMap(mapId)) {
   terrain(520, half + 12);
   perimeter(half);
   for (const side of [-1,1]) {
@@ -1062,6 +1066,17 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     landmarks.push({ name: 'Alpha yard', at: new THREE.Vector3(0, 2, 48) }, { name: 'Bravo yard', at: new THREE.Vector3(0, 2, -48) });
   }
 
+  // =====================================================================
+  // SIROCCO — 5v5 Bomb Defusal (layout: maps/sirocco.ts, geometry: maps/sirocco-build.ts)
+  // =====================================================================
+  if (mapId === 'sirocco') {
+    buildSirocco({
+      M, col, METAL, GLOW, FROND, ACC_TURQ, ACC_TERRA, FABRIC,
+      box, shape, dressing, ground, cover, palm, lamp, banner, sandbags, terrain,
+      group, solids, interiors, concrete, lightSpots, landmarks, soundTraps, arenaFx, playerSpawn,
+    });
+  }
+
   if (mapId === 'alrasul') {
     playerSpawn.set(-12, 0, 94);
     // Inhabited edges, authored in small offset clusters rather than a repeating tile grid.
@@ -1334,7 +1349,10 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const g of geos) g.dispose();
     (merged as unknown as { computeBoundsTree(): void }).computeBoundsTree();
     const mesh = new THREE.Mesh(merged, m);
-    mesh.castShadow = m !== smokeMaterial; mesh.receiveShadow = true;
+    // Terrain (the only M.sand user) is receive-only: a 36k-tri, ±260 m sheet whose
+    // gentle undulation never shadows anything inside the playfield, yet it was a
+    // third of Sandblast's whole shadow pass. Frame budget, docs/frame-budget.md.
+    mesh.castShadow = m !== smokeMaterial && m !== M.sand; mesh.receiveShadow = true;
     mesh.frustumCulled = false;
     batch.group.add(mesh);
     if (m !== smokeMaterial) batch.meshes.push(mesh);

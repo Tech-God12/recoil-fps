@@ -161,9 +161,10 @@ export default function App() {
         later(() => setFx(f => f.hitmark?.id === id ? { ...f, hitmark: null } : f), event.kill ? 450 : 260);
         break;
       case 'kill':
+        // Self-review fix U6: structured feed (killer/weapon/victim) keeps text for compat but Hud prefers structured fields
         setFx(f => ({
           ...f,
-          feed: [...f.feed.slice(-2), { id, text: `YOU  [${event.weapon}]  ${event.name}`, headshot: event.headshot }],
+          feed: [...f.feed.slice(-2), { id, text: `YOU  [${event.weapon}]  ${event.name}`, headshot: event.headshot, killer: 'YOU', weapon: event.weapon, victim: event.name } as unknown as HudFx['feed'][number]],
           scorePops: [...f.scorePops.slice(-2), { id, text: event.headshot ? '+150 HEADSHOT' : '+100', headshot: event.headshot }],
         }));
         later(() => setFx(f => ({ ...f, feed: f.feed.filter(row => row.id !== id) })), 5200);

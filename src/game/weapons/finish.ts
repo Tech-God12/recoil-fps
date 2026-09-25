@@ -15,7 +15,7 @@ function imageTexture(url: string, srgb = false): THREE.Texture {
   texture.name = url.split('/').pop()!;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-  texture.anisotropy = 8;
+  texture.anisotropy = 4;
   if (typeof document !== 'undefined' && typeof document.createElementNS === 'function') {
     pending.push(new Promise(resolve => {
       new THREE.ImageLoader().load(url, image => {
@@ -45,7 +45,7 @@ function microSurface(checkered: boolean): THREE.DataTexture {
   texture.name = checkered ? 'cut diamond checkering' : 'fine moulded polymer stipple';
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.magFilter = THREE.LinearFilter; texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.generateMipmaps = true; texture.anisotropy = 8; texture.needsUpdate = true;
+  texture.generateMipmaps = true; texture.anisotropy = 4; texture.needsUpdate = true;
   return texture;
 }
 
@@ -66,10 +66,22 @@ export class WeaponFinish extends THREE.MeshStandardMaterial {
     super(parameters);
     const wood = kind === 'wood' || kind === 'checkeredWood';
     const grip = kind === 'grip' || kind === 'checkeredWood';
-    this.map = wood ? walnut : kind === 'grip' || kind === 'rubber' ? stipple : metal;
+    const rubber = kind === 'rubber';
+    // ANTI-LAG: anisotropy 4× baseline (8× only on High shadow) — see engine.ts, keeps texture sampling cheap
+    const aniso = 4;
+    this.map = wood ? walnut : rubber ? stipple : grip ? stipple : metal;
     this.roughnessMap = wood ? walnutRough : metalRough;
     this.bumpMap = kind === 'checkeredWood' ? woodDiamonds : grip ? diamonds : wood ? walnutRough : kind === 'steel' ? metalRough : stipple;
     this.bumpScale = kind === 'checkeredWood' ? 0.00032 : grip ? 0.00020 : wood ? 0.00008 : kind === 'steel' ? 0.00011 : 0.000065;
+    // MATERIAL RESPONSE FIX (audit W7): metal vs polymer must read different under same light.
+    // Steel is moderately reflective (metalness 0.55, roughness 0.35), polymer is dielectric and rougher.
+    if (kind === 'steel') { this.metalness = 0.55; this.roughness = 0.38; }
+    else if (kind === 'polymer' || grip) { this.metalness = 0.02; this.roughness = 0.78; }
+    else if (wood || rubber) { this.metalness = 0.0; this.roughness = wood ? 0.62 : 0.85; }
+    // ensure anisotropy respects cap
+    if (this.map) this.map.anisotropy = aniso;
+    if (this.roughnessMap) this.roughnessMap.anisotropy = aniso;
+    if (this.bumpMap) this.bumpMap.anisotropy = aniso;
     this.userData.finish = {
       kind, tile: wood ? 0.22 : grip ? 0.026 : kind === 'steel' ? 0.14 : 0.17,
       wear: kind === 'steel' ? 0.72 : wood ? 0.16 : kind === 'rubber' ? 0.05 : 0.15,

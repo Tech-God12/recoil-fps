@@ -1,7 +1,8 @@
 // Recoil FPS — in-game HUD (VOLT PROTOCOL)
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
+import { TDM_RESPAWN_SECONDS } from '../game/tdm';
 import { isLowAmmo, shouldShowReload } from './hud-math';
 import MissionObjective, { missionClock } from './MissionObjective';
 import { CompHudLayer, CompScoreboard } from './Competitive';
@@ -173,7 +174,8 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         <div className="tdm-respawn" role="status">
           <span className="tdm-respawn-title">ELIMINATED</span>
           <span className="tdm-respawn-count">{Math.ceil(hud.tdm.respawnIn)}</span>
-          <div className="tdm-respawn-bar"><span style={{ width: `${(1 - hud.tdm.respawnIn / 5) * 100}%` }} /></div>
+          {/* FIX: use TDM_RESPAWN_SECONDS constant, not magic 5 */}
+          <div className="tdm-respawn-bar"><span style={{ width: `${(1 - hud.tdm.respawnIn / TDM_RESPAWN_SECONDS) * 100}%` }} /></div>
           <span className="tdm-respawn-sub">REDEPLOYING TO ALPHA YARD</span>
           <span className="tdm-respawn-score">ALPHA {hud.tdm.alphaScore} — {hud.tdm.bravoScore} BRAVO · YOUR KILLS {hud.tdm.playerKills}</span>
         </div>
@@ -194,10 +196,10 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         );
       })()}
 
-      {/* ============ COMPASS ============ */}
+      {/* ============ COMPASS — ANTI-LAG: memo ticks (73 nodes every 20 Hz = 1460 React nodes/s) */}
       <div className="compass">
         <div className="compass-strip">
-          {Array.from({ length: 73 }, (_, i) => i * 5).map(deg => {
+          {useMemo(() => Array.from({ length: 73 }, (_, i) => i * 5).map(deg => {
             let rel = deg - hud.bearing;
             while (rel > 180) rel -= 360; while (rel < -180) rel += 360;
             if (Math.abs(rel) > 58) return null;
@@ -209,7 +211,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
                 {(card || inter) && <div className={`compass-card ${card ? 'text-white' : 'text-white/40'}`}>{card || inter}</div>}
               </div>
             );
-          })}
+          }), [hud.bearing])}
           {hud.mission && (() => {
             const rel = hud.mission.relativeBearing;
             if (Math.abs(rel) > 58) return null;
@@ -233,9 +235,9 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         </div>
       )}
 
-      {/* ============ KILL FEED + FPS ============ */}
+      {/* ============ KILL FEED + FPS — capped at 5 latest for readability */}
       <div className="absolute top-14 right-5 flex flex-col items-end gap-1.5">
-        {fx.feed.map(f => f.tdm ? (
+        {fx.feed.slice(-5).map(f => f.tdm ? (
           <div key={f.id} className="feed-row text-right">
             <span className={`font-black ${f.tdm.killer === 'YOU' ? 'text-[var(--brass)]' : f.tdm.killerTeam === 'alpha' ? 'text-[#7FC4D4]' : 'text-[#E08A7E]'}`}>{f.tdm.killer || '—'}</span>
             <span className="mono text-[var(--steel)] text-[9px] mx-1.5">[{f.tdm.weapon}]</span>
@@ -245,10 +247,10 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
           </div>
         ) : (
           <div key={f.id} className="feed-row text-right">
-            <span className="text-[var(--brass)] font-black">YOU</span>
-            <span className="mono text-[var(--steel)] text-[9px] mx-1.5">{f.text.split('  ')[1]}</span>
+            <span className="text-[var(--brass)] font-black">{(f as unknown as { killer?: string }).killer ?? 'YOU'}</span>
+            <span className="mono text-[var(--steel)] text-[9px] mx-1.5">{(f as unknown as { weapon?: string }).weapon ? `[${(f as unknown as { weapon: string }).weapon}]` : f.text.split('  ')[1]}</span>
             {f.headshot && <span className="text-[var(--blood)] font-black mr-1 text-[10px] tracking-wider">HS</span>}
-            <span className="text-white/90">{f.text.split('  ')[2]}</span>
+            <span className="text-white/90">{(f as unknown as { victim?: string }).victim ?? f.text.split('  ')[2]}</span>
           </div>
         ))}
       </div>
@@ -437,8 +439,8 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         );
       })()}
 
-      {/* ============ AMMO ============ */}
-      {!spectating && <div className="absolute bottom-7 right-8 text-right">
+      {/* ============ AMMO — high-contrast plate (audit U9): readability on bright desert */}
+      {!spectating && <div className="absolute bottom-7 right-8 text-right hud-chip" style={{ background: 'rgba(12,10,8,0.72)', backdropFilter: 'blur(6px)', padding: '10px 14px', borderRadius: '10px' }}>
         <div className="weapon-name">{hud.weapon}</div>
         <div className="weapon-card mono" aria-label="Loadout">
           <span className={hud.heldSlot === 'primary' ? 'held' : ''}>1 · {hud.heldSlot === 'primary' ? hud.weapon : hud.secondaryWeapon}</span>

@@ -64,8 +64,25 @@ export class SpatialAudioEngine {
   }
 
   // Update Listener position & orientation for HRTF spatialization
+  // ANTI-LAG: also prune expired spatial panners here (was only on creation → leaked 24 panners in quiet scenes)
   updateListener(posX: number, posY: number, posZ: number, fwdX: number, fwdY: number, fwdZ: number, upX = 0, upY = 1, upZ = 0) {
     if (!this.ctx) return;
+    // Prune any voices past expiry (limit 16 not 24 — each HRTF panner costs convolve)
+    if (this.spatialVoices.size > 16) {
+      const now = this.ctx.currentTime;
+      for (const [node, voice] of this.spatialVoices) {
+        if (voice.expires <= now || this.spatialVoices.size > 16) {
+          node.disconnect(); voice.send.disconnect(); this.spatialVoices.delete(node);
+        }
+        if (this.spatialVoices.size <= 16) break;
+      }
+    } else {
+      // Light prune of truly expired even under limit
+      const now = this.ctx.currentTime;
+      for (const [node, voice] of [...this.spatialVoices]) {
+        if (voice.expires <= now) { node.disconnect(); voice.send.disconnect(); this.spatialVoices.delete(node); }
+      }
+    }
     const l = this.ctx.listener;
     const t = this.ctx.currentTime;
     if (l.positionX) {
@@ -89,8 +106,9 @@ export class SpatialAudioEngine {
   // panningModel: 'HRTF', distanceModel: 'inverse', refDistance: 1, maxDistance: 80, rolloffFactor: 2
   createSpatialPanner(x: number, y: number, z: number): PannerNode {
     const ctx = this.ensure();
+    // Limit 16 active spatial voices (was 24 — each HRTF panner is a convolve)
     for (const [node,voice] of this.spatialVoices) {
-      if (voice.expires<=ctx.currentTime || this.spatialVoices.size>=24) {
+      if (voice.expires<=ctx.currentTime || this.spatialVoices.size>=16) {
         node.disconnect(); voice.send.disconnect(); this.spatialVoices.delete(node);
       }
     }

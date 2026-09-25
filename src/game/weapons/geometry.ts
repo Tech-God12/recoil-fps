@@ -168,7 +168,8 @@ export class GunBuilder {
       const geo = cut.path
         ? new THREE.ExtrudeGeometry(roundedPath(cut.path.map(([z,y])=>new THREE.Vector2(-z,y)),r,true) as THREE.Shape, {depth:cut.w,bevelEnabled:true,bevelSize:r*.35,bevelThickness:r*.35,bevelSegments:2,curveSegments:4}).translate(0,0,-cut.w/2).rotateY(Math.PI/2)
         : cut.bore
-        ? new THREE.CylinderGeometry(cut.h / 2, cut.h / 2, cut.w, 24).rotateZ(Math.PI / 2)
+        // ANTI-LAG: 16 segments not 24 — saves ~33% tris on pocket bores, invisible at this scale
+        ? new THREE.CylinderGeometry(cut.h / 2, cut.h / 2, cut.w, 16).rotateZ(Math.PI / 2)
         : new RoundedBoxGeometry(cut.w, cut.h, cut.d, r >= .003 ? 2 : 1, r);
       wearMask(geo, cut.path ? 'x' : 'box'); cavityAttribute(geo, 0.38);
       const tool = new MillingBrush(geo); tool.position.set(cut.x, cut.y, cut.z);
@@ -211,7 +212,8 @@ export class GunBuilder {
   }
 
   cyl(rt: number, rb: number, h: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, seg = 28, open = false) {
-    const segments = Math.max(seg, Math.max(rt, rb) >= 0.009 ? 36 : seg);
+    // ANTI-LAG: cap bevelled lathe at 24 not 36 on large radii — saves 12 tris per bevel
+    const segments = Math.max(seg, Math.max(rt, rb) >= 0.009 ? 24 : seg);
     const edge = Math.min(rt, rb, h * 0.2, 0.0007);
     const geo = !open && edge > 0.0003
       ? new THREE.LatheGeometry([[0, -h / 2], [rb - edge, -h / 2], [rb, -h / 2 + edge], [rt, h / 2 - edge], [rt - edge, h / 2], [0, h / 2]].map(([r, y]) => new THREE.Vector2(r, y)), segments)
@@ -221,7 +223,8 @@ export class GunBuilder {
   }
 
   sph(r: number, mat: THREE.Material, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1) {
-    const geo = new THREE.SphereGeometry(r, 16, 10);
+    // ANTI-LAG: 12×8 not 16×10 — spheres tiny (screws/pins), facet invisible
+    const geo = new THREE.SphereGeometry(r, 12, 8);
     geo.scale(sx, sy, sz);
     return this.put(geo, mat, x, y, z);
   }
@@ -312,17 +315,19 @@ export class GunBuilder {
   }
 
   /** A closed-walled hollow tube, including annular end faces; never a capped bore. */
-  tube(outer: number, inner: number, length: number, mat: THREE.Material, x: number, y: number, z: number, rx = Math.PI / 2, ry = 0, rz = 0, segments = 24) {
+  tube(outer: number, inner: number, length: number, mat: THREE.Material, x: number, y: number, z: number, rx = Math.PI / 2, ry = 0, rz = 0, segments = 16) {
     const h = length / 2, edge = Math.min((outer - inner) * 0.22, length * 0.1, 0.0005);
     const points = [[inner, -h + edge], [inner + edge, -h], [outer - edge, -h], [outer, -h + edge], [outer, h - edge], [outer - edge, h], [inner + edge, h], [inner, h - edge], [inner, -h + edge]];
-    const geo = new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), Math.max(segments, outer > 0.012 ? 40 : outer > 0.006 ? 28 : 16));
+    // ANTI-LAG: 16 base not 24, cap 28/20/12 not 40/28/16 — tubes are viewmodel hero but small
+    const geo = new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), Math.max(segments, outer > 0.012 ? 28 : outer > 0.006 ? 20 : 12));
     wearMask(geo, 'y');
     return this.put(geo, mat, x, y, z, rx, ry, rz);
   }
 
   /** Turned profile along the barrel axis: [radius, Z], useful for bell-shaped optics. */
-  turned(points: readonly (readonly [number, number])[], mat: THREE.Material, x: number, y: number, z: number, segments = 28) {
-    const geo = new THREE.LatheGeometry(points.map(([r, z]) => new THREE.Vector2(r, z)), Math.max(segments, 40));
+  turned(points: readonly (readonly [number, number])[], mat: THREE.Material, x: number, y: number, z: number, segments = 20) {
+    // ANTI-LAG: 20 not 28, cap 28 not 40 — optics are small on screen
+    const geo = new THREE.LatheGeometry(points.map(([r, z]) => new THREE.Vector2(r, z)), Math.max(segments, 28));
     wearMask(geo, 'y');
     return this.put(geo, mat, x, y, z, Math.PI / 2);
   }

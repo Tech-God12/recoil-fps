@@ -167,6 +167,7 @@ const ray = new THREE.Raycaster();
 ray.firstHitOnly = true;
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
+const tmpV3 = new THREE.Vector3();
 let enemyCounter = 0;
 
 /**
@@ -299,8 +300,9 @@ export class Enemy {
     if (dist > 70) return false;
     const dir = tmpV.copy(pp).sub(eye).normalize();
     if (this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') {
-      const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      const flat = tmpV2.set(dir.x, 0, dir.z).normalize();
+      // ANTI-LAG: reuse scratch vectors (was `new Vector3` per LOS check: 20 Hz × 12 enemies = 240 allocs/s)
+      const fwd = tmpV2.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      const flat = tmpV3.set(dir.x, 0, dir.z).normalize();
       if (fwd.dot(flat) < Math.cos(Math.PI / 4) && dist > 16) return false;
       if (dist > 48) return false;
     }
@@ -369,7 +371,7 @@ export class Enemy {
       if (dp < 5) continue;
       if (this.squad.isCoverTaken(node, this)) continue;
       const eye = tmpV.set(node.x, node.y + 1.3, node.z);
-      const dir = new THREE.Vector3().copy(pp).sub(eye); const dist = dir.length(); dir.normalize();
+      const dir = tmpV2.copy(pp).sub(eye); const dist = dir.length(); dir.normalize();
       ray.set(eye.clone(), dir); ray.far = Math.min(dist - 0.3, 60);
       if (ray.intersectObjects(this.ctx.occluders, false).length === 0) continue;
       const ideal = preferClose ? 9 : 16 + this.personality * -6;
@@ -444,10 +446,12 @@ export class Enemy {
 
   private faceTarget(t: THREE.Vector3) { this.yaw = Math.atan2(-(t.x - this.pos.x), -(t.z - this.pos.z)); }
 
+  // Scratch for fireShot muzzle — reused, not allocated per bullet
+  private readonly _muzzle = new THREE.Vector3();
   private fireShot() {
     const ctx = this.ctx;
     this.model.group.updateMatrixWorld(true);
-    const muzzle = this.model.parts.muzzle.getWorldPosition(new THREE.Vector3());
+    const muzzle = this.model.parts.muzzle.getWorldPosition(this._muzzle);
     this.shotPose = 1;
     const pp = ctx.playerPos();
     ctx.effects.enemyMuzzle(muzzle);
@@ -464,10 +468,12 @@ export class Enemy {
     const obstruction = ray.intersectObjects(ctx.occluders,false)[0];
     if (obstruction) { ctx.effects.tracer(muzzle,obstruction.point,true); return; }
     if (this.hasLOS && Math.random() < acc && ctx.playerAlive()) {
-      ctx.effects.tracer(muzzle, pp.clone(), true);
+      // ANTI-LAG: avoid clone() for tracer end — getWorldPosition already reuses vector
+      ctx.effects.tracer(muzzle, pp, true);
       ctx.damagePlayer(7 + Math.floor(Math.random() * 8), this.pos);
     } else {
-      const miss = (this.hasLOS ? pp : this.lastKnown).clone().add(new THREE.Vector3((Math.random() - .5) * 3, 0.8 + (Math.random() - .3) * 2, (Math.random() - .5) * 3));
+      // Reuse tmpV2 for miss offset instead of new Vector3
+      const miss = (this.hasLOS ? pp : this.lastKnown).clone().add(tmpV2.set((Math.random() - .5) * 3, 0.8 + (Math.random() - .3) * 2, (Math.random() - .5) * 3));
       ctx.effects.tracer(muzzle, miss, true);
     }
   }

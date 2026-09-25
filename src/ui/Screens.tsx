@@ -110,7 +110,10 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const secondaryId = prof.loadout.secondary.weapon;
   const rootRef = useRef<HTMLElement | null>(null);
   const cashTarget = prof.cash;
-  const level = 13 + prof.missions;
+  // Level now derives from XP (kills + missions + score) not arbitrary 13+missions (audit N4)
+  // 100 XP per kill, 150 per mission, 1 per 500 cash earned; 200 XP per level
+  const xp = prof.kills * 100 + prof.missions * 150 + Math.floor(prof.cash / 500);
+  const level = Math.max(1, Math.floor(xp / 200) + 1);
   const phaseCount = getMission('kasbah').phases.length + getMission('alrasul').phases.length;
   const intelReadouts = [
     '1 OPERATOR · RECOIL_01',

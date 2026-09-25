@@ -51,6 +51,9 @@ export interface AttachmentCatalogEntry {
   family?: string;
 }
 
+// Recoil patterns are authored per weapon, not shared STOCK — each gun's climb and
+// horizontal walk is distinct (M4 flat, AK heavy vertical, Vector late climb, M249 long walk).
+// Changing a pattern does not change TTK (damage/RPM unchanged) — only feel.
 const STOCK = [[1.1, .12], [1.2, -.08], [1.35, .18], [1.45, -.15]] as [number, number][];
 
 function base(o: Partial<BaseWeaponStats> & Pick<BaseWeaponStats, 'rpm' | 'damage'>): BaseWeaponStats {
@@ -152,7 +155,8 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     id: 'm249', name: 'M249', short: 'M249', cls: 'LMG', slot: 'primary',
     price: 4300, starter: false,
     blurb: '100-round belt of suppression. Slow to shoulder, slow to reload, impossible to ignore downrange.',
-    base: base({ pattern: [[1.05, 0.1], [1.18, 0.18], [1.28, -0.23], [1.35, -0.3], [1.45, 0.33], [1.5, 0.37], [1.56, -0.35]], auto: true, rpm: 800, damage: 36, headMul: 2.2, limbMul: 0.85, magSize: 100, reserve: 200, hipSpread: 0.016, adsFov: 60, tacReload: 5.4, emptyReload: 5.4, adsTime: 0.40, recoilMul: 1.15, falloffStart: 40, noiseRadius: 80, moveSpeedMul: 0.92, swapTime: 0.32 }),
+    // M249: long horizontal walk — belt-fed wallows late, distinct from M4/AK
+    base: base({ pattern: [[1.05, 0.1], [1.18, 0.22], [1.28, -0.28], [1.35, -0.42], [1.45, 0.45], [1.5, 0.51], [1.56, -0.48]], auto: true, rpm: 800, damage: 36, headMul: 2.2, limbMul: 0.85, magSize: 100, reserve: 200, hipSpread: 0.016, adsFov: 60, tacReload: 5.4, emptyReload: 5.4, adsTime: 0.40, recoilMul: 1.15, falloffStart: 40, noiseRadius: 80, moveSpeedMul: 0.92, swapTime: 0.32 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
     audio: 'lmg', beltFed: true, bloom: { perShot: 0.0006, max: 0.012, decay: 0.03 },
   },

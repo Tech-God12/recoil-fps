@@ -335,6 +335,9 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
               <div className="radar-world" style={{ transform: `rotate(${-hud.bearing}deg)` }}>
                 <div className="radar-zoom" style={{ transform: `translate(${ox}%, ${oz}%) scale(${zoom})` }}>
                   <img src={hud.mapImage} alt="" draggable={false} className="radar-map" />
+                  {hud.alliesMap?.map((a, i) => (
+                    <span key={`a${i}`} className="radar-ally" style={{ left: `${a.nx * 100}%`, top: `${a.nz * 100}%`, transform: `rotate(${a.yaw}deg)` }} />
+                  ))}
                   {hud.enemiesMap.map((e, i) => (
                     <span
                       key={i}

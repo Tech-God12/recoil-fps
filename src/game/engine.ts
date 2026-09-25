@@ -176,6 +176,8 @@ export interface HudState {
   mapImage: string;
   playerMap: { nx: number; nz: number };
   enemiesMap: { nx: number; nz: number; yaw: number; hot: boolean }[];
+  /** Living teammates (TDM only). Always shown — you know where your own squad is. */
+  alliesMap?: { nx: number; nz: number; yaw: number }[];
   missionMap?: { nx: number; nz: number; ringPct: number; extract: boolean };
   fps: number;
   magSize: number;
@@ -3461,6 +3463,10 @@ void main(){
             yaw: -e.yaw * 180 / Math.PI,
             hot: e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE',
           })),
+      alliesMap: this.isTDM && this.tdm
+        ? this.tdm.bots.filter(b => !b.dead && b.team === 'alpha')
+          .map(b => ({ nx: (b.pos.x + H) / (2 * H), nz: (b.pos.z + H) / (2 * H), yaw: -b.yaw * 180 / Math.PI }))
+        : undefined,
       missionMap: (() => {
         if (this.isTDM) return undefined;
         const phase = this.missionRuntime.mission.current;

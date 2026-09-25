@@ -1,3 +1,9 @@
+## 2026-09-25 — Allies on the minimap
+
+In Warehouse TDM the minimap now shows every living teammate as a teal dot with a heading wedge (the same teal as the in-world ally marker), drawn under enemy dots. Teammates are always shown; enemies still follow the radar rules.
+
+Verification: lint, typecheck.
+
 ## 2026-09-25 — Scorestreaks removed, Mine and Medkit kits, bigger Warehouse
 
 Removed the whole scorestreak system (UAV, sentry, airstrike, chopper, nuke): streaks.ts, streak-models.ts, Streaks.tsx, its HUD, pause grid, sounds, CSS, tests and docs. Added two kits: Mine (a jumping proximity mine, 150 damage close in, marks survivors, chain-detonates) and Medkit (a med station that heals 14 HP/s inside 4 m for 8 s). Both have models, sounds, effects, turntable demos, icons and tests. The Kits menu now shows five cards (keys 1-5). The Warehouse grew from 92 m to 112 m: rail sidings with boxcars and a flatcar overlook on both flanks, truck bays and a low barrier screen behind each spawn, spawns moved back 10 m, bots path through the new flanks.

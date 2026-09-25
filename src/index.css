@@ -806,6 +806,9 @@ img { display: block; max-width: 100%; }
   border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid rgba(200,155,90,0.5);
   transform: translateY(-1px);
 }
+/* Teammates: teal (same as the in-world ally chevron), with a heading wedge, drawn under enemies. */
+.radar-ally { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; background: #4FB0C6; border: 1px solid rgba(8,12,14,0.9); border-radius: 50%; box-shadow: 0 0 5px rgba(79,176,198,0.6); }
+.radar-ally::before { content: ''; position: absolute; left: 50%; bottom: 100%; margin-left: -4px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid rgba(79,176,198,0.55); transform: translateY(-1px); }
 .radar-enemy.hot { background: var(--blood); box-shadow: 0 0 8px rgba(200,50,30,0.9); animation: hotPing 0.9s ease-in-out infinite; }
 .radar-enemy.hot::before { border-bottom-color: rgba(200,50,30,0.65); }
 @keyframes hotPing { 0%, 100% { box-shadow: 0 0 4px rgba(200,50,30,0.6); } 50% { box-shadow: 0 0 11px rgba(200,50,30,1); } }

@@ -459,6 +459,39 @@ export class SpatialAudioEngine {
     }
   }
 
+  /**
+   * SPATIAL: a body hitting the floor. Low-passed noise thump (≈180 Hz body, 0.16 s)
+   * under a short 70 Hz sine for weight. Quiet on purpose (0.42 peak vs 0.9 for glass):
+   * it is a confirmation layer under the kill cue, not a new event to react to.
+   */
+  bodyFallSpatial(wx: number, wy: number, wz: number, heavy = false) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource(); src.buffer = this.noise();
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = heavy ? 150 : 190;
+    const g = ctx.createGain(); g.gain.setValueAtTime(heavy ? 0.5 : 0.42, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    src.connect(lp); lp.connect(g); g.connect(panner); src.start(t); src.stop(t + 0.18);
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    const og = ctx.createGain(); og.gain.setValueAtTime(0.28, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+    o.connect(og); og.connect(panner); o.start(t); o.stop(t + 0.14);
+  }
+
+  /** SPATIAL: a dropped rifle landing — two band-passed metallic ticks 40 ms apart
+   *  (receiver, then barrel), quieter than a grenade bounce. */
+  weaponClatterSpatial(wx: number, wy: number, wz: number) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime;
+    for (const [dt, f, gain] of [[0, 1900, 0.26], [0.04, 2600, 0.16]] as const) {
+      const src = ctx.createBufferSource(); src.buffer = this.noise();
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 4;
+      const g = ctx.createGain(); g.gain.setValueAtTime(gain, t + dt); g.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.05);
+      src.connect(bp); bp.connect(g); g.connect(panner); src.start(t + dt); src.stop(t + dt + 0.06);
+    }
+  }
+
   // SPATIAL: Grenade bounce
   grenadeBounceSpatial(wx: number, wy: number, wz: number) {
     const ctx = this.ensure();

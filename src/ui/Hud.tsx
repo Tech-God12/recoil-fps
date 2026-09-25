@@ -253,7 +253,7 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         ))}
       </div>
       {s.showFps && (
-        <span className="fps-chip hud-chip absolute bottom-3 left-1/2 -translate-x-1/2" style={{ color: fpsColor }}>{hud.fps} FPS</span>
+        <span className="fps-chip hud-chip absolute bottom-3 left-1/2 -translate-x-1/2" style={{ color: fpsColor }}>{hud.fps} FPS{hud.renderScale < 100 ? ` · ${hud.renderScale}%` : ''}</span>
       )}
 
       {/* ============ CENTER STACK ============ */}

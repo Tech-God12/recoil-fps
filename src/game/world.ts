@@ -1294,7 +1294,10 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const g of geos) g.dispose();
     (merged as unknown as { computeBoundsTree(): void }).computeBoundsTree();
     const mesh = new THREE.Mesh(merged, m);
-    mesh.castShadow = m !== smokeMaterial; mesh.receiveShadow = true;
+    // Terrain (the only M.sand user) is receive-only: a 36k-tri, ±260 m sheet whose
+    // gentle undulation never shadows anything inside the playfield, yet it was a
+    // third of Sandblast's whole shadow pass. Frame budget, docs/frame-budget.md.
+    mesh.castShadow = m !== smokeMaterial && m !== M.sand; mesh.receiveShadow = true;
     mesh.frustumCulled = false;
     batch.group.add(mesh);
     if (m !== smokeMaterial) batch.meshes.push(mesh);

@@ -244,6 +244,7 @@ export class Effects {
 
   playerFlash(worldPos: THREE.Vector3) {
     this.flashLight.position.copy(worldPos);
+    this.flashLight.color.setHex(0xFFB86A);
     this.flashLight.intensity = 8;
     this.flashTimer = 0.045;
   }
@@ -269,8 +270,54 @@ export class Effects {
     this.burst(pos, 30, 0x555048, 5, 1.4, 1.5, 0.22, 1.4);
     this.burst(pos, 20, 0x2A2620, 7, 0.8, 7, 0.1);
     this.flashLight.position.copy(pos).y += 0.5;
+    this.flashLight.color.setHex(0xFFB86A);
     this.flashLight.intensity = 30;
     this.flashTimer = 0.12;
+  }
+
+  // ---- Field kit effects: same burst pool, kit-specific colours and motion. ----
+
+  /** Hot metal sparks off a barricade plate: fast, short, heavy gravity. */
+  sparks(pos: THREE.Vector3) {
+    this.burst(pos, 14, 0xFFC060, 5.2, 0.32, 14, 0.045, 1.6);
+    this.burst(pos, 4, 0xFFF4D0, 2.4, 0.08, 0, 0.1); // white strike flash
+  }
+
+  /** Dust ring kicked up when the barricade slams down. */
+  slamDust(pos: THREE.Vector3) {
+    this.burst(pos, 30, 0xC8B080, 3.4, 0.9, 2.2, 0.09, 2.2);
+    this.burst(pos, 12, 0x8C7A58, 1.6, 1.3, 0.6, 0.16, 2.6);
+  }
+
+  /** Sonar ping at the dart: cyan motes thrown up, plus a cold light flash. */
+  sonarPulse(pos: THREE.Vector3) {
+    this.burst(pos, 18, 0x5FE3FF, 2.6, 0.7, -0.8, 0.06, 1.8);
+    this.kitFlash(pos, 0x5FE3FF, 9, 0.16);
+  }
+
+  /** Hologram materialise / glitch-out: cyan shards spraying outward. */
+  holoBurst(pos: THREE.Vector3, big = false) {
+    this.burst(pos, big ? 40 : 22, 0x6FE8FF, big ? 6.5 : 3.2, big ? 0.6 : 0.45, 0.5, big ? 0.09 : 0.06, 2.4);
+    this.burst(pos, big ? 16 : 8, 0xE8FDFF, big ? 3 : 1.6, 0.25, 0, 0.12);
+    this.kitFlash(pos, 0x6FE8FF, big ? 26 : 10, big ? 0.22 : 0.12);
+  }
+
+  /** Mine jumps out of the ground: a puff of dirt before the blast. */
+  mineKick(pos: THREE.Vector3) {
+    this.burst(pos, 16, 0x8C7A58, 2.8, 0.6, 5, 0.08, 1.2);
+  }
+
+  /** Med field pulse: green motes drifting up out of the ring. */
+  healMotes(pos: THREE.Vector3) {
+    this.burst(pos, 12, 0x6CFF9A, 1.1, 1.2, -1.2, 0.05, 2.4);
+  }
+
+  /** Coloured point-light pop for kit events (shares the muzzle/explosion light). */
+  kitFlash(pos: THREE.Vector3, color: number, intensity: number, seconds: number) {
+    this.flashLight.position.copy(pos);
+    this.flashLight.color.setHex(color);
+    this.flashLight.intensity = intensity;
+    this.flashTimer = seconds;
   }
 
   footDust(pos: THREE.Vector3) {

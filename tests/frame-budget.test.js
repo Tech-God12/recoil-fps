@@ -67,18 +67,19 @@ test('light budget: pick ranks by distance past each light\'s own range', () => 
   assert.deepEqual(LightBudget.pick([small, big], eye, 1), [big]);
 });
 
-test('Warehouse: shader point-light count drops from 8 to 4 once the pool adopts dressing', () => {
+test('Warehouse: shader point-light count drops from 12 to 4 once the pool adopts dressing', () => {
   const keys = ['sand', 'plaza', 'adobeWall', 'adobeWall2', 'adobeBrick', 'concrete', 'asphalt', 'wood', 'rustedMetal', 'sandbag', 'tileFloor', 'plaster', 'whitewash', 'stoneBlock', 'firedBrick', 'packedEarth', 'corrugatedMetal', 'roughTimber', 'terracePavers', 'cobbleLane', 'wadiBed', 'signage'];
   const scene = new THREE.Scene();
   const world = buildWorld(scene, 'arena', Object.fromEntries(keys.map(k => [k, new THREE.MeshStandardMaterial()])));
   const dressing = pointLights(world.group);
-  assert.equal(dressing, 4, 'spawn washes + work lights');
-  // Before: dressing(4) + 2 centre lights + muzzle flash + ON FIRE = 8.
+  // The enlarged Warehouse adds 4 hall floodlights to the 4 spawn washes/work lights.
+  assert.equal(dressing, 8, 'spawn washes + work lights + hall floodlights');
+  // Before: dressing(8) + 2 centre lights + muzzle flash + ON FIRE = 12.
   const before = dressing + 2 + 2;
   const budget = new LightBudget(scene);
   budget.adoptAll(world.group);
   const after = pointLights(scene) + 2; // + muzzle flash + ON FIRE (dynamic, not adopted)
-  assert.equal(before, 8);
+  assert.equal(before, 12);
   assert.equal(after, 4);
   budget.dispose();
 });

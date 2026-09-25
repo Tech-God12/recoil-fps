@@ -42,7 +42,7 @@ test('bore alignment: optic vs muzzle vertical delta yields <0.6° at 50 m', () 
 
 test('factory irons hide only the aiming mark in ADS, glass stays transparent', async () => {
   // Mirrors the armory-models optic test but ensures factory guns ship ADS-clean.
-  const { WM } = await import('../src/game/models.ts');
+  await import('../src/game/models.ts');
   for (const [id, build] of Object.entries(WEAPON_BUILDERS)) {
     if (id === 'awm' || id === 'm249') continue; // scoped by default
     const model = build();

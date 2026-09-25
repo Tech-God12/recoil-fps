@@ -6,14 +6,13 @@ import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results, type Defu
 import BuyMenu from './ui/BuyMenu';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
+import KitsMenu from './ui/KitsMenu';
 import { buildForWeapon, developmentCashGrant, grantCash, loadProfile, resetCurrentCash, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { settleResult } from './game/economy/settlement';
-import { rankFor } from './game/economy/rank';
-import { RankedSetup } from './ui/Competitive';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'ranked-setup';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'kits';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const LEGACY_WALLET_NOTICE_THRESHOLD = 9_000_000;
 const DEFUSAL_KEY = 'recoilfps.defusal.v1';
@@ -42,7 +41,7 @@ const DEFAULT_HUD: HudState = {
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, renderScale: 100, worldHalf: 104, landmark: null,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, streakMsg: null, nukeFlash: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
@@ -204,13 +203,13 @@ export default function App() {
         setFx(f => ({ ...f, banner: { id, label: event.label } }));
         later(() => setFx(f => f.banner?.id === id ? { ...f, banner: null } : f), 1600);
         break;
-      case 'streakmsg':
-        setFx(f => ({ ...f, streakMsg: { id, text: event.text } }));
-        later(() => setFx(f => f.streakMsg?.id === id ? { ...f, streakMsg: null } : f), 3600);
+      case 'kitfx':
+        setFx(f => ({ ...f, kitFx: { id, kind: event.kind } }));
+        later(() => setFx(f => f.kitFx?.id === id ? { ...f, kitFx: null } : f), 900);
         break;
-      case 'nuke':
-        setFx(f => ({ ...f, nukeFlash: id }));
-        later(() => setFx(f => f.nukeFlash === id ? { ...f, nukeFlash: null } : f), 5200);
+      case 'kitmsg':
+        setFx(f => ({ ...f, kitMsg: { id, text: event.text } }));
+        later(() => setFx(f => f.kitMsg?.id === id ? { ...f, kitMsg: null } : f), 2800);
         break;
       case 'buymenu':
         if (event.open) openBuy();
@@ -302,10 +301,9 @@ export default function App() {
    * `mapOverride` beats the (possibly not-yet-committed) settings state so
    * "Play" in Arena Mode can never race the map selection. */
   // The mode of the live (or most recent) deployment. Pause → Restart replays the
-  // SAME mode: restarting a ranked match must not silently drop you into a
-  // story mission (audit U2 — newly reachable now that BLACKOUT deploys). The
-  // map follows the live setting, so a map change in pause Settings is honored.
-  const launchMode = useRef<'mission' | 'tdm' | 'comp' | 'defusal'>('mission');
+  // SAME mode: restarting TDM or Bomb Defusal must not silently drop you into a
+  // story mission (audit U2). The map follows the live setting, so a map change in pause Settings is honored.
+  const launchMode = useRef<'mission' | 'tdm' | 'defusal'>('mission');
 
   const deploy = async (mapOverride?: GameSettings['map']) => {
     await launch(mapOverride, 'mission');
@@ -313,19 +311,12 @@ export default function App() {
 
   const restart = () => {
     const mode = launchMode.current;
-    if (mode === 'comp') { void deployRanked(); }
-    else if (mode === 'tdm') { void launch('arena', 'tdm'); }
+    if (mode === 'tdm') { void launch('arena', 'tdm'); }
     else if (mode === 'defusal') { void launch('sirocco', 'defusal'); }
     else { void deploy(); }
   };
 
-  /** OPERATION BLACKOUT: always the warehouse, always ranked. */
-  const deployRanked = async () => {
-    if (settings.map !== 'arena') set({ map: 'arena' });
-    await launch('arena', 'comp');
-  };
-
-  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' | 'comp' | 'defusal' = 'mission') => {
+  const launch = async (mapOverride?: GameSettings['map'], mode: 'mission' | 'tdm' | 'defusal' = 'mission') => {
     if (!canvasRef.current || launching) return;
     const map = mapOverride ?? settings.map;
     if (mapOverride && mapOverride !== settings.map) set({ map: mapOverride });
@@ -343,13 +334,14 @@ export default function App() {
     await afterPaint();
     if (session.current !== epoch) return;
     try {
-      // Bomb Defusal fields your own armory builds; ranked deploys the ladder state.
+      // Bomb Defusal fields your own armory builds.
+      // The kit is whatever the player bought and equipped in KITS — none means none. It is
+      // fixed for the whole deployment and only used in Missions and Warehouse TDM
+      // (Bomb Defusal buys its utility each round instead).
       const prof = profileRef.current;
       const launchOptions = map === 'sirocco'
         ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
-        : mode === 'comp'
-          ? { mode: 'comp' as const, compBuilds: prof.builds, rankedProfile: prof.ranked }
-          : mode === 'tdm' ? { mode: 'tdm' as const } : { mode: 'mission' as const };
+        : mode === 'tdm' ? { mode: 'tdm' as const, kit: prof.equippedKit } : { mode: 'mission' as const, kit: prof.equippedKit };
       buyOpenRef.current = false; setBuyOpen(false);
       const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, launchOptions);
       engineRef.current = engine;
@@ -404,6 +396,14 @@ export default function App() {
     changePhase('armory');
     if (document.pointerLockElement) document.exitPointerLock();
   };
+  // KITS opens from the home menu or the TDM loadout screen and returns there.
+  const [kitsFrom, setKitsFrom] = useState<'menu' | 'tdm-setup'>('menu');
+  const openKits = (from: 'menu' | 'tdm-setup' = 'menu') => {
+    setKitsFrom(from);
+    if (from === 'menu') setMenuView('home');
+    setShowSettings(false);
+    changePhase('kits');
+  };
   const armoryBack = () => {
     changePhase(armoryFrom === 'results' && results ? 'results' : 'menu');
   };
@@ -434,7 +434,7 @@ export default function App() {
         <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: vignetteBg }} />
       )}
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} onRanked={() => changePhase('ranked-setup')} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} onKits={openKits} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>
@@ -455,7 +455,7 @@ export default function App() {
           onClose={closeBuy}
         />
       )}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} defusal={hud.defusal} onResume={resume} onRestart={restart} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} kit={hud.kit} tdm={hud.tdm} mapName={settings.map === 'arena' ? 'Warehouse · 5v5 TDM' : (MAPS.find(m => m.id === settings.map)?.name ?? '')} defusal={hud.defusal} onResume={resume} onRestart={restart} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={restart} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : settings.map === 'sirocco' ? 'SIROCCO · BOMB DEFUSAL' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
@@ -466,16 +466,12 @@ export default function App() {
           onArmor={setTdmArmor}
           onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
+          kit={profile.equippedKit}
+          onKits={() => openKits('tdm-setup')}
         />
       )}
-      {phase === 'ranked-setup' && !launching && (
-        <RankedSetup
-          rank={rankFor(profile.ranked.rating, profile.ranked)}
-          rating={profile.ranked.rating}
-          record={profile.ranked}
-          onDeploy={() => { void deployRanked(); }}
-          onBack={() => { setMenuView('home'); changePhase('menu'); }}
-        />
+      {phase === 'kits' && (
+        <KitsMenu profile={profile} onProfile={updateProfile} onBack={() => changePhase(kitsFrom)} />
       )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">

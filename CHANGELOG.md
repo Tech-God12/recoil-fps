@@ -1,3 +1,9 @@
+## 2026-09-25 — Merge main into the Kits branch (PR #27)
+
+Merged `main` (Bomb Defusal on Sirocco, frame budget / light pool, hit reactions, gunfeel, and the 2026-09-25 gunfeel/perf/HUD headline) into the Kits branch. Kits stay in Missions and Warehouse TDM only; Bomb Defusal gets no kit and keeps Z for smoke. Home menu: Missions, Arena (Bomb Defusal + TDM), Kits, Loadout, Settings. The scorestreak system and Operation Blackout stay removed, as this branch already decided, so main's streak and ranked hooks were stripped from the engine, TDM bots, HUD, menus and results. The bind list shows `Field kit — Z` in place of Scorestreaks. The frame-budget test now counts the 4 extra Warehouse floodlights. The light pool still caps the shader at 4 point lights. Main's newest commit also had 5 lint errors (empty catch blocks, `let`→`const`, an unused test import); those are fixed.
+
+Verification: lint, typecheck, 232/232 Node tests, 44/44 mutations, vite build.
+
 ## 2026-09-25 — Headlines: Gunfeel polish (ADS, viewmodel, decimation) + performance & HUD clarity
 
 **Performance (Headline A):** Blood decals are now 2 `InstancedMesh` (blood + brass) instead of 260 individual `Mesh` — scene traversal for 260 decals eliminated, `receiveShadow` toggled per instance via `instanceColor` dirty flag; shadow map re-aim is dirty-flagged (eye moved >0.5 m or occluder hash changed, 0.6 m quantization) instead of every 10th frame, removing the periodic hitch (R1). `App` HUD no longer reconciles the whole tree at 20 Hz: combat state (hp/mag/spread/ads/sprintLock) ticks at 32 ms, world state (compass bearing/pings/landmark) at 250 ms, compass extracted to `HudCompass` memoized so the strip doesn't redraw on every ammo tick (F1/F3). `engine.hud()` reuses GC-free scratch vectors for `playerMap`/`enemiesMap`/`pings`. Viewmodel pre-compiles 2 guns at boot so the first swap doesn't jank.
@@ -8,6 +14,41 @@ Audit: `docs/audit-2026-09-25.md` (42 findings across G/W/A/M/R/U/D/J/N/P/F/C; S
 
 Verification: `npx tsc --noEmit --skipLibCheck` clean, `npx eslint src/ui/Hud.tsx` clean, `npm run build` 5,282.26 kB / 3,104.95 kB gzip (single-file), Node headless: `tests/frame-budget` 10/10, `tests/impact-reactions` 11/11, `tests/effects-gunfeel` 5/5, `tests/bore-alignment` 2/2, `tests/armory-models` 16/16 (14 s), `tests/weapon-assembly` 18/18 (161 s). Perf-probe (stub GL, 600 frames): Warehouse median draw calls 165 (from 203 before light-budget), tri 105k (from 143k), with decals instanced the 260-mesh traversal cost is ~0.9 ms/frame saved (measured via `scene.traverse` micro-bench). No browser: Playwright CDN unreachable, no chromium — verified via Node shim + code grep + screenshot comparison pre/post where available.
 
+## 2026-09-25 — Allies on the minimap
+
+In Warehouse TDM the minimap now shows every living teammate as a teal dot with a heading wedge (the same teal as the in-world ally marker), drawn under enemy dots. Teammates are always shown; enemies still follow the radar rules.
+
+Verification: lint, typecheck.
+
+## 2026-09-25 — Scorestreaks removed, Mine and Medkit kits, bigger Warehouse
+
+Removed the whole scorestreak system (UAV, sentry, airstrike, chopper, nuke): streaks.ts, streak-models.ts, Streaks.tsx, its HUD, pause grid, sounds, CSS, tests and docs. Added two kits: Mine (a jumping proximity mine, 150 damage close in, marks survivors, chain-detonates) and Medkit (a med station that heals 14 HP/s inside 4 m for 8 s). Both have models, sounds, effects, turntable demos, icons and tests. The Kits menu now shows five cards (keys 1-5). The Warehouse grew from 92 m to 112 m: rail sidings with boxcars and a flatcar overlook on both flanks, truck bays and a low barrier screen behind each spawn, spawns moved back 10 m, bots path through the new flanks.
+
+Verification: 152/152 tests, 34/34 mutations, lint, typecheck, build, headless TDM smoke (no stuck bots).
+
+## 2026-09-25 — Kits screen rebuilt as a proper layout; new Radar and Decoy models
+
+The Kits screen now uses a real grid layout: details on the left, a framed 3D stage on the right, kit cards and the Buy/Equip button along the bottom. Nothing overlaps at any window size; on short screens the extra text hides first. Stats are compact tiles, and the stage has prev/next arrows. The Radar is now a rugged case on fold-out legs with a glowing array panel. The Decoy hologram shows only its outer surface (no more limbs glowing through each other), and both hands now hold the rifle properly.
+
+Verification: 162/162 tests, 34/34 mutations, typecheck, lint and vite build pass.
+
+## 2026-09-24 — Kits: simple names, new menu, detailed models
+
+Kits are now just **Radar**, **Barricade** and **Decoy** everywhere (menu, HUD, messages). The Kits menu is a full-screen showroom: a lit 3D stage with each kit playing a looping demo (radar unfolds and scans two enemies, barricade drops and unfolds, decoy materialises and walks), a big name, stat bars, three how-to steps, kit cards and one clear Buy/Equip button. All three models were rebuilt with bevelled plates, bolts, hinges, a dish radar on a tripod and a proper hologram soldier. The radar now drops down walls and sets up on the ground instead of sticking into them.
+
+Verification: 162/162 tests, 34/34 mutations, typecheck, lint and vite build pass.
+
+## 2026-09-24 — KITS menu, bought kits, stronger abilities, new pause menu; Operation Blackout removed
+
+Added a **KITS** screen on the home menu (and a Field kit button on the mission and TDM deploy screens). It has a live 3D turntable of each kit's ability, stat bars, how-to steps, one-time purchases (Recon $4,500 · Phantom $6,000 · Bulwark $7,500) and equip/unequip. New players own no kit, the old free `fieldKit` setting is gone, and the equipped kit is locked for the whole game: the pause menu shows it read-only. There are still exactly three kits, each with a stronger ability. Recon tags show as through-wall body silhouettes and marked hostiles take +10 % damage. Bulwark unfolds on hinges, lasts 24 s and can be recalled with Z for up to 30 s of cooldown back. Phantom strafes and, when it dies, bursts to stun hostiles within 6 m for 1.6 s. Cooldowns went from 30/40/35 s to 45/60/50 s, kits start each game at 50 % charge, and kill refunds dropped from 20 % to 8 % with a 30 %-per-charge cap. New feedback: a segmented HUD dial with ready/use bursts, screen-space kit effects with distance-scaled camera shake, sparks, slam dust, sonar domes and holo bursts. The pause menu was redesigned with a blurred backdrop, icon actions, keyboard navigation, confirm-before-restart/quit, a TDM scoreboard or mission panel, a kit card and a streak grid. Removed Operation Blackout (competitive Search & Destroy, ranked ladder and ranked setup screen, buy phase, comp tactics, `src/game/competitive/*`, `economy/rank.ts`, `ui/Competitive.tsx`, `scripts/comp-scenarios.ts` and its three test files) and the Redline Mountain Outpost map art (`map-ridgeline.jpg`). See `docs/field-kits.md`.
+
+Verification: `node scripts/validate.mjs` passes (lint, tsc, 162/162 Node tests, 34/34 mutations); `npx vite build` passes. No browser or human playtest was run.
+
+## 2026-09-24 — Field Kits: Sonar Dart, Barricade, Holo-Decoy on Z
+
+Added one cooldown ability per deployment, live in Missions and Warehouse TDM (off in Search & Destroy, where utility is bought). RECON throws a sonar dart that sticks and pings three times, tagging hostiles within 24 m through walls, but each ping is audible within 14 m. BULWARK plants a 1.4 m, 450 HP steel barricade that blocks bullets, sight-lines, movement and AI pathing for 22 s. It covers a crouched player but not a standing one, and hostile fire and frags break it. PHANTOM sends a holographic operator running ahead firing blanks. Mission soldiers and bravo bots with eyes on it inside 32 m aim and fire at it instead of you, and shooting a lured hostile snaps it out half the time. Cooldowns are 30 / 40 / 35 s, and each non-streak kill refunds 20 %. Kits are picked on the mission card or TDM setup, swapped from the pause menu (the new kit starts cold) and persisted as a sanitized `fieldKit` setting. HUD: cooldown dial with Z keycap, live object chips, event ticker, first-use prompt. All sounds come from the spatial synth, and all models are procedural. See `docs/field-kits.md`. Nothing was removed.
+
+Verification: `npx eslint` clean; `tsc` shows only the three pre-existing errors (`RankedSetup`/`rankFor` imports in App.tsx, TDM `outcome` field in engine.ts); 217 Node tests with 216 passing (16 new in `tests/field-kits.test.js`; the one failure is the pre-existing `AIManager` source-count assertion in `mission-integration.test.js`, which also blocks `scripts/mutate.mjs` on main); `npm run build` single-file HTML 4,716.37 kB / 2,741.59 kB gzip. Browser and hardware checks were not run.
 ## 2026-09-24 — Headlines: Frame Budget (performance) + impact & death reactions
 
 Frame Budget: decorative point lights are now virtual sources served by a fixed two-light pool (`light-budget.ts`), so shader light count no longer grows with map dressing (Warehouse 8 → 4 per pixel). The vignette moved to a CSS overlay, so default settings skip the whole post chain and render straight to the multisampled canvas (the world is antialiased again). The sun shadow box follows the player, texel-snapped at ±50 m (`shadow-fit.ts`) — sharper and cheaper; terrain is receive-only. Bot rifles swap to a one-draw LOD past 14 m, invisible hit proxies no longer draw, and the AI LOS/patrol hot paths stop allocating. Settings names the biggest FPS levers, and the FPS chip shows the adaptive render scale. Impact reactions: one shared `reactions.ts` gives every soldier a zone-aware directional flinch and five multi-joint deaths (crumple, blown back, pitched forward, spun, kneel, blast) chosen from hit zone, shot direction and cause; falls are wall-aware (turn or slump instead of clipping), the rifle drops and clatters, and a spatial thud lands. Hit direction is fed from bullets, frags, streaks and C4. Audit: `docs/audit-2026-09-24-b.md`; design notes `docs/frame-budget.md`, `docs/impact-reactions.md`.

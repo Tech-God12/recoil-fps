@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
-import type { CashLogEntry, CompDebrief, GameSettings } from '../game/engine';
+import type { CashLogEntry, GameSettings, TdmHud } from '../game/engine';
 import { weaponById } from '../game/economy/catalog';
 import { DEFAULT_PROFILE, type PlayerProfile } from '../game/economy/profile';
 import { MAPS, isMissionMap, type MapId } from '../game/world';
@@ -7,22 +7,22 @@ import type { DefusalHud, DefusalResult } from '../game/defusal/mode';
 import { WEAPON_CATALOG } from '../game/economy/catalog';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
-import type { StreakHud } from '../game/streaks';
+import type { KitHud } from '../game/kits';
+import { KitEquipButton, KitIcon, KitPauseCard } from './Kits';
+import { KIT_DEFS } from '../game/kits';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
 import CashCounter from './armory/CashCounter';
 import { gradeFor } from '../game/economy/rewards';
-import { CompDebriefPanel } from './Competitive';
 import { voice } from '../game/voice';
 import mapAlrasul from '../assets/map-alrasul.jpg';
 import mapKasbah from '../assets/map-kasbah.jpg';
 import mapArena from '../assets/map-arena.jpg';
 import mapSirocco from '../assets/map-sirocco.jpg';
-import ridgeArt from '../assets/map-ridgeline.jpg';
 import operatorArt from '../assets/operator.jpg';
 import menuCenter from '../assets/menu-center.jpg';
-import { TxBack, TxCoords, TxLock } from './tactical';
+import { TxBack, TxCoords } from './tactical';
 import { menuStep } from './bindings';
 import MapFlyover from './MapFlyover';
 import { gunThumbnail } from './armory/GunViewer';
@@ -34,18 +34,16 @@ export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: map
 /** Arena Mode → Bomb Defusal launch options (persisted by App). */
 export interface DefusalMenuOptions { side: 'attack' | 'defend' | 'random'; format: 'short' | 'long' }
 
-/* Theater cards: Town + Sandblast are live operations, Ridgeline is locked intel. */
-const THEATERS = [
-  { num: '01', code: 'TOWN', id: 'kasbah' as MapId | null, type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E', locked: false },
-  { num: '02', code: 'SANDBLAST', id: 'alrasul' as MapId | null, type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E', locked: false },
-  { num: '03', code: 'RIDGELINE', id: null, type: 'MOUNTAIN OUTPOST', art: ridgeArt, lat: '33.8812° N', lon: '42.7732° E', locked: true },
+/* Theater cards: Town and Sandblast, the two live story operations. */
+const THEATERS: { num: string; code: string; id: MapId; type: string; art: string; lat: string; lon: string }[] = [
+  { num: '01', code: 'TOWN', id: 'kasbah', type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E' },
+  { num: '02', code: 'SANDBLAST', id: 'alrasul', type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E' },
 ];
 
 export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
   mission: MissionReport; pressure: PressureStats;
   cash: number; cashLog: CashLogEntry[]; difficultyMul: number;
-  comp?: CompDebrief;
   tdm?: {
     alphaScore: number; bravoScore: number; playerKills: number; outcome: TDMOutcome;
     roster: { name: string; team: 'alpha' | 'bravo'; dead: boolean; armorIcon: string; you?: boolean; kills: number; deaths: number; headshots: number }[];
@@ -97,9 +95,9 @@ const INTEL_TABS = [
    Right: wallet + operator chip, intel tabs, loadout card, motto.
    Fully interactive: mouse + WASD/arrows + Enter + Tab profile.
    ================================================================ */
-function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings, onRanked }: {
+function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings, onKits }: {
   prof: PlayerProfile; primaryName: string; secondaryName: string;
-  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void; onRanked?: () => void;
+  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void; onKits: () => void;
 }) {
   const [sel, setSel] = useState(0);
   const [intel, setIntel] = useState(2);
@@ -148,7 +146,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
     { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 · BOMB DEFUSAL · TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'ranked', idx: '03', title: 'OPERATION BLACKOUT', sub: 'RANKED SEARCH & DESTROY', action: () => onRanked?.() },
+    { id: 'kits', idx: '03', title: 'KITS', sub: prof.equippedKit ? `${KIT_DEFS[prof.equippedKit].name.toUpperCase()} EQUIPPED` : 'RADAR · BARRICADE · DECOY · MINE · MEDKIT', action: onKits },
     { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
     { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
   ];
@@ -167,7 +165,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activate, profileOpen, sel]);
+  }, [activate, items.length, profileOpen, sel]);
 
   // Pointer parallax — backdrop layers drift against the operator.
   const onMouse = (e: RMouseEvent) => {
@@ -219,6 +217,11 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
               >
                 <span className="rm-idx mono">{it.idx}</span>
                 <span className="rm-item-body"><b>{it.title}</b><em>{it.sub}</em></span>
+                {it.id === 'kits' && prof.equippedKit && (
+                  <span className={`rm-kit-badge kit-${prof.equippedKit}`} aria-hidden="true">
+                    <KitIcon id={prof.equippedKit} size={16} />
+                  </span>
+                )}
                 <span className="rm-arrow"><Arrow /></span>
               </button>
             ))}
@@ -488,9 +491,11 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, defusal, onDefusal, onRanked }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, onKits, defusal, onDefusal }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; onArenaSetup?: () => void; onRanked?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
+  onArmory?: () => void; onArenaSetup?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
+  /** Opens the KITS menu (home tile and the missions deploy panel). */
+  onKits?: () => void;
   defusal?: DefusalMenuOptions; onDefusal?: (o: DefusalMenuOptions) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
@@ -498,7 +503,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
   const secondaryName = weaponById(prof.loadout.secondary.weapon)?.short ?? '—';
   const [view, setView] = useState<'home' | 'maps' | 'missions' | 'arena'>(initialView ?? 'home');
   const [hovered, setHovered] = useState<MapId | null>(null);
-  const [denied, setDenied] = useState('');
   const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const focusIdxRef = useRef(0);
   // Theater keyboard: arrows/A-D hop between cards (focus drives the live
@@ -519,11 +523,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [view]);
-  useEffect(() => {
-    if (!denied) return;
-    const t = window.setTimeout(() => setDenied(''), 2400);
-    return () => window.clearTimeout(t);
-  }, [denied]);
   // Missions cover the story maps only — the arena lives under Arena Mode.
   const mapOrder = MAPS.filter(m => isMissionMap(m.id)).sort(a => (a.id === 'kasbah' ? -1 : 1));
 
@@ -537,7 +536,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onSelect={v => setView(v)}
         onArmory={() => onArmory?.()}
         onSettings={onSettings}
-        onRanked={onRanked}
+        onKits={() => onKits?.()}
       />
     );
   }
@@ -546,17 +545,12 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
   if (view === 'maps') {
     const activateTheater = (index: number) => {
       const t = THEATERS[index];
-      if (t.locked || !t.id) {
-        setDenied('RIDGELINE THEATER LOCKED — INTEL PENDING');
-        return;
-      }
       onMap(t.id);
       setHovered(null);
       setView('missions');
     };
     const preview = (index: number, on: boolean) => {
       const t = THEATERS[index];
-      if (t.locked || !t.id) return;
       setHovered(on ? t.id : cur => (cur === t.id ? null : cur));
     };
     return (
@@ -592,8 +586,8 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
 
         <div className="map2-cards" role="listbox" aria-label="Choose a theater">
           {THEATERS.map((t, i) => {
-            const obj = t.id ? getMission(t.id).phases.length : 4;
-            const isLive = !t.locked && hovered === t.id;
+            const obj = getMission(t.id).phases.length;
+            const isLive = hovered === t.id;
             return (
               <button
                 key={t.code}
@@ -607,35 +601,32 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
                 onMouseLeave={() => preview(i, false)}
                 onFocus={() => { focusIdxRef.current = i; preview(i, true); }}
                 onBlur={() => preview(i, false)}
-                className={`map2-card seq ${isLive ? 'sel' : ''} ${t.locked ? 'locked' : ''} ${denied && t.locked ? 'denied' : ''}`}
+                className={`map2-card seq ${isLive ? 'sel' : ''}`}
                 style={{ animationDelay: `${0.08 + i * 0.06}s` }}
-                aria-label={t.locked ? `${t.code} theater, locked` : `${t.code} theater, ${obj} objectives`}
+                aria-label={`${t.code} theater, ${obj} objectives`}
               >
                 <img src={t.art} alt="" draggable={false} className="map2-art" />
                 <span className="map2-shade" aria-hidden="true" />
                 <span className="map2-num mono">{t.num}</span>
                 <span className="map2-cardcoords mono">{t.lat}<br />{t.lon}</span>
-                {t.locked && (
-                  <span className="map2-classified mono"><TxLock size={13} /> CLASSIFIED</span>
-                )}
                 <span className="map2-info">
                   <b>{t.code}</b>
                   <em>{t.type}</em>
-                  <span className="map2-obj mono">{t.locked ? `${obj} OBJECTIVES · CLASSIFIED` : `${obj} OBJECTIVES · ${t.code}`}</span>
+                  <span className="map2-obj mono">{`${obj} OBJECTIVES · ${t.code}`}</span>
                 </span>
                 <span className="map2-go"><Arrow /></span>
               </button>
             );
           })}
         </div>
-        <p className={`map2-hint mono ${denied ? 'denied' : ''}`} role="status">
-          {denied || 'HOVER A THEATER FOR A LIVE OVERVIEW · CLICK TO VIEW ITS OPERATION'}
+        <p className="map2-hint mono" role="status">
+          HOVER A THEATER FOR A LIVE OVERVIEW · CLICK TO VIEW ITS OPERATION
         </p>
 
         <div className="map2-features seq" style={{ animationDelay: '.26s' }}>
           <div className="map2-feat">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c-5.5 5-5.5 12 0 17M12 3.5c5.5 5 5.5 12 0 17" /></svg>
-            <span><b>THREE THEATERS</b><em>UNIQUE ENVIRONMENTS</em></span>
+            <span><b>TWO THEATERS</b><em>UNIQUE ENVIRONMENTS</em></span>
           </div>
           <div className="map2-feat">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="8.5" cy="8" r="3" /><circle cx="16" cy="9.5" r="2.4" /><path d="M3 20c0-3.3 2.5-5.5 5.5-5.5S14 16.7 14 20M15 14.7c2.8.2 5 2.2 5 5.3" /></svg>
@@ -711,6 +702,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
           ))}
         </ol>
         <div className="msn-cta seq" style={{ animationDelay: `${0.15 + mission.phases.length * 0.05}s` }}>
+          <KitEquipButton kit={prof.equippedKit} onOpen={onKits} />
           <button className="deploy-btn" onClick={() => onDeploy()}>
             <span>Deploy</span>
             <span className="hint">{mapName} · {mission.phases.length} objectives</span>
@@ -738,6 +730,7 @@ const BOOT_TIPS = [
   'Lean with Q and E, then return to cover before firing.',
   'Reload before crossing an exposed lane.',
   'Manage the magazine; reserve ammunition is not consumed.',
+  'Buy a kit in KITS, then press Z in game: Radar, Barricade or Decoy.',
 ];
 
 export function BootScreen({ map }: { map?: MapId }) {
@@ -797,10 +790,40 @@ export function BootScreen({ map }: { map?: MapId }) {
 /* ================================================================
    PAUSE — SUSPENDED
    ================================================================ */
-export function PauseMenu({ mission, defusal, streaks, onResume, onRestart, onSettings, onQuit }: {
-  mission?: MissionHud; defusal?: DefusalHud; streaks?: StreakHud; onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
+const PZ_ICONS: Record<string, React.ReactNode> = {
+  resume: <path d="M7 5l12 7-12 7z" fill="currentColor" stroke="none" />,
+  settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></>,
+  restart: <><path d="M4 12a8 8 0 1 0 2.6-5.9" /><path d="M4 4v4h4" /></>,
+  quit: <><path d="M14 4h5v16h-5" /><path d="M10 8l-4 4 4 4M6 12h10" /></>,
+};
+
+export function PauseMenu({ mission, kit, tdm, mapName, defusal, onResume, onRestart, onSettings, onQuit }: {
+  mission?: MissionHud; kit?: KitHud; tdm?: TdmHud; mapName?: string; defusal?: DefusalHud;
+  onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
 }) {
-  const readout = mission ? objectiveReadout(mission) : undefined;
+  const readout = mission && !tdm ? objectiveReadout(mission) : undefined;
+  // Restart and Quit throw away the match: the first press arms, the second confirms.
+  const [armed, setArmed] = useState<'restart' | 'quit' | null>(null);
+  const [focus, setFocus] = useState(0);
+  const actions = [
+    { id: 'resume', label: 'Resume', sub: 'Back into the fight', run: onResume },
+    { id: 'settings', label: 'Settings', sub: 'Controls · video · audio', run: onSettings },
+    { id: 'restart', label: armed === 'restart' ? 'Confirm restart' : 'Restart', sub: armed === 'restart' ? 'Progress this match is lost' : 'Same map, fresh start', run: () => (armed === 'restart' ? onRestart() : setArmed('restart')) },
+    { id: 'quit', label: armed === 'quit' ? 'Confirm quit' : 'Quit to menu', sub: armed === 'quit' ? 'Ends the game · change kits in KITS' : 'End the game', run: () => (armed === 'quit' ? onQuit() : setArmed('quit')) },
+  ];
+  const btns = useRef<(HTMLButtonElement | null)[]>([]);
+  useEffect(() => { btns.current[0]?.focus(); }, []);
+  const onKey = (e: React.KeyboardEvent) => {
+    const n = actions.length;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = (focus + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      setFocus(next); btns.current[next]?.focus();
+    } else if (/^[1-4]$/.test(e.key)) {
+      actions[Number(e.key) - 1].run();
+    }
+  };
+  const you = tdm?.roster.find(r => r.you);
   if (defusal) {
     // Arena card: the live match instead of an operation brief.
     const df = defusal;
@@ -838,53 +861,70 @@ export function PauseMenu({ mission, defusal, streaks, onResume, onRestart, onSe
     );
   }
   return (
-    <section className="pause-layer" role="dialog" aria-modal="true" aria-labelledby="pause-title">
-      <div className="pause-wrap anim-rise">
-        <div className="pause-left">
-          <span className="stencil">System pause</span>
-          <h2 id="pause-title" className="pause-title">Paused</h2>
-          <div className="pause-actions">
-            <button className="pause-action pause-action-primary" onClick={onResume}><span>Resume</span><span className="idx">01</span></button>
-            <button className="pause-action" onClick={onSettings}><span>Settings</span><span className="idx">02</span></button>
-            <button className="pause-action" onClick={onRestart}><span>Restart</span><span className="idx">03</span></button>
-            <button className="pause-action" onClick={onQuit}><span>Quit to menu</span><span className="idx">04</span></button>
-          </div>
-          <p className="pause-hint"><span className="keycap">Esc</span> Resume anytime</p>
+    <section className="pz-layer" role="dialog" aria-modal="true" aria-labelledby="pause-title" onKeyDown={onKey}>
+      <div className="pz-vignette" aria-hidden="true" />
+      <div className="pz-wrap">
+        <div className="pz-left">
+          <span className="pz-eyebrow mono"><i className="pz-dot" />SYSTEM PAUSE · TIMERS FROZEN</span>
+          <h2 id="pause-title" className="pz-title">Paused</h2>
+          {mapName && <span className="pz-map mono">{mapName}</span>}
+          <nav className="pz-actions" aria-label="Pause menu">
+            {actions.map((a, i) => (
+              <button key={a.id} ref={el => { btns.current[i] = el; }}
+                className={`pz-action ${a.id === 'resume' ? 'primary' : ''} ${armed === a.id ? 'armed' : ''}`}
+                style={{ animationDelay: `${60 + i * 45}ms` }}
+                onFocus={() => setFocus(i)} onMouseEnter={() => setFocus(i)}
+                onBlur={() => { if (armed === a.id) setArmed(null); }}
+                onClick={a.run}>
+                <svg className="pz-action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{PZ_ICONS[a.id]}</svg>
+                <span className="pz-action-text"><b>{a.label}</b><em>{a.sub}</em></span>
+                <span className="pz-action-key mono">{i + 1}</span>
+              </button>
+            ))}
+          </nav>
+          <p className="pz-hint mono"><span className="keycap">Esc</span> resume · <span className="keycap">↑↓</span> move · <span className="keycap">1–4</span> select</p>
         </div>
 
-        <div className="pause-card">
-          <div className="pause-card-head">
-            <span>Operation <b>{mission?.name ?? 'Ready'}</b></span>
-            <span className="pause-clock tabular">{mission ? missionClock(mission.elapsed) : '00:00'}</span>
-          </div>
-          <span className="pause-phase">Phase {mission ? `0${mission.index + 1} / 0${mission.phaseCount}` : '—'}</span>
-          <h3>{mission?.title ?? 'Ready to deploy'}</h3>
-          <p>{mission?.brief ?? 'Select resume to continue.'}</p>
-          <div className="pause-progress"><span style={{ width: `${Math.round((mission?.progress ?? 0) * 100)}%` }} /></div>
-          {readout && (
-            <div className="pause-readout">
-              <strong className="tabular">{readout.value}</strong>
-              <span>{readout.label}</span>
-            </div>
-          )}
-          <p className="pause-note">All mission timers frozen</p>
-          {streaks && (
-            <div className="pause-streaks" aria-label="Scorestreaks">
-              <div className="pause-streaks-head">
-                <span>Scorestreaks</span>
-                <span className="tabular">{streaks.points} pts this life</span>
+        <div className="pz-right">
+          {tdm ? (
+            <div className="pz-panel pz-score" style={{ animationDelay: '80ms' }}>
+              <div className="pz-panel-head mono"><span>TEAM DEATHMATCH</span><span className="tabular">{missionClock(tdm.timeLeft)} LEFT</span></div>
+              <div className="pz-score-row">
+                <div className="pz-team alpha"><span>ALPHA</span><b className="tabular">{tdm.alphaScore}</b></div>
+                <span className="pz-vs mono">VS</span>
+                <div className="pz-team bravo"><b className="tabular">{tdm.bravoScore}</b><span>BRAVO</span></div>
               </div>
-              {streaks.ladder.map(l => (
-                <div key={l.id} className={`pause-streak-row ${l.ready ? 'ready' : ''} ${l.claimed && !l.ready ? 'claimed' : ''}`}>
-                  <span className="keycap">{l.key}</span>
-                  <span className="psr-name">{l.name}</span>
-                  <span className="psr-cost tabular">{l.cost}</span>
-                  <span className="psr-state">{l.active ? 'LIVE' : l.ready ? 'READY' : l.claimed ? 'USED' : ''}</span>
+              <div className="pz-score-bar" aria-hidden="true">
+                <i style={{ flex: Math.max(1, tdm.alphaScore) }} /><i className="b" style={{ flex: Math.max(1, tdm.bravoScore) }} />
+              </div>
+              {you && (
+                <div className="pz-stats mono">
+                  <span><b className="tabular">{you.kills}</b>KILLS</span>
+                  <span><b className="tabular">{you.deaths}</b>DEATHS</span>
+                  <span><b className="tabular">{you.headshots}</b>HEADSHOTS</span>
+                  <span><b className="tabular">{you.deaths ? (you.kills / you.deaths).toFixed(2) : you.kills.toFixed(2)}</b>K/D</span>
                 </div>
-              ))}
-              <p className="pause-streaks-foot">Kills 100 · headshots 150 · objectives 250. Streak kills never chain. Progress resets on death; armed streaks are kept.</p>
+              )}
+            </div>
+          ) : (
+            <div className="pz-panel pz-op" style={{ animationDelay: '80ms' }}>
+              <div className="pz-panel-head mono">
+                <span>OPERATION · <b>{mission?.name ?? 'Ready'}</b></span>
+                <span className="tabular">{mission ? missionClock(mission.elapsed) : '00:00'}</span>
+              </div>
+              <span className="pz-phase mono">PHASE {mission ? `0${mission.index + 1} / 0${mission.phaseCount}` : '—'}</span>
+              <h3>{mission?.title ?? 'Ready to deploy'}</h3>
+              <p>{mission?.brief ?? 'Select resume to continue.'}</p>
+              <div className="pz-progress"><span style={{ width: `${Math.round((mission?.progress ?? 0) * 100)}%` }} /></div>
+              {readout && <div className="pz-readout"><strong className="tabular">{readout.value}</strong><span>{readout.label}</span></div>}
             </div>
           )}
+
+          <div className="pz-panel" style={{ animationDelay: '140ms' }}>
+            <div className="pz-panel-head mono"><span>KIT</span><span>{kit ? <span className="keycap">{kit.key}</span> : 'NONE'}</span></div>
+            <KitPauseCard kit={kit} />
+          </div>
+
         </div>
       </div>
     </section>
@@ -898,16 +938,15 @@ export type ResultsWallet = { before: number; after: number; gradeBonus: number;
 
 const CASH_REASONS: Record<string, string> = {
   kill: 'Eliminations', headshot: 'Headshots', grenade: 'Grenade kills',
-  streak: 'Streak bonuses', phase: 'Phases secured', extraction: 'Extraction', shutdown: 'Shutdowns',
+  streak: 'Multi-kill bonuses', shutdown: 'Momentum stopped', draw: 'Match draw', phase: 'Phases secured', extraction: 'Extraction',
   round: 'Rounds won', plant: 'Bombs planted', defuse: 'Bombs defused', mvp: 'Round MVPs', match: 'Match victory',
 };
 const DF_REASON_ICON: Record<string, string> = { elimination: '☠', bomb: '✹', defuse: '✂', time: '◷' };
 
 interface CashRow { label: string; detail: string; total: number }
 
-/** Shared payout ledger: mission, TDM, defusal, and ranked all settle cash, so
- *  all results screens itemize it. (Ranked used to swallow the breakdown — the
- *  wallet moved with no explanation.) */
+/** Shared payout ledger: mission, TDM and defusal all settle cash, so
+ *  all results screens itemize it. */
 function CashCard({ r, cashRows, wallet, grade }: { r: Results; cashRows: CashRow[]; wallet: ResultsWallet; grade: string }) {
   return (
     <section className="cash-card" aria-label="Cash earned">
@@ -954,29 +993,6 @@ export function ResultsScreen({ r, wallet, onRedeploy, onMenu, onArmory }: {
   const tdm = r.tdm;
   const df = r.defusal;
   const dfTitle = df ? `${df.winner === 'alpha' ? 'Victory' : df.winner === 'draw' ? 'Draw' : 'Defeat'} ${df.alphaScore} — ${df.bravoScore}` : '';
-  if (r.comp) {
-    return (
-      <main className={`results-root ${r.win ? '' : 'lose'}`}>
-        <div className="results-wrap">
-          <div className="results-header">
-            <div className="stamp"><span className="stamp-grade" style={{ color: tint }}>{grade}</span></div>
-            <div className="results-titleblock">
-              <div className="stamp-label">BLACKOUT REPORT</div>
-              <h1>OPERATION BLACKOUT</h1>
-              <p className="mono">RANKED SEARCH &amp; DESTROY · WAREHOUSE COMPLEX · {missionClock(r.timeSec)}</p>
-            </div>
-          </div>
-          <CompDebriefPanel report={r.comp} />
-          <CashCard r={r} cashRows={cashRows} wallet={wallet} grade={grade} />
-          <div className="results-actions">
-            <button className="deploy-btn" onClick={onRedeploy}>RE-QUEUE</button>
-            <button className="menu-secondary-btn" onClick={onArmory}>ARMORY (+${Math.round(wallet.earned)})</button>
-            <button className="menu-secondary-btn" onClick={onMenu}>BACK TO MENU</button>
-          </div>
-        </div>
-      </main>
-    );
-  }
   return (
     <main className={`results-root ${r.win || df?.winner === 'draw' || tdm?.outcome === 'draw' ? '' : 'lose'}`}>
       <div className="results-wrap">

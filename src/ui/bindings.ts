@@ -6,7 +6,7 @@ export const BINDS: [string, string][] = [
   ['Lean left', 'Q — hold'], ['Lean right', 'E — hold'], ['Frag grenade', 'Hold G'], ['Flashbang', 'F'],
   ['Primary / Sidearm', '1 / 2'], ['Last weapon', 'Tap Q'], ['Plant / Detonate', 'X'],
   ['Underbarrel shotgun', 'B'], ['Scope zoom', 'V · [ ]'], ['Canted sight', 'T — hold'],
-  ['Scorestreaks', '3 – 7'], ['Scoreboard', 'Tab — hold'], ['Pause', 'Esc'],
+  ['Field kit', 'Z'], ['Scoreboard', 'Tab — hold'], ['Pause', 'Esc'],
 ];
 
 /** Menu cursor step with wraparound. Count comes from the item list itself so the

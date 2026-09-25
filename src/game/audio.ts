@@ -2,8 +2,6 @@
 export class SpatialAudioEngine {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
-  comp: DynamicsCompressorNode | null = null;
-  makeup: GainNode | null = null;
   echoBus: DelayNode | null = null;
   echoFb: GainNode | null = null;
   echoGain: GainNode | null = null;
@@ -21,21 +19,7 @@ export class SpatialAudioEngine {
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = Math.max(0, Math.min(1.2, this.volume01)) * 0.85;
-      // Master bus glue: stacked gunshot bursts (gains 1.0 + 0.68 + 0.42) plus
-      // explosions and callouts used to hard-clip the destination. Gentle 4:1
-      // at −18 dB keeps transients punchy without the digital crunch.
-      this.comp = this.ctx.createDynamicsCompressor();
-      this.comp.threshold.value = -18;
-      this.comp.ratio.value = 4;
-      this.comp.attack.value = 0.003;
-      this.comp.release.value = 0.18;
-      // +1 dB makeup restores the body the glue takes; peaks stay controlled
-      // because the squash happens before this gain stage, not after.
-      this.makeup = this.ctx.createGain();
-      this.makeup.gain.value = 1.12;
-      this.master.connect(this.comp);
-      this.comp.connect(this.makeup);
-      this.makeup.connect(this.ctx.destination);
+      this.master.connect(this.ctx.destination);
 
       // Reverb/Echo bus
       this.echoBus = this.ctx.createDelay(1.0);
@@ -341,12 +325,6 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.025, gain: 0.35, freq: 2600, q: 1.8, when: 0.07 });
   }
 
-  /** Ejected casing: a bright delayed tink ~90 ms after the report, when brass
-   *  meets ground. Quiet on purpose — it should be felt, not heard over the gun. */
-  fireCasing() {
-    this.burstDirect({ dur: 0.03, gain: 0.1, freq: this.rf(6400), q: 4, hp: 4200, when: 0.09 });
-  }
-
   beltCoverOpen() {
     this.burstDirect({ dur: 0.03, gain: 0.35, freq: 1500, q: 1.4 });
     this.burstDirect({ dur: 0.05, gain: 0.25, freq: 900, q: 1.2, when: 0.08 });
@@ -456,39 +434,6 @@ export class SpatialAudioEngine {
       o.frequency.setValueAtTime(f, st); o.frequency.exponentialRampToValueAtTime(f * 0.7, st + 0.12);
       const og = ctx.createGain(); og.gain.setValueAtTime(0.12, st); og.gain.exponentialRampToValueAtTime(0.001, st + 0.14);
       o.connect(og); og.connect(panner); o.start(st); o.stop(st + 0.15);
-    }
-  }
-
-  /**
-   * SPATIAL: a body hitting the floor. Low-passed noise thump (≈180 Hz body, 0.16 s)
-   * under a short 70 Hz sine for weight. Quiet on purpose (0.42 peak vs 0.9 for glass):
-   * it is a confirmation layer under the kill cue, not a new event to react to.
-   */
-  bodyFallSpatial(wx: number, wy: number, wz: number, heavy = false) {
-    const ctx = this.ensure();
-    const panner = this.createSpatialPanner(wx, wy, wz);
-    const t = ctx.currentTime;
-    const src = ctx.createBufferSource(); src.buffer = this.noise();
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = heavy ? 150 : 190;
-    const g = ctx.createGain(); g.gain.setValueAtTime(heavy ? 0.5 : 0.42, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-    src.connect(lp); lp.connect(g); g.connect(panner); src.start(t); src.stop(t + 0.18);
-    const o = ctx.createOscillator(); o.type = 'sine';
-    o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
-    const og = ctx.createGain(); og.gain.setValueAtTime(0.28, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
-    o.connect(og); og.connect(panner); o.start(t); o.stop(t + 0.14);
-  }
-
-  /** SPATIAL: a dropped rifle landing — two band-passed metallic ticks 40 ms apart
-   *  (receiver, then barrel), quieter than a grenade bounce. */
-  weaponClatterSpatial(wx: number, wy: number, wz: number) {
-    const ctx = this.ensure();
-    const panner = this.createSpatialPanner(wx, wy, wz);
-    const t = ctx.currentTime;
-    for (const [dt, f, gain] of [[0, 1900, 0.26], [0.04, 2600, 0.16]] as const) {
-      const src = ctx.createBufferSource(); src.buffer = this.noise();
-      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 4;
-      const g = ctx.createGain(); g.gain.setValueAtTime(gain, t + dt); g.gain.exponentialRampToValueAtTime(0.001, t + dt + 0.05);
-      src.connect(bp); bp.connect(g); g.connect(panner); src.start(t + dt); src.stop(t + dt + 0.06);
     }
   }
 
@@ -767,155 +712,8 @@ export class SpatialAudioEngine {
     }
   }
 
-  // ==================== BOMB DEFUSAL ====================
-  /** One oscillator note straight to the master bus (UI stingers, keypad). */
-  private tone(freq: number, dur: number, gain: number, type: OscillatorType = 'sine', when = 0, glideTo?: number) {
-    const ctx = this.ensure();
-    const t = ctx.currentTime + when;
-    const o = ctx.createOscillator();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, t);
-    if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t + dur);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(gain, t + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(this.master!);
-    o.start(t); o.stop(t + dur + 0.02);
-    o.onended = () => { o.disconnect(); g.disconnect(); };
-  }
-
-  /** Planted C4 chirp from the bomb itself. Carries much further than gunfire. */
-  c4Beep(wx: number, wy: number, wz: number, urgency: number) {
-    const ctx = this.ensure();
-    const panner = this.createSpatialPanner(wx, wy, wz);
-    panner.refDistance = 4; panner.rolloffFactor = 0.8;
-    const t = ctx.currentTime;
-    const o = ctx.createOscillator();
-    o.type = 'square';
-    o.frequency.setValueAtTime(2500 + urgency * 900, t);
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass'; bp.frequency.value = 2900; bp.Q.value = 2.5;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.3, t + 0.004);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.085);
-    o.connect(bp); bp.connect(g); g.connect(panner);
-    o.start(t); o.stop(t + 0.1);
-    o.onended = () => { o.disconnect(); bp.disconnect(); g.disconnect(); };
-  }
-  /** Keypad digit while arming. */
-  c4Key(i: number) { this.tone(880 + (i % 4) * 190, 0.07, 0.12, 'square'); }
-  /** Armed: the unmistakable double chirp. */
-  c4Armed() { this.tone(1760, 0.09, 0.16, 'square'); this.tone(2350, 0.14, 0.16, 'square', 0.1); }
-  /** Rising whine in the last second. */
-  c4Whine(wx: number, wy: number, wz: number) {
-    const ctx = this.ensure();
-    const panner = this.createSpatialPanner(wx, wy, wz);
-    panner.refDistance = 5; panner.rolloffFactor = 0.7;
-    const t = ctx.currentTime;
-    const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(600, t);
-    o.frequency.exponentialRampToValueAtTime(3200, t + 1.0);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.05, t);
-    g.gain.linearRampToValueAtTime(0.22, t + 0.95);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.05);
-    o.connect(g); g.connect(panner);
-    o.start(t); o.stop(t + 1.1);
-    o.onended = () => { o.disconnect(); g.disconnect(); };
-  }
-  /** The C4 blast: stacked sub drop, debris wash and a long rolling tail. */
-  c4Explosion(wx: number, wy: number, wz: number, dist: number) {
-    this.explosionSpatial(wx, wy, wz, dist);
-    const a = Math.max(0.25, 1 - dist / 90);
-    this.subThump(70, 16, 1.5 * a, 1.8, 'sine');
-    this.burstDirect({ dur: 2.6, gain: 0.8 * a, freq: 260, q: 0.5, type: 'lowpass', attack: 0.01, toEcho: 0.6 });
-    this.burstDirect({ dur: 0.9, gain: 0.5 * a, freq: 1400, q: 0.7, when: 0.05 });
-  }
-  defuseTick() { this.burstDirect({ dur: 0.03, gain: 0.18, freq: 3400, q: 4 }); }
-  defused() { this.tone(1320, 0.12, 0.14, 'triangle'); this.tone(990, 0.12, 0.14, 'triangle', 0.12); this.tone(660, 0.3, 0.16, 'triangle', 0.24); }
-  smokePop(wx: number, wy: number, wz: number) {
-    const ctx = this.ensure();
-    const panner = this.createSpatialPanner(wx, wy, wz);
-    const t = ctx.currentTime;
-    const src = ctx.createBufferSource();
-    src.buffer = this.noise();
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.setValueAtTime(3000, t); lp.frequency.exponentialRampToValueAtTime(500, t + 2.4);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.5, t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
-    src.connect(lp); lp.connect(g); g.connect(panner);
-    src.start(t, Math.random() * 0.3); src.stop(t + 2.7);
-    src.onended = () => { src.disconnect(); lp.disconnect(); g.disconnect(); };
-  }
-  buyClick() { this.burstDirect({ dur: 0.03, gain: 0.3, freq: 3600, q: 3 }); this.tone(1500, 0.06, 0.08, 'triangle', 0.02); }
-  buyDenied() { this.tone(180, 0.16, 0.14, 'square'); }
-  pickup() { this.burstDirect({ dur: 0.04, gain: 0.3, freq: 2200, q: 2 }); this.burstDirect({ dur: 0.05, gain: 0.25, freq: 900, q: 1.5, when: 0.05 }); }
-  roundStartStinger() { this.tone(392, 0.18, 0.12, 'sawtooth'); this.tone(523, 0.32, 0.12, 'sawtooth', 0.16); }
-  roundWinStinger() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.28, 0.11, 'triangle', i * 0.09)); }
-  roundLoseStinger() { [440, 349, 294].forEach((f, i) => this.tone(f, 0.34, 0.11, 'sawtooth', i * 0.14)); }
-
   pinPull() { this.ensure(); this.burstDirect({ dur: 0.035, gain: 0.35, freq: 3200, q: 3 }); }
 
-  /**
-   * OPERATION BLACKOUT — the charge's LED beeper. Pitch and level rise as the fuse
-   * burns down, so a player can hear the clock without looking at the HUD.
-   * `urgency` is 0 (freshly planted) .. 1 (about to blow).
-   */
-  bombBeep(urgency: number) {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    const u = Math.max(0, Math.min(1, urgency));
-    const o = ctx.createOscillator();
-    o.type = 'square';
-    o.frequency.setValueAtTime(1750 + u * 900, t);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.035 + u * 0.05, t + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.075);
-    o.connect(g);
-    g.connect(this.master!);
-    o.start(t);
-    o.stop(t + 0.09);
-    o.onended = () => { o.disconnect(); g.disconnect(); };
-  }
-
-  /** Plant / defuse completion sting: two rising tones for the attackers, one for the cut. */
-  chargePlanted() {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    [420, 640, 880].forEach((f, i) => {
-      const o = ctx.createOscillator();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(f, t + i * 0.06);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t + i * 0.06);
-      g.gain.linearRampToValueAtTime(0.09, t + i * 0.06 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.06 + 0.16);
-      o.connect(g); g.connect(this.master!);
-      o.start(t + i * 0.06); o.stop(t + i * 0.06 + 0.18);
-      o.onended = () => { o.disconnect(); g.disconnect(); };
-    });
-  }
-
-  chargeDefused() {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    [880, 560].forEach((f, i) => {
-      const o = ctx.createOscillator();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(f, t + i * 0.09);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t + i * 0.09);
-      g.gain.linearRampToValueAtTime(0.085, t + i * 0.09 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.09 + 0.22);
-      o.connect(g); g.connect(this.master!);
-      o.start(t + i * 0.09); o.stop(t + i * 0.09 + 0.25);
-      o.onended = () => { o.disconnect(); g.disconnect(); };
-    });
-  }
   throwWhoosh() { this.ensure(); this.burstDirect({ dur: 0.16, gain: 0.2, freq: 950, q: 0.5, attack: 0.04 }); }
 
   fleshImpact(_pan = 0) {
@@ -983,240 +781,197 @@ export class SpatialAudioEngine {
     });
   }
 
-  // ==================== SCORESTREAKS ====================
-  /** A streak crossed its threshold: rising three-note chime, unmistakable under gunfire. */
-  streakReady() {
+  // ==================== FIELD KITS ====================
+  /** Spatial filtered-noise hit at a world point (kit hardware foley). */
+  private spatialNoise(wx: number, wy: number, wz: number, o: { dur: number; gain: number; freq: number; q?: number; type?: BiquadFilterType; when?: number }) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime + (o.when ?? 0);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise();
+    const f = ctx.createBiquadFilter();
+    f.type = o.type ?? 'bandpass'; f.frequency.value = o.freq; f.Q.value = o.q ?? 1;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(o.gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+    src.connect(f); f.connect(g); g.connect(panner);
+    src.start(t, Math.random() * 0.4); src.stop(t + o.dur + 0.02);
+    src.onended = () => { src.disconnect(); f.disconnect(); g.disconnect(); panner.disconnect(); };
+  }
+
+  /** Spatial oscillator sweep at a world point. */
+  private spatialTone(wx: number, wy: number, wz: number, o: { from: number; to: number; dur: number; gain: number; type?: OscillatorType; when?: number }) {
+    const ctx = this.ensure();
+    const panner = this.createSpatialPanner(wx, wy, wz);
+    const t = ctx.currentTime + (o.when ?? 0);
+    const osc = ctx.createOscillator();
+    osc.type = o.type ?? 'sine';
+    osc.frequency.setValueAtTime(o.from, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.to), t + o.dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(o.gain, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+    osc.connect(g); g.connect(panner);
+    osc.start(t); osc.stop(t + o.dur + 0.02);
+    osc.onended = () => { osc.disconnect(); g.disconnect(); panner.disconnect(); };
+  }
+
+  /** Kit charged: two soft rising blips, lower than the streak chime so they never blur. */
+  kitReady() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    [[660, 0], [880, 0.09], [1320, 0.18]].forEach(([f, when]) => {
+    [[520, 0], [780, 0.08]].forEach(([f, when]) => {
       const o = ctx.createOscillator();
-      o.type = 'triangle';
-      o.frequency.value = f;
+      o.type = 'sine'; o.frequency.value = f;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t + when);
-      g.gain.exponentialRampToValueAtTime(0.28, t + when + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.34);
+      g.gain.exponentialRampToValueAtTime(0.2, t + when + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.22);
       o.connect(g); g.connect(this.master!);
-      o.start(t + when); o.stop(t + when + 0.36);
+      o.start(t + when); o.stop(t + when + 0.24);
       o.onended = () => { o.disconnect(); g.disconnect(); };
     });
   }
 
-  /** Streak called in: deep confirm thud + radio squelch. */
-  streakDeploy() {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    this.burstDirect({ dur: 0.05, gain: 0.18, freq: 2600, q: 5 });
-    this.burstDirect({ dur: 0.05, gain: 0.14, freq: 1900, q: 5, when: 0.09 });
-    const o = ctx.createOscillator();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(140, t);
-    o.frequency.exponentialRampToValueAtTime(48, t + 0.35);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.5, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
-    o.connect(g); g.connect(this.master!);
-    o.start(t); o.stop(t + 0.42);
-    o.onended = () => { o.disconnect(); g.disconnect(); };
+  /** Pressed Z on cooldown / refused placement: a dull double tick. */
+  kitDenied() {
+    this.burstDirect({ dur: 0.04, gain: 0.12, freq: 900, q: 3 });
+    this.burstDirect({ dur: 0.04, gain: 0.1, freq: 700, q: 3, when: 0.07 });
   }
 
-  /** Sentry gun round: short, metallic, very fast — a sewing machine bolted to a tripod. */
-  sentryFireSpatial(wx: number, wy: number, wz: number) {
-    const ctx = this.ensure();
-    const panner = this.createSpatialPanner(wx, wy, wz);
-    const t = ctx.currentTime;
-    const src = ctx.createBufferSource();
-    src.buffer = this.noise();
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass'; bp.frequency.value = this.rf(3400); bp.Q.value = 1.1;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.55, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-    src.connect(bp); bp.connect(g); g.connect(panner);
-    src.start(t, Math.random() * 0.4); src.stop(t + 0.06);
-    const o = ctx.createOscillator();
-    o.type = 'square';
-    o.frequency.setValueAtTime(this.rf(210), t);
-    o.frequency.exponentialRampToValueAtTime(80, t + 0.06);
-    const og = ctx.createGain();
-    og.gain.setValueAtTime(0.22, t);
-    og.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
-    o.connect(og); og.connect(panner);
-    o.start(t); o.stop(t + 0.08);
-    o.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); o.disconnect(); og.disconnect(); panner.disconnect(); };
+  /** Dart leaves the hand: short air whip. */
+  dartThrow() {
+    this.burstDirect({ dur: 0.16, gain: 0.16, freq: 1800, q: 0.8, attack: 0.03, hp: 900 });
   }
 
-  /** Helicopter chin gun: a fat, ripping 30 mm burst that rolls across the sky. */
-  chopperGunSpatial(wx: number, wy: number, wz: number, rounds: number) {
-    const ctx = this.ensure();
-    const panner = this.createSpatialPanner(wx, wy, wz);
-    const t = ctx.currentTime;
-    const step = 0.05;
-    let last: AudioNode | null = null;
-    for (let i = 0; i < rounds; i++) {
-      const when = t + i * step;
-      const src = ctx.createBufferSource();
-      src.buffer = this.noise();
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.value = 900;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.9, when);
-      g.gain.exponentialRampToValueAtTime(0.001, when + 0.045);
-      src.connect(lp); lp.connect(g); g.connect(panner);
-      src.start(when, Math.random() * 0.4); src.stop(when + 0.05);
-      last = src;
-      src.onended = () => { src.disconnect(); lp.disconnect(); g.disconnect(); };
-    }
-    if (last) (last as AudioBufferSourceNode).addEventListener('ended', () => panner.disconnect());
+  /** Dart bites into a surface: tick + tiny metallic ring. */
+  dartStick(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.05, gain: 0.5, freq: 3200, q: 2 });
+    this.spatialTone(wx, wy, wz, { from: 2400, to: 2200, dur: 0.18, gain: 0.12, type: 'triangle' });
+  }
+
+  /** Sonar pulse: descending sine "ping" with a watery tail; the last ping is doubled. */
+  sonarPing(wx: number, wy: number, wz: number, last = false) {
+    this.spatialTone(wx, wy, wz, { from: 1900, to: 1250, dur: 0.55, gain: 0.55 });
+    this.spatialTone(wx, wy, wz, { from: 950, to: 620, dur: 0.7, gain: 0.25, type: 'triangle' });
+    if (last) this.spatialTone(wx, wy, wz, { from: 1900, to: 1250, dur: 0.45, gain: 0.4, when: 0.16 });
+  }
+
+  /** Barricade unfolds: ratchet clacks and a heavy plate thump. */
+  barricadeDeploy(wx: number, wy: number, wz: number) {
+    for (let i = 0; i < 3; i++) this.spatialNoise(wx, wy, wz, { dur: 0.04, gain: 0.45, freq: 2600 - i * 300, q: 4, when: i * 0.06 });
+    this.spatialTone(wx, wy, wz, { from: 130, to: 55, dur: 0.3, gain: 0.7, type: 'triangle', when: 0.2 });
+    this.spatialNoise(wx, wy, wz, { dur: 0.2, gain: 0.35, freq: 400, q: 0.8, when: 0.2 });
+  }
+
+  /** A round spangs off the steel. */
+  barricadeHit(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.05, gain: 0.5, freq: this.rf(4200, 0.2), q: 3 });
+    this.spatialTone(wx, wy, wz, { from: this.rf(1700, 0.2), to: 1300, dur: 0.22, gain: 0.14, type: 'square' });
+  }
+
+  /** Integrity gone: plates crash down. */
+  barricadeBreak(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.5, gain: 0.8, freq: 700, q: 0.6 });
+    this.spatialNoise(wx, wy, wz, { dur: 0.3, gain: 0.5, freq: 2400, q: 1.5, when: 0.08 });
+    this.spatialTone(wx, wy, wz, { from: 90, to: 40, dur: 0.45, gain: 0.8, type: 'triangle' });
+  }
+
+  /** Life expired: the wall folds itself away. */
+  barricadeFold(wx: number, wy: number, wz: number) {
+    for (let i = 0; i < 2; i++) this.spatialNoise(wx, wy, wz, { dur: 0.05, gain: 0.35, freq: 2000 + i * 400, q: 4, when: i * 0.08 });
+    this.spatialTone(wx, wy, wz, { from: 110, to: 60, dur: 0.22, gain: 0.4, type: 'triangle', when: 0.16 });
+  }
+
+  /** Holo-decoy boots: rising digital sweep with a projector buzz. */
+  decoyDeploy(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 300, to: 1600, dur: 0.35, gain: 0.3, type: 'sawtooth' });
+    this.spatialNoise(wx, wy, wz, { dur: 0.3, gain: 0.18, freq: 5200, q: 6 });
   }
 
   /**
-   * Looping rotor bed: filtered noise whose gain is chopped by a blade-slap LFO, plus a
-   * low turbine drone. Returns a handle so the engine can drag the panner with the
-   * airframe every frame and cut it clean on despawn.
+   * Decoy blank: a rifle report built the same way as the hostile gun voice, so the AI's
+   * ears and the player's ears both hear "a rifleman", just a touch brighter and dryer.
    */
-  rotorLoop(wx: number, wy: number, wz: number): { move(x: number, y: number, z: number): void; stop(): void } {
-    const ctx = this.ensure();
-    const panner = ctx.createPanner();
-    panner.panningModel = 'HRTF';
-    panner.distanceModel = 'inverse';
-    panner.refDistance = 6;
-    panner.maxDistance = 400;
-    panner.rolloffFactor = 1.1;
-    panner.connect(this.master!);
-    const src = ctx.createBufferSource();
-    src.buffer = this.noise(); src.loop = true;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = 520;
-    const chop = ctx.createGain(); chop.gain.value = 0.35;
-    const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 12.5;
-    const lfoG = ctx.createGain(); lfoG.gain.value = 0.3;
-    lfo.connect(lfoG); lfoG.connect(chop.gain);
-    const drone = ctx.createOscillator(); drone.type = 'sawtooth'; drone.frequency.value = 62;
-    const droneLp = ctx.createBiquadFilter(); droneLp.type = 'lowpass'; droneLp.frequency.value = 240;
-    const droneG = ctx.createGain(); droneG.gain.value = 0.22;
-    const master = ctx.createGain();
-    master.gain.setValueAtTime(0.0001, ctx.currentTime);
-    master.gain.exponentialRampToValueAtTime(1.0, ctx.currentTime + 1.2);
-    src.connect(lp); lp.connect(chop); chop.connect(master);
-    drone.connect(droneLp); droneLp.connect(droneG); droneG.connect(master);
-    master.connect(panner);
-    src.start(); lfo.start(); drone.start();
-    const move = (x: number, y: number, z: number) => {
-      const t = ctx.currentTime;
-      if (panner.positionX) {
-        panner.positionX.linearRampToValueAtTime(x, t + 0.1);
-        panner.positionY.linearRampToValueAtTime(y, t + 0.1);
-        panner.positionZ.linearRampToValueAtTime(z, t + 0.1);
-      } else panner.setPosition(x, y, z);
-    };
-    move(wx, wy, wz);
-    let stopped = false;
-    return {
-      move,
-      stop: () => {
-        if (stopped) return; stopped = true;
-        const t = ctx.currentTime;
-        master.gain.cancelScheduledValues(t);
-        master.gain.setValueAtTime(master.gain.value, t);
-        master.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
-        src.stop(t + 1.6); lfo.stop(t + 1.6); drone.stop(t + 1.6);
-        src.onended = () => { [src, lp, chop, lfo, lfoG, drone, droneLp, droneG, master, panner].forEach(n => n.disconnect()); };
-      },
-    };
+  decoyFire(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.09, gain: 0.85, freq: this.rf(1500), q: 0.7 });
+    this.spatialTone(wx, wy, wz, { from: this.rf(160), to: 60, dur: 0.1, gain: 0.35, type: 'triangle' });
   }
 
-  /** Fast-mover pass: rising then tearing-away noise sweep — the Doppler crack of jets on the deck. */
-  jetFlyby(wx: number, wy: number, wz: number) {
-    const ctx = this.ensure();
-    const panner = this.createSpatialPanner(wx, wy, wz);
-    panner.refDistance = 20; panner.maxDistance = 600; panner.rolloffFactor = 0.8;
-    const t = ctx.currentTime;
-    const src = ctx.createBufferSource();
-    src.buffer = this.noise(); src.loop = true;
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass'; bp.Q.value = 0.7;
-    bp.frequency.setValueAtTime(320, t);
-    bp.frequency.exponentialRampToValueAtTime(1400, t + 1.8);
-    bp.frequency.exponentialRampToValueAtTime(260, t + 3.6);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(1.4, t + 1.8);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 3.8);
-    src.connect(bp); bp.connect(g); g.connect(panner);
-    src.start(t); src.stop(t + 3.9);
-    src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); panner.disconnect(); };
+  /** Decoy destroyed / expired: digital crackle collapse. */
+  decoyPop(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 1400, to: 180, dur: 0.3, gain: 0.3, type: 'square' });
+    for (let i = 0; i < 4; i++) this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.3, freq: 3000 + i * 900, q: 5, when: i * 0.045 });
   }
 
-  /** Bomb release: a heavy whistle dropping in pitch before the strike lands. */
-  bombWhistle() {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    const o = ctx.createOscillator();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(1900, t);
-    o.frequency.exponentialRampToValueAtTime(700, t + 1.6);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.16, t + 0.3);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
-    o.connect(g); g.connect(this.master!);
-    o.start(t); o.stop(t + 1.75);
-    o.onended = () => { o.disconnect(); g.disconnect(); };
+  /** Decoy glitch burst: a sub-bass thump under a descending digital shriek and crackle. */
+  decoyBurst(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 110, to: 38, dur: 0.45, gain: 0.55, type: 'sine' });
+    this.spatialTone(wx, wy, wz, { from: 2600, to: 240, dur: 0.38, gain: 0.26, type: 'sawtooth' });
+    for (let i = 0; i < 7; i++) this.spatialNoise(wx, wy, wz, { dur: 0.025, gain: 0.34, freq: 1800 + (i % 3) * 1500, q: 6, when: 0.02 + i * 0.038 });
   }
 
-  /** Tactical nuke siren: one full sweep, called every second of the countdown. */
-  nukeSiren(urgent: boolean) {
-    const ctx = this.ensure();
-    const t = ctx.currentTime;
-    const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(urgent ? 620 : 420, t);
-    o.frequency.exponentialRampToValueAtTime(urgent ? 980 : 760, t + 0.45);
-    o.frequency.exponentialRampToValueAtTime(urgent ? 620 : 420, t + 0.9);
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = 1800;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(urgent ? 0.2 : 0.14, t + 0.05);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.92);
-    o.connect(lp); lp.connect(g); g.connect(this.master!);
-    o.start(t); o.stop(t + 0.95);
-    o.onended = () => { o.disconnect(); lp.disconnect(); g.disconnect(); };
+  /** Barricade recalled: servo whine up, then two latch clicks. */
+  barricadeRecall(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 240, to: 720, dur: 0.28, gain: 0.22, type: 'triangle' });
+    this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.4, freq: 2400, q: 4, when: 0.26 });
+    this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.34, freq: 1900, q: 4, when: 0.34 });
   }
 
-  /** The detonation. Sub-bass slam, long rolling rumble, hearing-loss whine. */
-  nukeBlast() {
+  /** Mine planted: a soft metal set-down and a latch click. */
+  minePlant(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.06, gain: 0.35, freq: 900, q: 1.2 });
+    this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.3, freq: 3000, q: 4, when: 0.12 });
+  }
+
+  /** Mine armed: two short high chirps — quiet enough that hostiles don't hear it. */
+  mineArm(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 2600, to: 2600, dur: 0.05, gain: 0.14, type: 'square' });
+    this.spatialTone(wx, wy, wz, { from: 3200, to: 3200, dur: 0.05, gain: 0.14, type: 'square', when: 0.09 });
+  }
+
+  /** Mine tripped: a fast rising beep just before it jumps. */
+  mineTrip(wx: number, wy: number, wz: number) {
+    this.spatialTone(wx, wy, wz, { from: 1800, to: 3600, dur: 0.22, gain: 0.3, type: 'square' });
+    this.spatialNoise(wx, wy, wz, { dur: 0.05, gain: 0.4, freq: 600, q: 1, when: 0.24 });
+  }
+
+  /** Medkit opens: latches, then a warm rising two-tone. */
+  medkitDeploy(wx: number, wy: number, wz: number) {
+    this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.35, freq: 2200, q: 4 });
+    this.spatialNoise(wx, wy, wz, { dur: 0.03, gain: 0.35, freq: 1800, q: 4, when: 0.07 });
+    this.spatialTone(wx, wy, wz, { from: 520, to: 780, dur: 0.3, gain: 0.22, type: 'sine', when: 0.12 });
+    this.spatialTone(wx, wy, wz, { from: 780, to: 1040, dur: 0.35, gain: 0.18, type: 'sine', when: 0.3 });
+  }
+
+  /** Medkit heal tick: a soft chime, pitched up as health refills. */
+  medkitTick(pct: number) {
+    this.burstDirect({ dur: 0.08, gain: 0.05, freq: 1400 + pct * 900, q: 8 });
+  }
+
+  /** Kits menu: purchase confirmed — register drawer plus a rising two-note seal. */
+  kitPurchase() {
+    this.burstDirect({ dur: 0.05, gain: 0.3, freq: 2600, q: 2 });
+    this.burstDirect({ dur: 0.18, gain: 0.16, freq: 5200, q: 6, when: 0.05 });
     const ctx = this.ensure();
     const t = ctx.currentTime;
-    const o = ctx.createOscillator();
-    o.type = 'triangle';
-    o.frequency.setValueAtTime(70, t);
-    o.frequency.exponentialRampToValueAtTime(18, t + 3.5);
-    const og = ctx.createGain();
-    og.gain.setValueAtTime(1.6, t);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 4);
-    o.connect(og); og.connect(this.master!);
-    o.start(t); o.stop(t + 4.1);
-    const src = ctx.createBufferSource();
-    src.buffer = this.noise(); src.loop = true;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(900, t);
-    lp.frequency.exponentialRampToValueAtTime(120, t + 5);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(1.3, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 5.5);
-    src.connect(lp); lp.connect(g); g.connect(this.master!);
-    src.start(t); src.stop(t + 5.6);
-    const ring = ctx.createOscillator();
-    ring.frequency.value = 3400;
-    const rg = ctx.createGain();
-    rg.gain.setValueAtTime(0.22, t + 0.1);
-    rg.gain.exponentialRampToValueAtTime(0.0001, t + 5);
-    ring.connect(rg); rg.connect(this.master!);
-    ring.start(t + 0.1); ring.stop(t + 5.1);
-    src.onended = () => { [o, og, src, lp, g, ring, rg].forEach(n => n.disconnect()); };
+    [[440, 0.06], [660, 0.14], [990, 0.22]].forEach(([f, when]) => {
+      const o = ctx.createOscillator();
+      o.type = 'triangle'; o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + when);
+      g.gain.exponentialRampToValueAtTime(0.16, t + when + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.3);
+      o.connect(g); g.connect(this.master!);
+      o.start(t + when); o.stop(t + when + 0.32);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    });
+  }
+
+  /** Kits menu: moving the selection between kits — a dry mechanical tick. */
+  kitSelect() {
+    this.burstDirect({ dur: 0.025, gain: 0.12, freq: 3400, q: 5 });
   }
 
   private burstDirect(opts: {

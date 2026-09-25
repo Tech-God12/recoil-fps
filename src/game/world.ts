@@ -4,22 +4,18 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { getMaterials, type TextureSet } from './textures';
-import { buildSirocco } from './maps/sirocco-build';
 
 // Install BVH acceleration globally (huge raycast speed-up for merged meshes)
 (THREE.BufferGeometry.prototype as unknown as { computeBoundsTree: typeof computeBoundsTree }).computeBoundsTree = computeBoundsTree;
 (THREE.BufferGeometry.prototype as unknown as { disposeBoundsTree: typeof disposeBoundsTree }).disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type MapId = 'alrasul' | 'kasbah' | 'arena' | 'sirocco';
+export type MapId = 'alrasul' | 'kasbah' | 'arena';
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
   { id: 'alrasul', name: 'Sandblast', desc: 'Two bridges. One dry river. A souk under siege in the shadow of the water tower.' },
   { id: 'kasbah', name: 'Town', desc: 'Six trades beneath a stone crown. Break the citadel, then disappear through the west gate.' },
   { id: 'arena', name: 'Warehouse', desc: '5v5 team deathmatch. Twin steel warehouses, container yards and barricade lines. Most kills in 2:30 wins.' },
-  { id: 'sirocco', name: 'Sirocco', desc: '5v5 bomb defusal. A desert town of three lanes — A long, mid and the B tunnels — around two bomb sites. First to 7 rounds.' },
 ];
-/** Story maps with a mission runtime (theater select, settings map picker). */
-export const isMissionMap = (id: MapId): id is 'alrasul' | 'kasbah' => id === 'alrasul' || id === 'kasbah';
 
 export interface AABB { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number }
 export interface WindowHole { x: number; y: number; z: number; nx: number; nz: number } // center + outward normal (horizontal)
@@ -43,10 +39,12 @@ export const ARENA_ZONES: TDMZone[] = [
   { name: 'MID LINK', minX: -3.5, maxX: 3.5, minZ: -4, maxZ: 4 },
   { name: 'DOCK A', minX: -22, maxX: 22, minZ: 10.5, maxZ: 27 },
   { name: 'DOCK B', minX: -22, maxX: 22, minZ: -27, maxZ: -10.5 },
-  { name: 'WEST YARD', minX: -46, maxX: -18, minZ: -46, maxZ: 46 },
-  { name: 'EAST YARD', minX: 18, maxX: 46, minZ: -46, maxZ: 46 },
-  { name: 'ALPHA YARD', minX: -18, maxX: 18, minZ: 27, maxZ: 46 },
-  { name: 'BRAVO YARD', minX: -18, maxX: 18, minZ: -46, maxZ: -27 },
+  { name: 'WEST SIDING', minX: -56, maxX: -44, minZ: -56, maxZ: 56 },
+  { name: 'EAST SIDING', minX: 44, maxX: 56, minZ: -56, maxZ: 56 },
+  { name: 'WEST YARD', minX: -44, maxX: -18, minZ: -56, maxZ: 56 },
+  { name: 'EAST YARD', minX: 18, maxX: 44, minZ: -56, maxZ: 56 },
+  { name: 'ALPHA YARD', minX: -18, maxX: 18, minZ: 27, maxZ: 56 },
+  { name: 'BRAVO YARD', minX: -18, maxX: 18, minZ: -56, maxZ: -27 },
 ];
 export function arenaZoneAt(x: number, z: number): string {
   for (const zn of ARENA_ZONES) if (x >= zn.minX && x <= zn.maxX && z >= zn.minZ && z <= zn.maxZ) return zn.name;
@@ -585,8 +583,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   }
 
   const playerSpawn = new THREE.Vector3();
-  const half = mapId === 'alrasul' ? 124 : mapId === 'arena' ? 46 : mapId === 'sirocco' ? 44 : 134;
-  if (isMissionMap(mapId)) {
+  const half = mapId === 'alrasul' ? 124 : mapId === 'arena' ? 56 : 134;
+  if (mapId !== 'arena') {
   terrain(520, half + 12);
   perimeter(half);
   for (const side of [-1,1]) {
@@ -616,7 +614,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   // Alpha deploys south (+z), Bravo north (-z). Every position mirrors.
   // =====================================================================
   if (mapId === 'arena') {
-    playerSpawn.set(0, 0, 38);
+    playerSpawn.set(0, 0, 48);
     terrain(520, half + 8); // flat desert apron beyond the walls — no void horizon
     const concreteM = M.concrete, metal = iron, rusted = M.rustedMetal ?? iron;
 
@@ -624,14 +622,14 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     ground(0, 0, half * 2, half * 2, concreteM, 0.015);
     concrete.push({ minX: -half, maxX: half, minZ: -half, maxZ: half, minY: -1, maxY: 3 });
     ground(0, 0, half * 2, 10, M.asphalt, 0.03);                    // E-W cross lane through the yards
-    for (const x of [-31, 31]) ground(x, 0, 26, 56, M.asphalt, 0.028); // container yard pads
-    for (const z of [-38, 38]) ground(0, z, 30, 13, pavers, 0.04);  // spawn aprons
+    for (const x of [-31, 31]) ground(x, 0, 26, 76, M.asphalt, 0.028); // container yard pads
+    for (const z of [-48, 48]) ground(0, z, 30, 13, pavers, 0.04);  // spawn aprons
 
     // ---- 6m perimeter walls (concrete, with pilasters) ----
     for (const s of [-1, 1]) {
       box(0, 3, s * half, half * 2 + 1.2, 6, 1.2, concreteM);
       box(s * half, 3, 0, 1.2, 6, half * 2 + 1.2, concreteM);
-      for (let p = -30; p <= 30; p += 15) {
+      for (let p = -45; p <= 45; p += 15) {
         box(p, 3.1, s * (half - 0.9), 1.0, 6.2, 0.7, stone);
         box(s * (half - 0.9), 3.1, p, 0.7, 6.2, 1.0, stone);
       }
@@ -840,12 +838,12 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     const tarpTeal = new THREE.MeshStandardMaterial({ color: 0x2C7C8E, emissive: 0x2C7C8E, emissiveIntensity: 0.5, roughness: 0.95, side: THREE.DoubleSide });
     const tarpRust = new THREE.MeshStandardMaterial({ color: 0x9A4A2E, emissive: 0x9A4A2E, emissiveIntensity: 0.5, roughness: 0.95, side: THREE.DoubleSide });
     const spawnDressing = (sz: 1 | -1, tarp: THREE.Material, lightHex: number) => {
-      for (const [tx, tz, ry] of [[-9.5, sz * 33.5, 0.35], [10.5, sz * 35.5, -0.3]] as const) {
+      for (const [tx, tz, ry] of [[-9.5, sz * 43.5, 0.35], [10.5, sz * 45.5, -0.3]] as const) {
         for (const px of [-2.3, 2.3]) box(tx + Math.cos(ry) * px, 1.3, tz - Math.sin(ry) * px, 0.09, 2.6, 0.09, METAL, false);
         shape(new THREE.PlaneGeometry(4.8, 2.5), tarp, tx, 2.05, tz, sz * 0.12, ry);
       }
       const glow = new THREE.PointLight(lightHex, 2.0, 22, 1.6);
-      glow.position.set(0, 5.2, sz * 36);
+      glow.position.set(0, 5.2, sz * 46);
       group.add(glow);
     };
     spawnDressing(1, tarpTeal, 0x2C7C8E);    // alpha (south): cool teal wash
@@ -1008,18 +1006,60 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const [sx2, sz2] of [[-10.5, 12.2], [10.5, -12.2], [0, 5.6], [-26, 12.5], [26, -12.5]] as const)
       dressing(new THREE.CircleGeometry(0.55 + Math.abs(sx2) % 3 * 0.08, 12), scorchMat, sx2, 0.075, sz2, -Math.PI / 2, 0, sx2 + sz2);
 
-    landmarks.push({ name: 'Alpha yard', at: new THREE.Vector3(0, 2, 38) }, { name: 'Bravo yard', at: new THREE.Vector3(0, 2, -38) });
-  }
+    // ---- B · expansion ring (half 46 -> 56): rail sidings + truck bays ----
+    // The extra 10 m is deliberately NOT more open floor: a long empty band would
+    // just be a sniper lane. Each flank gets a rail siding (boxcars with 8-10 m gaps
+    // so it is a real third lane you can cut across, not a wall), and each spawn
+    // gets a truck bay that screens the pads from long shots down the yards.
+    // Everything mirrors under the same 180-degree rotation as the core map.
+    const gravelM = col(0x6E665A, 0.97);
+    const boxcarM = [col(0x5B3A2A, 0.85), col(0x3E4C3A, 0.85)];
+    for (const s of [-1, 1] as const) {
+      const rx = s * 49.5;
+      ground(rx, 0, 7, half * 2 - 4, gravelM, 0.032);                 // ballast bed
+      for (const off of [-0.75, 0.75]) box(rx + off, 0.07, 0, 0.1, 0.14, half * 2 - 6, METAL, false); // rails
+      for (let z = -half + 4; z <= half - 4; z += 1.6) dressing(new THREE.BoxGeometry(2.3, 0.08, 0.26), timber, rx, 0.04, z);
+      // boxcars (3.0w x 3.4h x 11d): gaps at z = 0 and z = +-22 line up with the
+      // cross lane and the yard lanes, so every E-W route has an exit into the siding.
+      for (const bz of [-33, -11, 11, 33]) {
+        const m = boxcarM[(bz * s > 0 ? 0 : 1)];
+        box(rx, 1.95, bz, 3.0, 3.1, 11, m);
+        box(rx, 0.2, bz, 2.4, 0.4, 10, METAL, false);                 // undercarriage (visual)
+        for (const k of [-1, 1]) box(rx - s * 1.53, 1.7, bz + k * 1.2, 0.06, 2.4, 2.4, METAL, false); // sliding door
+        cover(rx - s * 2.6, bz - 3); cover(rx - s * 2.6, bz + 3); cover(rx + s * 2.6, bz);
+      }
+      // one flatcar per siding is a low climbable deck — a flank overlook
+      // mirrored to the opposite end so neither team gets the closer one.
+      const fz = -s * 22;
+      box(rx, 0.55, fz, 2.8, 1.1, 5, METAL);
+      stairsZ(rx, fz + s * 2.6, 1.1, 2.4, s);   // 4 steps, ends ~0.2 m clear of the boxcar
+    }
+    overlooks.push(
+      { name: 'West siding flatcar', at: new THREE.Vector3(-49.5, 1.2, 22), approach: new THREE.Vector3(-49.5, 0, 15.5), route: [new THREE.Vector3(-49.5, 1.2, 22)] },
+      { name: 'East siding flatcar', at: new THREE.Vector3(49.5, 1.2, -22), approach: new THREE.Vector3(49.5, 0, -15.5), route: [new THREE.Vector3(49.5, 1.2, -22)] },
+    );
+    landmarks.push({ name: 'Rail siding', at: new THREE.Vector3(-49.5, 3, 0) }, { name: 'Rail siding', at: new THREE.Vector3(49.5, 3, 0) });
+    // truck bays: two semi trailers backed against the rear wall of each spawn and a
+    // low jersey-barrier screen in front of the pads (1.1 m — crouch cover, not a wall).
+    for (const sz of [-1, 1] as const) {
+      for (const tx of [-24, 24]) {
+        box(tx, 2.0, sz * 49, 2.6, 3.2, 12, sz > 0 ? col(0xB9B6AC, 0.8) : col(0x9C958A, 0.8));
+        box(tx, 0.35, sz * 49, 2.2, 0.5, 11, METAL, false);
+        cover(tx + 2.4, sz * 45); cover(tx - 2.4, sz * 45);
+      }
+      for (const bx of [-18, -6, 6, 18]) { box(bx, 0.55, sz * 39, 3.2, 1.1, 0.6, concreteM); cover(bx, sz * 40.2); }
+      // dock doors painted on the back wall + a floodlight each side
+      for (const dx of [-24, -8, 8, 24]) box(dx, 2.2, sz * (half - 0.65), 4.2, 4.4, 0.1, rusted, false);
+      for (const lx of [-40, 40]) {
+        box(lx, 3.5, sz * (half - 2), 0.3, 7, 0.3, METAL);
+        dressing(new THREE.BoxGeometry(1.4, 0.4, 0.3), METAL, lx, 7.1, sz * (half - 2.3));
+        const fl = new THREE.PointLight(0xFFE0B0, 2.4, 26, 1.6);
+        fl.position.set(lx, 6.6, sz * (half - 4));
+        group.add(fl);
+      }
+    }
 
-  // =====================================================================
-  // SIROCCO — 5v5 Bomb Defusal (layout: maps/sirocco.ts, geometry: maps/sirocco-build.ts)
-  // =====================================================================
-  if (mapId === 'sirocco') {
-    buildSirocco({
-      M, col, METAL, GLOW, FROND, ACC_TURQ, ACC_TERRA, FABRIC,
-      box, shape, dressing, ground, cover, palm, lamp, banner, sandbags, terrain,
-      group, solids, interiors, concrete, lightSpots, landmarks, soundTraps, arenaFx, playerSpawn,
-    });
+    landmarks.push({ name: 'Alpha yard', at: new THREE.Vector3(0, 2, 48) }, { name: 'Bravo yard', at: new THREE.Vector3(0, 2, -48) });
   }
 
   if (mapId === 'alrasul') {
@@ -1294,10 +1334,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const g of geos) g.dispose();
     (merged as unknown as { computeBoundsTree(): void }).computeBoundsTree();
     const mesh = new THREE.Mesh(merged, m);
-    // Terrain (the only M.sand user) is receive-only: a 36k-tri, ±260 m sheet whose
-    // gentle undulation never shadows anything inside the playfield, yet it was a
-    // third of Sandblast's whole shadow pass. Frame budget, docs/frame-budget.md.
-    mesh.castShadow = m !== smokeMaterial && m !== M.sand; mesh.receiveShadow = true;
+    mesh.castShadow = m !== smokeMaterial; mesh.receiveShadow = true;
     mesh.frustumCulled = false;
     batch.group.add(mesh);
     if (m !== smokeMaterial) batch.meshes.push(mesh);

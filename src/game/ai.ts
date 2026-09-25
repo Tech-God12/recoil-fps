@@ -1,11 +1,11 @@
 // Recoil FPS — Enemy AI v3: grid A* navigation, unpredictable tactics, squad pushes, grenades
 import * as THREE from 'three';
-import { buildSoldier, updateWeaponLod, type SoldierModel } from './models';
-import { BodyReactions, surfaceUnder, type HitInfo } from './reactions';
+import { buildSoldier, type SoldierModel } from './models';
 import type { Effects } from './effects';
 import type { AABB } from './world';
 import { PRESSURE_BUDGET, type ReinforcementBatch } from './systems/reinforcements';
 import type { Position } from './systems/mission';
+import { KIT_LURE_BREAK_CHANCE, type KitLure } from './kits';
 
 export type AIState = 'PATROL' | 'ALERT' | 'SEARCH' | 'ENGAGE' | 'SUPPRESS' | 'FLANK' | 'ADVANCE' | 'RETREAT' | 'DEAD';
 export type CalloutKind = 'contact' | 'flank' | 'grenade' | 'mandown' | 'fallback' | 'push';
@@ -42,9 +42,6 @@ export interface AIContext {
    * at all, so a deployment is never met by squads that are already firing.
    */
   canAcquire?(): boolean;
-  /** Death feedback hooks (engine routes them to spatial audio; absent in headless sims). */
-  onBodyFall?(at: THREE.Vector3, heavy: boolean): void;
-  onWeaponDrop?(at: THREE.Vector3): void;
 }
 
 /* ================= NAV GRID (A*) ================= */
@@ -171,9 +168,6 @@ const ray = new THREE.Raycaster();
 ray.firstHitOnly = true;
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
-// LOS scratch (checkLOS runs for every bot every AI tick; avoid per-call garbage).
-const losEye = new THREE.Vector3();
-const losFwd = new THREE.Vector3();
 let enemyCounter = 0;
 
 /**
@@ -220,6 +214,7 @@ export class Enemy {
   private burstIdx = 0;
   private flankTarget: THREE.Vector3 | null = null;
   private flinch = 0;
+  private deathT = -1;
   private moveTarget: THREE.Vector3 | null = null;
   private walkPhase = 0;
   private locomotion = 0;
@@ -227,12 +222,12 @@ export class Enemy {
   private recentDamage = 0;
   private grenadeCD = 0;
   private crouched = false;
+  /** Read-only crouch state (field-kit sonar silhouettes drop to crouch height). */
+  get isCrouched(): boolean { return this.crouched; }
   private strafeDir = 0; private strafeT = 0; private strafeCD = 0;
   private lastX = 0; private lastZ = 0;
   private path: THREE.Vector3[] | null = null;
   private pathGoal = new THREE.Vector3();
-  /** Reused patrol waypoint (owned per bot, since goTo may keep the reference). */
-  private patrolGoal = new THREE.Vector3();
   private repathT = 0;
   private stuckT = 0;
   // Committed obstacle-avoidance: a side picked once and held, plus the cumulative
@@ -243,15 +238,20 @@ export class Enemy {
   private blockedT = 0;
   private personality: number; // 0 cautious .. 1 aggressive
   stunTimer = 0;
+  /**
+   * Field-kit holo-decoy this soldier has locked onto (assigned by the engine). While
+   * set, every "where is the threat" question — sight, aim, cover, flanking, frags —
+   * is answered with the decoy instead of the player, and rounds land on the decoy.
+   */
+  lure: KitLure | null = null;
+
+  /** Current threat eye: the decoy while lured, otherwise the player. */
+  private tEye(): THREE.Vector3 { return this.lure && this.lure.active() ? this.lure.eye.clone() : this.ctx.playerPos(); }
+  /** Current threat feet: the decoy while lured, otherwise the player. */
+  private tFeet(): THREE.Vector3 { return this.lure && this.lure.active() ? this.lure.feet.clone() : this.ctx.playerFeet(); }
+  get lured(): boolean { return !!this.lure && this.lure.active(); }
 
   invalidatePath() { this.path = null; this.repathT = 0; }
-
-  /** Directional flinch + procedural death (shared with arena bots — reactions.ts). */
-  readonly reactions = new BodyReactions();
-  private pendingHit: HitInfo | null = null;
-  /** Describe the NEXT takeDamage call (direction, zone, explosive). Optional: without
-   *  it the hit is assumed to come from the player as a torso/head bullet. */
-  noteHit(info: HitInfo) { this.pendingHit = info; }
 
   constructor(ctx: AIContext, nav: NavGrid, squad: Squad, role: Enemy['role'], spawn: THREE.Vector3) {
     this.ctx = ctx; this.nav = nav; this.squad = squad; this.role = role;
@@ -269,7 +269,7 @@ export class Enemy {
 
   /** Sight *and* inside effective rifle range. Squads advance before they shoot. */
   private canFire(): boolean {
-    return this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) <= ENGAGE_RANGE;
+    return this.hasLOS && this.pos.distanceTo(this.tFeet()) <= ENGAGE_RANGE;
   }
 
   resetForInsertion(squad: Squad, role: Enemy['role'], at: Position, focus: Position, zone: string | null) {
@@ -277,7 +277,7 @@ export class Enemy {
     this.name = NAMES[this.id % NAMES.length];
     this.squad = squad; this.role = role; this.missionZone = zone ?? undefined;
     this.pos.set(...at); this.hp = 100; this.state = 'ALERT'; this.dormant = false;
-    this.deadAge = 0; this.stateTime = 0; this.lastSeenT = 999;
+    this.deadAge = 0; this.deathT = -1; this.stateTime = 0; this.lastSeenT = 999;
     this.reactTimer = -1; this.hasLOS = false; this.losTimer = (this.id % 5) * 0.04;
     this.lastKnown.set(...focus); this.moveTarget = this.approachPoint(new THREE.Vector3(...focus));
     this.coverPos = null; this.hasRealCover = false; this.coverAge = 0;
@@ -287,10 +287,9 @@ export class Enemy {
     this.grenadeCD = 4; this.crouched = false; this.stunTimer = 0;
     this.strafeDir = 0; this.strafeT = 0; this.strafeCD = 0;
     this.path = null; this.repathT = 0; this.stuckT = 0; this.patrolIdx = 0;
-    this.escapeDir = 0; this.escapeT = 0; this.blockedT = 0;
+    this.escapeDir = 0; this.escapeT = 0; this.blockedT = 0; this.lure = null;
     this.walkPhase = 0; this.locomotion = 0; this.shotPose = 0; this.lastX = at[0]; this.lastZ = at[2];
     this.yaw = Math.atan2(at[0] - focus[0], at[2] - focus[2]);
-    this.reactions.reset(this.model); this.pendingHit = null;
     const g = this.model.group;
     g.visible = true; g.position.copy(this.pos); g.rotation.set(0, this.yaw, 0); g.scale.setScalar(1);
     const p = this.model.parts;
@@ -307,15 +306,15 @@ export class Enemy {
   }
 
   checkLOS(): boolean {
-    if (!this.ctx.playerAlive()) return false;
+    if (!this.lured && !this.ctx.playerAlive()) return false;
     // Deployment grace: no acquisition at all until the mission lets hostiles engage.
     if (this.ctx.canAcquire && !this.ctx.canAcquire()) return false;
-    const eye = losEye.set(this.pos.x, this.pos.y + 1.62 - (this.crouched ? 0.4 : 0), this.pos.z); const pp = this.ctx.playerPos();
+    const eye = this.eyePos(); const pp = this.tEye();
     const dist = eye.distanceTo(pp);
     if (dist > 70) return false;
     const dir = tmpV.copy(pp).sub(eye).normalize();
     if (this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') {
-      const fwd = losFwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       const flat = tmpV2.set(dir.x, 0, dir.z).normalize();
       if (fwd.dot(flat) < Math.cos(Math.PI / 4) && dist > 16) return false;
       if (dist > 48) return false;
@@ -345,11 +344,10 @@ export class Enemy {
   takeDamage(amount: number, isHead: boolean): boolean {
     if (this.dead) return false;
     this.hp -= amount; this.recentDamage += amount;
-    const hit = this.pendingHit ?? {}; this.pendingHit = null;
-    if (!hit.zone) hit.zone = isHead ? 'head' : 'torso';
-    if (!hit.from) hit.from = this.ctx.playerFeet();
-    if (this.hp <= 0) { this.die(hit); return true; }
-    this.reactions.hit(hit.zone, tmpV.set(this.pos.x - hit.from.x, 0, this.pos.z - hit.from.z).normalize(), this.yaw);
+    this.flinch = isHead ? 0.35 : 0.22;
+    // Getting shot snaps half of the decoy-lured soldiers back onto the real shooter.
+    if (this.lure && Math.random() < KIT_LURE_BREAK_CHANCE) this.lure = null;
+    if (this.hp <= 0) { this.die(); return true; }
     this.lastKnown.copy(this.ctx.playerFeet()); this.lastSeenT = 0;
     if (this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') { this.setState('ENGAGE'); this.reactTimer = this.ctx.difficulty.reaction * 0.4; this.squad.alertAll(this.lastKnown); }
     // Only the most cautious, badly-hurt enemies give ground — everyone else holds and fights
@@ -361,18 +359,16 @@ export class Enemy {
     return false;
   }
 
-  private die(hit: HitInfo = {}) {
-    this.state = 'DEAD';
+  private die() {
+    this.state = 'DEAD'; this.deathT = 0;
     // Sit the pool on whatever the soldier actually died on (crate, floor slab, roof),
     // instead of pinning every kill to the ground plane under the map.
-    const surfaceY = surfaceUnder(this.pos, this.ctx.solids, this.ctx.groundHeight?.(this.pos.x, this.pos.z) ?? 0);
+    let surfaceY = this.ctx.groundHeight?.(this.pos.x, this.pos.z) ?? 0;
+    for (const b of this.ctx.solids) {
+      if (b.maxY > this.pos.y + 0.4 || b.maxY <= surfaceY) continue;
+      if (this.pos.x > b.minX - 0.3 && this.pos.x < b.maxX + 0.3 && this.pos.z > b.minZ - 0.3 && this.pos.z < b.maxZ + 0.3) surfaceY = b.maxY;
+    }
     this.ctx.effects.bloodDecal(this.pos, surfaceY);
-    this.model.group.rotation.y = this.yaw;
-    this.reactions.die(this.model, hit, {
-      pos: this.model.group.position.clone().setY(this.pos.y), yaw: this.model.group.rotation.y, surfaceY, solids: this.ctx.solids, dropWeapon: true,
-      onImpact: (at, heavy) => this.ctx.onBodyFall?.(at, heavy),
-      onClatter: at => this.ctx.onWeaponDrop?.(at),
-    });
     if (this.role === 'leader') { this.ctx.onCallout('mandown', this.pos); this.squad.leaderDown(); }
     this.ctx.onEliminated?.(this);
   }
@@ -380,7 +376,7 @@ export class Enemy {
   setState(s: AIState) { if (this.state === 'DEAD') return; if (this.state !== s) { this.state = s; this.stateTime = 0; this.path = null; } }
 
   private findCover(preferClose = false): THREE.Vector3 | null {
-    const pp = this.ctx.playerPos(); const pf = this.ctx.playerFeet();
+    const pp = this.tEye(); const pf = this.tFeet();
     let best: THREE.Vector3 | null = null, bestScore = Infinity;
     for (const node of this.ctx.coverNodes) {
       if (Math.abs(node.y - this.pos.y) > 0.5) continue;
@@ -470,23 +466,34 @@ export class Enemy {
     this.model.group.updateMatrixWorld(true);
     const muzzle = this.model.parts.muzzle.getWorldPosition(new THREE.Vector3());
     this.shotPose = 1;
-    const pp = ctx.playerPos();
+    const pp = this.tEye();
     ctx.effects.enemyMuzzle(muzzle);
     ctx.onEnemyFire(muzzle);
     const dist = muzzle.distanceTo(pp);
     const suppressing = this.state === 'SUPPRESS' || !this.hasLOS;
     // accuracy: distance falloff, moving player harder, first rounds of a burst less accurate
     let acc = ctx.difficulty.accuracy * Math.max(0.3, 1 - dist / 75);
-    acc *= 1 - Math.min(0.45, ctx.playerVel() * 0.06);
+    const lure = this.lured ? this.lure : null;
+    if (!lure) acc *= 1 - Math.min(0.45, ctx.playerVel() * 0.06);
     acc *= this.burstIdx === 0 ? 0.55 : this.burstIdx === 1 ? 0.8 : 1;
     if (suppressing) acc *= 0.25;
     this.burstIdx++;
     ray.set(muzzle, tmpV.copy(pp).sub(muzzle).normalize()); ray.far = Math.max(0,dist - 0.2);
     const obstruction = ray.intersectObjects(ctx.occluders,false)[0];
-    if (obstruction) { ctx.effects.tracer(muzzle,obstruction.point,true); return; }
-    if (this.hasLOS && Math.random() < acc && ctx.playerAlive()) {
+    const roll = 7 + Math.floor(Math.random() * 8);
+    if (obstruction) {
+      ctx.effects.tracer(muzzle,obstruction.point,true);
+      // Field-kit barricade plates carry a damage hook: rounds that stop on them count.
+      const kitHit = obstruction.object.userData.kitHit as ((n: number, at?: THREE.Vector3) => void) | undefined;
+      if (kitHit) kitHit(roll, obstruction.point);
+      return;
+    }
+    if (lure && this.hasLOS && Math.random() < acc) {
       ctx.effects.tracer(muzzle, pp.clone(), true);
-      ctx.damagePlayer(7 + Math.floor(Math.random() * 8), this.pos);
+      lure.hit(roll);
+    } else if (!lure && this.hasLOS && Math.random() < acc && ctx.playerAlive()) {
+      ctx.effects.tracer(muzzle, pp.clone(), true);
+      ctx.damagePlayer(roll, this.pos);
     } else {
       const miss = (this.hasLOS ? pp : this.lastKnown).clone().add(new THREE.Vector3((Math.random() - .5) * 3, 0.8 + (Math.random() - .3) * 2, (Math.random() - .5) * 3));
       ctx.effects.tracer(muzzle, miss, true);
@@ -497,16 +504,16 @@ export class Enemy {
   updateVisualFrame(dt: number) {
     if (this.state === 'DEAD') {
       this.deadAge += dt;
-      // Procedural death; returns false once settled so corpses cost nothing after ~1 s.
-      this.reactions.update(dt, this.model);
+      if (this.deathT >= 0 && this.deathT < 0.6) {
+        this.deathT += dt; const t = Math.min(1, this.deathT / 0.5);
+        this.model.group.rotation.x = -t * Math.PI / 2 * 0.96;
+        this.model.group.position.y = this.pos.y + 0.1 * Math.sin(t * Math.PI);
+      }
       return;
     }
     if (this.stunTimer > 0) this.stunTimer -= dt;
     this.flinch = Math.max(0, this.flinch - dt);
     this.updateVisual(dt);
-    this.reactions.applyFlinch(dt, this.model.parts);
-    const pp = this.ctx.playerPos();
-    updateWeaponLod(this.model, Math.hypot(pp.x - this.pos.x, pp.z - this.pos.z));
   }
 
   /** Expensive brain logic (LOS raycasts, cover search, state machine) — staggered across frames. */
@@ -522,7 +529,7 @@ export class Enemy {
       const had = this.hasLOS;
       this.hasLOS = this.checkLOS();
       if (this.hasLOS) {
-        this.lastKnown.copy(this.ctx.playerFeet()); this.lastSeenT = 0;
+        this.lastKnown.copy(this.tFeet()); this.lastSeenT = 0;
         if ((this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') && this.reactTimer <= 0) this.reactTimer = this.ctx.difficulty.reaction * (0.7 + Math.random() * 0.6);
         if (!had) this.squad.shareIntel(this.lastKnown);
       }
@@ -536,7 +543,7 @@ export class Enemy {
       }
     }
 
-    const closeContact = this.hasLOS && this.pos.distanceTo(this.ctx.playerFeet()) < 14;
+    const closeContact = this.hasLOS && this.pos.distanceTo(this.tFeet()) < 14;
     if (closeContact && this.reactTimer <= 0 && this.state !== 'ENGAGE' && this.state !== 'SUPPRESS') {
       this.coverPos = null; this.moveTarget = null; this.flankTarget = null;
       this.setState('ENGAGE'); this.waitTimer = 0;
@@ -557,7 +564,7 @@ export class Enemy {
   private doPatrol(dt: number) {
     const path = this.squad.patrol; const target = path[this.patrolIdx % path.length];
     const off = this.role === 'flankA' ? 1.4 : this.role === 'flankB' ? -1.4 : 0;
-    if (this.goTo(this.patrolGoal.set(target.x + off, 0, target.z + off), 1.7, dt)) this.patrolIdx++;
+    if (this.goTo(tmpV.set(target.x + off, 0, target.z + off).clone(), 1.7, dt)) this.patrolIdx++;
     this.crouched = false;
   }
   private doAlert(dt: number) {
@@ -577,7 +584,7 @@ export class Enemy {
   }
 
   private doEngage(dt: number, suppress: boolean) {
-    const pf = this.ctx.playerFeet();
+    const pf = this.tFeet();
     const range = this.pos.distanceTo(pf);
     // Spotted you from across the sector: close the distance instead of spraying from
     // the edge of perception. This is what made a fresh deployment feel like the squad
@@ -607,11 +614,11 @@ export class Enemy {
     const atCover = this.pos.distanceTo(this.coverPos) < 0.6;
     if (!atCover) {
       this.goTo(this.coverPos, 3.5, dt); this.crouched = false;
-      if (this.canFire()) { this.faceTarget(this.ctx.playerFeet()); this.burstTimer -= dt; if (this.burstTimer <= 0) { this.fireShot(); this.burstTimer = 0.4; } }
+      if (this.canFire()) { this.faceTarget(this.tFeet()); this.burstTimer -= dt; if (this.burstTimer <= 0) { this.fireShot(); this.burstTimer = 0.4; } }
     }
     else {
       this.crouched = this.hasRealCover && !this.peeking;
-      this.faceTarget(this.hasLOS ? this.ctx.playerFeet() : this.lastKnown);
+      this.faceTarget(this.hasLOS ? this.tFeet() : this.lastKnown);
       if (!this.hasRealCover) { // open ground: strafe
         this.strafeCD -= dt;
         if (this.strafeT > 0) {
@@ -657,7 +664,7 @@ export class Enemy {
   private doFlank(dt: number) {
     this.crouched = false;
     if (!this.flankTarget) {
-      const pp = this.ctx.playerFeet();
+      const pp = this.tFeet();
       const away = tmpV.copy(this.pos).sub(pp).normalize();
       const perp = new THREE.Vector3(-away.z, 0, away.x); if (this.role === 'flankA') perp.negate();
       this.flankTarget = pp.clone().addScaledVector(perp, 16).addScaledVector(away, 4);
@@ -670,7 +677,7 @@ export class Enemy {
   private doRetreat(dt: number) {
     this.crouched = false;
     if (!this.moveTarget) {
-      const away = tmpV.copy(this.pos).sub(this.ctx.playerFeet()).normalize();
+      const away = tmpV.copy(this.pos).sub(this.tFeet()).normalize();
       const far = this.pos.clone().addScaledVector(away, 14);
       const h = this.ctx.half - 4; far.x = Math.max(-h, Math.min(h, far.x)); far.z = Math.max(-h, Math.min(h, far.z));
       this.moveTarget = far; this.coverPos = null;
@@ -681,7 +688,7 @@ export class Enemy {
   private tryGrenade() {
     if (this.grenadeCD > 0 || this.squad.grenadeCD > 0) return;
     if (this.state !== 'ENGAGE' && this.state !== 'SUPPRESS') return;
-    const d = this.pos.distanceTo(this.ctx.playerFeet());
+    const d = this.pos.distanceTo(this.tFeet());
     if (d < 8 || d > 30) return;
     // camping player behind cover, OR player out of sight for a while → flush
     const camping = this.ctx.playerStaticTime() > 3 && !this.hasLOS;
@@ -824,7 +831,6 @@ export class AIManager {
     const e = this.enemies.find(actor => actor.id === id);
     if (!e) return;
     e.dormant = true; e.model.group.visible = false;
-    e.reactions.reset(e.model); // pull a dropped rifle back so nothing is left on the floor
     this.enemies = this.enemies.filter(actor => actor !== e);
     e.squad.members = e.squad.members.filter(actor => actor !== e);
     this.squads = this.squads.filter(squad => squad.members.length > 0);
@@ -841,7 +847,6 @@ export class AIManager {
 
   dispose() {
     for (const e of this.pool) {
-      e.reactions.reset(e.model); // re-parent a dropped rifle so it is disposed with the body
       e.model.group.removeFromParent();
       e.model.group.traverse(object => {
         if (object instanceof THREE.Mesh) object.geometry.dispose();

@@ -94,13 +94,7 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     id: 'awm', name: 'AWM', short: 'AWM', cls: 'SR', slot: 'primary',
     price: 3900, starter: false,
     blurb: 'Bolt-action .338 Lapua. One round, one silhouette down — if you can stand the scope sway and the report.',
-    // AWM: a bolt-action sniper MUST one-tap the chest — 78 dmg forced two hits at
-    // 48 RPM (1.25 s felt TTK, 2.5 s in TDM), which reads as broken, not balanced.
-    // 160 one-taps the 100 HP mission pool at any range, one-taps unarmored TDM
-    // operators (150 HP), and still needs two against armor 1–2 (170/190 HP after
-    // reduction) — armor stays meaningful. Lowest DPS in the game by far, so the
-    // price is the fire rate, the 5-round mag and the slow ADS, not a fake wound.
-    base: base({ pattern: [[4.2, 0.28]], auto: false, rpm: 48, damage: 160, headMul: 3.0, limbMul: 1.0, magSize: 5, reserve: 25, hipSpread: 0.045, adsFov: 22, tacReload: 2.25, emptyReload: 2.7, adsTime: 0.42, noiseRadius: 90, moveSpeedMul: 0.96 }),
+    base: base({ pattern: [[4.2, 0.28]], auto: false, rpm: 48, damage: 78, headMul: 3.0, limbMul: 1.0, magSize: 5, reserve: 25, hipSpread: 0.045, adsFov: 22, tacReload: 2.25, emptyReload: 2.7, adsTime: 0.42, noiseRadius: 90, moveSpeedMul: 0.96 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'rail'],
     audio: 'sniper', boltAction: true, scoped: true,
   },
@@ -129,14 +123,10 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'shotgun', pump: true, pellets: 8,
   },
   {
-    // SCAR-H: 52 dmg two-tapped (0.10 s) while the AK needed three (0.20 s) at the
-    // same 600 RPM — there was no reason to run any other AR. 48 dmg keeps the
-    // one-tap head and the best-in-class range (45 m × 0.9) but moves body TTK to
-    // three shots, in line with the AK; you now pick SCAR for range, AK for price.
     id: 'scar_h', name: 'SCAR', short: 'SCAR', cls: 'BR', slot: 'primary',
     price: 3200, starter: false,
-    blurb: 'Hard-hitting battle rifle. Slow, surgical, and heavy — the muzzle climbs like it has somewhere to be.',
-    base: base({ pattern: [[1.45, 0.18], [1.62, -0.25], [1.78, 0.32], [1.87, 0.38], [1.95, -0.35], [1.97, -0.28]], auto: true, rpm: 600, damage: 48, headMul: 2.4, limbMul: 0.85, magSize: 20, reserve: 100, hipSpread: 0.010, adsFov: 55, tacReload: 2.3, emptyReload: 2.9, adsTime: 0.26, recoilMul: 1.35, falloffStart: 45, falloffMul: 0.9, noiseRadius: 75 }),
+    blurb: 'Two-tap battle rifle. Slow, surgical, and heavy — the muzzle climbs like it has somewhere to be.',
+    base: base({ pattern: [[1.45, 0.18], [1.62, -0.25], [1.78, 0.32], [1.87, 0.38], [1.95, -0.35], [1.97, -0.28]], auto: true, rpm: 600, damage: 52, headMul: 2.4, limbMul: 0.85, magSize: 20, reserve: 100, hipSpread: 0.010, adsFov: 55, tacReload: 2.3, emptyReload: 2.9, adsTime: 0.26, recoilMul: 1.35, falloffStart: 45, falloffMul: 0.9, noiseRadius: 75 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
     audio: 'scar',
   },

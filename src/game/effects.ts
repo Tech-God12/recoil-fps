@@ -4,12 +4,6 @@ import * as THREE from 'three';
 const MAX_BURSTS = 28;
 const MAX_PARTICLES = 48;
 const MAX_TRACERS = 20;
-/** Muzzle smoke lives in its own pool so a mag dump never evicts impact effects. */
-const MAX_SMOKES = 8;
-/** Ejected brass: one InstancedMesh, ring-buffered. 12 covers a full auto burst. */
-const MAX_BRASS = 12;
-const brassGeo = new THREE.BoxGeometry(0.012, 0.012, 0.03);
-const brassMat = new THREE.MeshBasicMaterial({ color: 0xD8A83C });
 
 interface BurstSlot {
   points: THREE.Points;
@@ -32,21 +26,6 @@ const tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 1);
 export class Effects {
   private bursts: BurstSlot[] = [];
   private burstIdx = 0;
-  private smokes: BurstSlot[] = [];
-  private smokeIdx = 0;
-  private lastSmokeT = -1000;
-  private brass!: THREE.InstancedMesh;
-  private brassIdx = 0;
-  private brassPos = new Float32Array(MAX_BRASS * 3);
-  private brassVel = new Float32Array(MAX_BRASS * 3);
-  private brassLife = new Float32Array(MAX_BRASS);
-  private brassSpin = new Float32Array(MAX_BRASS);
-  private readonly _m4 = new THREE.Matrix4();
-  private readonly _q = new THREE.Quaternion();
-  private readonly _e = new THREE.Euler();
-  private readonly _one = new THREE.Vector3(1, 1, 1);
-  private readonly _zero = new THREE.Vector3(0, 0, 0);
-  private readonly _bp = new THREE.Vector3();
   private tracers: { mesh: THREE.Mesh; life: number; active: boolean; from: THREE.Vector3; direction: THREE.Vector3; distance: number; travel: number; speed: number }[] = [];
   private tracerIdx = 0;
   private holes: THREE.Mesh[] = [];
@@ -73,17 +52,18 @@ export class Effects {
       scene.add(m); this.bloods.push(m);
     }
     // preallocated burst pool — buffers reused forever, never disposed
-    for (let i = 0; i < MAX_BURSTS; i++) this.bursts.push(Effects.makeSlot(scene));
-    // dedicated smoke pool — same slot shape, separate ring (see MAX_SMOKES)
-    for (let i = 0; i < MAX_SMOKES; i++) this.smokes.push(Effects.makeSlot(scene));
-    // ejected brass — a single instanced draw, all instances parked at scale 0
-    this.brass = new THREE.InstancedMesh(brassGeo, brassMat, MAX_BRASS);
-    this.brass.frustumCulled = false;
-    this._m4.compose(this._bp.set(0, -100, 0), this._q.identity(), this._zero);
-    for (let i = 0; i < MAX_BRASS; i++) this.brass.setMatrixAt(i, this._m4);
-    this.brass.instanceMatrix.needsUpdate = true;
-    this.brass.count = 0; // unfired gun costs zero draws; first eject re-arms it
-    scene.add(this.brass);
+    for (let i = 0; i < MAX_BURSTS; i++) {
+      const pos = new Float32Array(MAX_PARTICLES * 3);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setDrawRange(0, 0);
+      const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05, transparent: true, opacity: 0 });
+      const points = new THREE.Points(geo, mat);
+      points.frustumCulled = false;
+      points.visible = false;
+      scene.add(points);
+      this.bursts.push({ points, mat, pos, vel: new Float32Array(MAX_PARTICLES * 3), life: 0, maxLife: 1, grav: 0, count: 0, active: false });
+    }
     // pooled tracers — shared geometry, scaled per shot
     for (let i = 0; i < MAX_TRACERS; i++) {
       const mesh = new THREE.Mesh(tracerGeo, tracerMat);
@@ -114,21 +94,9 @@ export class Effects {
     scene.add(this.flashLight);
   }
 
-  private static makeSlot(scene: THREE.Scene): BurstSlot {
-    const pos = new Float32Array(MAX_PARTICLES * 3);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setDrawRange(0, 0);
-    const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05, transparent: true, opacity: 0 });
-    const points = new THREE.Points(geo, mat);
-    points.frustumCulled = false;
-    points.visible = false;
-    scene.add(points);
-    return { points, mat, pos, vel: new Float32Array(MAX_PARTICLES * 3), life: 0, maxLife: 1, grav: 0, count: 0, active: false };
-  }
-
-  private burstInto(pool: BurstSlot[], idx: number, pos: THREE.Vector3, count: number, color: number, speed: number, life: number, grav: number, size: number, spread: number): number {
-    const s = pool[idx];
+  private burst(pos: THREE.Vector3, count: number, color: number, speed: number, life: number, grav: number, size = 0.05, spread = 1) {
+    const s = this.bursts[this.burstIdx];
+    this.burstIdx = (this.burstIdx + 1) % this.bursts.length;
     const n = Math.min(count, MAX_PARTICLES);
     for (let i = 0; i < n; i++) {
       s.pos[i * 3] = pos.x; s.pos[i * 3 + 1] = pos.y; s.pos[i * 3 + 2] = pos.z;
@@ -141,41 +109,6 @@ export class Effects {
     s.points.geometry.setDrawRange(0, n);
     s.points.geometry.attributes.position.needsUpdate = true;
     s.points.visible = true;
-    return (idx + 1) % pool.length;
-  }
-
-  private burst(pos: THREE.Vector3, count: number, color: number, speed: number, life: number, grav: number, size = 0.05, spread = 1) {
-    this.burstIdx = this.burstInto(this.bursts, this.burstIdx, pos, count, color, speed, life, grav, size, spread);
-  }
-
-  /** Muzzle smoke: a thin grey puff that hangs ~1 s. Throttled to one puff per
-   *  70 ms (≈ every 5th round at 780 RPM) so full-auto doesn't flood the pool.
-   *  `nowMs` is injectable so tests drive the throttle without patching clocks. */
-  gunSmoke(pos: THREE.Vector3, nowMs = performance.now()) {
-    const now = nowMs;
-    if (now - this.lastSmokeT < 70) return;
-    this.lastSmokeT = now;
-    this.smokeIdx = this.burstInto(this.smokes, this.smokeIdx, pos, 4, 0xB9B4A6, 0.55, 1.1, -0.35, 0.11, 0.7);
-  }
-
-  /** Eject a casing right-and-up with a fast tumble; it bounces once on the
-   *  player's footing plane and dies after 1.6 s. Ring-buffered, zero alloc. */
-  ejectBrass(origin: THREE.Vector3, right: THREE.Vector3) {
-    this.brass.count = MAX_BRASS;
-    const i = this.brassIdx;
-    this.brassIdx = (this.brassIdx + 1) % MAX_BRASS;
-    this.brassPos[i * 3] = origin.x; this.brassPos[i * 3 + 1] = origin.y; this.brassPos[i * 3 + 2] = origin.z;
-    this.brassVel[i * 3] = right.x * 1.7 + (Math.random() - 0.5) * 0.6;
-    this.brassVel[i * 3 + 1] = 2.0 + Math.random() * 0.5;
-    this.brassVel[i * 3 + 2] = right.z * 1.7 + (Math.random() - 0.5) * 0.6;
-    this.brassLife[i] = 1.6;
-    this.brassSpin[i] = 8 + Math.random() * 10;
-  }
-
-  /** Release the brass instance buffer. (Geometries/materials are owned by the
-   *  engine's dispose traversal; only the InstancedMesh needs an explicit call.) */
-  dispose() {
-    this.brass.dispose();
   }
 
   impact(pos: THREE.Vector3, normal: THREE.Vector3) {
@@ -215,6 +148,7 @@ export class Effects {
 
   playerFlash(worldPos: THREE.Vector3) {
     this.flashLight.position.copy(worldPos);
+    this.flashLight.color.setHex(0xFFB86A);
     this.flashLight.intensity = 8;
     this.flashTimer = 0.045;
   }
@@ -240,17 +174,63 @@ export class Effects {
     this.burst(pos, 30, 0x555048, 5, 1.4, 1.5, 0.22, 1.4);
     this.burst(pos, 20, 0x2A2620, 7, 0.8, 7, 0.1);
     this.flashLight.position.copy(pos).y += 0.5;
+    this.flashLight.color.setHex(0xFFB86A);
     this.flashLight.intensity = 30;
     this.flashTimer = 0.12;
+  }
+
+  // ---- Field kit effects: same burst pool, kit-specific colours and motion. ----
+
+  /** Hot metal sparks off a barricade plate: fast, short, heavy gravity. */
+  sparks(pos: THREE.Vector3) {
+    this.burst(pos, 14, 0xFFC060, 5.2, 0.32, 14, 0.045, 1.6);
+    this.burst(pos, 4, 0xFFF4D0, 2.4, 0.08, 0, 0.1); // white strike flash
+  }
+
+  /** Dust ring kicked up when the barricade slams down. */
+  slamDust(pos: THREE.Vector3) {
+    this.burst(pos, 30, 0xC8B080, 3.4, 0.9, 2.2, 0.09, 2.2);
+    this.burst(pos, 12, 0x8C7A58, 1.6, 1.3, 0.6, 0.16, 2.6);
+  }
+
+  /** Sonar ping at the dart: cyan motes thrown up, plus a cold light flash. */
+  sonarPulse(pos: THREE.Vector3) {
+    this.burst(pos, 18, 0x5FE3FF, 2.6, 0.7, -0.8, 0.06, 1.8);
+    this.kitFlash(pos, 0x5FE3FF, 9, 0.16);
+  }
+
+  /** Hologram materialise / glitch-out: cyan shards spraying outward. */
+  holoBurst(pos: THREE.Vector3, big = false) {
+    this.burst(pos, big ? 40 : 22, 0x6FE8FF, big ? 6.5 : 3.2, big ? 0.6 : 0.45, 0.5, big ? 0.09 : 0.06, 2.4);
+    this.burst(pos, big ? 16 : 8, 0xE8FDFF, big ? 3 : 1.6, 0.25, 0, 0.12);
+    this.kitFlash(pos, 0x6FE8FF, big ? 26 : 10, big ? 0.22 : 0.12);
+  }
+
+  /** Mine jumps out of the ground: a puff of dirt before the blast. */
+  mineKick(pos: THREE.Vector3) {
+    this.burst(pos, 16, 0x8C7A58, 2.8, 0.6, 5, 0.08, 1.2);
+  }
+
+  /** Med field pulse: green motes drifting up out of the ring. */
+  healMotes(pos: THREE.Vector3) {
+    this.burst(pos, 12, 0x6CFF9A, 1.1, 1.2, -1.2, 0.05, 2.4);
+  }
+
+  /** Coloured point-light pop for kit events (shares the muzzle/explosion light). */
+  kitFlash(pos: THREE.Vector3, color: number, intensity: number, seconds: number) {
+    this.flashLight.position.copy(pos);
+    this.flashLight.color.setHex(color);
+    this.flashLight.intensity = intensity;
+    this.flashTimer = seconds;
   }
 
   footDust(pos: THREE.Vector3) {
     this.burst(pos, 3, 0xC8B080, 0.7, 0.35, 1.2, 0.05);
   }
 
-  private updatePool(pool: BurstSlot[], dt: number) {
-    for (let i = 0; i < pool.length; i++) {
-      const b = pool[i];
+  update(dt: number, playerPos: THREE.Vector3) {
+    for (let i = 0; i < this.bursts.length; i++) {
+      const b = this.bursts[i];
       if (!b.active) continue;
       b.life -= dt;
       if (b.life <= 0) { b.active = false; b.points.visible = false; continue; }
@@ -264,40 +244,6 @@ export class Effects {
       b.points.geometry.attributes.position.needsUpdate = true;
       b.mat.opacity = 0.9 * (b.life / b.maxLife);
     }
-  }
-
-  /** Brass ballistics: gravity, one damped bounce on the footing plane, tumble. */
-  private updateBrass(dt: number, floorY: number) {
-    let any = false;
-    for (let i = 0; i < MAX_BRASS; i++) {
-      if (this.brassLife[i] <= 0) continue;
-      any = true;
-      this.brassLife[i] -= dt;
-      const j = i * 3;
-      this.brassVel[j + 1] -= 12 * dt;
-      this.brassPos[j] += this.brassVel[j] * dt;
-      this.brassPos[j + 1] += this.brassVel[j + 1] * dt;
-      this.brassPos[j + 2] += this.brassVel[j + 2] * dt;
-      if (this.brassPos[j + 1] < floorY) {
-        this.brassPos[j + 1] = floorY;
-        this.brassVel[j + 1] *= -0.35;
-        this.brassVel[j] *= 0.55;
-        this.brassVel[j + 2] *= 0.55;
-      }
-      const dead = this.brassLife[i] <= 0;
-      this._q.setFromEuler(this._e.set(this.brassSpin[i] * this.brassLife[i], this.brassSpin[i] * 0.7 * this.brassLife[i], 0));
-      this._m4.compose(this._bp.set(this.brassPos[j], this.brassPos[j + 1], this.brassPos[j + 2]), this._q, dead ? this._zero : this._one);
-      this.brass.setMatrixAt(i, this._m4);
-    }
-    if (any) this.brass.instanceMatrix.needsUpdate = true;
-    // Ring fully expired: back to zero draws until the next shot.
-    else if (this.brass.count !== 0) this.brass.count = 0;
-  }
-
-  update(dt: number, playerPos: THREE.Vector3) {
-    this.updatePool(this.bursts, dt);
-    this.updatePool(this.smokes, dt);
-    this.updateBrass(dt, playerPos.y + 0.012);
     for (let i = 0; i < this.tracers.length; i++) {
       const t = this.tracers[i];
       if (!t.active) continue;

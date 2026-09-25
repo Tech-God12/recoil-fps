@@ -28,11 +28,11 @@ function buildRig(id: KitId): Rig {
     // The unit is 45 cm tall: shown at 2.6× so it reads at the same size as the others.
     m.group.scale.setScalar(2.6);
     root.add(m.group, m.ring, m.echo);
-    const ghosts = [new THREE.Vector3(-2.1, 0, -2.6), new THREE.Vector3(2.3, 0, -2.9)].map((p, i) => {
-      const g = buildTagGhost();
+    const ghosts = [new THREE.Vector3(-1.5, 0, -1.4), new THREE.Vector3(1.6, 0, -1.7)].map((p, i) => {
+      const g = buildTagGhost(false);
       g.group.position.copy(p);
       g.group.rotation.y = i ? 2.4 : -0.6;
-      g.group.scale.setScalar(0.8);
+      g.group.scale.setScalar(0.6);
       root.add(g.group);
       return g;
     });
@@ -45,6 +45,7 @@ function buildRig(id: KitId): Rig {
     return { id, m, root };
   }
   const m = buildDecoy();
+  m.group.rotation.y = Math.PI - 0.5; // face the camera (the rig faces -Z), slight three-quarter turn
   root.add(m.group);
   return { id, m, root };
 }
@@ -71,7 +72,7 @@ function animate(r: Rig, t: number, dt: number) {
     m.dish.rotation.y += dt * (scanT > 0 && scanT % 1.4 < 0.3 ? 14 : 2.5);
     (m.led.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.2 + (Math.sin(t * 10) > 0 ? 1.6 : 0);
     const p = scanT > 0 ? (scanT % 1.4) / 1.4 : -1;
-    for (const [o, lag, max, op] of [[m.ring, 0, 3.4, 0.9], [m.echo, 0.1, 3.2, 0.5]] as const) {
+    for (const [o, lag, max, op] of [[m.ring, 0, 2.3, 0.9], [m.echo, 0.1, 2.1, 0.5]] as const) {
       const q = p - lag;
       o.visible = q > 0 && q < 1;
       o.position.y = 0.02;
@@ -168,8 +169,8 @@ export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className
     const disposables: { dispose(): void }[] = [];
     const add = <T extends THREE.Mesh>(o: T) => { scene.add(o); disposables.push(o.geometry, o.material as THREE.Material); return o; };
     // Floor fades to nothing at the edges so there is no visible horizon line.
-    const floorTex = shadowTexture('rgba(22,19,14,1)', 'rgba(22,19,14,0)'); disposables.push(floorTex);
-    add(new THREE.Mesh(new THREE.PlaneGeometry(16, 16), new THREE.MeshBasicMaterial({ map: floorTex, transparent: true, depthWrite: false }))).rotation.x = -Math.PI / 2;
+    const floorTex = shadowTexture('rgba(12,10,8,0.55)', 'rgba(12,10,8,0)'); disposables.push(floorTex);
+    add(new THREE.Mesh(new THREE.PlaneGeometry(7, 7), new THREE.MeshBasicMaterial({ map: floorTex, transparent: true, depthWrite: false }))).rotation.x = -Math.PI / 2;
     const ringMat = new THREE.MeshBasicMaterial({ color: ACCENT[kit], transparent: true, opacity: 0.55, side: THREE.DoubleSide });
     const ring1 = add(new THREE.Mesh(new THREE.RingGeometry(1.55, 1.58, 96), ringMat)); ring1.rotation.x = -Math.PI / 2; ring1.position.y = 0.003;
     const ring2Mat = new THREE.MeshBasicMaterial({ color: ACCENT[kit], transparent: true, opacity: 0.18, side: THREE.DoubleSide });
@@ -185,16 +186,20 @@ export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className
     rig.root.updateMatrixWorld(true);
     const box = new THREE.Box3();
     rig.root.traverse(o => { if (o instanceof THREE.Mesh && o.visible && o !== (rig.id === 'recon' ? rig.m.ring : null) && o !== (rig.id === 'recon' ? rig.m.echo : null)) box.expandByObject(o); });
-    if (rig.id === 'recon') box.set(new THREE.Vector3(-1.3, 0, -1.2), new THREE.Vector3(1.3, 1.45, 0.8));
+    if (rig.id === 'recon') box.set(new THREE.Vector3(-1.6, 0, -1.8), new THREE.Vector3(1.6, 1.3, 0.4));
     const size = box.getSize(new THREE.Vector3());
     const centre = box.getCenter(new THREE.Vector3());
     const radius = Math.max(size.x, size.y * 1.1, size.z) * 0.62 + 0.25;
-    const dist = radius / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    // Fit the subject in BOTH directions: on a narrow stage the horizontal FOV is the limit.
+    let dist = 1;
 
     const resize = () => {
       const w = el.clientWidth || 1, h = el.clientHeight || 1;
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
+      const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
+      const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
+      dist = radius / Math.tan(Math.min(vHalf, hHalf));
       if (shift) camera.setViewOffset(w, h, -shift * w, 0, w, h); else camera.clearViewOffset();
       camera.updateProjectionMatrix();
     };

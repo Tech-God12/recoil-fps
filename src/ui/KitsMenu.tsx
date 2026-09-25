@@ -69,8 +69,6 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
 
   return (
     <main className={`kits-root kit-${sel}`} aria-labelledby="kits-title">
-      <KitViewer kit={sel} shift={0.16} className="kits-stage" />
-      <div className="kits-shade" aria-hidden="true" />
 
       <header className="kits-top">
         <button type="button" className="kits-back" onClick={onBack}>
@@ -84,6 +82,7 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
         </div>
       </header>
 
+      <div className="kits-body">
       <section key={sel} className="kits-info" aria-live="polite">
         <span className="kits-status mono">
           {equipped ? <><i className="dot" />Equipped</> : owned ? 'Owned' : <><LockIcon size={11} /> {money(def.price)}</>}
@@ -105,6 +104,18 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
         <p className="kits-rule">{def.rule}</p>
       </section>
 
+      <div className="kits-stage-wrap">
+        <KitViewer kit={sel} className="kits-stage" />
+        <span className="kits-stage-idx mono" aria-hidden="true">
+          <b>{String(KIT_IDS.indexOf(sel) + 1).padStart(2, '0')}</b> / {String(KIT_IDS.length).padStart(2, '0')} · {def.role}
+        </span>
+        <button type="button" className="kits-arrow prev" aria-label="Previous kit"
+          onClick={() => setSel(KIT_IDS[(KIT_IDS.indexOf(sel) + KIT_IDS.length - 1) % KIT_IDS.length])}>‹</button>
+        <button type="button" className="kits-arrow next" aria-label="Next kit"
+          onClick={() => setSel(KIT_IDS[(KIT_IDS.indexOf(sel) + 1) % KIT_IDS.length])}>›</button>
+      </div>
+      </div>
+
       <footer className="kits-bottom">
         <nav className="kits-cards" aria-label="Kits" role="tablist">
           {KIT_IDS.map((id, i) => {
@@ -117,9 +128,11 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
                 style={{ animationDelay: `${0.05 + i * 0.06}s` }}
                 onClick={() => setSel(id)}>
                 <span className="kits-card-key mono">{i + 1}</span>
-                <span className="kits-card-icon"><KitIcon id={id} size={30} /></span>
-                <b>{d.name}</b>
-                <span className="kits-card-tag mono">{eq ? 'Equipped' : own ? 'Owned' : money(d.price)}</span>
+                <span className="kits-card-icon"><KitIcon id={id} size={24} /></span>
+                <span className="kits-card-text">
+                  <b>{d.name}</b>
+                  <span className="kits-card-tag mono">{eq ? <><i className="dot" />Equipped</> : own ? 'Owned' : <><LockIcon size={10} /> {money(d.price)}</>}</span>
+                </span>
               </button>
             );
           })}

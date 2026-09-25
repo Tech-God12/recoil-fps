@@ -150,8 +150,36 @@ class Parts {
   }
 }
 
+let arrayMatShared: THREE.MeshStandardMaterial | null = null;
+/** Radar emitter face: dark tile grid with cyan-lit seams (shared, never disposed). */
+function arrayMat(): THREE.MeshStandardMaterial {
+  if (arrayMatShared) return arrayMatShared;
+  const cg = canvas(256, 160);
+  let map: THREE.CanvasTexture | null = null;
+  let emi: THREE.CanvasTexture | null = null;
+  if (cg) {
+    const [c, g] = cg;
+    g.fillStyle = '#10161a'; g.fillRect(0, 0, 256, 160);
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 14; x++) {
+      g.fillStyle = (x + y) % 2 ? '#1b252b' : '#162026';
+      g.fillRect(4 + x * 17.8, 4 + y * 19, 15, 16);
+    }
+    map = new THREE.CanvasTexture(c); map.colorSpace = THREE.SRGBColorSpace;
+    const ce = canvas(256, 160)!;
+    const ge = ce[1];
+    ge.fillStyle = '#000'; ge.fillRect(0, 0, 256, 160);
+    ge.fillStyle = '#5fe3ff';
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 14; x++) ge.fillRect(9 + x * 17.8, 10 + y * 19, 5, 3);
+    ge.fillRect(0, 0, 256, 2); ge.fillRect(0, 158, 256, 2);
+    emi = new THREE.CanvasTexture(ce[0]); emi.colorSpace = THREE.SRGBColorSpace;
+  }
+  return (arrayMatShared = new THREE.MeshStandardMaterial({
+    color: 0xffffff, map, emissive: emi ? 0xffffff : 0x113844, emissiveMap: emi, emissiveIntensity: 1.6, roughness: 0.35, metalness: 0.5,
+  }));
+}
+
 // ---------------------------------------------------------------------------------
-// Radar: throwable ground radar — hex puck, tripod legs, telescopic mast, spinning dish
+// Radar: throwable ground radar — rugged case, fold-out legs, mast, spinning array panel
 // ---------------------------------------------------------------------------------
 export interface DartModel {
   group: THREE.Group;
@@ -174,72 +202,76 @@ export interface DartModel {
 export function buildDart(): DartModel {
   const m = M();
   const group = new THREE.Group();
-  // body: rubber-bumpered hex puck with an armoured top deck and vent slots
+  // Base: a rugged rounded case (olive, worn) on a rubber skirt, with a carry handle,
+  // a dark top deck, vents, bolts and a small status panel. ~26 × 20 cm footprint.
   const body = new Parts()
-    .cyl(0.15, 0.17, 0.075, m.olive, 0, 0.055, 0, 0, Math.PI / 6, 0, 6)
-    .add(new THREE.TorusGeometry(0.165, 0.018, 6, 6), m.rubber, 0, 0.03, 0, Math.PI / 2, 0, Math.PI / 6)
-    .cyl(0.12, 0.14, 0.03, m.gunmetal, 0, 0.105, 0, 0, Math.PI / 6, 0, 6)
-    .cyl(0.045, 0.05, 0.03, m.dark, 0, 0.13, 0, 0, 0, 0, 12);
-  for (let i = 0; i < 6; i++) {
-    const a = i * Math.PI / 3;
-    body.box(0.05, 0.012, 0.012, m.dark, Math.sin(a) * 0.1, 0.121, Math.cos(a) * 0.1, 0, a, 0); // vents
-    body.cyl(0.008, 0.008, 0.01, m.steel, Math.sin(a + 0.5) * 0.125, 0.122, Math.cos(a + 0.5) * 0.125); // bolts
-  }
+    .rbox(0.26, 0.085, 0.2, 0.025, m.olive, 0, 0.06, 0)
+    .rbox(0.275, 0.03, 0.215, 0.012, m.rubber, 0, 0.022, 0)
+    .rbox(0.2, 0.02, 0.15, 0.008, m.gunmetal, 0, 0.108, 0)
+    .cyl(0.05, 0.056, 0.03, m.dark, 0, 0.128, 0, 0, 0, 0, 16)
+    .rbox(0.07, 0.03, 0.004, 0.003, m.glass, -0.06, 0.07, 0.101)
+    // carry handle across the back edge
+    .cyl(0.008, 0.008, 0.16, m.steel, 0, 0.13, -0.085, 0, 0, Math.PI / 2, 8)
+    .box(0.012, 0.035, 0.012, m.steel, -0.08, 0.112, -0.085)
+    .box(0.012, 0.035, 0.012, m.steel, 0.08, 0.112, -0.085);
+  for (let i = 0; i < 4; i++) body.box(0.012, 0.03, 0.004, m.dark, 0.03 + i * 0.022, 0.065, 0.101); // vents
+  for (const [x, z] of [[-0.09, -0.065], [0.09, -0.065], [-0.09, 0.065], [0.09, 0.065]]) body.cyl(0.007, 0.007, 0.006, m.steel, x, 0.12, z, 0, 0, 0, 8);
   body.build(group);
-  // status light ring (own material)
+  // status LED strip on the front (own material — the director pulses it)
   const ledMat = m.cyan.clone();
-  const led = new THREE.Mesh(new THREE.TorusGeometry(0.128, 0.007, 6, 24), ledMat);
-  led.rotation.x = Math.PI / 2; led.position.y = 0.093;
+  const led = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.01, 0.004), ledMat);
+  led.position.set(-0.06, 0.07, 0.104);
   group.add(led);
-  // tripod legs
+  // three fold-out legs with rubber feet
   const legs: THREE.Group[] = [];
-  for (let i = 0; i < 3; i++) {
-    const a = i * Math.PI * 2 / 3 + Math.PI / 6;
+  for (const a of [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.5]) {
     const hinge = new THREE.Group();
-    hinge.position.set(Math.sin(a) * 0.15, 0.06, Math.cos(a) * 0.15);
+    hinge.position.set(Math.sin(a) * 0.12, 0.05, Math.cos(a) * 0.1);
     hinge.rotation.y = a;
     new Parts()
-      .box(0.024, 0.022, 0.2, m.gunmetal, 0, 0, 0.1)
-      .cyl(0.012, 0.012, 0.035, m.steel, 0, 0, 0, 0, 0, Math.PI / 2, 8)
-      .rbox(0.05, 0.02, 0.05, 0.008, m.rubber, 0, -0.01, 0.2)
+      .rbox(0.028, 0.018, 0.17, 0.006, m.gunmetal, 0, 0, 0.085)
+      .cyl(0.012, 0.012, 0.036, m.steel, 0, 0, 0, 0, 0, Math.PI / 2, 8)
+      .cyl(0.024, 0.028, 0.016, m.rubber, 0, -0.012, 0.17, 0, 0, 0, 10)
       .build(hinge);
     group.add(hinge);
     legs.push(hinge);
   }
-  // telescopic mast
+  // telescopic mast: two steel stages with collars
   const mast = new THREE.Group();
   mast.position.y = 0.14;
   new Parts()
-    .cyl(0.022, 0.026, 0.2, m.gunmetal, 0, 0.1, 0)
-    .cyl(0.015, 0.015, 0.16, m.steel, 0, 0.27, 0)
-    .cyl(0.03, 0.03, 0.02, m.dark, 0, 0.2, 0)
+    .cyl(0.02, 0.024, 0.16, m.gunmetal, 0, 0.08, 0, 0, 0, 0, 12)
+    .cyl(0.028, 0.028, 0.018, m.dark, 0, 0.16, 0, 0, 0, 0, 12)
+    .cyl(0.014, 0.014, 0.12, m.steel, 0, 0.23, 0, 0, 0, 0, 10)
     .build(mast);
   group.add(mast);
-  // radar head: parabolic dish on a yoke with feed horn and counterweight
+  // Head: a flat phased-array panel (glowing emitter grid) on a turntable yoke,
+  // tilted back 15°, with a sensor pod and whip antenna. Reads as "radar" at a glance.
   const dish = new THREE.Group();
-  dish.position.y = 0.36;
+  dish.position.y = 0.29;
   mast.add(dish);
-  const prof: THREE.Vector2[] = [];
-  for (let i = 0; i <= 8; i++) { const r = 0.012 + (i / 8) * 0.13; prof.push(new THREE.Vector2(r, (r * r) * 2.2)); }
-  const dishGeo = new THREE.LatheGeometry(prof, 20);
+  const tilt = -0.26;
   const head = new Parts()
-    .box(0.07, 0.03, 0.04, m.gunmetal, 0, 0.0, 0)
-    .box(0.012, 0.09, 0.03, m.gunmetal, -0.05, 0.045, 0)
-    .box(0.012, 0.09, 0.03, m.gunmetal, 0.05, 0.045, 0)
-    .add(dishGeo, m.steel, 0, 0.09, -0.02, -Math.PI / 2 + 0.25, 0, 0)
-    .cyl(0.004, 0.004, 0.13, m.dark, 0, 0.13, -0.08, -Math.PI / 2 + 0.25 + Math.PI / 2 - 0.2, 0, 0, 6)
-    .rbox(0.08, 0.05, 0.05, 0.01, m.dark, 0, 0.07, 0.07)
-    .cyl(0.003, 0.003, 0.22, m.dark, 0.04, 0.2, 0.07, 0, 0, 0, 5)
-    .sphere(0.008, m.amber, 0.04, 0.31, 0.07, 1, 1, 1, 8);
+    .cyl(0.04, 0.045, 0.025, m.gunmetal, 0, 0.012, 0, 0, 0, 0, 16)     // turntable
+    .rbox(0.2, 0.018, 0.04, 0.006, m.gunmetal, 0, 0.032, 0)          // yoke bar
+    .rbox(0.016, 0.1, 0.03, 0.005, m.gunmetal, -0.1, 0.08, 0)        // yoke arms
+    .rbox(0.016, 0.1, 0.03, 0.005, m.gunmetal, 0.1, 0.08, 0)
+    .rbox(0.32, 0.2, 0.04, 0.012, m.olive, 0, 0.14, 0, tilt, 0, 0)    // panel housing
+    .rbox(0.18, 0.1, 0.035, 0.01, m.dark, 0, 0.13, 0.04, tilt, 0, 0) // rear electronics box
+    .cyl(0.004, 0.004, 0.2, m.dark, 0.12, 0.3, 0.02, 0, 0, 0, 5)     // antenna
+    .sphere(0.008, m.amber, 0.12, 0.4, 0.02, 1, 1, 1, 8);
+  for (const s of [-1, 1]) head.cyl(0.012, 0.012, 0.03, m.steel, s * 0.1, 0.12, 0, 0, 0, Math.PI / 2, 10); // pivots
   head.build(dish);
-  const horn = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.03, 8), m.cyan);
-  horn.position.set(0, 0.11, -0.16); horn.rotation.x = Math.PI / 2 + 0.25;
-  dish.add(horn);
+  // emitter face (own mesh so its emissive grid can glow)
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.29, 0.17), arrayMat());
+  face.position.set(0, 0.14 - Math.sin(tilt) * 0.021, -0.021 * Math.cos(tilt));
+  face.rotation.set(tilt, Math.PI, 0);
+  dish.add(face);
 
   const setDeploy = (k: number) => {
     const e = Math.max(0, Math.min(1, k));
-    // legs fold up flat against the puck, then swing down/out to 35°
-    for (const l of legs) l.rotation.x = THREE.MathUtils.lerp(-1.4, 0.62, e);
+    // legs tucked flat under the case, then swing down/out
+    for (const l of legs) l.rotation.x = THREE.MathUtils.lerp(-0.2, 0.42, e);
     const up = Math.max(0, Math.min(1, (e - 0.35) / 0.65));
     mast.scale.set(1, Math.max(0.04, up), 1);
     dish.scale.setScalar(Math.max(0.04, up));
@@ -309,11 +341,12 @@ export function makeHoloMaterial(color: number, throughWalls = false): THREE.Sha
       void main(){ vec4 wp = modelMatrix*vec4(position,1.0); vec4 mv = viewMatrix*wp; vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); vY = wp.y; gl_Position = projectionMatrix*mv; }`,
     fragmentShader: `uniform vec3 uColor; uniform float uOpacity; uniform float uTime; varying vec3 vN; varying vec3 vV; varying float vY;
       void main(){
-        float rim = pow(1.0-abs(dot(normalize(vN),normalize(vV))),2.0);
-        float scan = 0.72 + 0.28*step(0.5, fract(vY*38.0 - uTime*1.6));
-        float band = smoothstep(0.12,0.0,abs(fract(vY*0.45 - uTime*0.35)-0.5));
-        float a = uOpacity*(0.22 + rim*1.1 + band*0.5)*scan;
-        gl_FragColor = vec4(uColor*(0.6+rim*0.9+band), a);
+        float rim = pow(1.0-abs(dot(normalize(vN),normalize(vV))),2.2);
+        float scan = 0.8 + 0.2*step(0.5, fract(vY*60.0 - uTime*1.6));
+        float band = smoothstep(0.08,0.0,abs(fract(vY*0.4 - uTime*0.35)-0.5));
+        float light = 0.5 + 0.5*clamp(normalize(vN).y*0.6 + 0.4, 0.0, 1.0);
+        float a = uOpacity*(0.16*light + rim*1.25 + band*0.45)*scan;
+        gl_FragColor = vec4(uColor*(0.55+rim*0.9+band*0.8) + vec3(rim*rim*0.35), a);
       }`,
     transparent: true, depthWrite: false, depthTest: !throughWalls, blending: THREE.AdditiveBlending,
   });
@@ -355,8 +388,8 @@ function buildSoldier(mat: THREE.Material): SoldierRig {
     .sphere(0.075, mat, -0.22, 0.56, 0)                       // shoulders
     .sphere(0.075, mat, 0.22, 0.56, 0)
     .build(torso);
-  // rifle, held across the chest pointing -Z
-  const rifle = new THREE.Group(); rifle.position.set(0.07, 0.4, -0.22); torso.add(rifle);
+  // rifle shouldered in a low-ready: stock in the right shoulder pocket, pointing -Z
+  const rifle = new THREE.Group(); rifle.position.set(0.1, 0.44, -0.24); rifle.rotation.x = 0.06; torso.add(rifle);
   new Parts()
     .box(0.05, 0.08, 0.3, mat, 0, 0, 0)                 // receiver
     .box(0.045, 0.055, 0.28, mat, 0, 0.005, -0.28)      // handguard
@@ -364,21 +397,36 @@ function buildSoldier(mat: THREE.Material): SoldierRig {
     .cyl(0.018, 0.018, 0.05, mat, 0, 0.01, -0.63, Math.PI / 2, 0, 0, 8) // muzzle device
     .box(0.035, 0.15, 0.07, mat, 0, -0.1, -0.06, 0.22, 0, 0) // magazine
     .box(0.03, 0.09, 0.04, mat, 0, -0.07, 0.08, -0.3, 0, 0)  // grip
-    .box(0.04, 0.09, 0.22, mat, 0, -0.015, 0.25)             // stock
+    .box(0.04, 0.09, 0.2, mat, 0, -0.015, 0.24)              // stock
     .cyl(0.024, 0.024, 0.13, mat, 0, 0.075, -0.02, Math.PI / 2, 0, 0, 10) // optic
     .build(rifle);
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.01, -0.66); rifle.add(muzzle);
-  // arms: shoulder pivot → upper arm → elbow pivot → forearm + glove
-  const arm = (x: number, sx: number, ex: number, sz: number) => {
+  rifle.updateMatrix();
+  // Arms solved with two-bone IK so both hands land ON the rifle (grip + handguard)
+  // instead of hand-tuned angles that float or clip through the body.
+  const UPPER = 0.29, FORE = 0.29;
+  const down = new THREE.Vector3(0, -1, 0);
+  const arm = (x: number, handLocal: THREE.Vector3, pole: THREE.Vector3) => {
     const sh = new THREE.Group(); sh.position.set(x, 0.55, 0); torso.add(sh);
-    new Parts().capsule(0.052, 0.2, mat, 0, -0.14, 0).build(sh);
-    const el = new THREE.Group(); el.position.y = -0.28; sh.add(el);
-    new Parts().capsule(0.046, 0.19, mat, 0, -0.12, 0).rbox(0.07, 0.09, 0.05, 0.02, mat, 0, -0.27, 0).build(el);
-    sh.rotation.set(sx, 0, sz); el.rotation.x = ex;
+    new Parts().capsule(0.052, UPPER - 0.08, mat, 0, -UPPER / 2, 0).rbox(0.11, 0.07, 0.12, 0.03, mat, 0, -0.02, 0).build(sh);
+    const el = new THREE.Group(); el.position.y = -UPPER; sh.add(el);
+    new Parts().capsule(0.045, FORE - 0.1, mat, 0, -FORE / 2 + 0.02, 0).rbox(0.07, 0.09, 0.055, 0.02, mat, 0, -FORE, 0).build(el);
+    const target = handLocal.clone().applyMatrix4(rifle.matrix);
+    const toT = target.clone().sub(sh.position);
+    const d = Math.min(toT.length(), UPPER + FORE - 1e-3);
+    const dir = toT.normalize();
+    // elbow: law of cosines, bent toward the pole direction
+    const cosA = (UPPER * UPPER + d * d - FORE * FORE) / (2 * UPPER * d);
+    const bend = pole.clone().sub(dir.clone().multiplyScalar(pole.dot(dir))).normalize();
+    const elbow = dir.clone().multiplyScalar(cosA * UPPER).addScaledVector(bend, Math.sqrt(Math.max(0, 1 - cosA * cosA)) * UPPER);
+    const qU = new THREE.Quaternion().setFromUnitVectors(down, elbow.clone().normalize());
+    sh.quaternion.copy(qU);
+    const foreDir = dir.clone().multiplyScalar(d).sub(elbow).normalize();
+    el.quaternion.copy(qU.clone().invert().multiply(new THREE.Quaternion().setFromUnitVectors(down, foreDir)));
     return sh;
   };
-  const rArm = arm(0.23, -0.5, -1.35, -0.2);
-  const lArm = arm(-0.23, -1.2, -0.6, 0.55);
+  const rArm = arm(0.22, new THREE.Vector3(0, -0.08, 0.075), new THREE.Vector3(0.8, -1, 0.3));
+  const lArm = arm(-0.22, new THREE.Vector3(-0.01, -0.04, -0.24), new THREE.Vector3(-0.9, -1, 0.1));
   // legs: hip pivot → thigh → knee pivot → shin, knee pad, boot
   const leg = (x: number) => {
     const hip = new THREE.Group(); hip.position.set(x, 0.95, 0); root.add(hip);
@@ -394,6 +442,24 @@ function buildSoldier(mat: THREE.Material): SoldierRig {
   };
   const lLeg = leg(-0.11), rLeg = leg(0.11);
   return { root, torso, lLeg, rLeg, lArm, rArm, muzzle };
+}
+
+let depthOnly: THREE.MeshBasicMaterial | null = null;
+/**
+ * Hologram clean-up: every holo mesh gets a depth-only twin drawn in the opaque pass.
+ * The additive hologram then only shows its FRONT surface, instead of every limb,
+ * pouch and rifle part glowing through each other into a tangled mess.
+ */
+function addDepthPrepass(root: THREE.Object3D) {
+  depthOnly ??= new THREE.MeshBasicMaterial({ colorWrite: false });
+  const list: THREE.Mesh[] = [];
+  root.traverse(o => { if (o instanceof THREE.Mesh) list.push(o); });
+  for (const mesh of list) {
+    const d = new THREE.Mesh(mesh.geometry, depthOnly);
+    d.renderOrder = -1; d.frustumCulled = mesh.frustumCulled;
+    d.userData.sharedGeometry = true;
+    mesh.add(d);
+  }
 }
 
 // ---------------------------------------------------------------------------------
@@ -424,13 +490,15 @@ function ghostGeometry(): THREE.BufferGeometry {
  * as a body (stance, facing, crouch height) rather than a floating dot. The geometry is
  * shared; each ghost owns its material so it can fade on its own clock.
  */
-export function buildTagGhost(): TagGhost {
-  const mat = makeHoloMaterial(0x5fe3ff, true);
+export function buildTagGhost(throughWalls = true): TagGhost {
+  const mat = makeHoloMaterial(0x5fe3ff, throughWalls);
   mat.opacity = 0.35;
   const group = new THREE.Group();
   const body = new THREE.Mesh(ghostGeometry(), mat);
   body.renderOrder = 50; body.frustumCulled = false;
   group.add(body);
+  // In the menu (no walls to see through) the silhouette is drawn front-surface only.
+  if (!throughWalls) addDepthPrepass(group);
   group.visible = false;
   return { group, mat };
 }
@@ -576,6 +644,7 @@ export function buildDecoy(): DecoyModel {
   const rig = buildSoldier(mat);
   const group = new THREE.Group();
   group.add(rig.root);
+  addDepthPrepass(rig.root);
   // projector base: armoured disc, emitter lens, light ring and three stub feet
   const puck = new THREE.Group();
   new Parts()
@@ -623,7 +692,7 @@ export function makeSonarMarkerMaterial(): THREE.SpriteMaterial {
 
 /** Disposes geometries under a kit object (shared materials and the shared ghost body are kept). */
 export function disposeKitObject(o: THREE.Object3D) {
-  o.traverse(c => { if (c instanceof THREE.Mesh && c.geometry !== ghostGeo) c.geometry.dispose(); });
+  o.traverse(c => { if (c instanceof THREE.Mesh && c.geometry !== ghostGeo && !c.userData.sharedGeometry) c.geometry.dispose(); });
 }
 
 /** Everything the decoy owns beyond geometry: hologram, cone and scan materials. */

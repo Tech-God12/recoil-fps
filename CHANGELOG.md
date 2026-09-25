@@ -1,3 +1,9 @@
+## 2026-09-25 — Kits screen rebuilt as a proper layout; new Radar and Decoy models
+
+The Kits screen now uses a real grid layout: details on the left, a framed 3D stage on the right, kit cards and the Buy/Equip button along the bottom. Nothing overlaps at any window size; on short screens the extra text hides first. Stats are compact tiles, and the stage has prev/next arrows. The Radar is now a rugged case on fold-out legs with a glowing array panel. The Decoy hologram shows only its outer surface (no more limbs glowing through each other), and both hands now hold the rifle properly.
+
+Verification: 162/162 tests, 34/34 mutations, typecheck, lint and vite build pass.
+
 ## 2026-09-24 — Kits: simple names, new menu, detailed models
 
 Kits are now just **Radar**, **Barricade** and **Decoy** everywhere (menu, HUD, messages). The Kits menu is a full-screen showroom: a lit 3D stage with each kit playing a looping demo (radar unfolds and scans two enemies, barricade drops and unfolds, decoy materialises and walks), a big name, stat bars, three how-to steps, kit cards and one clear Buy/Equip button. All three models were rebuilt with bevelled plates, bolts, hinges, a dish radar on a tripod and a proper hologram soldier. The radar now drops down walls and sets up on the ground instead of sticking into them.

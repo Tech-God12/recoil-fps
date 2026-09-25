@@ -170,7 +170,7 @@ export const KIT_DEFS: Record<KitId, KitDef> = {
     price: KIT_PRICES.recon,
     stats: [
       { label: 'RANGE', value: '24 m', bar: 0.8 },
-      { label: 'SHOWS ENEMIES', value: '≈8 s', bar: 0.55 },
+      { label: 'SHOWS', value: '≈8 s', bar: 0.55 },
       { label: 'COOLDOWN', value: '45 s', bar: 0.45 },
     ],
   },

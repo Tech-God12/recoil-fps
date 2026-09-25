@@ -1,5 +1,5 @@
 // Recoil FPS — in-game HUD (VOLT PROTOCOL)
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { GameSettings, HudState, TdmRosterEntry } from '../game/engine';
 import { Reticle } from './Settings';
 import { isLowAmmo, shouldShowReload } from './hud-math';
@@ -10,7 +10,7 @@ import ScopeView, { type ScopeControls } from './ScopeView';
 import DefusalHudLayer, { C4Glyph } from './DefusalHud';
 
 export interface HudFx {
-  hitmark: { id: number; kill: boolean } | null;
+  hitmark: { id: number; kill: boolean; headshot?: boolean } | null;
   feed: { id: number; text: string; headshot: boolean; tdm?: { killer: string; weapon: string; victim: string; killerTeam: 'alpha' | 'bravo'; zone?: string } }[];
   dmgArcs: { id: number; dir: number; opacity: number }[];
   scorePops: { id: number; text: string; headshot: boolean; cash?: boolean }[];
@@ -70,7 +70,46 @@ function TdmFullBoard({ tdm }: { tdm: NonNullable<HudState['tdm']> }) {
   );
 }
 
-export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx; active?: boolean } & ScopeControls) {
+// Inner memoized compass: only re-renders when bearing/pings/landmark/mission change (slow lane 250 ms).
+const HudCompass = memo(function HudCompass({ bearing, pings, landmark, missionBearing }: { bearing: number; pings: HudState['pings']; landmark: HudState['landmark']; missionBearing: number | null }) {
+  return (
+    <div className="compass">
+      <div className="compass-strip">
+        {Array.from({ length: 73 }, (_, i) => i * 5).map(deg => {
+          let rel = deg - bearing;
+          while (rel > 180) rel -= 360; while (rel < -180) rel += 360;
+          if (Math.abs(rel) > 58) return null;
+          const card = ({ 0: 'N', 90: 'E', 180: 'S', 270: 'W' } as Record<number, string>)[deg % 360];
+          const inter = ({ 45: 'NE', 135: 'SE', 225: 'SW', 315: 'NW' } as Record<number, string>)[deg % 360];
+          return (
+            <div key={deg} className="compass-tick" style={{ left: 230 + rel * 3.75 - 12 }}>
+              <i style={{ width: 1, height: card ? 9 : inter ? 6 : 3, background: card ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.45)', boxShadow: 'none' }} />
+              {(card || inter) && <div className={`compass-card ${card ? 'text-white' : 'text-white/40'}`}>{card || inter}</div>}
+              {deg % 5 === 0 && <div className="compass-deg">{deg % 360}</div>}
+            </div>
+          );
+        })}
+        {missionBearing !== null && Math.abs(missionBearing) <= 58 && <span className="compass-obj" style={{ left: 230 + missionBearing * 3.75 - 4 }} aria-label="Objective bearing" />}
+        {pings.map((p, i) => {
+          let rel = p.dir - bearing;
+          while (rel > 180) rel -= 360; while (rel < -180) rel += 360;
+          if (Math.abs(rel) > 58) return null;
+          return <span key={i} className="ping-diamond" style={{ left: 230 + rel * 3.75, opacity: 1 - p.age / 3.2 }} />;
+        })}
+        {landmark && (() => {
+          let r = landmark!.angle - bearing;
+          while (r > 180) r -= 360; while (r < -180) r += 360;
+          if (Math.abs(r) > 58) return null;
+          return <span className="compass-landmark" style={{ left: 230 + r * 3.75 - 14 }}><i style={{ width: 6, height: 6, background: 'rgba(200,155,90,0.9)', transform: 'rotate(45deg)', display: 'block', margin: '0 auto' }} /><em className="mono" style={{ fontSize: 7, letterSpacing: '0.06em', color: 'rgba(237,228,211,0.9)', display: 'block', textAlign: 'center', marginTop: 2 }}>{landmark!.name}</em></span>;
+        })()}
+        <span className="compass-notch" />
+      </div>
+      <div className="compass-bear hud-chip">{Math.round(bearing).toString().padStart(3, '0')}<span> DEG</span></div>
+    </div>
+  );
+});
+
+function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx; active?: boolean } & ScopeControls) {
   // Hold-Tab scoreboard (TDM only). Listens on window so it works regardless
   // of pointer lock; Tab's default focus-move is suppressed while playing.
   const [showBoard, setShowBoard] = useState(false);
@@ -194,39 +233,9 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         );
       })()}
 
-      {/* ============ COMPASS ============ */}
-      <div className="compass">
-        <div className="compass-strip">
-          {Array.from({ length: 73 }, (_, i) => i * 5).map(deg => {
-            let rel = deg - hud.bearing;
-            while (rel > 180) rel -= 360; while (rel < -180) rel += 360;
-            if (Math.abs(rel) > 58) return null;
-            const card = ({ 0: 'N', 90: 'E', 180: 'S', 270: 'W' } as Record<number, string>)[deg % 360];
-            const inter = ({ 45: 'NE', 135: 'SE', 225: 'SW', 315: 'NW' } as Record<number, string>)[deg % 360];
-            return (
-              <div key={deg} className="compass-tick" style={{ left: 230 + rel * 3.75 - 12 }}>
-                <i style={{ width: 1, height: card ? 9 : inter ? 6 : 3, background: card ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.45)', boxShadow: 'none' }} />
-                {(card || inter) && <div className={`compass-card ${card ? 'text-white' : 'text-white/40'}`}>{card || inter}</div>}
-              </div>
-            );
-          })}
-          {hud.mission && (() => {
-            const rel = hud.mission.relativeBearing;
-            if (Math.abs(rel) > 58) return null;
-            return <span className="compass-obj" style={{ left: 230 + rel * 3.75 - 4 }} aria-label="Objective bearing" />;
-          })()}
-          {hud.pings.map((p, i) => {
-            let rel = p.dir - hud.bearing;
-            while (rel > 180) rel -= 360; while (rel < -180) rel += 360;
-            if (Math.abs(rel) > 58) return null;
-            return <span key={i} className="ping-diamond" style={{ left: 230 + rel * 3.75, opacity: 1 - p.age / 3.2 }} />;
-          })}
-          <span className="compass-notch" />
-        </div>
-        <div className="compass-bear hud-chip">{Math.round(hud.bearing).toString().padStart(3, '0')}<span> DEG</span></div>
-      </div>
+      <HudCompass bearing={hud.bearing} pings={hud.pings} landmark={hud.landmark} missionBearing={hud.mission?.relativeBearing ?? null} />
 
-      {/* ============ CASH (mission wallet; the defusal layer shows round money) ============ */}
+            {/* ============ CASH (mission wallet; the defusal layer shows round money) ============ */}
       {!df && (
         <div className="hud-cash mono" aria-label={`Cash ${hud.cash}`}>
           <span>$</span>{hud.cash.toLocaleString('en-US')}
@@ -260,9 +269,13 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
       {!spectating && hud.ads < 0.3 && !hud.sprinting && (
         <div className="absolute left-1/2 top-1/2" style={{ opacity: 1 - hud.ads / 0.3 }}>
           {/* Kill-confirm pulse: the crosshair kicks open on every hitmark (wider on
-              kills) and glides back via the Reticle's arm transition. */}
-          <Reticle s={s} spread={(hud.spread || 0) * 520 + (fx.hitmark ? (fx.hitmark.kill ? 14 : 8) : 0)} />
+              kills, widest on headshot) and glides back via the Reticle's arm transition (G6). */}
+          <Reticle s={s} spread={(hud.spread || 0) * 520 + (fx.hitmark ? (fx.hitmark.headshot ? 16 : fx.hitmark.kill ? 14 : 8) : 0)} />
         </div>
+      )}
+      {/* G3 sprint-to-fire block: 200 ms weapon-not-ready after sprint, grey indicator */}
+      {!spectating && hud.sprintLock > 0.01 && !hud.sprinting && (
+        <div className="absolute left-1/2 top-[52%] -translate-x-1/2 mono text-[9px] tracking-[0.18em] text-white/35" style={{ textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>RECOVERING</div>
       )}
       <ScopeView hud={hud} active={active} {...scopeControls} />
 
@@ -270,12 +283,13 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
         <div key={fx.hitmark.id} className={`absolute left-1/2 top-1/2 ${fx.hitmark.kill ? 'hm-kill' : 'hm'}`}>
           {[45, -45, 135, -135].map(r => (
             <span key={r} style={{
-              position: 'absolute', width: 2, height: fx.hitmark!.kill ? 14 : 10, left: -1, top: fx.hitmark!.kill ? -7 : -5,
-              background: fx.hitmark!.kill ? '#C8321E' : '#fff',
-              boxShadow: fx.hitmark!.kill ? '0 0 10px #C8321E' : '0 0 4px rgba(255,255,255,.8)',
-              transform: `rotate(${r}deg) translateY(${fx.hitmark!.kill ? -13 : -11}px)`,
+              position: 'absolute', width: 2, height: fx.hitmark!.headshot ? 12 : fx.hitmark!.kill ? 14 : 10, left: -1, top: fx.hitmark!.headshot ? -6 : fx.hitmark!.kill ? -7 : -5,
+              background: fx.hitmark!.headshot ? '#FF3B30' : fx.hitmark!.kill ? '#C8321E' : '#fff',
+              boxShadow: fx.hitmark!.headshot ? '0 0 8px #FF3B30' : fx.hitmark!.kill ? '0 0 10px #C8321E' : '0 0 4px rgba(255,255,255,.8)',
+              transform: `rotate(${r}deg) translateY(${fx.hitmark!.headshot ? -10 : fx.hitmark!.kill ? -13 : -11}px)`,
             }} />
           ))}
+          {fx.hitmark.headshot && <span style={{ position: 'absolute', width: 8, height: 8, left: -4, top: -4, background: '#FF3B30', transform: 'rotate(45deg)', boxShadow: '0 0 6px #FF3B30', border: '1px solid #fff' }} />}
         </div>
       )}
 
@@ -524,3 +538,22 @@ export default function Hud({ hud, s, fx, active, ...scopeControls }: { hud: Hud
     </div>
   );
 }
+
+// Memoized: slow sub-tree (compass, minimap, pings) only reconciles when its inputs change.
+// Fast tick (hp/mag/spread/sprintLock) at 32 ms does not force a compass redraw.
+function hudPropsEqual(a: { hud: HudState; s: GameSettings; fx: HudFx; active?: boolean }, b: { hud: HudState; s: GameSettings; fx: HudFx; active?: boolean }): boolean {
+  // Shallow: hud object identity is new each tick (engine.hud() returns new), so compare field-wise.
+  // Fast fields: hp/mag/reloading/ads/spread/sprint/sprintLock — if only these changed, still need update but cheap.
+  // Slow fields gate deeper: bearing/pings/enemiesLeft/landmark — skip reconcile if same.
+  if (a.fx !== b.fx) return false;
+  if (a.s !== b.s) return false;
+  if (a.active !== b.active) return false;
+  const ah = a.hud, bh = b.hud;
+  // fast lane: if any combat-critical changed we must render
+  if (ah.hp !== bh.hp || ah.mag !== bh.mag || ah.reloading !== bh.reloading || ah.ads !== bh.ads || ah.spread !== bh.spread || ah.sprinting !== bh.sprinting || ah.sprintLock !== bh.sprintLock) return false;
+  // slow lane: if boring fields equal, we can bail even though hud object is new
+  if (ah.bearing !== bh.bearing || ah.enemiesLeft !== bh.enemiesLeft || ah.pings.length !== bh.pings.length || ah.landmark?.name !== bh.landmark?.name || ah.mapImage !== bh.mapImage) return false;
+  // check deep pings reference equality (new array each tick but content often same) — if lengths equal and bearing same we consider equal
+  return true;
+}
+export default memo(Hud, (a,b) => hudPropsEqual(a,b));

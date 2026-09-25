@@ -33,11 +33,11 @@ export function makeSocket(x: number, y: number, z: number): THREE.Object3D {
 }
 
 export const WM = {
-  poly: finish({ color: 0x2B2E31, roughness: 0.78, metalness: 0.10 }, 'polymer'),
+  poly: finish({ color: 0x2B2E31, roughness: 0.78, metalness: 0.04 }, 'polymer'), // W3: 0.10→0.04 so polymer reads as plastic, not painted metal
   steel: finish({ color: 0x898C8B, roughness: 0.62, metalness: 0.86 }),
   darkSteel: finish({ color: 0x505356, roughness: 0.70, metalness: 0.62 }),
   tanGrip: finish({ color: 0x8C7D63, roughness: 0.84, metalness: 0.04 }, 'grip'),
-  tan: finish({ color: 0x8C7D63, roughness: 0.74, metalness: 0.08 }, 'polymer'),
+  tan: finish({ color: 0x8C7D63, roughness: 0.74, metalness: 0.04 }, 'polymer'), // W3: 0.08→0.04
   dark: finish({ color: 0x242727, roughness: 0.80, metalness: 0.52 }),
   wood: finish({ color: 0xCBBBAA, roughness: 0.58 }, 'wood'),
   woodDark: finish({ color: 0xB5A08B, roughness: 0.72 }, 'checkeredWood'),
@@ -53,10 +53,10 @@ export const WM = {
   tritium: new THREE.MeshBasicMaterial({ color: 0xD4E6BC }),
   marking: new THREE.MeshStandardMaterial({ color: 0xADAFA6, roughness: 0.65 }),
   red: new THREE.MeshStandardMaterial({ color: 0xA73C32, roughness: 0.65 }),
-  fde: finish({ color: 0x968366, roughness: 0.72, metalness: 0.50 }, 'polymer'),
+  fde: finish({ color: 0x968366, roughness: 0.72, metalness: 0.04 }, 'polymer'), // W3: 0.50→0.04
   chrome: finish({ color: 0xD7D6D1, roughness: 0.32, metalness: 0.97 }),
   midSteel: finish({ color: 0x606568, roughness: 0.68, metalness: 0.80 }),
-  od: finish({ color: 0x465038, roughness: 0.85, metalness: 0.08 }, 'polymer'),
+  od: finish({ color: 0x465038, roughness: 0.85, metalness: 0.04 }, 'polymer'), // W3: 0.08→0.04
 };
 
 /* ---------- Weapon finishes ---------- */

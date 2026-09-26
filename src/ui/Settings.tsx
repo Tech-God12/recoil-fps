@@ -62,6 +62,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <Toggle label="Hold to aim" value={!s.adsToggle} onChange={v => set({ adsToggle: !v })} hint={s.adsToggle ? 'Click to toggle scope' : 'Hold right mouse to aim'} />
                   <Toggle label="Auto sprint" value={s.autoSprint} onChange={v => set({ autoSprint: v })} hint="Forward movement sprints whenever your weapon is ready" />
                   <Toggle label="Auto reload on empty" value={s.autoReload} onChange={v => set({ autoReload: v })} hint="Chambers a new magazine after the final round" />
+                  <Toggle label="Crouch toggle" value={s.crouchToggle} onChange={v => set({ crouchToggle: v })} hint={s.crouchToggle ? 'Tap C / Ctrl to crouch' : 'Hold C / Ctrl to crouch'} />
                   <div className="mt-6">
                     <SectionTitle sub="Enemy reaction and squad tactics">Difficulty</SectionTitle>
                     <Segmented label="Threat level" value={s.difficulty} options={[{ v: 'Easy', l: 'Recruit' }, { v: 'Normal', l: 'Regular' }, { v: 'Hard', l: 'Veteran' }]} onChange={v => set({ difficulty: v })} />
@@ -156,6 +157,8 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <SectionTitle sub="Readable in every firefight">Display comfort</SectionTitle>
                   <Slider label="HUD scale" value={s.hudScale} min={75} max={125} unit="%" onChange={v => set({ hudScale: v })} hint="Scales the combat HUD without changing render resolution" />
                   <Toggle label="Reduced motion" value={s.reducedMotion} onChange={v => set({ reducedMotion: v })} hint="Caps camera shake and removes nonessential UI motion" />
+                  <Toggle label="Compact tactical HUD" value={s.compactHud} onChange={v => set({ compactHud: v })} hint="Hide the lower radar; M still opens the full planning map" />
+                  <Toggle label="High contrast HUD" value={s.highContrastHud} onChange={v => set({ highContrastHud: v })} hint="More opaque HUD panels for bright environments" />
                 </div>
                 <div>
                   <SectionTitle sub="Semantic colors update across radar, teams and damage">Color vision</SectionTitle>

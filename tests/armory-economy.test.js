@@ -21,7 +21,7 @@ test('catalog ships eleven weapons and the full 59-part attachment catalog', () 
   assert.equal(ATTACHMENT_CATALOG.length, 59);
   assert.equal(new Set(ATTACHMENT_CATALOG.map(a => a.id)).size, ATTACHMENT_CATALOG.length);
   assert.deepEqual(WEAPON_CATALOG.map(w => w.id).sort(), [
-    'ak47', 'awm', 'deagle', 'm1911', 'm249', 'm4a1', 'm7_spear', 'mp7', 'scar_h', 'spas12', 'vector',
+    'ak47', 'awm', 'deagle', 'm1911', 'm249', 'm4a1', 'mcx_spear', 'mp7', 'scar_h', 'spas12', 'vector',
   ]);
 });
 
@@ -232,7 +232,7 @@ test('catalog uses full real-steel display names with stable ids and shorts', ()
     m4a1: ['M416', 'M416'], ak47: ['AK-47', 'AK-47'],
     m1911: ['1911', '1911'], awm: ['AWM', 'AWM'],
     mp7: ['MP', 'MP'], vector: ['Vector', 'Vector'],
-    spas12: ['SPAS', 'SPAS'], scar_h: ['SCAR', 'SCAR'], m7_spear: ['M7 SPEAR', 'M7'],
+    spas12: ['SPAS', 'SPAS'], scar_h: ['SCAR', 'SCAR'], mcx_spear: ['MCX-SPEAR', 'MCX'],
     deagle: ['Deagle', 'Deagle'], m249: ['M249', 'M249'],
   };
   assert.deepEqual(Object.keys(names).sort(), WEAPON_CATALOG.map(w => w.id).sort());

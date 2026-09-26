@@ -67,6 +67,11 @@ test('settings sanitizer clamps numeric ranges, validates choices and restores i
   assert.equal(settings.crosshairGap, 26);
   assert.equal(settings.crosshairThickness, 1);
   assert.equal(settings.showFps, true);
+  assert.equal(settings.autoReload, DEFAULT_SETTINGS.autoReload);
+  assert.equal(settings.crouchToggle, DEFAULT_SETTINGS.crouchToggle);
+  assert.equal(settings.reducedMotion, DEFAULT_SETTINGS.reducedMotion);
+  assert.equal(settings.compactHud, DEFAULT_SETTINGS.compactHud);
+  assert.equal(settings.highContrastHud, DEFAULT_SETTINGS.highContrastHud);
   assert.equal('unrecognizedSetting' in settings, false);
 });
 
@@ -126,4 +131,21 @@ test('opt-in legacy balance reset changes current cash only and preserves purcha
 test('saved settings and UI patches are both routed through the sanitizer', () => {
   assert.match(appSource, /sanitizeSettings\(localStorage\.getItem\(SETTINGS_KEY\)\)/);
   assert.match(appSource, /sanitizeSettings\(\{ \.\.\.previous, \.\.\.patch \}\)/);
+});
+
+
+test('quality-of-life accessibility preferences are persisted as strict booleans', () => {
+  const enabled = sanitizeSettings({
+    autoReload: false, autoSprint: true, crouchToggle: false,
+    reducedMotion: true, compactHud: true, highContrastHud: true,
+  });
+  assert.deepEqual(
+    [enabled.autoReload, enabled.autoSprint, enabled.crouchToggle, enabled.reducedMotion, enabled.compactHud, enabled.highContrastHud],
+    [false, true, false, true, true, true],
+  );
+  const invalid = sanitizeSettings({ autoReload: 'no', autoSprint: 1, crouchToggle: null, reducedMotion: 'yes', compactHud: [], highContrastHud: {} });
+  assert.deepEqual(
+    [invalid.autoReload, invalid.autoSprint, invalid.crouchToggle, invalid.reducedMotion, invalid.compactHud, invalid.highContrastHud],
+    [DEFAULT_SETTINGS.autoReload, DEFAULT_SETTINGS.autoSprint, DEFAULT_SETTINGS.crouchToggle, DEFAULT_SETTINGS.reducedMotion, DEFAULT_SETTINGS.compactHud, DEFAULT_SETTINGS.highContrastHud],
+  );
 });

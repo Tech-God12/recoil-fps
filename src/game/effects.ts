@@ -4,7 +4,10 @@ import * as THREE from 'three';
 const MAX_BURSTS = 28;
 const MAX_PARTICLES = 48;
 const MAX_TRACERS = 20;
-  /** Ejected brass: one InstancedMesh, ring-buffered. 12 covers a full auto burst. */
+/** Short-lived propellant smoke gets its own tiny pool. Keeping it separate from impact
+ * bursts prevents automatic fire from stealing hit feedback during a firefight. */
+const MAX_SMOKES = 8;
+/** Ejected brass: one InstancedMesh, ring-buffered. 12 covers a full auto burst. */
 const MAX_BRASS = 12;
 const brassGeo = new THREE.BoxGeometry(0.012, 0.012, 0.03);
 const brassMat = new THREE.MeshBasicMaterial({ color: 0xD8A83C });
@@ -31,6 +34,11 @@ const tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 1);
 export class Effects {
   private bursts: BurstSlot[] = [];
   private burstIdx = 0;
+  // Kept as a distinct pool: muzzle residue is a slow, buoyant cloud; impact and
+  // blood particles remain responsive even during sustained automatic fire.
+  private smokes: BurstSlot[] = [];
+  private smokeIdx = 0;
+  private lastSmokeMs = -Infinity;
   private brass!: THREE.InstancedMesh;
   private brassIdx = 0;
   private brassPos = new Float32Array(MAX_BRASS * 3);
@@ -88,6 +96,10 @@ export class Effects {
     scene.add(this.bloodMesh);
     // preallocated burst pool — buffers reused forever, never disposed
     for (let i = 0; i < MAX_BURSTS; i++) this.bursts.push(Effects.makeSlot(scene));
+    // Tiny transparent muzzle residue — eight pooled point clouds, no allocation
+    // per shot. It is intentionally capped at one start every 70 ms so full-auto
+    // fire reads as a continuous wisp rather than a particle machine.
+    for (let i = 0; i < MAX_SMOKES; i++) this.smokes.push(Effects.makeSlot(scene));
     // ejected brass — a single instanced draw, all instances parked at scale 0
     this.brass = new THREE.InstancedMesh(brassGeo, brassMat, MAX_BRASS);
     this.brass.frustumCulled = false;
@@ -161,12 +173,18 @@ export class Effects {
   }
 
   /**
-   * Tiny muzzle residue: one short-lived grey-amber particle using the existing
-   * burst pool. It reads as hot propellant without becoming a sight-obscuring
-   * smoke cloud or allocating a second particle system per shot.
+   * Muzzle residue is deliberately its own sparse pool rather than an impact burst:
+   * it hangs for a beat, rises with heat, and never evicts blood / dust feedback.
+   * `nowMs` is injectable so deterministic probes can verify the fire-rate throttle.
    */
-  gunSmoke(pos: THREE.Vector3) {
-    this.burst(pos, 1, 0xC8B88D, 0.16, 0.08, -0.05, 0.025, 0.2);
+  gunSmoke(pos: THREE.Vector3, nowMs = performance.now()) {
+    if (nowMs - this.lastSmokeMs < 70) return;
+    this.lastSmokeMs = nowMs;
+    this.smokeIdx = this.burstInto(this.smokes, this.smokeIdx, pos, 5, 0xB8AE98, 0.14, 1.08, -0.16, 0.075, 1.7);
+    const slot = this.smokes[(this.smokeIdx + this.smokes.length - 1) % this.smokes.length];
+    // Start almost transparent and let the wisp open up; keeping only five points
+    // avoids obscuring the player optic even at a 900 RPM cycle rate.
+    slot.mat.opacity = 0.32;
   }
 
   /** Eject a casing right-and-up with a fast tumble; it bounces once on the
@@ -364,6 +382,7 @@ export class Effects {
 
   update(dt: number, playerPos: THREE.Vector3) {
     this.updatePool(this.bursts, dt);
+    this.updatePool(this.smokes, dt);
     this.updateBrass(dt, playerPos.y + 0.012);
     for (let i = 0; i < this.tracers.length; i++) {
       const t = this.tracers[i];

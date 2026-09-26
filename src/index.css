@@ -2997,3 +2997,19 @@ span.arm2-thumb { display: inline-block; }
 .pause-readout span { color:var(--bone-mute); font:10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; }
 .pause-note { margin-top:22px !important; color:var(--bone-mute) !important; font:10px/1 var(--mono) !important; letter-spacing:.12em; text-transform:uppercase; }
 @media (max-width:700px) { .pause-wrap { grid-template-columns:1fr; max-height:92vh; overflow:auto; } .pause-card { padding:18px; } .pause-title { font-size:58px; } }
+
+/* Accessibility / comfort HUD path: more opaque panels and hard-edged lettering
+   retain a clean sightline in sunlit sand without touching world colour grading. */
+.hud-contrast .hud-chip,
+.hud-contrast .vitals,
+.hud-contrast .weapon-card,
+.hud-contrast .compass-bear,
+.hud-contrast .radar,
+.hud-contrast .hud-cash {
+  background-color: rgba(10, 10, 9, 0.88) !important;
+  border-color: rgba(255, 245, 221, 0.72) !important;
+  text-shadow: 0 1px 3px #000, 0 0 2px #000;
+}
+.hud-contrast .radar-meta,
+.hud-contrast .weapon-name,
+.hud-contrast .vitals-head { color: #fff4dc; }

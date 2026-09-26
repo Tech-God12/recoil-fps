@@ -58,14 +58,14 @@ export const BOT_WEAPONS: Record<WeaponId, BotWeapon> = {
   ak47: { id: 'ak47', name: 'AK-47', kind: 'rifle', damage: 36, armorRatio: 0.775, interval: 0.1, burst: [3, 6], pause: [0.3, 0.6], accNear: 0.8, accFar: 0.42, range: 60, headChance: 0.11 },
   m4a1: { id: 'm4a1', name: 'M416', kind: 'rifle', damage: 33, armorRatio: 0.7, interval: 0.09, burst: [3, 6], pause: [0.3, 0.55], accNear: 0.82, accFar: 0.46, range: 60, headChance: 0.1 },
   scar_h: { id: 'scar_h', name: 'SCAR', kind: 'rifle', damage: 40, armorRatio: 0.85, interval: 0.1, burst: [2, 5], pause: [0.35, 0.6], accNear: 0.8, accFar: 0.48, range: 62, headChance: 0.1 },
-  m7_spear: { id: 'm7_spear', name: 'M7 SPEAR', kind: 'rifle', damage: 42, armorRatio: 0.89, interval: 0.095, burst: [2, 5], pause: [0.34, 0.62], accNear: 0.80, accFar: 0.53, range: 68, headChance: 0.11 },
+  mcx_spear: { id: 'mcx_spear', name: 'MCX-SPEAR', kind: 'rifle', damage: 42, armorRatio: 0.89, interval: 0.095, burst: [2, 5], pause: [0.34, 0.62], accNear: 0.80, accFar: 0.53, range: 68, headChance: 0.11 },
   awm: { id: 'awm', name: 'AWM', kind: 'sniper', damage: 115, armorRatio: 0.975, interval: 1.45, burst: [1, 1], pause: [0.9, 1.6], accNear: 0.72, accFar: 0.8, range: 80, headChance: 0.18 },
   spas12: { id: 'spas12', name: 'SPAS', kind: 'shotgun', damage: 26, armorRatio: 0.5, interval: 0.85, burst: [1, 2], pause: [0.5, 0.9], accNear: 0.85, accFar: 0.1, range: 16, headChance: 0.06, pellets: 8, falloffStart: 8 },
   m249: { id: 'm249', name: 'M249', kind: 'lmg', damage: 32, armorRatio: 0.8, interval: 0.08, burst: [6, 12], pause: [0.3, 0.6], accNear: 0.72, accFar: 0.35, range: 55, headChance: 0.07 },
 };
 const WORLD_KIND: Record<WeaponId, WorldWeaponKind> = {
   m1911: 'pistol', deagle: 'pistol', mp7: 'smg', vector: 'smg', ak47: 'rifle', m4a1: 'rifle',
-  scar_h: 'rifle', m7_spear: 'rifle', awm: 'sniper', spas12: 'shotgun', m249: 'lmg',
+  scar_h: 'rifle', mcx_spear: 'rifle', awm: 'sniper', spas12: 'shotgun', m249: 'lmg',
 };
 
 export interface Combatant {

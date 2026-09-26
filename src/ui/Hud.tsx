@@ -167,7 +167,7 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
   const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / maxHp * hpSegs)));
 
   return (
-    <div className="hud-root pointer-events-none select-none">
+    <div className={`hud-root pointer-events-none select-none ${s.highContrastHud ? 'hud-contrast' : ''}`}>
       {/* HUD frame corners */}
       <span className="hud-corner tl" /><span className="hud-corner tr" />
       <span className="hud-corner bl" /><span className="hud-corner br" />
@@ -359,7 +359,7 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
       )}
 
       {/* ============ TACTICAL RADAR (bottom-left, 60m zoom) ============ */}
-      {hud.mapImage && (() => {
+      {!s.compactHud && hud.mapImage && (() => {
         // 60m radius fills the dish; scale the full-map image so 120m spans the 168px diameter.
         const zoom = (hud.worldHalf * 2) / 170;
         const ox = (0.5 - hud.playerMap.nx) * 100 * zoom;

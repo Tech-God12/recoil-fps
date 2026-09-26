@@ -34,7 +34,7 @@ export class WeaponAssembly {
     sightY: number; sockets: Partial<Record<AttachSlot, Point3>>;
     muzzleTip: Point3; arms: ArmAnchors; pistol?: boolean;
   }): WeaponModel {
-    const ids: Record<string, string> = { M416:'m4a1','AK-47':'ak47','M1911 A1':'m1911',AWM:'awm',MP7:'mp7','SCAR-H':'scar_h','KRISS Vector':'vector','SPAS-12':'spas12','Desert Eagle':'deagle','M249 SAW':'m249' };
+    const ids: Record<string, string> = { M416:'m4a1','AK-47':'ak47','M1911 A1':'m1911',AWM:'awm',MP7:'mp7','SCAR-H':'scar_h','MCX-SPEAR':'mcx_spear','KRISS Vector':'vector','SPAS-12':'spas12','Desert Eagle':'deagle','M249 SAW':'m249' };
     this.group.userData.weaponId = ids[this.group.name];
     this.body.build(this.group);
     for (const { b, group } of this.parts) b.build(group);

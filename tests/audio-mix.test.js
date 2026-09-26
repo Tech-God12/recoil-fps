@@ -63,3 +63,24 @@ test('footsteps use their own layered mix bus and can be tuned without waking a 
   assert.ok(calls.some(c => c.type === 'lowpass'), 'heel body has low-frequency weight');
   assert.ok(calls.some(c => c.when === 0.018), 'sole tick lands after the heel');
 });
+
+
+test('MCX-SPEAR layers a pressure crack, body and distinct piston mechanics', () => {
+  const bursts = [];
+  const thumps = [];
+  const realBurst = audio.burstDirect.bind(audio);
+  const realThump = audio.subThump.bind(audio);
+  audio.burstDirect = opts => { bursts.push(opts); };
+  audio.subThump = (...args) => { thumps.push(args); };
+  try {
+    audio.fireSpear();
+  } finally {
+    audio.burstDirect = realBurst;
+    audio.subThump = realThump;
+  }
+  assert.equal(bursts.length, 5, 'SPEAR has crack, body, low frequency and two mechanical layers');
+  assert.equal(bursts[0].hp, 480, '6.8 pressure crack has its own high-pass profile');
+  assert.equal(bursts[1].toEcho, 0.52, 'the pressure body sends a controlled tail to the world bus');
+  assert.deepEqual(thumps[0], [118, 34, 0.68, 0.14, 'triangle']);
+  assert.deepEqual(bursts.slice(-2).map(b => b.when), [0.052, 0.086], 'piston clack and receiver tick arrive after the shot');
+});

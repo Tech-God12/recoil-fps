@@ -320,7 +320,7 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.045, gain: 0.2, freq: this.rf(4200), q: 2.0, when: 0.05 });
   }
 
-  /** M7 SPEAR: deep 6.8mm pulse with a piston clack after the pressure wave. */
+  /** MCX-SPEAR: deep 6.8mm pulse with a piston clack after the pressure wave. */
   fireSpear() {
     this.burstDirect({ dur: 0.042, gain: 1.0, freq: this.rf(2350), q: 0.7, hp: 480 });
     this.burstDirect({ dur: 0.19, gain: 0.92, freq: this.rf(610), q: 0.75, toEcho: 0.52 });

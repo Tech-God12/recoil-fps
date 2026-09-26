@@ -59,6 +59,8 @@ export interface GameSettings {
   autoSprint: boolean;
   /** Starts a reload after the final round instead of requiring a dry trigger pull. */
   autoReload: boolean;
+  /** Tap C/Ctrl to crouch; false provides a hold-only crouch action. */
+  crouchToggle: boolean;
   fov: number;              // 70 - 120
   difficulty: string;
   map: MapId;
@@ -89,6 +91,10 @@ export interface GameSettings {
   hudScale: number;         // 75 - 125 (%)
   colorVision: 'default' | 'protanopia' | 'deuteranopia' | 'tritanopia';
   reducedMotion: boolean;
+  /** Hides the lower tactical radar for a less busy sightline. */
+  compactHud: boolean;
+  /** Increases HUD panel separation in high-brightness scenes. */
+  highContrastHud: boolean;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -98,6 +104,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   adsToggle: false,
   autoSprint: false,
   autoReload: true,
+  crouchToggle: true,
   fov: 95,
   difficulty: 'Normal',
   map: 'alrasul',
@@ -124,6 +131,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   hudScale: 100,
   colorVision: 'default',
   reducedMotion: false,
+  compactHud: false,
+  highContrastHud: false,
 };
 
 /** True when the settings need the off-screen EffectComposer chain. Everything
@@ -164,6 +173,7 @@ export function sanitizeSettings(input: unknown): GameSettings {
     adsToggle: boolean('adsToggle', DEFAULT_SETTINGS.adsToggle),
     autoSprint: boolean('autoSprint', DEFAULT_SETTINGS.autoSprint),
     autoReload: boolean('autoReload', DEFAULT_SETTINGS.autoReload),
+    crouchToggle: boolean('crouchToggle', DEFAULT_SETTINGS.crouchToggle),
     fov: number('fov', DEFAULT_SETTINGS.fov, 70, 120),
     difficulty: choice('difficulty', ['Easy', 'Normal', 'Hard'], DEFAULT_SETTINGS.difficulty),
     map: choice('map', ['alrasul', 'kasbah', 'arena', 'sirocco'], DEFAULT_SETTINGS.map),
@@ -190,6 +200,8 @@ export function sanitizeSettings(input: unknown): GameSettings {
     hudScale: number('hudScale', DEFAULT_SETTINGS.hudScale, 75, 125),
     colorVision: choice('colorVision', ['default', 'protanopia', 'deuteranopia', 'tritanopia'], DEFAULT_SETTINGS.colorVision),
     reducedMotion: boolean('reducedMotion', DEFAULT_SETTINGS.reducedMotion),
+    compactHud: boolean('compactHud', DEFAULT_SETTINGS.compactHud),
+    highContrastHud: boolean('highContrastHud', DEFAULT_SETTINGS.highContrastHud),
   };
 }
 
@@ -409,7 +421,7 @@ const ADAPT_UP_WINDOWS = 3;
 const ADAPT_STALL_SECONDS = 0.25;
 // Maps armory weapon ids to the engine's legacy audio tags for loadout-built guns.
 const LOADOUT_AUDIO: Record<WeaponId, NonNullable<WeaponDef['audioTag']>> = {
-  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', m7_spear: 'spear', m249: 'lmg', vector: 'vector', mp7: 'smg',
+  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', mcx_spear: 'spear', m249: 'lmg', vector: 'vector', mp7: 'smg',
   spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle',
 };
 
@@ -651,6 +663,8 @@ export class Engine {
   private tacticalMapOpen = false;
   private autoSprint = false;
   private autoReload = true;
+  private crouchToggle = true;
+  private reducedMotion = false;
   private boltCycle = 0;
   private adaptiveEnabled = true;
   private appliedPR = -1;
@@ -1236,12 +1250,10 @@ void main(){
       // Trigger slide: sprint + crouch input simultaneously
       if (this.sprinting && this.grounded && !this.sliding && this.slideCD <= 0) {
         this.startSlide();
-      } else {
-        if (!this.sliding) {
-          this.crouched = !this.crouched;
-          this.crouchT = 0;
-          if (this.crouched) this.sprinting = false;
-        }
+      } else if (!this.sliding) {
+        this.crouched = this.crouchToggle ? !this.crouched : true;
+        this.crouchT = 0;
+        if (this.crouched) this.sprinting = false;
       }
     }
 
@@ -1261,6 +1273,7 @@ void main(){
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
+    if (!this.crouchToggle && (e.code === 'KeyC' || e.code === 'ControlLeft') && !this.sliding) this.crouched = false;
     // Q is dual-purpose: tap = quick-swap to last weapon, hold = lean left.
     if (e.code === 'KeyQ' && this.qDownT >= 0 && !this.paused && !this.dead && !this.ended) {
       if (performance.now() - this.qDownT < 220 && Math.abs(this.lean) < 0.15) this.switchWeapon(this.lastCur);
@@ -3677,13 +3690,15 @@ void main(){
     let ry = THREE.MathUtils.lerp(hip.ry, 0, a);
     let rz = cantRoll*a;
 
-    // Idle sway
-    const swayM = (1 - a * 0.95) * (d.swayMul ?? 1) * (this.crouched ? (d.swayMulCrouched ?? 1) : 1);
+    // Idle sway. The reduced-motion setting preserves aim/recoil response but
+    // dials down only decorative viewmodel movement.
+    const comfortMotion = this.reducedMotion ? 0.18 : 1;
+    const swayM = (1 - a * 0.95) * (d.swayMul ?? 1) * (this.crouched ? (d.swayMulCrouched ?? 1) : 1) * comfortMotion;
     px += Math.sin(t * Math.PI) * 0.004 * S * swayM;
     py += Math.sin(t * Math.PI * 2 + 1) * 0.0035 * S * swayM;
 
     // Walk bob
-    const bobM = this.grounded ? this.walkBlend : 0;
+    const bobM = (this.grounded ? this.walkBlend : 0) * comfortMotion;
     px += Math.sin(this.footPhase) * 0.01 * S * bobM * swayM;
     py -= Math.abs(Math.cos(this.footPhase)) * 0.007 * S * bobM * swayM;
     rz += Math.sin(this.footPhase) * 0.012 * S * bobM * swayM;
@@ -3965,6 +3980,8 @@ void main(){
     this.adsToggle = s.adsToggle;
     this.autoSprint = s.autoSprint;
     this.autoReload = s.autoReload;
+    this.crouchToggle = s.crouchToggle;
+    this.reducedMotion = s.reducedMotion;
     this.fovSetting = s.fov;
     voice.setEnabled(s.voices);
     audio.setMasterVolume(s.masterVolume / 100);

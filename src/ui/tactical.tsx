@@ -55,9 +55,9 @@ const SLOT_PATHS: Record<AttachSlot, ReactNode> = {
   muzzle: (<><rect x="8" y="9" width="11" height="6" rx="1" /><path d="M2 12h6M19 12h3M11.5 9v6M15 9v6" /></>),
   optic: (<><circle cx="12" cy="12" r="6" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M12 10.5v3M10.5 12h3" /></>),
   magazine: (<><path d="M9 3h6v7l-1.5 9h-3L9 10z" /><path d="M9.5 7h5" /></>),
-  underbarrel: (<><rect x="10" y="9" width="4" height="11" rx="2" /><path d="M7 3h10v4H7z" /></>),
+  underbarrel: (<><rect x="10" y="9" width="4" height="11" rx="2" /><path d="MCX 3h10v4H7z" /></>),
   stock: (<><path d="M3 8h9v9H8l-5-5z" /><path d="M12 8v9" /></>),
-  rail: (<><rect x="3" y="10" width="18" height="4" rx="1" /><path d="M7 10v4M11 10v4M15 10v4M19 10v4" /></>),
+  rail: (<><rect x="3" y="10" width="18" height="4" rx="1" /><path d="MCX 10v4M11 10v4M15 10v4M19 10v4" /></>),
   barrel: (<><path d="M2 12h13" /><rect x="15" y="10" width="6" height="4" rx="1" /><path d="M5.5 8.5V12" /></>),
 };
 
@@ -103,7 +103,7 @@ export const CALIBER: Record<WeaponId, { round: string; note: string }> = {
   vector: { round: '.45 ACP', note: 'Pistol-caliber thumper in a fire hose of a gun. Manage the climb.' },
   spas12: { round: '12 GAUGE', note: 'Eight pellets per trigger pull. Devastating inside a doorway.' },
   scar_h: { round: '7.62×51MM', note: 'Full-power battle rifle round. Two taps solve most problems.' },
-  m7_spear: { round: '6.8×51MM', note: 'High-pressure intermediate battle round. Deliberate twenty-round magazines reward lane discipline.' },
+  mcx_spear: { round: '6.8×51MM', note: 'High-pressure intermediate battle round. Deliberate twenty-round magazines reward lane discipline.' },
   deagle: { round: '.50 AE', note: 'Hand-cannon magnum. Loud, proud, and wrist-breaking.' },
   m249: { round: '5.56×45 BELT', note: 'Linked suppression. One hundred rounds before the long reload.' },
 };
@@ -168,7 +168,7 @@ const BAR_ICONS: Record<string, ReactNode> = {
   dmg: (<><circle cx="12" cy="12" r="7" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></>),
   rate: (<><path d="M13 2L4 14h6l-1 8 9-12h-6z" /></>),
   acc: (<><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" /><circle cx="12" cy="12" r="0.8" /></>),
-  range: (<><path d="M3 17l14-10M17 7v4h-4M7 13v4h4" /></>),
+  range: (<><path d="M3 17l14-10M17 7v4h-4MCX 13v4h4" /></>),
   mob: (<><path d="M4 18l6-9 4 4 6-9" /><path d="M4 20h16" /></>),
 };
 

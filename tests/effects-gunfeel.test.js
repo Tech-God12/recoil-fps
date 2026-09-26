@@ -1,5 +1,5 @@
-// Muzzle residue + ejected brass: the two new per-shot effects. Verified against
-// the real pools headless — budget, short rise, bounce, and expiry.
+// Muzzle smoke + ejected brass: the two new per-shot effects. Verified against
+// the real pools headless — throttle behavior, buoyancy, bounce, and expiry.
 import './helpers/register-json.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,30 +14,28 @@ function rig() {
   return { scene, fx, any, playerPos };
 }
 
-test('muzzle residue reuses the burst pool and stays too brief to obscure a firefight', () => {
+test('gun smoke puffs, throttles, and never touches the blood pool', () => {
   const { fx, any } = rig();
   const at = new THREE.Vector3(0, 1.5, -1);
-  fx.gunSmoke(at);
-  const residue = any.bursts.filter(s => s.active);
-  assert.equal(residue.length, 1, 'first shot emits one small residue burst');
-  assert.equal(residue[0].count, 1, 'a propellant trace is not a sight-obscuring cloud');
-  assert.equal(residue[0].maxLife, 0.08, 'residue clears in 80 ms');
-  assert.equal(residue[0].mat.size, 0.025, 'residue stays visually fine-grained');
-  fx.gunSmoke(at);
-  fx.gunSmoke(at);
-  assert.equal(any.bursts.filter(s => s.active).length, 3, 'rapid fire uses the preallocated ring rather than a new particle system');
+  fx.gunSmoke(at, 1000);
+  assert.equal(any.smokes.filter((s) => s.active).length, 1, 'first shot must puff');
+  assert.ok(any.bursts.every((s) => !s.active), 'blood/impact pool must stay untouched');
+  fx.gunSmoke(at, 1069);
+  assert.equal(any.smokes.filter((s) => s.active).length, 1, 'a shot 69 ms later is throttled');
+  fx.gunSmoke(at, 2000);
+  assert.equal(any.smokes.filter((s) => s.active).length, 2, 'a shot 1 s later must puff again');
 });
 
-test('muzzle residue lifts briefly and clears inside 80 ms', () => {
+test('smoke hangs, rises, and clears inside ~1.1 s', () => {
   const { fx, any, playerPos } = rig();
   fx.gunSmoke(new THREE.Vector3(0, 1.5, 0));
-  const slot = any.bursts.find(s => s.active);
+  const slot = any.smokes.find((s) => s.active);
   const y0 = slot.pos[1];
-  fx.update(0.02, playerPos);
-  assert.ok(slot.pos[1] >= y0, `residue should not fall before it dissipates (moved ${(slot.pos[1] - y0).toFixed(3)})`);
-  assert.ok(slot.active, 'residue must still be visible during its 80 ms lifetime');
-  fx.update(0.07, playerPos);
-  assert.equal(slot.active, false, 'residue must clear after its 80 ms life');
+  fx.update(0.5, playerPos);
+  assert.ok(slot.pos[1] > y0, `smoke must be buoyant (rose ${(slot.pos[1] - y0).toFixed(3)})`);
+  assert.ok(slot.active, 'smoke must still hang at 0.5 s');
+  fx.update(0.7, playerPos);
+  assert.equal(slot.active, false, 'smoke must clear after its 1.1 s life');
   assert.equal(slot.points.visible, false);
 });
 

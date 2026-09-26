@@ -1,8 +1,8 @@
 # Weapon assemblies
 
-All ten viewmodels use the same procedural assemblies in gameplay and the Armory.
+All eleven viewmodels use the same procedural assemblies in gameplay and the Armory.
 The public builders and `WeaponModel` interface remain available from
-`src/game/models.ts`; weapon stats, attachment compatibility and prices are unchanged.
+`src/game/models.ts`; existing platform stats, attachment compatibility and prices remain data-driven.
 The geometry remains native Three.js; no third-party model pack is used.
 `three-bvh-csg` supplies cached geometric machining (blind pockets and through cuts). Four optimized, generated material tiles are
 checked in under `src/assets/weapons/` and embedded in the single-file build.
@@ -17,6 +17,7 @@ checked in under `src/assets/weapons/` and embedded in the single-file build.
 | AWM | Oval thumbhole, countersunk chassis wells, rounded cheekpiece, folded forward bipod, tapered hollow barrel and ring-mounted scope |
 | MP7 | Layered moulded shell with recessed louvres/bolt opening, folding foregrip, grip-fed magazine and guided telescopic stock |
 | SCAR | Broad monolithic upper with machined longitudinal raceways and oval vents, distinct bolt/mag catches, straight tan box magazine, stepped folding boot stock and tan contoured grip |
+| MCX-SPEAR | Coyote monolithic upper, free-float M-LOK forend with recessed slots, non-reciprocating side charger, short-stroke piston hardware, 20-round AR-10 steel magazine and a hinged telescoping skeleton stock |
 | Vector | Compound Super-V housing, inset service plates, machined shoulders, low bore and contoured backstrap |
 | SPAS | Hollow slotted rolled heat shield, rounded ribbed pump and wrap-ribbed pistol grip, clean blued receiver without the red shell saddle, perforated folding stock |
 | Deagle | Chamfered fixed barrel and reciprocating slide, frame scallops, broad textured grip, safety serrations and open crown |
@@ -76,6 +77,7 @@ shadow/postprocessing passes):
 | awm | 31 | 40,792 |
 | mp7 | 33 | 30,847 |
 | scar_h | 32 | 37,005 |
+| mcx_spear | ≤44 | ≤48,000 |
 | vector | 36 | 29,231 |
 | spas12 | 28 | 36,742 |
 | deagle | 30 | 13,906 |
@@ -87,11 +89,22 @@ The soldier's smaller world rifle still uses a lower-cost connected silhouette.
 ### Viewer / texture readiness
 
 The Armory awaits `weaponTexturesReady` and yields between thumbnails rather than
-permanently caching untextured first renders or blocking the UI with ten builds.
+permanently caching untextured first renders or blocking the UI with eleven builds.
 The main viewer uses self-shadows; its 2048² shadow map refreshes for a refit or swap
 transition, not for every camera-only orbit frame. The large plinth is hidden so the
 reference-style backdrop and complete weapon silhouette stay unobstructed. Live clones, attachment pulses,
 visible bounds and picking retain their existing ownership / mounting contracts.
+
+### MCX-SPEAR research and implementation
+
+The MCX-SPEAR visual design was researched against public product specifications: the
+[16-inch 6.8×51 configuration](https://www.sigsauer.com/mcx-spear.html) and a detailed
+[platform specification](https://www.provenoutfitters.com/sig-sauer/mcx-spear-6-8x51-16-rifle-coy-3128)
+identify the AR-10 20-round magazine, free-floating M-LOK handguard, adjustable
+short-stroke piston, ambidextrous controls, non-reciprocating side charger and folding
+telescoping stock. The game model builds each of those as joined geometry, rather than
+adding a flat texture or importing a third-party mesh. It has a dedicated 6.8×51 report
+and is available in both the Armory and Sirocco buy menu.
 
 ## Mounting and animation invariants
 
@@ -121,7 +134,7 @@ node scripts/validate.mjs
 npm run build
 ```
 
-The assembly suite checks every factory gun and all **185 supported single-part
+The assembly suite checks every factory gun and all **144 supported single-part
 pairings**, plus 40 sampled fully equipped builds and restoration in reverse order.
 Named source-solid ranges survive batching, so the contact audit checks actual
 triangles with a BVH, not just scene parenting or overlapping bounding boxes.

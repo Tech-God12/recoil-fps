@@ -230,96 +230,136 @@ export function buildSCARH(): WeaponModel {
   });
 }
 
+/**
+ * MCX-SPEAR: a modern coyote 6.8 battle rifle built around the details that make
+ * the platform readable at first-person distance — one-piece upper, AR-10 steel
+ * magazine, short-stroke piston hardware, side charger, folding/telescoping stock
+ * and a free-floating M-LOK handguard.  The all-important silhouette stays distinct
+ * from the SCAR: narrower receiver, longer ventilated forend, and a skeleton stock.
+ */
+export function buildMCXSpear(): WeaponModel {
+  const a = new WeaponAssembly('MCX-SPEAR'), b = a.body;
+  const stock = a.part('stock', 'folding telescopic coyote stock');
+  const barrel = a.part('barrel', '16 inch piston barrel assembly');
+  const mag = a.part('magazine', '20 round steel AR-10 magazine');
+  const charging = a.moving('non reciprocating side charger');
 
-/** M7 SPEAR: a modern 6.8mm short-stroke piston rifle. The receiver, handguard,
- * folding stock and controls are deliberately independent shapes so it reads as a
- * new silhouette rather than a recoloured M4 or SCAR. */
-export function buildM7Spear(): WeaponModel {
-  const a = new WeaponAssembly('M7 SPEAR'), b = a.body;
-  const stock = a.part('stock', 'side-folding SPEAR stock');
-  const barrel = a.part('barrel', '6.8 piston barrel assembly');
-  const mag = a.part('magazine', '20-round 6.8 magazine');
-  const charging = a.moving('non-reciprocating charging handle');
-
-  // A distinct tall, swept monolithic upper with a recessed side channel and true
-  // ejection-port pocket. This keeps the silhouette lighter than SCAR's slab upper.
-  b.name('SPEAR swept monolithic upper').profile([
-    [-.016,-.010],[-.364,-.010],[-.383,.001],[-.379,.026],[-.360,.042],[-.046,.046],[-.020,.033],[-.013,.012],
-  ], .049, WM.fde, 0, .0024).mill([
-    { x:.025, y:.020, z:-.154, w:.008, h:.018, d:.070, radius:.003 },
-    ...[-1,1].flatMap(side => [
-      { x:side*.025, y:.030, z:-.238, w:.006, h:.007, d:.175, radius:.003 },
-      ...Array.from({ length: 5 }, (_, i) => ({ x:side*.025, y:.040, z:-.302 + i*.026, w:.010, h:.005, d:.017, radius:.0026 })),
-    ]),
-  ]);
-  b.name('SPEAR separate lower').profile([
-    [-.208,-.010],[-.035,-.010],[-.021,-.019],[-.029,-.033],[-.073,-.036],[-.085,-.050],[-.195,-.049],[-.210,-.031],
-  ], .039, WM.tan, 0, .0025);
-  b.name('SPEAR flared magazine tunnel').profile([[-.206,-.012],[-.126,-.012],[-.122,-.045],[-.135,-.056],[-.205,-.051]], .043, WM.tan, 0, .0018)
-    .mill([{ x:0, y:-.052, z:-.165, w:.032, h:.031, d:.064, radius:.0015 }]);
-  b.name('piston barrel within handguard').cyl(.010,.010,.212,WM.darkSteel,0,.015,-.310,HALF_PI);
-  rail(b, -.024, -.374, .046, .033, WM.darkSteel);
-  // A single belly web physically joins the barrel channel and the bottom rail;
-  // its overlap also gives every fitted vertical grip a real structural seat.
-  b.name('SPEAR handguard belly web').box(.031,.040,.205,WM.darkSteel,0,-.005,-.302);
-  b.name('continuous lower rail spine').box(.029,.006,.168,WM.darkSteel,0,-.020,-.305);
-  for (let i=0;i<14;i++) b.name('lower rail lug').box(.034,.005,.006,WM.darkSteel,0,-.024,-.224-i*.0115);
-  sideRail(b,-.027,-.001,-.319,.126); sideRail(b,.027,-.001,-.319,.126);
-  for (const side of [-1,1]) {
-    // The ambidextrous controls are shallow on both faces, not floating decorative discs.
-    b.name('SPEAR ambi selector drum').cyl(.0046,.0046,.0034,WM.midSteel,side*.021,-.020,-.061,0,0,HALF_PI,16);
-    b.name('SPEAR selector wing').profile([[-.071,-.015],[-.056,-.015],[-.050,-.022],[-.058,-.025],[-.074,-.020]],.003,WM.darkSteel,side*.023,.0004);
-    b.name('SPEAR magazine release fence').profile([[-.121,-.004],[-.098,-.004],[-.097,-.016],[-.114,-.023],[-.122,-.017]],.0035,WM.fde,side*.024,.0005);
-    b.name('SPEAR magazine release').box(.004,.007,.015,WM.midSteel,side*.025,-.013,-.106);
-    b.name('SPEAR bolt catch').profile([[-.118,-.008],[-.108,-.008],[-.108,-.034],[-.114,-.040],[-.122,-.034]],.004,WM.darkSteel,side*.022,.0005);
-    b.name('SPEAR takedown boss').cyl(.0047,.0047,.003,WM.midSteel,side*.023,.000,-.028,0,0,HALF_PI,16);
-    screw(b,side*.025,.000,-.028,.003); screw(b,side*.025,-.003,-.202,.003);
-    stamp(b, 4, side*.025, .014, -.089, .088, .007);
+  // Receiver: a low, continuous coyote upper surrounded by a separate forged lower.
+  b.name('MCX monolithic upper receiver').profile([
+    [-0.384, -0.010], [-0.030, -0.010], [-0.014, 0.003], [-0.016, 0.039],
+    [-0.031, 0.050], [-0.358, 0.050], [-0.382, 0.039],
+  ], 0.050, WM.fde, 0, 0.0024)
+    .mill([
+      { x: 0.025, y: 0.021, z: -0.150, w: 0.013, h: 0.019, d: 0.076, radius: 0.0025 },
+      { x: -0.025, y: 0.012, z: -0.274, w: 0.012, h: 0.018, d: 0.042, radius: 0.0022 },
+    ]);
+  b.name('MCX forged lower receiver').profile([
+    [-0.225, -0.007], [-0.034, -0.007], [-0.022, -0.016], [-0.030, -0.031],
+    [-0.058, -0.035], [-0.076, -0.048], [-0.197, -0.047], [-0.221, -0.033],
+  ], 0.044, WM.fde, 0, 0.0021);
+  b.name('MCX flared AR10 magazine well').profile([
+    [-0.222, -0.014], [-0.120, -0.014], [-0.121, -0.049], [-0.133, -0.064],
+    [-0.209, -0.059], [-0.228, -0.042],
+  ], 0.049, WM.fde, 0, 0.0020)
+    .mill([{ x: 0, y: -0.055, z: -0.173, w: 0.035, h: 0.032, d: 0.069, radius: 0.0017 }]);
+  b.name('MCX ejection port interior').box(0.002, 0.016, 0.070, WM.dark, 0.026, 0.026, -0.151);
+  b.name('MCX steel bolt through port').box(0.0024, 0.010, 0.047, WM.steel, 0.0255, 0.025, -0.151);
+  b.name('MCX shell deflector').loft([
+    [-0.115, 0.036, 0.021, 0.004], [-0.100, 0.041, 0.019, 0.019], [-0.087, 0.034, 0.019, 0.005],
+  ], WM.fde, 0.42, 0.027);
+  b.name('MCX forward assist delete plate').profile([
+    [-0.066, 0.011], [-0.042, 0.011], [-0.037, 0.025], [-0.061, 0.029],
+  ], 0.004, WM.darkSteel, 0.026, 0.0007);
+  for (const side of [-1, 1]) {
+    b.name('MCX ambidextrous selector drum').cyl(0.005, 0.005, 0.0035, WM.midSteel, side * 0.024, -0.014, -0.071, 0, 0, HALF_PI);
+    b.name('MCX ambidextrous selector lever').profile([
+      [-0.076, -0.010], [-0.066, -0.010], [-0.052, -0.018], [-0.051, -0.023], [-0.058, -0.021], [-0.076, -0.014],
+    ], 0.0035, WM.darkSteel, side * 0.026, 0.00045);
+    b.name('MCX magazine release paddle').profile([
+      [-0.129, -0.012], [-0.107, -0.012], [-0.106, -0.025], [-0.119, -0.030], [-0.132, -0.024],
+    ], 0.0032, WM.midSteel, side * 0.026, 0.00055);
+    b.name('MCX bolt catch').profile([
+      [-0.113, 0.004], [-0.099, 0.004], [-0.099, -0.030], [-0.107, -0.037], [-0.115, -0.029],
+    ], 0.0034, WM.darkSteel, side * 0.0245, 0.0006);
+    b.name('MCX takedown pin').cyl(0.005, 0.005, 0.003, WM.midSteel, side * 0.025, 0.004, -0.033, 0, 0, HALF_PI);
+    screw(b, side * 0.026, 0.002, -0.199, 0.003);
+    screw(b, side * 0.026, 0.002, -0.032, 0.0028);
+    stamp(b, side === 1 ? 16 : 15, side * 0.0263, 0.010, -0.169, 0.075, 0.008);
   }
-  b.name('SPEAR ejection door').profile([[-.186,.008],[-.112,.008],[-.112,-.003],[-.186,-.003]],.0022,WM.midSteel,.025,.0004);
-  b.name('SPEAR brass deflector').loft([[-.104,.027,.011,.006],[-.091,.026,.014,.017],[-.078,.021,.011,.005]],WM.fde,.42,.026);
-  b.name('SPEAR textured forward assist').cyl(.006,.005,.017,WM.darkSteel,.030,.022,-.045,0,0,HALF_PI,16);
-  triggerGuard(b,-.072,-.137,-.028,-.066,WM.tan,true);
-  pistolGrip(b,-.050,-.025,.091,.034,WM.tanGrip,.026);
+  triggerGuard(b, -0.066, -0.128, -0.030, -0.071, WM.darkSteel, true);
+  pistolGrip(b, -0.053, -0.028, 0.089, 0.036, WM.tanGrip, 0.018);
 
-  // Non-reciprocating left-side charger lives in the moving group; during reload
-  // the engine drives this group rather than allowing the hand to intersect metal.
-  charging.b.name('SPEAR charge track').box(.002,.007,.058,WM.dark, -.024,.027,-.116);
-  charging.b.name('SPEAR folding charge handle').box(.013,.013,.030,WM.darkSteel,-.032,.027,-.086);
-  charging.b.name('SPEAR charge handle texture').box(.016,.003,.021,WM.grip,-.046,.027,-.086);
-
-  // Receiver bridge overlaps the upper, hinge and both skeleton struts. It is a
-  // real reinforcement plate rather than a hidden contact-test shim.
-  b.name('SPEAR rear stock reinforcement').box(.047,.050,.034,WM.darkSteel,0,.010,-.001);
-  const st=stock.b;
-  st.name('SPEAR rear hinge block').box(.045,.048,.023,WM.darkSteel,0,.010,-.004);
-  st.name('SPEAR folding hinge pin').cyl(.005,.005,.054,WM.steel,-.014,.010,-.004,0,0,0,16);
-  // Open triangular struts prevent the solid-boot silhouette shared by the SCAR.
-  for (const side of [-1,1]) {
-    st.name('SPEAR upper skeleton strut').profile([[.012,.030],[.188,.030],[.204,.019],[.075,.009]],.006,WM.poly,side*.018,.0007);
-    st.name('SPEAR lower skeleton strut').profile([[.022,-.010],[.075,-.027],[.202,-.056],[.211,-.044],[.081,-.012]],.006,WM.poly,side*.018,.0007);
-    // Slim web carries the side fastener through the hollow stock, keeping the
-    // skeleton profile open while making its hardware structurally seated.
-    st.name('SPEAR stock side web').box(.006,.050,.200,WM.poly,side*.018,-.010,.110);
-    st.name('SPEAR stock latch').box(.004,.010,.019,WM.midSteel,side*.021,.003,.021);
-    screw(st,side*.020,-.020,.183,.003);
+  // Continuous optic rail lets users mount a scope without a floating adapter.
+  rail(b, -0.027, -0.356, 0.051, 0.036, WM.darkSteel);
+  b.name('MCX barrel extension').tube(0.019, 0.010, 0.034, WM.darkSteel, 0, 0.012, -0.363);
+  // The M-LOK forend has a hollow bore and recessed oblong mounting windows.
+  const mlok: [number, number][] = [
+    [-0.024, -0.019], [0.024, -0.019], [0.031, -0.010], [0.031, 0.020],
+    [0.023, 0.032], [-0.023, 0.032], [-0.031, 0.020], [-0.031, -0.010],
+  ];
+  b.name('MCX free float MLOK handguard').section(mlok, 0.238, WM.fde, 0, 0.006, -0.477, { y: 0.005, radius: 0.015 })
+    .mill(Array.from({ length: 7 }, (_, i) => ({ x: 0, y: 0.026, z: -0.380 - i * 0.027, w: 0.070, h: 0.008, d: 0.012, radius: 0.004 })));
+  // Recessed M-LOK slot shadows on both flanks give the forend physical rhythm.
+  for (const side of [-1, 1]) for (let i = 0; i < 6; i++) {
+    const z = -0.403 - i * 0.031;
+    b.name('MLOK side slot recess').box(0.0015, 0.006, 0.014, WM.dark, side * 0.031, 0.005, z);
+    b.name('MLOK slot bridge').box(0.0025, 0.003, 0.003, WM.midSteel, side * 0.031, 0.005, z);
   }
-  st.name('SPEAR adjustable cheek riser').loft([[.062,.030,.018,.026],[.085,.041,.021,.035],[.174,.041,.019,.036],[.193,.029,.012,.029]],WM.fde,.48);
-  st.name('SPEAR rubber butt pad').profile([[.203,.022],[.222,.017],[.224,-.062],[.208,-.067]],.041,WM.rubber,0,.0015);
-  for(let i=0;i<8;i++) st.name('SPEAR buttpad traction').box(.033,.0025,.002,WM.grip,0,.014-i*.009,.222);
+  b.name('MCX handguard lower spine').box(0.028, 0.010, 0.217, WM.darkSteel, 0, -0.016, -0.480);
+  sideRail(b, -0.032, 0.004, -0.484, 0.090);
+  sideRail(b, 0.032, 0.004, -0.484, 0.090);
 
-  const r=barrel.b;
-  r.name('SPEAR open tapered barrel').tube(.010,.004,.205,WM.darkSteel,0,.015,-.486);
-  r.name('SPEAR gas block').tube(.016,.009,.026,WM.darkSteel,0,.015,-.407);
-  r.name('SPEAR short-stroke piston').cyl(.0055,.0055,.071,WM.darkSteel,0,.036,-.386,HALF_PI);
-  r.name('SPEAR regulator cap').cyl(.008,.008,.011,WM.steel,0,.045,-.408,0,0,0,12);
-  flashHider(a,-.589,.015,.051,.012);
-  ironSights(a,-.046,-.364,.052,.052,.079);
-  magazine(mag.b,{width:.032,depth:.062,length:.119,bend:.006,material:WM.midSteel,ribs:2});
-  // Front toe sits below the well with a clear gap to the lower rail / forehand.
-  mag.group.position.set(0,-.041,-.166);
-  return a.finish({ mag:mag.group, handle:charging.group, sightY:.079,
-    sockets:{ muzzle:[0,.015,-.589], barrel:[0,.015,-.392], optic:[0,.052,-.138], magazine:[0,-.041,-.166], underbarrel:[0,-.025,-.315], stock:[0,.010,-.012], rail:[-.030,-.001,-.319] },
-    muzzleTip:[0,.015,-.644], arms:{ fore:[0,-.046,-.318], mag:[0,-.157,-.170], fa:[-.045,.027,-.086], grip:[.004,-.079,-.022] },
+  // The left-side charging handle rides in a real slot but never follows the bolt.
+  charging.b.name('MCX side charging rail').box(0.005, 0.010, 0.070, WM.steel, -0.029, 0.026, -0.160);
+  charging.b.name('MCX folding charging handle stem').box(0.013, 0.006, 0.017, WM.darkSteel, -0.034, 0.026, -0.166);
+  charging.b.name('MCX charging handle knuckle').loft([
+    [-0.173, 0.037, 0.021, 0.018], [-0.165, 0.042, 0.018, 0.026], [-0.151, 0.039, 0.018, 0.019],
+  ], WM.darkSteel, 0.55, -0.037);
+
+  // Hinge, twin guide rails and skeleton stock make the rear assembly explicitly foldable.
+  const s = stock.b;
+  // The hinge overlaps the receiver's rear trunnion; this is a physical bridge,
+  // not a stock assembly parented in space.
+  s.name('MCX push button hinge block').box(0.052, 0.052, 0.045, WM.darkSteel, 0, 0.010, 0.004);
+  s.name('MCX hinge pin').cyl(0.006, 0.006, 0.060, WM.steel, 0, 0.010, 0.004, 0, 0, 0, 16);
+  s.name('MCX folding latch').box(0.010, 0.015, 0.023, WM.midSteel, -0.027, 0.010, 0.016);
+  for (const x of [-0.014, 0.014]) {
+    s.name('MCX telescoping stock guide').box(0.008, 0.012, 0.151, WM.darkSteel, x, 0.013, 0.084);
+    s.name('MCX stock guide collar').box(0.014, 0.019, 0.014, WM.midSteel, x, 0.013, 0.034);
+  }
+  s.name('MCX skeleton cheek riser').profile([
+    [0.027, 0.035], [0.156, 0.035], [0.182, 0.018], [0.179, -0.003], [0.063, -0.002], [0.028, 0.013],
+  ], 0.032, WM.fde, 0, 0.0022, [[[0.066, 0.014], [0.145, 0.014], [0.160, 0.006], [0.079, 0.007]]]);
+  s.name('MCX adjustable buttstock body').profile([
+    [0.142, 0.028], [0.220, 0.025], [0.235, 0.010], [0.234, -0.073], [0.215, -0.079], [0.187, -0.047], [0.143, -0.018],
+  ], 0.040, WM.fde, 0, 0.0026);
+  s.name('MCX recoil pad').profile([[0.228, 0.024], [0.245, 0.018], [0.246, -0.072], [0.230, -0.080]], 0.043, WM.rubber, 0, 0.0015);
+  // This latch keys into both telescoping guide rails instead of hovering below them.
+  s.name('MCX stock adjustment latch').box(0.025, 0.016, 0.030, WM.darkSteel, 0, 0.006, 0.112, -0.22);
+  // Countersunk screws are seated inside the buttstock shell, not pasted over its edge.
+  for (const side of [-1, 1]) screw(s, side * 0.018, -0.010, 0.205, 0.003);
+
+  const r = barrel.b;
+  r.name('MCX cold hammer forged barrel').tube(0.010, 0.0044, 0.281, WM.darkSteel, 0, 0.008, -0.512);
+  r.name('MCX two position gas block').tube(0.016, 0.009, 0.027, WM.darkSteel, 0, 0.008, -0.426);
+  r.name('MCX adjustable gas valve').cyl(0.0065, 0.0065, 0.012, WM.steel, 0, 0.040, -0.426, 0, 0, 0, 16);
+  r.name('MCX piston rod').cyl(0.005, 0.005, 0.170, WM.darkSteel, 0, 0.035, -0.469, HALF_PI);
+  r.name('MCX muzzle collar').tube(0.014, 0.009, 0.020, WM.midSteel, 0, 0.008, -0.636);
+  // Seat the QD flash hider over the barrel crown — no seam at the muzzle.
+  flashHider(a, -0.653, 0.008, 0.050, 0.012);
+  // A low pedestal intersects the handguard top rail under the folding front sight.
+  b.name('MCX front sight rail bridge').box(0.028, 0.018, 0.026, WM.darkSteel, 0, 0.041, -0.574);
+  ironSights(a, -0.075, -0.574, 0.051, 0.039, 0.077);
+  magazine(mag.b, { width: 0.033, depth: 0.066, length: 0.123, bend: 0.001, material: WM.darkSteel, ribs: 2 });
+  mag.group.position.set(0, -0.048, -0.168);
+
+  return a.finish({
+    mag: mag.group, handle: charging.group, sightY: 0.077,
+    sockets: {
+      muzzle: [0, 0.008, -0.653], barrel: [0, 0.008, -0.399], optic: [0, 0.055, -0.177],
+      magazine: [0, -0.048, -0.168], underbarrel: [0, -0.021, -0.486], stock: [0, 0.010, 0.005], rail: [-0.035, 0.005, -0.485],
+    },
+    muzzleTip: [0, 0.008, -0.703],
+    arms: { fore: [0, -0.029, -0.479], mag: [0, -0.148, -0.180], fa: [-0.039, 0.030, -0.163] },
   });
 }

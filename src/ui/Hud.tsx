@@ -109,6 +109,79 @@ const HudCompass = memo(function HudCompass({ bearing, pings, landmark, missionB
   );
 });
 
+/* ================================================================
+   QoL: FLOATING DAMAGE NUMBERS
+   Projected to screen space by the engine; they rise, fade and scale
+   with severity so a headshot reads instantly without stopping to count.
+   ================================================================ */
+const DamageNumbers = memo(function DamageNumbers({ nums }: { nums: NonNullable<HudState['damageNumbers']> }) {
+  return (
+    <div className="dmg-num-layer" aria-hidden="true">
+      {nums.map((n, i) => {
+        const life = Math.min(1, n.age / 0.9);
+        // Rise fast then ease out; fade only over the last 40%.
+        const rise = (1 - (1 - life) * (1 - life)) * 46;
+        const opacity = life > 0.6 ? 1 - (life - 0.6) / 0.4 : 1;
+        // Bigger hits read bigger, clamped so a 120 doesn't fill the screen.
+        const scale = (n.kill ? 1.5 : n.head ? 1.28 : 1) * (0.86 + Math.min(0.34, n.dmg / 150));
+        return (
+          <span
+            key={`${i}-${Math.round(n.x * 1000)}-${n.dmg}`}
+            className={`dmg-num ${n.kill ? 'kill' : n.head ? 'head' : ''}`}
+            style={{
+              left: `${n.x * 100}%`,
+              top: `${n.y * 100}%`,
+              transform: `translate(-50%, -50%) translateY(${-rise}px) scale(${scale})`,
+              opacity,
+            }}
+          >
+            {n.kill ? '☠' : ''}{n.dmg}
+          </span>
+        );
+      })}
+    </div>
+  );
+});
+
+/* ================================================================
+   QoL: DAMAGE LOG — a rolling "who did what" column so you can read
+   back a fight instead of guessing why you died.
+   ================================================================ */
+const DamageLog = memo(function DamageLog({ log }: { log: NonNullable<HudState['damageLog']> }) {
+  if (!log.length) return null;
+  return (
+    <div className="dmg-log" aria-hidden="true">
+      {log.map((e, i) => (
+        <div key={`${e.text}-${i}`} className="dmg-log-row" style={{ opacity: Math.max(0, 1 - e.age / 6) }}>
+          <span className="dmg-log-name">{e.text || 'CONTACT'}</span>
+          <span className="dmg-log-val tabular">{e.dmg}</span>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+/* ================================================================
+   QoL: PERFORMANCE OVERLAY — draw calls are the real budget in three.js,
+   so they get top billing alongside frame time, not just an FPS number.
+   ================================================================ */
+const PerfOverlay = memo(function PerfOverlay({ perf, fps }: { perf: NonNullable<HudState['perf']>; fps: number }) {
+  const ms = perf.frameMs;
+  const grade = ms <= 12 ? 'good' : ms <= 18 ? 'ok' : 'bad';
+  const Row = ({ k, v, cls }: { k: string; v: string; cls?: string }) => (
+    <div className="perf-row"><span>{k}</span><b className={`tabular ${cls ?? ''}`}>{v}</b></div>
+  );
+  return (
+    <div className="perf-overlay" role="status" aria-label="Performance overlay">
+      <Row k="FPS" v={String(Math.round(fps))} cls={grade} />
+      <Row k="FRAME" v={`${ms.toFixed(1)}ms`} cls={grade} />
+      <Row k="DRAWS" v={String(perf.draws)} cls={perf.draws <= 150 ? 'good' : perf.draws <= 260 ? 'ok' : 'bad'} />
+      <Row k="TRIS" v={perf.tris >= 1000 ? `${(perf.tris / 1000).toFixed(0)}k` : String(perf.tris)} />
+      <Row k="SHADERS" v={String(perf.programs)} />
+    </div>
+  );
+});
+
 function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx; active?: boolean } & ScopeControls) {
   // Hold-Tab scoreboard (TDM only). Listens on window so it works regardless
   // of pointer lock; Tab's default focus-move is suppressed while playing.
@@ -144,8 +217,21 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
   const hpSegs = 10;
   const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / maxHp * hpSegs)));
 
+  // QoL: HUD scale and colour-blind palette are applied once at the root so every
+  // child — including the reticle and damage numbers — inherits them.
+  const rootStyle = {
+    '--hud-scale': (s.hudScale ?? 100) / 100,
+    fontSize: `calc(1rem * ${(s.hudScale ?? 100) / 100})`,
+  } as React.CSSProperties;
+
   return (
-    <div className="hud-root pointer-events-none select-none">
+    <div
+      className={`hud-root pointer-events-none select-none${s.colorBlindMode && s.colorBlindMode !== 'off' ? ` cb-${s.colorBlindMode}` : ''}`}
+      style={rootStyle}
+    >
+      {hud.damageNumbers && hud.damageNumbers.length > 0 && <DamageNumbers nums={hud.damageNumbers} />}
+      {hud.damageLog && hud.damageLog.length > 0 && <DamageLog log={hud.damageLog} />}
+      {hud.perf && <PerfOverlay perf={hud.perf} fps={hud.fps} />}
       {/* HUD frame corners */}
       <span className="hud-corner tl" /><span className="hud-corner tr" />
       <span className="hud-corner bl" /><span className="hud-corner br" />
@@ -338,7 +424,9 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
       {/* ============ TACTICAL RADAR (bottom-left, 60m zoom) ============ */}
       {hud.mapImage && (() => {
         // 60m radius fills the dish; scale the full-map image so 120m spans the 168px diameter.
-        const zoom = (hud.worldHalf * 2) / 170;
+        // QoL: minimapZoom is a percentage — 100 keeps the tuned default framing,
+        // higher pulls the map in tighter around the player.
+        const zoom = ((hud.worldHalf * 2) / 170) * ((s.minimapZoom ?? 100) / 100);
         const ox = (0.5 - hud.playerMap.nx) * 100 * zoom;
         const oz = (0.5 - hud.playerMap.nz) * 100 * zoom;
         const hot = hud.enemiesMap.filter(e => e.hot).length;
@@ -519,6 +607,10 @@ function hudPropsEqual(a: { hud: HudState; s: GameSettings; fx: HudFx; active?: 
   const ah = a.hud, bh = b.hud;
   // fast lane: if any combat-critical changed we must render
   if (ah.hp !== bh.hp || ah.mag !== bh.mag || ah.reloading !== bh.reloading || ah.ads !== bh.ads || ah.spread !== bh.spread || ah.sprinting !== bh.sprinting || ah.sprintLock !== bh.sprintLock) return false;
+  // QoL layers animate every frame while they are alive, so they must not be memoized away.
+  if ((ah.damageNumbers?.length ?? 0) || (bh.damageNumbers?.length ?? 0)) return false;
+  if ((ah.damageLog?.length ?? 0) || (bh.damageLog?.length ?? 0)) return false;
+  if (ah.perf || bh.perf) return false;
   // slow lane: if boring fields equal, we can bail even though hud object is new
   if (ah.bearing !== bh.bearing || ah.enemiesLeft !== bh.enemiesLeft || ah.pings.length !== bh.pings.length || ah.landmark?.name !== bh.landmark?.name || ah.mapImage !== bh.mapImage) return false;
   // check deep pings reference equality (new array each tick but content often same) — if lengths equal and bearing same we consider equal

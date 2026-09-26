@@ -4,14 +4,16 @@ import type { StatMods } from './stats';
 
 export type WeaponId =
   | 'm4a1' | 'ak47' | 'm1911' | 'awm' | 'mp7'
-  | 'scar_h' | 'vector' | 'spas12' | 'deagle' | 'm249';
+  | 'scar_h' | 'vector' | 'spas12' | 'deagle' | 'm249'
+  | 'aug_a3';
 export type WeaponClass = 'AR' | 'BR' | 'SMG' | 'PDW' | 'SR' | 'SG' | 'LMG' | 'PISTOL';
 export type SlotId = 'primary' | 'secondary';
 export type AttachSlot = 'muzzle' | 'optic' | 'magazine' | 'underbarrel' | 'stock' | 'rail' | 'barrel';
 export type AttachmentId = string;
 export type AudioKind =
   | 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg'
-  | 'scar' | 'vector' | 'shotgun' | 'deagle' | 'lmg';
+  | 'scar' | 'vector' | 'shotgun' | 'deagle' | 'lmg'
+  | 'aug';
 
 export interface BaseWeaponStats {
   auto: boolean; rpm: number; damage: number; headMul: number; limbMul: number;
@@ -149,6 +151,17 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     audio: 'deagle', slideBlowback: true,
   },
   {
+    // Steyr AUG A3 — the roster's first bullpup. Short overall length with a full
+    // 16" barrel, so it keeps rifle ballistics at SMG handling; the trade is a very
+    // tall sight line and a rear-biased balance that punishes snap transitions.
+    id: 'aug_a3', name: 'AUG A3', short: 'AUG', cls: 'AR', slot: 'primary',
+    price: 3600, starter: false,
+    blurb: 'Austrian bullpup. Carbine length, rifle barrel — fast through doorways and flat under recoil, with a sight line that sits a full inch high.',
+    base: base({ pattern: [[1.02, 0.11], [1.16, -0.16], [1.26, 0.21], [1.33, 0.25], [1.40, -0.24], [1.44, -0.30], [1.48, 0.28]], auto: true, rpm: 680, damage: 31, headMul: 2.3, limbMul: 0.88, magSize: 30, reserve: 150, hipSpread: 0.0105, adsFov: 58, tacReload: 2.0, emptyReload: 2.55, adsTime: 0.21, recoilMul: 0.92, falloffStart: 42, falloffMul: 0.88, noiseRadius: 70, moveSpeedMul: 1.02 }),
+    slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
+    audio: 'aug',
+  },
+  {
     id: 'm249', name: 'M249', short: 'M249', cls: 'LMG', slot: 'primary',
     price: 4300, starter: false,
     blurb: '100-round belt of suppression. Slow to shoulder, slow to reload, impossible to ignore downrange.',
@@ -168,7 +181,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "m249"
+      "m249",
+      "aug_a3"
     ],
     "desc": "Short, open-prong rifle device. Cuts flash without taming the burst.",
     "pros": [
@@ -191,7 +205,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
-      "scar_h"
+      "scar_h",
+      "aug_a3"
     ],
     "desc": "Side-port compensator for the M416 and SCAR. Flatter bursts, louder report.",
     "pros": [
@@ -220,7 +235,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "m249"
+      "m249",
+      "aug_a3"
     ],
     "desc": "Slim receiver-matched rifle can. Quieter shots, not a recoil eliminator.",
     "pros": [
@@ -359,7 +375,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
       "m249",
       "mp7",
       "vector",
-      "spas12"
+      "spas12",
+      "aug_a3"
     ],
     "desc": "Tubular 1\u00d7 reflex with a clean red dot and fast acquisition.",
     "pros": [
@@ -389,7 +406,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
       "m249",
       "mp7",
       "vector",
-      "spas12"
+      "spas12",
+      "aug_a3"
     ],
     "desc": "Wide protected window, circle-dot aiming mark and a forward battery compartment.",
     "pros": [
@@ -417,7 +435,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
       "m4a1",
       "scar_h",
       "mp7",
-      "vector"
+      "vector",
+      "aug_a3"
     ],
     "desc": "Short 2\u00d7 prism with a ring-dot reticle. Sized for carbines and compact rails.",
     "pros": [
@@ -443,7 +462,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "m249"
+      "m249",
+      "aug_a3"
     ],
     "desc": "3\u00d7 prism with a horseshoe/chevron and compact holdover ladder.",
     "pros": [
@@ -472,7 +492,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
       "m4a1",
       "scar_h",
       "m249",
-      "awm"
+      "awm",
+      "aug_a3"
     ],
     "desc": "4\u00d7 combat optic with a pointed chevron and fine BDC stadia. No free damage bonus.",
     "pros": [
@@ -613,7 +634,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
-      "ak47"
+      "ak47",
+      "aug_a3"
     ],
     "desc": "A seated magazine plus a supported spare. Faster reloads, more carried bulk.",
     "pros": [
@@ -713,7 +735,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "vector"
+      "vector",
+      "aug_a3"
     ],
     "desc": "Ribbed vertical grip for controlling muzzle climb. Deliberate rather than snap-fast.",
     "pros": [
@@ -738,7 +761,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "vector"
+      "vector",
+      "aug_a3"
     ],
     "desc": "Low angled palm shelf for horizontal tracking and quick shoulder transitions.",
     "pros": [
@@ -842,7 +866,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "m249"
+      "m249",
+      "aug_a3"
     ],
     "desc": "Host-matched cheek support and buttpad. Retains the actual weapon stock.",
     "pros": [
@@ -897,7 +922,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "m249"
+      "m249",
+      "aug_a3"
     ],
     "desc": "Compact rifle laser housing with a seated clamp and visible emitter.",
     "pros": [
@@ -927,7 +953,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
       "scar_h",
       "m249",
       "spas12",
-      "awm"
+      "awm",
+      "aug_a3"
     ],
     "desc": "Slim cylindrical scout light on a short rail clamp.",
     "pros": [
@@ -953,7 +980,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
-      "scar_h"
+      "scar_h",
+      "aug_a3"
     ],
     "desc": "Small offset backup sights on a proper side-rail bracket. Hold T to use the 1\u00d7 backup while ADS.",
     "pros": [
@@ -977,7 +1005,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "m249"
+      "m249",
+      "aug_a3"
     ],
     "desc": "Host-matched precision barrel with a modest extension. Retains the handguard, receiver and stock silhouette.",
     "pros": [
@@ -1004,7 +1033,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "vector"
+      "vector",
+      "aug_a3"
     ],
     "desc": "Short host-matched barrel, not a replacement handguard. The muzzle remains seated ahead of the receiver.",
     "pros": [
@@ -1343,6 +1373,34 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "family": "30-Round SCAR"
   },
   {
+    "id": "mag_extended_aug",
+    "slot": "magazine",
+    "name": "42-Round AUG Magazine",
+    "price": 650,
+    "tier": 2,
+    "compat": [
+      "aug_a3"
+    ],
+    "desc": "Translucent polymer waffle magazine in the long 42-round length. You can read the remaining stack at a glance, which is half the point.",
+    "pros": [
+      "30 \u2192 42 rounds",
+      "Visible round count"
+    ],
+    "cons": [
+      "Reload +12%",
+      "Prone profile"
+    ],
+    "mods": {
+      "magAdd": 12,
+      "reserveAdd": 24,
+      "tacReloadMul": 1.12,
+      "emptyReloadMul": 1.12,
+      "adsTimeMul": 1.03
+    },
+    "visual": "mag_ext",
+    "family": "AUG 5.56"
+  },
+  {
     "id": "mag_extended_vector",
     "slot": "magazine",
     "name": "33-Round Vector Magazine",
@@ -1567,7 +1625,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
-      "vector"
+      "vector",
+      "aug_a3"
     ],
     "desc": "Short open-frame grip with balanced burst control but a less stable hold.",
     "pros": [

@@ -708,7 +708,80 @@ img { display: block; max-width: 100%; }
 /* ============================================================
    HUD — steel-on-dark, tabular, no neon
    ============================================================ */
-.hud-root { position: absolute; inset: 0; pointer-events: none; }
+.hud-root { position: absolute; inset: 0; pointer-events: none; --hud-scale: 1; }
+
+/* ================================================================
+   QoL — COLOUR-BLIND MODES
+   Only the *semantic* pair matters in this game: friendly/safe (olive)
+   vs hostile/danger (blood red). Both are remapped to a pair that keeps
+   its separation under each deficiency, rather than tinting the screen.
+   ================================================================ */
+.hud-root.cb-deuteranopia { --olive: #1E88E5; --blood: #FFB300; --signal: #FF6F00; --brass: #90CAF9; }
+.hud-root.cb-protanopia   { --olive: #0288D1; --blood: #FFC400; --signal: #FF8F00; --brass: #81D4FA; }
+.hud-root.cb-tritanopia   { --olive: #00A86B; --blood: #E5397E; --signal: #FF2D6F; --brass: #9CE8C4; }
+
+/* ================================================================
+   QoL — FLOATING DAMAGE NUMBERS
+   ================================================================ */
+.dmg-num-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 6; }
+.dmg-num {
+  position: absolute;
+  font-family: var(--display);
+  font-size: calc(21px * var(--hud-scale));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--bone);
+  /* Outline instead of a drop shadow: stays legible on sand AND on shadow. */
+  text-shadow:
+    0 0 1px rgba(18,16,12,0.95), 0 1px 0 rgba(18,16,12,0.95), 0 -1px 0 rgba(18,16,12,0.95),
+    1px 0 0 rgba(18,16,12,0.95), -1px 0 0 rgba(18,16,12,0.95), 0 2px 7px rgba(18,16,12,0.7);
+  will-change: transform, opacity;
+}
+.dmg-num.head { color: var(--brass); font-size: calc(24px * var(--hud-scale)); }
+.dmg-num.kill { color: var(--signal); font-size: calc(27px * var(--hud-scale)); letter-spacing: 0.04em; }
+
+/* ================================================================
+   QoL — DAMAGE LOG
+   ================================================================ */
+.dmg-log {
+  position: absolute; right: calc(16px * var(--hud-scale)); top: 44%;
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: calc(112px * var(--hud-scale));
+  z-index: 5;
+}
+.dmg-log-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: calc(2px * var(--hud-scale)) calc(7px * var(--hud-scale));
+  background: rgba(18,16,12,0.5);
+  border-right: 2px solid var(--signal);
+  font-family: var(--mono); font-size: calc(10px * var(--hud-scale));
+  letter-spacing: 0.08em;
+}
+.dmg-log-name { color: rgba(237,228,211,0.66); text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 15ch; }
+.dmg-log-val { color: var(--bone); font-weight: 700; }
+
+/* ================================================================
+   QoL — PERFORMANCE OVERLAY
+   ================================================================ */
+.perf-overlay {
+  position: absolute; top: calc(44px * var(--hud-scale)); left: calc(14px * var(--hud-scale));
+  display: flex; flex-direction: column; gap: 1px;
+  padding: calc(6px * var(--hud-scale)) calc(9px * var(--hud-scale));
+  background: rgba(18,16,12,0.62);
+  border: 1px solid rgba(237,228,211,0.1);
+  border-left: 2px solid var(--steel);
+  border-radius: 2px;
+  font-family: var(--mono); font-size: calc(10px * var(--hud-scale));
+  letter-spacing: 0.06em;
+  z-index: 7;
+}
+.perf-row { display: flex; justify-content: space-between; gap: 14px; }
+.perf-row > span { color: rgba(237,228,211,0.5); }
+.perf-row > b { color: var(--bone); font-weight: 700; }
+.perf-row > b.good { color: var(--olive); }
+.perf-row > b.ok { color: var(--brass); }
+.perf-row > b.bad { color: var(--blood); }
 .hud-corner { position: absolute; width: 14px; height: 14px; border-color: rgba(237,228,211,0.18); border-style: solid; }
 .hud-corner.tl { top: 10px; left: 10px; border-width: 1px 0 0 1px; }
 .hud-corner.tr { top: 10px; right: 10px; border-width: 1px 1px 0 0; }

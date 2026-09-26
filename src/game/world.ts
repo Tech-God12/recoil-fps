@@ -203,6 +203,11 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   }
   function cover(x: number, z: number, y = 0) { coverNodes.push(new THREE.Vector3(x, y, z)); }
 
+  /** Every opening cut by the last wallRun() calls: position, outward normal and
+   *  size. Architecture code reads this to hang reveals, sills, shutters and
+   *  lintels on real holes instead of guessing where the holes were. */
+  const holeLog: { x: number; y: number; z: number; nx: number; nz: number; w: number; h: number; sill: number; alongX: boolean; door: boolean }[] = [];
+
   // wall run with openings; windows (b>0) get a glass pane
   function wallRun(alongX: boolean, x0: number, z0: number, len: number, height: number, thick: number,
     holes: [number, number, number, number][], m: THREE.Material, yb = 0, addGlass = true) {
@@ -217,6 +222,13 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     put(cur, len, 0, height);
     for (const [s, e, b, t] of holes) {
       put(s, e, t, height);
+      {
+        const mid = (s + e) / 2;
+        holeLog.push({
+          x: alongX ? x0 + mid : x0, y: yb + b + (t - b) / 2, z: alongX ? z0 : z0 + mid,
+          nx: alongX ? 0 : 1, nz: alongX ? 1 : 0, w: e - s, h: t - b, sill: yb + b, alongX, door: b <= 0,
+        });
+      }
       if (b > 0) {
         put(s, e, 0, b);
         // sill + glass
@@ -231,6 +243,176 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
           glassCenters.push(new THREE.Vector3(cx, cy, cz));
           windows.push({ x: cx, y: cy, z: cz, nx: alongX ? 0 : (cx > x0 ? 1 : -1), nz: alongX ? (cz > z0 ? 1 : (z0 === cz ? 1 : -1)) : 0 });
         }
+      }
+    }
+  }
+
+  // ==================== ARCHITECTURAL DETAIL LIBRARY ====================
+  // Everything here merges into the existing per-material batches, so a building can
+  // gain a hundred pieces of trim without costing a single extra draw call. The rule
+  // for every helper: purely decorative mass is non-colliding and sits either above
+  // head height or flush against a wall that already collides, so nav and the AI
+  // capsule never notice it.
+
+  /** Weathered base course. A wall that meets the ground with no plinth reads as a
+   *  floating texture sample; 0.55 m of darker, slightly proud stone fixes that. */
+  function plinth(cx: number, cz: number, w: number, d: number, m: THREE.Material, h = 0.55) {
+    box(cx, h / 2, cz, w + 0.14, h, d + 0.14, m, false);
+    box(cx, h + 0.05, cz, w + 0.2, 0.1, d + 0.2, M.concrete, false);
+  }
+
+  /** Alternating corner stones. Cheap, and it turns a flat box into masonry. */
+  function quoins(x0: number, z0: number, w: number, d: number, top: number, m: THREE.Material) {
+    for (const [qx, qz] of [[x0, z0], [x0 + w, z0], [x0, z0 + d], [x0 + w, z0 + d]] as const) {
+      for (let y = 0.8; y < top - 0.4; y += 1.25) {
+        const long = Math.round(y / 1.25) % 2 === 0;
+        box(qx, y, qz, long ? 0.92 : 0.58, 0.44, long ? 0.58 : 0.92, m, false);
+      }
+    }
+  }
+
+  /** Recessed reveal + projecting sill + a lintel over the head of an opening. This
+   *  single detail is the difference between "hole punched in a box" and "window". */
+  function reveal(h: { x: number; y: number; z: number; w: number; height: number; alongX: boolean; sill: number },
+    frame: THREE.Material, lintelMat: THREE.Material) {
+    const ax = h.alongX, t = 0.14;
+    const halfW = h.w / 2 + 0.16, halfH = h.height / 2 + 0.14;
+    // jambs
+    for (const s of [-1, 1]) {
+      if (ax) box(h.x + s * halfW, h.y, h.z, 0.28, h.height + 0.34, 0.66, frame, false);
+      else box(h.x, h.y, h.z + s * halfW, 0.66, h.height + 0.34, 0.28, frame, false);
+    }
+    // head + projecting lintel that actually casts a shadow line
+    if (ax) {
+      box(h.x, h.y + halfH, h.z, h.w + 0.6, 0.26, 0.7, frame, false);
+      box(h.x, h.sill - 0.1, h.z, h.w + 0.9, 0.16, 0.92, lintelMat, false);
+    } else {
+      box(h.x, h.y + halfH, h.z, 0.7, 0.26, h.w + 0.6, frame, false);
+      box(h.x, h.sill - 0.1, h.z, 0.92, 0.16, h.w + 0.9, lintelMat, false);
+    }
+    void t;
+  }
+
+  /** Louvred shutter leaves folded back against the wall beside an opening. */
+  function shutters(h: { x: number; y: number; z: number; w: number; height: number; alongX: boolean },
+    out: number, m: THREE.Material) {
+    const leaf = Math.min(0.5, h.w * 0.46), off = h.w / 2 + leaf / 2 + 0.06;
+    for (const s of [-1, 1]) {
+      const px = h.alongX ? h.x + s * off : h.x + out * 0.34;
+      const pz = h.alongX ? h.z + out * 0.34 : h.z + s * off;
+      if (h.alongX) box(px, h.y, pz, leaf, h.height * 0.92, 0.07, m, false);
+      else box(px, h.y, pz, 0.07, h.height * 0.92, leaf, m, false);
+      // louvre slats, proud of the face
+      for (let i = 0; i < 2; i++) {
+        const ly = h.y - h.height * 0.22 + i * h.height * 0.44;
+        if (h.alongX) box(px, ly, pz + out * 0.045, leaf * 0.82, 0.05, 0.03, METAL, false);
+        else box(px + out * 0.045, ly, pz, 0.03, 0.05, leaf * 0.82, METAL, false);
+      }
+    }
+  }
+
+  /** Projecting turned-wood lattice bay — the signature element of the region and the
+   *  thing that makes a street front read as a real town rather than a corridor. */
+  function mashrabiya(x: number, y: number, z: number, width: number, nx: number, nz: number) {
+    const out = 0.62, hgt = 1.95;
+    const ax = nz !== 0;      // faces along ±Z, so the bay is wide in X
+    const px = x + nx * out * 0.5, pz = z + nz * out * 0.5;
+    // corbels underneath: it has to look supported
+    for (const s of [-1, 1]) {
+      const bx = ax ? x + s * (width / 2 - 0.16) : px;
+      const bz = ax ? pz : z + s * (width / 2 - 0.16);
+      shape(new THREE.CylinderGeometry(0.1, 0.16, 0.6, 6), timber, bx, y - hgt / 2 - 0.2, bz, Math.PI / 2 * nz, 0, Math.PI / 2 * nx);
+    }
+    // floor + roof slabs
+    for (const dy of [-hgt / 2 - 0.05, hgt / 2 + 0.05]) {
+      if (ax) box(px, y + dy, pz, width, 0.1, out, timber, false);
+      else box(px, y + dy, pz, out, 0.1, width, timber, false);
+    }
+    // lattice face: vertical mullions + horizontal rails, with turned spindles
+    const n = Math.max(4, Math.round(width / 0.22));
+    for (let i = 0; i <= n; i++) {
+      const o = -width / 2 + (width * i) / n;
+      if (ax) box(x + o, y, pz + nz * out * 0.48, 0.045, hgt, 0.05, timber, false);
+      else box(px + nx * out * 0.48, y, z + o, 0.05, hgt, 0.045, timber, false);
+    }
+    for (let r = 0; r < 4; r++) {
+      const ry = y - hgt / 2 + 0.25 + r * 0.48;
+      if (ax) box(px, ry, pz + nz * out * 0.48, width, 0.05, 0.05, timber, false);
+      else box(px + nx * out * 0.48, ry, z, 0.05, 0.05, width, timber, false);
+    }
+    // returns at the sides so it is a box, not a billboard
+    for (const s of [-1, 1]) {
+      if (ax) box(x + s * width / 2, y, pz, 0.06, hgt, out, timber, false);
+      else box(px, y, z + s * width / 2, out, hgt, 0.06, timber, false);
+    }
+  }
+
+  /** Stepped parapet with merlons — the single biggest silhouette upgrade available.
+   *  Replaces a flat 0.7 m band with a rhythm that reads from 80 m away. */
+  function parapet(cx: number, cz: number, w: number, d: number, y: number, m: THREE.Material, cap: THREE.Material) {
+    const base = 0.42;
+    box(cx, y + base / 2, cz, w + 0.5, base, d + 0.5, m);
+    const run = (alongX: boolean, fixed: number) => {
+      const len = alongX ? w + 0.5 : d + 0.5;
+      const n = Math.max(3, Math.round(len / 1.7));
+      const step = len / n;
+      for (let i = 0; i < n; i++) {
+        const o = -len / 2 + step * (i + 0.5);
+        const tall = i % 2 === 0;
+        const hgt = tall ? 0.56 : 0.24;
+        const wid = step * 0.62;
+        if (alongX) box(cx + o, y + base + hgt / 2, fixed, wid, hgt, 0.5, m, false);
+        else box(fixed, y + base + hgt / 2, cz + o, 0.5, hgt, wid, m, false);
+        if (tall) {
+          if (alongX) box(cx + o, y + base + hgt + 0.045, fixed, wid + 0.1, 0.09, 0.6, cap, false);
+          else box(fixed, y + base + hgt + 0.045, cz + o, 0.6, 0.09, wid + 0.1, cap, false);
+        }
+      }
+    };
+    run(true, cz - d / 2 - 0.25); run(true, cz + d / 2 + 0.25);
+    run(false, cx - w / 2 - 0.25); run(false, cx + w / 2 + 0.25);
+  }
+
+  /** Rainwater spout poking through the parapet — tiny, and instantly "lived in". */
+  function spout(x: number, y: number, z: number, nx: number, nz: number) {
+    shape(new THREE.CylinderGeometry(0.075, 0.075, 0.78, 6), timber,
+      x + nx * 0.34, y, z + nz * 0.34, nz !== 0 ? Math.PI / 2 : 0, 0, nx !== 0 ? Math.PI / 2 : 0);
+  }
+
+  /** Exactly ONE roof feature per building. The brief was explicit: no crammed,
+   *  cluttered rooftops. Style picks the program so a street gets variety without
+   *  any single roof turning into a junk pile. */
+  function roofProgram(cx: number, cz: number, w: number, d: number, H: number, style: number, seed: number) {
+    const rx = cx + (seed % 2 ? 1 : -1) * w * 0.24, rz = cz + (seed % 3 ? 1 : -1) * d * 0.2;
+    if (style === 0) {
+      // Galvanised water tank on a welded stand.
+      box(rx, H + 0.34, rz, 1.7, 0.12, 1.7, METAL, false);
+      for (const dx of [-0.72, 0.72]) for (const dz of [-0.72, 0.72]) box(rx + dx, H + 0.2, rz + dz, 0.09, 0.4, 0.09, METAL, false);
+      shape(new THREE.CylinderGeometry(0.8, 0.8, 1.5, 14), iron, rx, H + 1.15, rz);
+      shape(new THREE.CylinderGeometry(0.84, 0.84, 0.1, 14), METAL, rx, H + 1.92, rz);
+      shape(new THREE.CylinderGeometry(0.05, 0.05, 1.1, 6), METAL, rx + 0.85, H + 0.9, rz);
+    } else if (style === 1) {
+      // Satellite dish + a whip antenna guyed to the parapet.
+      shape(new THREE.CylinderGeometry(0.04, 0.04, 2.6, 6), METAL, rx, H + 1.5, rz);
+      shape(new THREE.SphereGeometry(0.62, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.42),
+        col(0xD8D2C4, 0.6), rx + 0.3, H + 1.5, rz, 1.1, 0.5, 0);
+      shape(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 5), METAL, rx + 0.62, H + 1.42, rz + 0.18, 1.1, 0.5, 0);
+      for (const a of [0.6, 2.7, 4.6]) shape(new THREE.CylinderGeometry(0.014, 0.014, 2.3, 4), METAL,
+        rx + Math.cos(a) * 0.5, H + 1.1, rz + Math.sin(a) * 0.5, Math.cos(a) * 0.42, 0, -Math.sin(a) * 0.42);
+    } else if (style === 2) {
+      // Stair head-house with a shaded doorway.
+      box(rx, H + 1.3, rz, 2.3, 2.2, 2.0, earth);
+      box(rx, H + 2.5, rz, 2.6, 0.2, 2.3, M.concrete, false);
+      box(rx, H + 1.05, rz + 1.02, 0.95, 1.7, 0.1, timber, false);
+      shape(new THREE.PlaneGeometry(2.4, 1.0), FABRIC[seed % FABRIC.length], rx, H + 2.35, rz + 1.6, -Math.PI / 2 + 0.3);
+    } else {
+      // Laundry line between two posts — movement, colour, zero clutter.
+      const span = Math.min(w - 1.6, 5.4);
+      for (const s of [-1, 1]) shape(new THREE.CylinderGeometry(0.05, 0.06, 1.9, 6), METAL, rx + s * span / 2, H + 1.0, rz);
+      box(rx, H + 1.85, rz, span, 0.025, 0.025, METAL, false);
+      for (let i = 0; i < 4; i++) {
+        const lx = rx - span / 2 + span * (i + 0.6) / 4.6;
+        shape(new THREE.PlaneGeometry(0.62, 0.9), FABRIC[(seed + i) % FABRIC.length], lx, H + 1.4, rz, 0, 0, 0.05);
       }
     }
   }
@@ -250,6 +432,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     };
     const doorHole = (len: number): [number, number, number, number] => [len / 2 - 1.2, len / 2 + 1.2, 0, 2.5];
     const noDoorOverlap = (row: [number, number, number, number][], len: number) => row.filter(h => Math.abs((h[0] + h[1]) / 2 - len / 2) > 2.2);
+    const holeStart = holeLog.length;
     for (let f = 0; f < floors; f++) {
       const yb = f * fh, g0 = f === 0;
       const n = g0 && (door === 'north' || door === 'south') ? [...noDoorOverlap(winRow(w), w), doorHole(w)] : winRow(w);
@@ -273,6 +456,51 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
         // Exterior-style stair: large overlapping treads (0.22 rise, 0.55 run) so the player never wedges between steps
         const count=Math.ceil((fh+0.24)/0.22),rise=(fh+0.24)/count,run=(d-2.3)/count;
         for (let i=0;i<count;i++) box(x0+1.5,(f-1)*fh+(i+0.5)*rise,z0+0.7+i*run,2.2,rise,run+0.03,M.concrete);
+      }
+    }
+    // ---- FACADE ARTICULATION ----------------------------------------------
+    // The walls are up; now give them depth. Everything below is non-colliding
+    // trim hung off the openings wallRun() actually cut, so nothing can end up
+    // floating in front of a solid wall or blocking a doorway.
+    // Trim palette is drawn strictly from materials the map already batches —
+    // a brand-new material here would cost a whole extra draw call for a few
+    // hundred triangles of window surround.
+    const frameMat = style === 1 ? stone : style === 3 ? M.adobeBrick : M.concrete;
+    const trimMat = style === 0 ? ACC_TURQ : style === 2 ? ACC_TERRA : timber;
+    plinth(cx, cz, w, d, style === 3 ? M.adobeBrick : stone);
+    if (style === 1 || style === 3) quoins(x0, z0, w, d, H, stone);
+    let bayUsed = false;
+    for (let i = holeStart; i < holeLog.length; i++) {
+      const h = holeLog[i];
+      // outward normal: compare the hole's position with the building centre
+      const nx = h.alongX ? 0 : Math.sign(h.x - cx) || 1;
+      const nz = h.alongX ? (Math.sign(h.z - cz) || 1) : 0;
+      const g = { x: h.x, y: h.y, z: h.z, w: h.w, height: h.h, alongX: h.alongX, sill: h.sill };
+      reveal(g, frameMat, trimMat);
+      if (h.door) {
+        // Deep shaded doorway: a recessed reveal plus a solid timber leaf and a step.
+        const dw = h.w * 0.78;
+        if (h.alongX) {
+          box(h.x, h.sill + h.h / 2, h.z + nz * 0.22, dw, h.h - 0.12, 0.09, timber, false);
+          box(h.x, 0.06, h.z + nz * 0.62, h.w + 0.9, 0.14, 1.1, stone, false);
+        } else {
+          box(h.x + nx * 0.22, h.sill + h.h / 2, h.z, 0.09, h.h - 0.12, dw, timber, false);
+          box(h.x + nx * 0.62, 0.06, h.z, 1.1, 0.14, h.w + 0.9, stone, false);
+        }
+        // Studded door furniture: two hinge straps and a ring pull.
+        for (const s of [-1, 1]) {
+          if (h.alongX) box(h.x + s * dw * 0.34, h.sill + h.h * 0.5, h.z + nz * 0.28, dw * 0.26, 0.07, 0.03, METAL, false);
+          else box(h.x + nx * 0.28, h.sill + h.h * 0.5, h.z + s * dw * 0.34, 0.03, 0.07, dw * 0.26, METAL, false);
+        }
+        shape(new THREE.TorusGeometry(0.09, 0.022, 5, 10), METAL,
+          h.x + nx * 0.3, h.sill + 1.05, h.z + nz * 0.3, 0, h.alongX ? 0 : Math.PI / 2, 0);
+        continue;
+      }
+      if (i % 2 === 0) shutters(g, nx + nz, trimMat);
+      // One projecting mashrabiya bay per building, on an upper-floor street window.
+      if (!bayUsed && floors > 1 && h.y > fh + 0.9 && h.w > 1.2 && (style === 1 || style === 2)) {
+        bayUsed = true;
+        mashrabiya(h.x, h.y + 0.12, h.z, Math.min(2.3, h.w + 1.0), nx, nz);
       }
     }
     ground(cx, cz, w - 0.8, d - 0.8, M.tileFloor, 0.04);
@@ -338,17 +566,31 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       for(const dx of [-w/2+0.8,w/2-0.8]) box(cx+dx,1.35,front+1.5,0.12,2.7,0.12,timber);
       box(cx,0.09,front+0.7,w-0.5,0.18,1.8,M.concrete);
     }
-    if (style===2 && !o.roofAccess) {
-      shape(new THREE.CylinderGeometry(0.85,0.85,1.6,12),ACC_TURQ,cx+w*0.22,H+1.1,cz);
-      box(cx+w*0.22,H+0.3,cz,1.9,0.3,1.9,M.concrete);
-    }
-    if(style===3) for(let i=0;i<Math.floor(w/1.2);i++) box(x0+0.6+i*1.2,H+0.9,z0,0.6,0.55,0.45,earth);
-    // cornice + parapet + door lintel
+    // ---- ROOFLINE ---------------------------------------------------------
+    // Projecting cornice on carved corbels, then a stepped/merloned parapet, then
+    // exactly one roof program. The old version was a flat 0.7 m band on all four
+    // sides, which is why every building read as the same grey shoebox.
     box(cx, H + 0.15, cz, w + 0.5, 0.3, d + 0.5, M.concrete);
-    box(cx, H + 0.65, z0, w + 0.5, 0.7, 0.35, earth);
-    box(cx, H + 0.65, z0 + d, w + 0.5, 0.7, 0.35, earth);
-    if (!o.roofAccess) box(x0, H + 0.65, cz, 0.35, 0.7, d + 0.5, earth);
-    box(x0 + w, H + 0.65, cz, 0.35, 0.7, d + 0.5, earth);
+    box(cx, H + 0.34, cz, w + 0.9, 0.16, d + 0.9, stone, false);
+    for (const [alongX, fixed] of [[true, cz - d / 2 - 0.3], [true, cz + d / 2 + 0.3]] as const) {
+      const n = Math.max(2, Math.round(w / 1.6));
+      for (let i = 0; i < n; i++) {
+        const o2 = -w / 2 + (w / n) * (i + 0.5);
+        void alongX;
+        box(cx + o2, H + 0.02, fixed, 0.24, 0.3, 0.6, timber, false);
+      }
+    }
+    if (o.roofAccess) {
+      // Roof-access buildings keep a low kerb on the stair side so the route is legible.
+      box(cx, H + 0.55, z0, w + 0.5, 0.5, 0.35, earth);
+      box(cx, H + 0.55, z0 + d, w + 0.5, 0.5, 0.35, earth);
+      box(x0 + w, H + 0.55, cz, 0.35, 0.5, d + 0.5, earth);
+    } else {
+      parapet(cx, cz, w, d, H + 0.3, earth, stone);
+      roofProgram(cx, cz, w, d, H + 0.5, style, Math.abs(Math.round(cx * 3 + cz)));
+    }
+    // Rainwater spouts through the street parapet.
+    for (const s of [-1, 1]) spout(cx + s * w * 0.3, H + 0.62, z0 + d, 0, 1);
     const lint = (x: number, z: number, lw: number, ld: number) => box(x, 2.68, z, lw, 0.22, ld, timber, false);
     if (door === 'south') lint(cx, z0 + d, 2.8, 0.7); if (door === 'north') lint(cx, z0, 2.8, 0.7);
     if (door === 'east') lint(x0 + w, cz, 0.7, 2.8); if (door === 'west') lint(x0, cz, 0.7, 2.8);

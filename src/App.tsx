@@ -343,6 +343,10 @@ export default function App() {
         ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
         : mode === 'tdm' ? { mode: 'tdm' as const, kit: prof.equippedKit } : { mode: 'mission' as const };
       buyOpenRef.current = false; setBuyOpen(false);
+      // Texture resolution has to be set BEFORE the world is built: materials bake
+      // their canvases once at construction, so changing it later would only affect
+      // whatever happens to be created after the fact.
+      Engine.applyTextureQuality(settings.textureQuality);
       const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, launchOptions);
       engineRef.current = engine;
       engine.applySettings(settings);

@@ -7,8 +7,12 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { ATMOSPHERES, DustField, bakeEnvironment, buildSky, type SkyHandle } from './atmosphere';
+import { GRADES, GRADE_SHADER, makeComposerTarget } from './postfx';
+import { setTextureQuality } from './textures';
 import { buildWorld, pointInAABB, type World, type MapId, type AABB } from './world';
 import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, WEAPON_BUILDERS, type WeaponModel } from './models';
+import { solveArm } from './weapons/core';
 import { applyBuild } from './attachments';
 import { WEAPON_CATALOG, attachmentById, weaponById, type WeaponId } from './economy/catalog';
 import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
@@ -59,9 +63,16 @@ export interface GameSettings {
   difficulty: string;
   map: MapId;
   // Graphics
+  graphicsPreset: GraphicsPreset;
   adaptiveResolution: boolean;
   resolutionScale: number;  // 50 - 100 (%)
   shadowQuality: 'off' | 'low' | 'medium' | 'high';
+  textureQuality: 'low' | 'medium' | 'high';
+  /** Master switch for the finishing chain (FXAA + clarity + film grade). */
+  postProcess: boolean;
+  sunShafts: boolean;
+  sharpness: number;        // 0 - 100
+  aberration: number;       // 0 - 100 (lens chromatic fringe)
   bloom: boolean;
   bloomStrength: number;    // 0 - 100
   vignette: number;         // 0 - 70
@@ -69,8 +80,22 @@ export interface GameSettings {
   brightness: number;       // 80 - 170 (exposure %)
   cameraShake: number;      // 0 - 100
   showFps: boolean;
+  /** Frame-time graph + draw-call readout (F1). */
+  perfOverlay: boolean;
+  // Quality of life
+  holdToCrouch: boolean;    // false = crouch toggles
+  autoSprint: boolean;
+  damageNumbers: boolean;
+  hudScale: number;         // 80 - 130 (%)
+  colorBlindMode: 'off' | 'protanopia' | 'deuteranopia' | 'tritanopia';
+  minimapZoom: number;      // 70 - 160 (%)
+  showDamageLog: boolean;
   // Audio
   masterVolume: number;     // 0 - 100
+  sfxVolume: number;        // 0 - 100
+  footstepVolume: number;   // 0 - 150
+  musicVolume: number;      // 0 - 100
+  dynamicRange: 'night' | 'normal' | 'wide';
   voices: boolean;
   // Crosshair
   crosshairColor: string;
@@ -80,6 +105,29 @@ export interface GameSettings {
   crosshairDot: boolean;
 }
 
+export type GraphicsPreset = 'performance' | 'balanced' | 'high' | 'ultra' | 'custom';
+
+/** Coherent quality ladders. Selecting a preset stamps every graphics field at once,
+ *  so players stop having to reason about eight independent sliders. */
+/**
+ * Quality presets.
+ *
+ * Bloom is OFF in every preset. It is a fill-rate hog (UnrealBloomPass is five
+ * mip levels of separable blur, ~10 extra full-screen passes) and on a bright
+ * desert map it washes the image out until nothing is readable. It stays as a
+ * manual toggle for anyone who wants it, but nothing switches it on for you.
+ *
+ * Only Ultra engages the off-screen composer at all. Performance/Balanced/High
+ * render straight into the multisampled canvas, which is both faster AND
+ * antialiased — the composed path has to re-do AA in software.
+ */
+export const GRAPHICS_PRESETS: Record<Exclude<GraphicsPreset, 'custom'>, Partial<GameSettings>> = {
+  performance: { resolutionScale: 70, shadowQuality: 'off', textureQuality: 'low', postProcess: false, sunShafts: false, bloom: false, bloomStrength: 0, sharpness: 0, aberration: 0, filmGrain: 0, adaptiveResolution: true },
+  balanced: { resolutionScale: 90, shadowQuality: 'low', textureQuality: 'medium', postProcess: false, sunShafts: false, bloom: false, bloomStrength: 0, sharpness: 0, aberration: 0, filmGrain: 0, adaptiveResolution: true },
+  high: { resolutionScale: 100, shadowQuality: 'low', textureQuality: 'high', postProcess: false, sunShafts: false, bloom: false, bloomStrength: 0, sharpness: 0, aberration: 0, filmGrain: 0, adaptiveResolution: true },
+  ultra: { resolutionScale: 100, shadowQuality: 'medium', textureQuality: 'high', postProcess: true, sunShafts: false, bloom: false, bloomStrength: 0, sharpness: 24, aberration: 0, filmGrain: 0, adaptiveResolution: true },
+};
+
 export const DEFAULT_SETTINGS: GameSettings = {
   sensitivity: 2.2,
   adsSensitivity: 0.7,
@@ -88,17 +136,38 @@ export const DEFAULT_SETTINGS: GameSettings = {
   fov: 95,
   difficulty: 'Normal',
   map: 'alrasul',
+  graphicsPreset: 'high',
   adaptiveResolution: true,
   resolutionScale: 100,
   shadowQuality: 'low',
+  textureQuality: 'high',
+  // Everything below is off by default so usesPostChain() is false and the engine
+  // renders straight to the multisampled canvas: no off-screen HDR target, no
+  // bloom mips, no finishing pass. That is the fast path and the safe path.
+  postProcess: false,
+  sunShafts: false,
+  sharpness: 0,
+  aberration: 0,
   bloom: false,
-  bloomStrength: 22,
-  vignette: 12,
+  bloomStrength: 0,
+  vignette: 10,
   filmGrain: 0,
-  brightness: 110,
+  brightness: 100,
   cameraShake: 100,
   showFps: true,
+  perfOverlay: false,
+  holdToCrouch: true,
+  autoSprint: false,
+  damageNumbers: true,
+  hudScale: 100,
+  colorBlindMode: 'off',
+  minimapZoom: 100,
+  showDamageLog: false,
   masterVolume: 85,
+  sfxVolume: 100,
+  footstepVolume: 100,
+  musicVolume: 60,
+  dynamicRange: 'normal',
   voices: true,
   crosshairColor: '#FF5C1A',
   crosshairSize: 9,
@@ -109,8 +178,9 @@ export const DEFAULT_SETTINGS: GameSettings = {
 
 /** True when the settings need the off-screen EffectComposer chain. Everything
  *  else renders straight to the multisampled canvas (cheaper AND antialiased). */
-export function usesPostChain(s: Pick<GameSettings, 'bloom' | 'filmGrain'>): boolean {
-  return s.bloom || s.filmGrain > 0;
+export function usesPostChain(s: Partial<Pick<GameSettings, 'bloom' | 'filmGrain' | 'postProcess' | 'sunShafts' | 'sharpness' | 'aberration'>>): boolean {
+  return !!s.bloom || (s.filmGrain ?? 0) > 0 || !!s.postProcess || !!s.sunShafts
+    || (s.sharpness ?? 0) > 0 || (s.aberration ?? 0) > 0;
 }
 
 /** CSS for the screen-space vignette overlay. Matches the old shader's falloff: clear
@@ -146,9 +216,15 @@ export function sanitizeSettings(input: unknown): GameSettings {
     fov: number('fov', DEFAULT_SETTINGS.fov, 70, 120),
     difficulty: choice('difficulty', ['Easy', 'Normal', 'Hard'], DEFAULT_SETTINGS.difficulty),
     map: choice('map', ['alrasul', 'kasbah', 'arena', 'sirocco'], DEFAULT_SETTINGS.map),
+    graphicsPreset: choice('graphicsPreset', ['performance', 'balanced', 'high', 'ultra', 'custom'], DEFAULT_SETTINGS.graphicsPreset),
     adaptiveResolution: boolean('adaptiveResolution', DEFAULT_SETTINGS.adaptiveResolution),
     resolutionScale: number('resolutionScale', DEFAULT_SETTINGS.resolutionScale, 50, 100),
     shadowQuality: choice('shadowQuality', ['off', 'low', 'medium', 'high'], DEFAULT_SETTINGS.shadowQuality),
+    textureQuality: choice('textureQuality', ['low', 'medium', 'high'], DEFAULT_SETTINGS.textureQuality),
+    postProcess: boolean('postProcess', DEFAULT_SETTINGS.postProcess),
+    sunShafts: boolean('sunShafts', DEFAULT_SETTINGS.sunShafts),
+    sharpness: number('sharpness', DEFAULT_SETTINGS.sharpness, 0, 100),
+    aberration: number('aberration', DEFAULT_SETTINGS.aberration, 0, 100),
     bloom: boolean('bloom', DEFAULT_SETTINGS.bloom),
     bloomStrength: number('bloomStrength', DEFAULT_SETTINGS.bloomStrength, 0, 100),
     vignette: number('vignette', DEFAULT_SETTINGS.vignette, 0, 70),
@@ -156,7 +232,19 @@ export function sanitizeSettings(input: unknown): GameSettings {
     brightness: number('brightness', DEFAULT_SETTINGS.brightness, 80, 170),
     cameraShake: number('cameraShake', DEFAULT_SETTINGS.cameraShake, 0, 100),
     showFps: boolean('showFps', DEFAULT_SETTINGS.showFps),
+    perfOverlay: boolean('perfOverlay', DEFAULT_SETTINGS.perfOverlay),
+    holdToCrouch: boolean('holdToCrouch', DEFAULT_SETTINGS.holdToCrouch),
+    autoSprint: boolean('autoSprint', DEFAULT_SETTINGS.autoSprint),
+    damageNumbers: boolean('damageNumbers', DEFAULT_SETTINGS.damageNumbers),
+    hudScale: number('hudScale', DEFAULT_SETTINGS.hudScale, 80, 130),
+    colorBlindMode: choice('colorBlindMode', ['off', 'protanopia', 'deuteranopia', 'tritanopia'], DEFAULT_SETTINGS.colorBlindMode),
+    minimapZoom: number('minimapZoom', DEFAULT_SETTINGS.minimapZoom, 70, 160),
+    showDamageLog: boolean('showDamageLog', DEFAULT_SETTINGS.showDamageLog),
     masterVolume: number('masterVolume', DEFAULT_SETTINGS.masterVolume, 0, 100),
+    sfxVolume: number('sfxVolume', DEFAULT_SETTINGS.sfxVolume, 0, 100),
+    footstepVolume: number('footstepVolume', DEFAULT_SETTINGS.footstepVolume, 0, 150),
+    musicVolume: number('musicVolume', DEFAULT_SETTINGS.musicVolume, 0, 100),
+    dynamicRange: choice('dynamicRange', ['night', 'normal', 'wide'], DEFAULT_SETTINGS.dynamicRange),
     voices: boolean('voices', DEFAULT_SETTINGS.voices),
     crosshairColor: typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color : DEFAULT_SETTINGS.crosshairColor,
     crosshairSize: number('crosshairSize', DEFAULT_SETTINGS.crosshairSize, 3, 24),
@@ -223,6 +311,12 @@ export interface HudState {
   /** Dead in a defusal round: whose eyes you are watching through. */
   spectating?: { name: string; hp: number; weapon: string; team: TDMTeam } | null;
   maxHp?: number;
+  /** QoL: floating damage numbers, already projected to 0-1 screen space. */
+  damageNumbers?: { x: number; y: number; dmg: number; head: boolean; kill: boolean; age: number }[];
+  /** QoL: rolling damage log (most recent first) for the after-action read. */
+  damageLog?: { text: string; dmg: number; age: number }[];
+  /** QoL: renderer counters for the performance overlay. */
+  perf?: { draws: number; tris: number; frameMs: number; programs: number } | null;
 }
 
 /** Launch options for the Bomb Defusal mode. `builds` fields the player's own armory guns. */
@@ -318,7 +412,7 @@ interface WeaponDef {
   lpvo?: boolean;
   lpvoHigh?: boolean;
   pumpShotgun?: boolean;
-  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'vector' | 'lmg' | 'deagle';
+  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'vector' | 'lmg' | 'deagle' | 'aug';
   laser?: boolean;
   flashlight?: boolean;
   masterkey?: boolean;
@@ -374,6 +468,8 @@ const ADAPT_DOWN_FPS = 45;
 const ADAPT_UP_FPS = 57;
 const ADAPT_EVAL_MS = 5000;
 const ADAPT_LOCK_MS = 8000;
+/** Clamped smoothstep. Used everywhere an animation beat needs an eased 0..1. */
+const ease01 = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 const ADAPT_DOWN_WINDOWS = 2;
 const ADAPT_UP_WINDOWS = 3;
 /** A frame longer than this is a hitch, not sustained throughput; it must not drive scaling. */
@@ -381,7 +477,7 @@ const ADAPT_STALL_SECONDS = 0.25;
 // Maps armory weapon ids to the engine's legacy audio tags for loadout-built guns.
 const LOADOUT_AUDIO: Record<WeaponId, NonNullable<WeaponDef['audioTag']>> = {
   m4a1: 'm4', ak47: 'ak', scar_h: 'scar', m249: 'lmg', vector: 'vector', mp7: 'smg',
-  spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle',
+  spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle', aug_a3: 'aug',
 };
 
 /**
@@ -486,7 +582,14 @@ export class Engine {
   private vignettePass!: ShaderPass;
   private sunLight!: THREE.DirectionalLight;
   private mapImage = '';
-  private clouds = new THREE.Group();
+  // Atmosphere: sky shader, its baked light probe, drifting dust and the film grade.
+  private sky: SkyHandle | null = null;
+  private skyEnv: THREE.Texture | null = null;
+  private dust: DustField | null = null;
+  private atmos: (typeof ATMOSPHERES)[MapId] | null = null;
+  private grade = GRADES.alrasul;
+  private composerTarget: THREE.WebGLRenderTarget | null = null;
+  private readonly _sunScreen = new THREE.Vector3();
 
   // Player state
   private pos!: THREE.Vector3;
@@ -665,62 +768,73 @@ export class Engine {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap; // PCF (not Soft) — ~2x cheaper
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 0.92;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.autoClear = false;
 
-    this.camera = new THREE.PerspectiveCamera(this.fovSetting, 1, 0.12, 500);
+    // Far plane trimmed 500 -> 380: no map's diagonal comes close, and every
+    // atmosphere now fogs out well before it, so the cut is invisible but the
+    // frustum culls a lot more distant geometry. The sky dome is exempt — its
+    // vertex shader pins itself to the far plane regardless of radius.
+    this.camera = new THREE.PerspectiveCamera(this.fovSetting, 1, 0.12, 380);
     this.camera.rotation.order = 'YXZ';
     this.vmCamera = new THREE.PerspectiveCamera(VIEWMODEL_RIG.vmFovHip, 1, 0.01, 5);
 
-    // Per-map colour grading so the two arenas read instantly different:
-    // Sandblast = hot amber desert noon; Town = cooler hazy hill morning.
-    const golden = mapId === 'sirocco';
-    const desert = mapId === 'alrasul' || golden;
-    this.scene.background = new THREE.Color(golden ? 0xE2C79C : desert ? 0xC3CBD2 : 0xAAB9C4);
-    this.scene.fog = golden
-      ? new THREE.Fog(0xD9B98A, 70, 260)          // Sirocco: warm late-afternoon dust haze
-      : desert
-        ? new THREE.Fog(0xC6B89C, 130, 430)
-        : new THREE.Fog(0xA9B8BE, 95, 340); // closer, bluer haze on the hill town
-    // strong sky fill so shadowed faces stay readable
-    const hemi = new THREE.HemisphereLight(desert ? 0xCFE0EE : 0xC2D4E2, desert ? 0x8C765A : 0x6E7568, desert ? 0.65 : 0.75);
+    // ==================== ATMOSPHERE ====================
+    // One authored preset per map drives the sky shader, the sun, the fog AND the
+    // image-based lighting, so indirect light always matches the sky the player sees.
+    const atmos = ATMOSPHERES[mapId] ?? ATMOSPHERES.alrasul;
+    this.atmos = atmos;
+    this.grade = GRADES[mapId] ?? GRADES.alrasul;
+    const desert = mapId === 'alrasul' || mapId === 'sirocco';
+    this.scene.background = new THREE.Color(atmos.horizon);
+    this.scene.fog = new THREE.Fog(atmos.fogColor, atmos.fogNear, atmos.fogFar);
+    // Sky fill: trimmed hard now that a real sky probe carries the bounce light.
+    const hemi = new THREE.HemisphereLight(atmos.hemiSky, atmos.hemiGround, atmos.hemiIntensity);
     this.scene.add(hemi);
-    // key sun — desert gets a hard warm noon sun, the town a lower cooler morning key
-    const sun = new THREE.DirectionalLight(golden ? 0xFFC98E : desert ? 0xFFE4BE : 0xF2E9D8, golden ? 3.2 : desert ? 3.0 : 2.5);
-    if (golden) sun.position.set(-70, 34, 30);   // low golden sun: long shadows down the lanes
-    else if (desert) sun.position.set(-65, 52, 40);
-    else sun.position.set(55, 38, -50);
+    // Key sun — direction comes straight from the sky shader's sun vector so the
+    // shadows fall exactly where the visible sun disc says they should.
+    const sun = new THREE.DirectionalLight(atmos.sunColor, atmos.sunIntensity);
+    this.sunDir.set(...atmos.sun).normalize();
+    sun.position.copy(this.sunDir).multiplyScalar(100);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048); // 4x fewer shadow texels than 4096 — big FPS win
+    sun.shadow.mapSize.set(1024, 1024); // applySettings() raises this only if asked
     // Frustum extents/placement are owned by shadow-fit.ts (follows the player,
     // texel-snapped). The sun's authored position above is kept as its DIRECTION.
-    this.sunDir.copy(sun.position).normalize();
     sun.shadow.camera.far = 240;
     this.scene.add(sun.target);
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.04;
+    sun.shadow.bias = -0.00035;
+    sun.shadow.normalBias = 0.035;
     this.scene.add(sun);
     this.sunLight = sun;
-    // gentle cool fill from the opposite side
-    const fill = new THREE.DirectionalLight(0xAFC6DC, desert ? 0.22 : 0.3);
-    fill.position.set(desert ? 55 : -55, 30, desert ? -45 : 45);
+    // Gentle cool bounce from the opposite side — keeps shadow cores from going dead.
+    const fill = new THREE.DirectionalLight(0xAFC6DC, desert ? 0.10 : 0.14);
+    fill.position.set(-this.sunDir.x * 60, 26, -this.sunDir.z * 60);
     this.scene.add(fill);
-    this.scene.add(new THREE.AmbientLight(desert ? 0x8A7A60 : 0x707A78, 0.12));
+    this.scene.add(new THREE.AmbientLight(atmos.ambient, atmos.ambientIntensity));
 
-    this.addSkyDome(mapId);
+    this.sky = buildSky(atmos);
+    this.scene.add(this.sky.mesh);
+    if (atmos.dust > 0.01) {
+      this.dust = new DustField(Math.round(150 * atmos.dust), 28,
+        mapId === 'arena' ? 0xC9D2DC : 0xE8D3AC, 0.05 + atmos.dust * 0.03);
+      this.dust.setOpacity(0.14 + atmos.dust * 0.30);
+      this.scene.add(this.dust.points);
+    }
 
     // Heaviest single stage: procedural texture set plus all world geometry.
     await nextFrame();
     this.world = buildWorld(this.scene, mapId);
     this.buildSolidGrid();
-    const maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    const maxAniso = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
     this.world.group.traverse(o => {
       const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
       if (!mat) return;
-      const m = mat as unknown as { map?: THREE.Texture; bumpMap?: THREE.Texture };
+      const m = mat as unknown as { map?: THREE.Texture; bumpMap?: THREE.Texture; normalMap?: THREE.Texture; roughnessMap?: THREE.Texture };
       if (m.map) m.map.anisotropy = maxAniso;
       if (m.bumpMap) m.bumpMap.anisotropy = maxAniso;
+      if (m.normalMap) m.normalMap.anisotropy = maxAniso;
+      if (m.roughnessMap) m.roughnessMap.anisotropy = maxAniso;
     });
     // Warm interior point lights near the map centre (capped at 2 — each one re-lights every merged mesh)
     const spots = [...this.world.lightSpots].sort((a, b) => a.length() - b.length()).slice(0, 2);
@@ -745,40 +859,31 @@ export class Engine {
     this.effects = new Effects(this.scene);
     await nextFrame();
 
-    // ==================== AAA POST-PROCESSING (bloom + tone-mapped output) ====================
-    this.composer = new EffectComposer(this.renderer);
+    // ==================== POST CHAIN ====================
+    // Multisampled composer buffer: previously turning bloom on silently threw away
+    // canvas MSAA and the whole world went jagged. The chain is now render → bloom →
+    // one combined finishing pass (FXAA + clarity + grade + shafts + vignette + grain).
+    // samples: 0 — the composed path does its own FXAA, so paying for 4x MSAA on a
+    // full-resolution half-float target as well was pure waste (and multisampled
+    // float targets are the least portable thing in WebGL2).
+    this.composerTarget = makeComposerTarget(this.renderer, 0);
+    this.composer = new EffectComposer(this.renderer, this.composerTarget);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    // Bloom at HALF resolution and only on genuinely bright pixels (threshold 0.92) — cheap and clean
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2), 0.28, 0.4, 0.92);
+    // Bloom at HALF resolution and only on genuinely bright pixels — cheap and clean
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2), 0.28, 0.5, 0.86);
     this.composer.addPass(this.bloom);
-    // Light finishing pass: barely-there vignette, no film grain (grain was killing clarity)
-    this.vignettePass = new ShaderPass({
-      uniforms: {
-        tDiffuse: { value: null },
-        uTime: { value: 0 },
-        uVignette: { value: 0.18 },
-        uGrain: { value: 0.0 },
-      },
-      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: `uniform sampler2D tDiffuse; uniform float uTime; uniform float uVignette; uniform float uGrain;
-varying vec2 vUv;
-void main(){
-  vec4 c = texture2D(tDiffuse, vUv);
-  vec2 uv = vUv - 0.5;
-  float d = length(uv);
-  float vig = smoothstep(0.85, 0.28, d);
-  c.rgb *= mix(1.0 - uVignette, 1.0, vig);
-  if (uGrain > 0.0) {
-    float g = (fract(sin(dot(vUv + uTime, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * uGrain;
-    c.rgb += g;
-  }
-  // mild clarity boost — slight contrast, neutral color (no warm tint muddying the image)
-  c.rgb = (c.rgb - 0.5) * 1.04 + 0.5;
-  gl_FragColor = c;
-}`,
-    });
-    this.composer.addPass(this.vignettePass);
+    // Tone-map FIRST, then grade: FXAA, clarity and contrast all want display-referred
+    // values. Grading raw HDR made the vignette and contrast pivot meaningless.
     this.composer.addPass(new OutputPass());
+    this.vignettePass = new ShaderPass({ ...GRADE_SHADER, uniforms: THREE.UniformsUtils.clone(GRADE_SHADER.uniforms) });
+    const gu = this.vignettePass.uniforms;
+    gu.uLift.value.set(...this.grade.lift);
+    gu.uGamma.value.set(...this.grade.gamma);
+    gu.uGain.value.set(...this.grade.gain);
+    gu.uSaturation.value = this.grade.saturation;
+    gu.uContrast.value = this.grade.contrast;
+    gu.uSunColor.value.setHex(atmos.glow);
+    this.composer.addPass(this.vignettePass);
 
     // Accurate tactical map rendered from the real world collision geometry
     await nextFrame();
@@ -1199,12 +1304,17 @@ void main(){
       // Trigger slide: sprint + crouch input simultaneously
       if (this.sprinting && this.grounded && !this.sliding && this.slideCD <= 0) {
         this.startSlide();
-      } else {
-        if (!this.sliding) {
+      } else if (!this.sliding) {
+        // QoL: hold-to-crouch (default) or toggle, chosen in Settings. Toggle players
+        // repeat-fire the keydown while held, so only flip on the first edge.
+        if (this.holdToCrouch) {
+          if (!this.crouched) { this.crouched = true; this.crouchT = 0; this.sprinting = false; }
+        } else if (!this.crouchEdge) {
           this.crouched = !this.crouched;
           this.crouchT = 0;
           if (this.crouched) this.sprinting = false;
         }
+        this.crouchEdge = true;
       }
     }
 
@@ -1224,6 +1334,15 @@ void main(){
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
+    if (e.code === 'KeyC' || e.code === 'ControlLeft') {
+      this.crouchEdge = false;
+      // Hold mode: standing back up must still respect a low ceiling, so route it
+      // through the same clearance check the slide exit uses.
+      if (this.holdToCrouch && this.crouched && !this.sliding
+          && !this.keys.has('KeyC') && !this.keys.has('ControlLeft')) {
+        this.crouched = false; this.crouchT = 0;
+      }
+    }
     // Q is dual-purpose: tap = quick-swap to last weapon, hold = lean left.
     if (e.code === 'KeyQ' && this.qDownT >= 0 && !this.paused && !this.dead && !this.ended) {
       if (performance.now() - this.qDownT < 220 && Math.abs(this.lean) < 0.15) this.switchWeapon(this.lastCur);
@@ -1301,16 +1420,33 @@ void main(){
     await this.canvas.requestPointerLock();
   }
 
+  /**
+   * Two probes, on purpose.
+   *  - The WORLD is lit by a prefiltered bake of the actual sky shader, so stone,
+   *    metal and glass pick up the same zenith blue / horizon amber the player sees.
+   *    This is the single largest reason the maps stopped looking like flat clay.
+   *  - The VIEWMODEL keeps a small studio probe: a gun held 30 cm from the eye needs
+   *    controllable, readable highlights, not whatever the sky happens to be doing.
+   */
   private createReflections() {
     this.reflectionMap?.dispose();
+    this.skyEnv?.dispose();
     const environment = new RoomEnvironment();
     const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.reflectionMap = pmrem.fromScene(environment,0.04);
+    this.reflectionMap = pmrem.fromScene(environment, 0.04);
     this.vmScene.environment = this.reflectionMap.texture;
-    this.vmScene.environmentIntensity = 0.65;
-    this.scene.environment = this.reflectionMap.texture;
-    this.scene.environmentIntensity = 0.25;
+    this.vmScene.environmentIntensity = 0.7;
     environment.dispose(); pmrem.dispose();
+
+    const skyEnv = this.atmos ? bakeEnvironment(this.renderer, this.atmos) : null;
+    if (skyEnv) {
+      this.skyEnv = skyEnv;
+      this.scene.environment = skyEnv;
+      this.scene.environmentIntensity = this.atmos?.envIntensity ?? 0.9;
+    } else {
+      this.scene.environment = this.reflectionMap.texture;
+      this.scene.environmentIntensity = 0.25;
+    }
   }
 
   private onGraphicsLost = (event: Event) => {
@@ -1334,6 +1470,12 @@ void main(){
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
+    // The grade pass samples neighbouring texels for FXAA and clarity; without the
+    // real buffer size it was reading at a hardcoded 1920x1080 and smearing.
+    if (this.vignettePass) {
+      const buffer = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      this.vignettePass.uniforms.uResolution.value.set(Math.max(1, buffer.x), Math.max(1, buffer.y));
+    }
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.vmCamera.aspect = w / h;
@@ -1354,88 +1496,6 @@ void main(){
     this.renderer.setPixelRatio(pr);
     this.composer.setPixelRatio(pr);
   }
-
-  /** Gradient sky dome + sun glow + drifting clouds (cheap, huge visual payoff) */
-  private addSkyDome(mapId: MapId) {
-    const c = document.createElement('canvas');
-    c.width = 4; c.height = 256;
-    const ctx = c.getContext('2d')!;
-    const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    if (mapId === 'sirocco') {
-      // Sirocco late afternoon: dusty steel-blue zenith melting into a burnt-gold horizon.
-      grad.addColorStop(0, '#4F6F93');
-      grad.addColorStop(0.38, '#8EA3B1');
-      grad.addColorStop(0.56, '#D9BE93');
-      grad.addColorStop(0.7, '#EDC48A');
-      grad.addColorStop(0.84, '#F2AE66');
-      grad.addColorStop(1, '#E09A58');
-    } else if (mapId === 'kasbah') {
-      // Cool hazy hill-town morning: blue-grey dome, pale horizon, no amber base.
-      grad.addColorStop(0, '#3E668F');
-      grad.addColorStop(0.4, '#87A6BC');
-      grad.addColorStop(0.58, '#B7C5CC');
-      grad.addColorStop(0.72, '#D3D6CE');
-      grad.addColorStop(0.85, '#DFD9C6');
-      grad.addColorStop(1, '#D8CCB4');
-    } else {
-      // Hot desert noon: deep zenith blue burning into an amber horizon.
-      grad.addColorStop(0, '#4A78A6');
-      grad.addColorStop(0.4, '#93B6C8');
-      grad.addColorStop(0.58, '#D8C7A0');
-      grad.addColorStop(0.72, '#F0D6A2');
-      grad.addColorStop(0.85, '#F6C888');
-      grad.addColorStop(1, '#EAB878');
-    }
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 4, 256);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(420, 24, 16),
-      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })
-    );
-    dome.renderOrder = -10;
-    this.scene.add(dome);
-    // Sun glow billboard
-    const sc = document.createElement('canvas');
-    sc.width = 128; sc.height = 128;
-    const sctx = sc.getContext('2d')!;
-    const rg = sctx.createRadialGradient(64, 64, 4, 64, 64, 64);
-    rg.addColorStop(0, 'rgba(255,250,230,1)');
-    rg.addColorStop(0.25, 'rgba(255,240,200,0.85)');
-    rg.addColorStop(1, 'rgba(255,240,200,0)');
-    sctx.fillStyle = rg;
-    sctx.fillRect(0, 0, 128, 128);
-    const sunTex = new THREE.CanvasTexture(sc);
-    const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, fog: false, depthWrite: false, transparent: true }));
-    if (mapId === 'kasbah') { sunSpr.position.set(200, 150, -180); sunSpr.scale.setScalar(84); } // lower, paler morning sun
-    else if (mapId === 'sirocco') { sunSpr.position.set(-300, 140, 125); sunSpr.scale.setScalar(150); } // big low sun behind A long
-    else { sunSpr.position.set(-220, 200, 150); sunSpr.scale.setScalar(110); }
-    this.scene.add(sunSpr);
-    this.scene.add(this.clouds);
-    // A few flat drifting clouds
-    const [cc, cctx] = this.makeCanvas(256, 128);
-    for (let i = 0; i < 8; i++) {
-      const x = 35 + i * 25, y = 65 + Math.sin(i * 1.9) * 13, r = 24 + (i % 3) * 6;
-      const gradient = cctx.createRadialGradient(x,y,3,x,y,r);
-      gradient.addColorStop(0,'rgba(255,251,238,.5)');
-      gradient.addColorStop(.55,'rgba(245,237,216,.3)');
-      gradient.addColorStop(1,'rgba(245,237,216,0)');
-      cctx.fillStyle = gradient; cctx.fillRect(x-r,y-r,r*2,r*2);
-    }
-    const cloudTexture = new THREE.CanvasTexture(cc);
-    cloudTexture.colorSpace = THREE.SRGBColorSpace;
-    const cloudMat = new THREE.SpriteMaterial({ map:cloudTexture, color:0xffffff, transparent:true, opacity:0.7, fog:false, depthWrite:false });
-    for (let i = 0; i < 7; i++) {
-      const cl = new THREE.Sprite(cloudMat);
-      const a = i * 2.39996;
-      cl.position.set(Math.cos(a)*230,100+(i%3)*16,Math.sin(a)*230);
-      cl.scale.set(110+(i%3)*20,45,1);
-      this.clouds.add(cl);
-    }
-  }
-
-
 
   private eyePos(): THREE.Vector3 { return V().set(this.pos.x, this.pos.y + this.eyeH, this.pos.z); }
   private camDir(): THREE.Vector3 { const d = V(); this.camera.getWorldDirection(d); return d; }
@@ -1734,15 +1794,25 @@ void main(){
       }
     }
 
+    // Audio beats are expressed as fractions of the reload so they stay locked to
+    // the animation phases in animateViewmodel() no matter how long the weapon
+    // takes. They used to be absolute seconds, which drifted badly off the visuals
+    // on slow reloads: you heard the magazine seat while it was still off-screen.
     const stages: { t: number; stage: HudState['reloadStage']; fn: () => void }[] = [
       {
-        t: 0.28, stage: 'magOut', fn: () => {
+        t: this.reloadDur * 0.26, stage: 'magOut', fn: () => {
           this.currentReloadStage = 'magOut';
           if (d.audioTag === 'lmg') audio.beltCoverOpen(); else audio.magOut();
         },
       },
       {
-        t: this.reloadDur * 0.55, stage: 'magIn', fn: () => {
+        // The empty hits the ground shortly after it clears the well.
+        t: this.reloadDur * 0.44, stage: 'magOut', fn: () => {
+          if (d.audioTag !== 'lmg' && !d.pumpShotgun) audio.magDrop(audio.indoor);
+        },
+      },
+      {
+        t: this.reloadDur * 0.78, stage: 'magIn', fn: () => {
           this.currentReloadStage = 'magIn';
           if (d.audioTag === 'lmg') audio.beltCoverClose();
           else if (d.pumpShotgun) audio.shellInsert();
@@ -1763,7 +1833,7 @@ void main(){
     ];
     if (empty) {
       stages.push({
-        t: this.reloadDur * 0.82, stage: 'ready', fn: () => {
+        t: this.reloadDur * 0.90, stage: 'ready', fn: () => {
           this.currentReloadStage = 'ready';
           audio.boltRelease();
         },
@@ -1908,6 +1978,7 @@ void main(){
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         if (part === 'head') audio.headshotDink();
+        this.noteDamage(h.point, dmg, part === 'head', false, tdmBot.name);
         if (tdmBot.takeDamage(dmg, part === 'head', 'player', false)) {
           this.kills++;
           this.score += part === 'head' ? 150 : 100;
@@ -1937,6 +2008,7 @@ void main(){
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         if (part === 'head') audio.headshotDink();
+        this.noteDamage(h.point, dmg, part === 'head', false, tdmBot.name);
         const killed = tdmBot.takeDamage(dmg, part === 'head', 'player');
         if (killed) {
           if (part === 'head') { this.headshots++; voice.headshot(); }
@@ -1966,6 +2038,7 @@ void main(){
         // Headshot "dink" rings on EVERY head hit — the reward cue lands even
         // when the target survives (and stacks under the kill confirm when not).
         if (part === 'head') audio.headshotDink();
+        this.noteDamage(h.point, dmg, part === 'head', false, enemy.name);
         const killed = enemy.takeDamage(dmg, part === 'head');
         if (killed) {
           this.kills++;
@@ -2046,6 +2119,7 @@ void main(){
       else if (tag === 'vector') audio.fireVector();
       else if (tag === 'lmg') audio.fireLMG();
       else if (tag === 'deagle') audio.fireDeagle();
+      else if (tag === 'aug') audio.fireAUG();
       else audio.fireSMG();
     }
     // Every shot ejects: the delayed metallic tink lands ~90 ms after the report,
@@ -3206,11 +3280,12 @@ void main(){
   };
 
   private update(dt: number) {
-    this.clouds.rotation.y += dt * 0.0012;
     const k = this.keys;
 
-    // Animated film grain
-    this.vignettePass.uniforms.uTime.value = performance.now() / 1000;
+    // Animated film grain + drifting cloud deck share one clock.
+    const now = performance.now() / 1000;
+    this.vignettePass.uniforms.uTime.value = now;
+    if (this.sky) this.sky.uniforms.uTime.value = now;
 
     // UPDATE SPATIAL AUDIO LISTENER POSITION & FORWARD/UP ORIENTATION
     const eye = this.isDefusal && this.dead ? this.camera.position.clone() : this.eyePos();
@@ -3280,7 +3355,12 @@ void main(){
     const wasSprinting = this.sprinting;
     // Cannot sprint from crouch without standing first
     // Cannot sprint while aiming down sights or while leaning
-    this.sprinting = k.has('ShiftLeft') && !this.rmb && iz < 0 && !this.crouched && !this.sliding
+    // QoL: auto-sprint holds Shift for you once you have been running forward for
+    // a moment — it never fires mid-ADS, mid-reload or while leaning.
+    if (this.autoSprint && iz < 0 && !this.rmb && !this.crouched) this.autoSprintT += dt;
+    else this.autoSprintT = 0;
+    const sprintHeld = k.has('ShiftLeft') || (this.autoSprint && this.autoSprintT > 0.45);
+    this.sprinting = sprintHeld && !this.rmb && iz < 0 && !this.crouched && !this.sliding
       && this.ads < 0.25 && this.reloadT < 0 && this.switchT < 0 && Math.abs(this.lean) < 0.25 && moving;
 
     if (wasSprinting && !this.sprinting) {
@@ -3515,6 +3595,7 @@ void main(){
     this.composeCamera(dt);
     this.animateViewmodel(dt);
     this.camera.updateMatrixWorld(true);
+    this.updateAtmosphere(dt);
     if (this.isTDM && this.tdm) {
       this.tdm.update(dt);
       // player respawn cooldown
@@ -3672,59 +3753,101 @@ void main(){
     const magHomeZ = (magObj.userData.homeZ as number | undefined) ?? 0;
     if (this.reloadT >= 0) {
       const rt = this.reloadT / this.reloadDur;
-      const dip = Math.sin(Math.min(1, rt) * Math.PI);
       const tag = d.audioTag ?? 'm4';
+      // ---- RELOAD CHOREOGRAPHY -------------------------------------------
+      // The old animation was one symmetric sine over the whole duration: the gun
+      // sank, came back, and nothing else happened — no beats, no weight, no snap.
+      // Now the body motion is built from named phases that line up with what the
+      // hands are doing, so the magazine leaving and the bolt running are readable.
+      //   index  : rifle rotates into the workspace and settles there
+      //   settle : held steady while the hands work (this is the bit that was missing)
+      //   recover: rolls back out to the firing position
+      const index = ease01(rt / 0.16);                       // 0 -> 1 over the first 16%
+      const recover = ease01((rt - 0.86) / 0.14);            // 1 -> 0 over the last 14%
+      const hold = index * (1 - recover);                    // plateau in the middle
+      // Short impulses layered on top of the plateau.
+      const pulse = (at: number, width: number) => {
+        const x = (rt - at) / width;
+        return x <= -1 || x >= 1 ? 0 : Math.cos(x * Math.PI / 2) ** 2;
+      };
+      const stripSnap = pulse(0.27, 0.05);   // empty magazine torn out
+      const seatSlam = pulse(0.79, 0.055);   // fresh magazine driven home
+      const boltSnap = pulse(0.905, 0.045);  // bolt released
       if (tag === 'ak') {
-        // AK: rock-and-lock — the rifle rolls hard left and NOSES UP while the
-        // mag pivots out forward, then slams back with a visible counter-rock.
-        py -= dip * 0.06 * S; rx -= dip * 0.28; rz += dip * 0.45; ry -= dip * 0.10;
-        const rock = rt > 0.5 && rt < 0.62 ? Math.sin(((rt - 0.5) / 0.12) * Math.PI) : 0;
-        rz -= rock * 0.12; // the slap when the fresh mag seats
+        // Rock-and-lock: the rifle rolls hard left and noses up, the mag pivots out
+        // forward off the front catch, then a visible counter-rock as it locks.
+        py -= hold * 0.055 * S; rx -= hold * 0.26; rz += hold * 0.46; ry -= hold * 0.11;
+        rz -= seatSlam * 0.16; rx += seatSlam * 0.08;
+        rz += stripSnap * 0.07;
       } else if (tag === 'sniper') {
-        // AWM: roll right into the workspace, feed the stubby mag from below,
-        // then a long bolt stroke re-cocks (chargingHandle slides back).
-        py -= dip * 0.08 * S; rx -= dip * 0.30; rz -= dip * 0.35; ry += dip * 0.08;
+        py -= hold * 0.075 * S; rx -= hold * 0.28; rz -= hold * 0.34; ry += hold * 0.09;
         const boltP = rt > 0.72 ? Math.sin(Math.min(1, (rt - 0.72) / 0.24) * Math.PI) : 0;
         d.model.chargingHandle.position.z = boltP * 0.06;
+        rx -= boltP * 0.05;
       } else if (tag === 'pistol' || tag === 'deagle') {
-        // Pistols: muzzle tips up near the face, mag drops fast, slide runs.
-        py -= dip * 0.05 * S; rx += dip * 0.22; rz += dip * 0.18; pz -= dip * 0.02;
-        const slideP = rt > 0.78 ? Math.sin(Math.min(1, (rt - 0.78) / 0.2) * Math.PI) : 0;
-        d.model.chargingHandle.position.z = slideP * 0.04;
+        py -= hold * 0.045 * S; rx += hold * 0.24; rz += hold * 0.20; pz -= hold * 0.02;
+        const slideP = rt > 0.80 ? Math.sin(Math.min(1, (rt - 0.80) / 0.18) * Math.PI) : 0;
+        d.model.chargingHandle.position.z = slideP * 0.042;
+        pz += seatSlam * 0.012;
       } else if (tag === 'lmg') {
-        // Cradle the SAW in frame so its hinged cover and feed tray stay readable.
-        py -= dip * 0.04 * S; rz += dip * 0.30; rx += dip * 0.18;
-        d.model.chargingHandle.rotation.x = -dip * 1.15; // cover stays on its front hinge
+        py -= hold * 0.04 * S; rz += hold * 0.30; rx += hold * 0.18;
+        d.model.chargingHandle.rotation.x = -hold * 1.15;
       } else if (tag === 'shotgun') {
-        // SPAS: cradled low and rolled, shells thumbed into the tube.
-        py -= dip * 0.07 * S; rx -= dip * 0.30; rz += dip * 0.30;
+        // Shell-by-shell: a small rhythmic nudge per round rather than one dip.
+        py -= hold * 0.065 * S; rx -= hold * 0.28; rz += hold * 0.30;
+        rx += Math.sin(rt * Math.PI * 8) * hold * 0.022;
       } else if (tag === 'smg' || tag === 'vector') {
-        // PDWs: fast, twitchy — sharp cant, quick mag punch, minimal dip.
-        py -= dip * 0.055 * S; rx -= dip * 0.30; rz += dip * 0.32; ry += dip * 0.06;
+        py -= hold * 0.05 * S; rx -= hold * 0.28; rz += hold * 0.34; ry += hold * 0.07;
+        rz -= seatSlam * 0.10;
+      } else if (tag === 'aug') {
+        // Bullpup: the magwell is behind the grip, so the rifle barely has to move —
+        // it cants inboard and the support hand comes back past the cheek instead.
+        py -= hold * 0.032 * S; rx -= hold * 0.16; rz += hold * 0.30; ry -= hold * 0.16;
+        pz += hold * 0.012;
+        rz -= seatSlam * 0.12; py -= seatSlam * 0.006 * S;
+        rx -= boltSnap * 0.06;
       } else {
-        // AR family (M416/SCAR): controlled tactical reload at chest height.
-        py -= dip * 0.08 * S; rx -= dip * 0.40; rz += dip * 0.24;
+        // AR family: controlled tactical reload held at chest height.
+        py -= hold * 0.070 * S; rx -= hold * 0.34; rz += hold * 0.26; ry -= hold * 0.05;
+        rz -= seatSlam * 0.11; py -= seatSlam * 0.008 * S;
+        rx -= boltSnap * 0.07; pz += boltSnap * 0.010;
       }
       if (!d.pumpShotgun) {
-        // Mag travel: straight drop for STANAG guns, forward pivot for the AK rock.
-        const out = rt > 0.14 && rt < 0.58 ? Math.sin(((rt - 0.14) / 0.44) * Math.PI) : 0;
-        magObj.position.y = magHomeY - out * 0.17 * S;
+        // Magazine travel: it is gripped until 0.27, torn free, then falls away and
+        // is hidden while the hand is at the pouch. It reappears on the way back up.
+        const dropT = (rt - 0.24) / 0.22;
         if (tag === 'ak') {
+          const out = rt > 0.14 && rt < 0.58 ? Math.sin(((rt - 0.14) / 0.44) * Math.PI) : 0;
+          magObj.position.y = magHomeY - out * 0.17 * S;
           magObj.position.z = magHomeZ - out * 0.05 * S;
           magObj.rotation.x = out * 0.5;
+          magObj.visible = true;
+        } else if (rt < 0.24) {
+          magObj.position.y = magHomeY; magObj.visible = true;
+        } else if (dropT < 1) {
+          // Accelerating fall: gravity, not a sine wave.
+          magObj.position.y = magHomeY - dropT * dropT * 0.34 * S;
+          magObj.rotation.x = dropT * 0.55;
+          magObj.visible = true;
+        } else if (rt < 0.66) {
+          magObj.visible = false;   // in the hand, off-screen at the pouch
+        } else {
+          // Fresh magazine rides the hand up and seats at 0.80.
+          const up = Math.min(1, (rt - 0.66) / 0.14);
+          magObj.visible = true;
+          magObj.position.y = magHomeY - (1 - ease01(up)) * 0.20 * S;
+          magObj.rotation.x = (1 - up) * 0.24;
         }
       }
       this.poseLArm(d, rt);
     } else {
       magObj.position.y = magHomeY;
-      if (d.audioTag === 'ak') { magObj.position.z = magHomeZ; magObj.rotation.x = 0; }
+      magObj.rotation.x = 0;
+      magObj.visible = true;
+      if (d.audioTag === 'ak') magObj.position.z = magHomeZ;
       if (d.audioTag === 'lmg') d.model.chargingHandle.rotation.x *= 1 - Math.min(1, dt * 10);
       if ((d.boltAction ?? this.cur === 3) && this.boltCycle <= 0) d.model.chargingHandle.position.z = (d.model.chargingHandle.userData.homeZ as number | undefined) ?? 0;
-      if (d.model.lArm) {
-        d.model.lArm.position.multiplyScalar(1 - Math.min(1, dt * 14));
-        d.model.lArm.rotation.x *= 1 - Math.min(1, dt * 14);
-        d.model.lArm.rotation.z *= 1 - Math.min(1, dt * 14);
-      }
+      this.restArm(d, dt);
     }
 
     // Switch raise
@@ -3828,7 +3951,15 @@ void main(){
   }
   private sprintPose = 0;
 
-  /** Drives the viewmodel left arm through reload keyframes (mag grab → pull → seat → tap). */
+  /**
+   * Drives the viewmodel left arm through the reload beats.
+   *
+   * The keys are absolute HAND TARGETS in gun space; the two-bone solver in
+   * weapons/core.ts puts the elbow somewhere anatomically plausible between the
+   * pinned shoulder and that target. The previous version translated the whole
+   * rigid arm, which is what dragged the shoulder and forearm straight through
+   * the receiver on every magazine change.
+   */
   private poseLArm(d: { model: { lArm: THREE.Object3D | null; lArmKeys: { t: number; p: [number, number, number]; r: [number, number, number] }[] } }, rt: number) {
     const arm = d.model.lArm;
     const keys = d.model.lArmKeys;
@@ -3837,18 +3968,64 @@ void main(){
     while (i < keys.length - 2 && rt > keys[i + 1].t) i++;
     const k0 = keys[i], k1 = keys[i + 1];
     const f = Math.max(0, Math.min(1, (rt - k0.t) / Math.max(0.0001, k1.t - k0.t)));
-    const s = f * f * (3 - 2 * f); // smoothstep — no snapping between keys
-    arm.position.set(
+    // Ease each beat independently; a single global curve makes every reload feel
+    // like one slow slide instead of a sequence of deliberate actions.
+    const s = f * f * (3 - 2 * f);
+    this._armTarget.set(
       k0.p[0] + (k1.p[0] - k0.p[0]) * s,
       k0.p[1] + (k1.p[1] - k0.p[1]) * s,
       k0.p[2] + (k1.p[2] - k0.p[2]) * s,
     );
-    arm.rotation.set(
-      k0.r[0] + (k1.r[0] - k0.r[0]) * s,
-      k0.r[1] + (k1.r[1] - k0.r[1]) * s,
-      k0.r[2] + (k1.r[2] - k0.r[2]) * s,
-    );
+    const roll = k0.r[2] + (k1.r[2] - k0.r[2]) * s;
+    solveArm(arm, this._armTarget, roll);
+    const rig = arm.userData.rig as { hand?: THREE.Object3D } | undefined;
+    if (rig?.hand) {
+      rig.hand.rotation.set(
+        k0.r[0] + (k1.r[0] - k0.r[0]) * s,
+        k0.r[1] + (k1.r[1] - k0.r[1]) * s,
+        0,
+      );
+    }
   }
+  private _armTarget = new THREE.Vector3();
+  /** Where the support hand rests when nothing is animating it. */
+  private restArm(d: { model: { lArm: THREE.Object3D | null } }, dt: number) {
+    const arm = d.model.lArm;
+    const rig = arm?.userData.rig as { rest: THREE.Vector3; hand: THREE.Object3D } | undefined;
+    if (!arm || !rig) return;
+    // Ease back rather than snapping, so finishing a reload settles instead of popping.
+    this._armTarget.copy(rig.rest);
+    solveArm(arm, this._armTarget, 0);
+    rig.hand.rotation.x *= 1 - Math.min(1, dt * 14);
+    rig.hand.rotation.y *= 1 - Math.min(1, dt * 14);
+  }
+
+  /**
+   * Keeps the sky centred on the eye (so it reads as infinitely far), drifts the
+   * dust field with the player, and projects the sun into screen space for the
+   * light-shaft pass — shafts fade out as the sun leaves the frame or goes behind
+   * the viewer, which is what stops them from smearing across the whole screen.
+   */
+  private updateAtmosphere(dt: number) {
+    const cam = this.camera;
+    if (this.sky) this.sky.mesh.position.copy(cam.position);
+    if (this.dust) this.dust.update(dt, cam.position);
+    const u = this.vignettePass?.uniforms;
+    if (!u || !this.atmos) return;
+    if (this.shaftStrength > 0.001) {
+      this._sunScreen.set(...this.atmos.sun).normalize().multiplyScalar(300).add(cam.position).project(cam);
+      const behind = this._sunScreen.z > 1;
+      const sx = this._sunScreen.x * 0.5 + 0.5, sy = this._sunScreen.y * 0.5 + 0.5;
+      // Falls off smoothly outside the frame instead of snapping off at the edge.
+      const off = Math.max(Math.abs(sx - 0.5), Math.abs(sy - 0.5));
+      const vis = behind ? 0 : Math.max(0, 1 - Math.max(0, off - 0.5) / 0.55);
+      u.uSunUv.value.set(sx, sy);
+      u.uShafts.value = this.shaftStrength * vis;
+    } else {
+      u.uShafts.value = 0;
+    }
+  }
+  private shaftStrength = 0;
 
   private render() {
     // Static architecture shadows refresh only on construction/settings/destruction.
@@ -3880,8 +4057,18 @@ void main(){
         this.lastShadowHash = curHash;
       }
     }
-    if (this.postFxOn) {
-      this.composer.render();
+    if (this.postFxOn && !this.postFxBroken) {
+      // Safety net: if the composed path ever throws (incomplete framebuffer,
+      // unsupported target format, lost context...) fall back to direct rendering
+      // permanently rather than handing the player a black screen with a working HUD.
+      try {
+        this.composer.render();
+      } catch (err) {
+        this.postFxBroken = true;
+        console.warn('[recoil] post-processing disabled — falling back to direct rendering', err);
+        this.renderer.autoClear = true;
+        this.renderer.render(this.scene, this.camera);
+      }
     } else {
       // No post FX active — render direct, skipping 3 fullscreen passes entirely
       this.renderer.autoClear = true;
@@ -3949,25 +4136,72 @@ void main(){
     }
     this.renderer.shadowMap.needsUpdate = true;
 
-    // Post FX
+    // Post FX. The finishing pass is one shader, so everything below is a uniform
+    // flip rather than adding or removing passes mid-match (which recompiles).
     this.bloom.enabled = s.bloom;
     this.bloom.strength = s.bloomStrength / 100;
-    // The vignette is a CSS overlay now (vignetteOverlay() / App.tsx): it used to be
-    // the ONLY reason the default settings ran the whole off-screen post chain
-    // (full-res render target + 2 fullscreen passes), and that chain renders into a
-    // non-multisampled target — so players paid for canvas MSAA and got an aliased
-    // world. Post now runs only for effects that genuinely need it.
-    this.vignettePass.uniforms.uVignette.value = 0;
-    this.vignettePass.uniforms.uGrain.value = s.filmGrain / 100 * 0.06;
-    this.vignettePass.enabled = s.filmGrain > 0;
+    const u = this.vignettePass.uniforms;
+    // The screen vignette stays a CSS overlay (App.tsx) so it is free when the post
+    // chain is off; the shader copy is kept at 0 to avoid doubling it up.
+    u.uVignette.value = 0;
+    u.uGrain.value = s.filmGrain / 100 * 0.07;
+    u.uSharpen.value = s.sharpness / 100 * 0.55;
+    u.uAberration.value = s.aberration / 100;
+    u.uFxaa.value = s.postProcess ? 1 : 0;
+    this.shaftStrength = s.sunShafts ? 1 : 0;
+    this.vignettePass.enabled = true;
     this.postFxOn = usesPostChain(s);
-    this.renderer.toneMappingExposure = s.brightness / 100;
+    this.renderer.toneMappingExposure = (s.brightness / 100) * (this.atmos?.exposure ?? 1);
     this.motionBlurAmount = s.cameraShake / 100;
+    this.damageNumbersOn = s.damageNumbers;
+    this.holdToCrouch = s.holdToCrouch;
+    this.autoSprint = s.autoSprint;
+    this.showDamageLog = s.showDamageLog;
+    this.perfOverlay = s.perfOverlay;
+    audio.setMix({
+      sfx: s.sfxVolume / 100,
+      footsteps: s.footstepVolume / 100,
+      music: s.musicVolume / 100,
+      range: s.dynamicRange,
+    });
   }
+
+  /** Texture memory is chosen once, before the world builds — changing it later
+   *  would orphan every uploaded map, so the engine reads it at construction. */
+  static applyTextureQuality(q: GameSettings['textureQuality']) {
+    setTextureQuality(q === 'low' ? 0.375 : q === 'medium' ? 0.625 : 1);
+  }
+  /** QoL: floating combat text. World-anchored so the number stays on the target. */
+  private dmgNums: { pos: THREE.Vector3; dmg: number; head: boolean; kill: boolean; born: number }[] = [];
+  private dmgLog: { text: string; dmg: number; born: number }[] = [];
+  private _dmgProj = new THREE.Vector3();
+  private noteDamage(point: THREE.Vector3, dmg: number, head: boolean, kill: boolean, who = '') {
+    if (!this.damageNumbersOn) return;
+    const now = performance.now() / 1000;
+    // Merge rapid hits on the same spot (automatic fire) into one rising total,
+    // otherwise a 900 RPM PDW paints the screen with a wall of 12s.
+    const last = this.dmgNums[this.dmgNums.length - 1];
+    if (last && now - last.born < 0.22 && last.pos.distanceToSquared(point) < 0.6 && !last.kill) {
+      last.dmg += dmg; last.born = now; last.head = last.head || head; last.kill = kill;
+    } else {
+      this.dmgNums.push({ pos: point.clone(), dmg, head, kill, born: now });
+      if (this.dmgNums.length > 14) this.dmgNums.shift();
+    }
+    const entry = this.dmgLog[0];
+    if (entry && now - entry.born < 1.4 && entry.text === who) entry.dmg += dmg;
+    else { this.dmgLog.unshift({ text: who, dmg, born: now }); if (this.dmgLog.length > 6) this.dmgLog.pop(); }
+  }
+  private damageNumbersOn = true;
+  private holdToCrouch = true;
+  private autoSprint = false;
+  private autoSprintT = 0;
+  private crouchEdge = false;
 
   motionBlurAmount = 1;
   private frameNo = 0;
   private postFxOn = true;
+  /** Latched when the composed path fails once; never retried for this session. */
+  private postFxBroken = false;
   // Adaptive resolution: holds FPS by scaling render resolution within the user's cap
   private userPR = 1;
   private dynPR = 1;
@@ -4026,9 +4260,16 @@ void main(){
   }
 
   private recordFrameForScaling(frameSeconds: number) {
+    // Smoothed frame time for the perf overlay — raw per-frame values are unreadable.
+    if (frameSeconds > 0 && frameSeconds < ADAPT_STALL_SECONDS) {
+      this.lastFrameMs += (frameSeconds * 1000 - this.lastFrameMs) * 0.1;
+    }
     if (frameSeconds <= 0 || frameSeconds > ADAPT_STALL_SECONDS) return;
     if (this.adaptSamples.length < 480) this.adaptSamples.push(frameSeconds);
   }
+  private lastFrameMs = 16.7;
+  private showDamageLog = false;
+  private perfOverlay = false;
 
   setPaused(p: boolean) {
     if (!p && this.graphicsLost) return;
@@ -4077,7 +4318,38 @@ void main(){
       const d = lm.at.distanceTo(this.pos);
       if (d < bestDist && d < 80) { bestDist = d; landmark = { name: lm.name, dist: Math.round(d), angle: this.dirToScreenDeg(lm.at) }; }
     }
+    // QoL: project world-anchored damage numbers into screen space, drop the stale
+    // ones and anything that ended up behind the camera.
+    const nowS = performance.now() / 1000;
+    let damageNumbers: HudState['damageNumbers'];
+    if (this.damageNumbersOn && this.dmgNums.length) {
+      damageNumbers = [];
+      for (let i = this.dmgNums.length - 1; i >= 0; i--) {
+        const d = this.dmgNums[i];
+        const age = nowS - d.born;
+        if (age > 1.15) { this.dmgNums.splice(i, 1); continue; }
+        this._dmgProj.copy(d.pos).project(this.camera);
+        if (this._dmgProj.z > 1) continue;
+        damageNumbers.push({
+          x: this._dmgProj.x * 0.5 + 0.5, y: -this._dmgProj.y * 0.5 + 0.5,
+          dmg: Math.round(d.dmg), head: d.head, kill: d.kill, age,
+        });
+      }
+    }
+    let damageLog: HudState['damageLog'];
+    if (this.showDamageLog && this.dmgLog.length) {
+      damageLog = this.dmgLog
+        .filter(e => nowS - e.born < 6)
+        .map(e => ({ text: e.text, dmg: Math.round(e.dmg), age: nowS - e.born }));
+    }
+    const info = this.renderer.info;
+    const perf = this.perfOverlay
+      ? { draws: info.render.calls, tris: info.render.triangles, frameMs: this.lastFrameMs, programs: info.programs?.length ?? 0 }
+      : null;
     return {
+      damageNumbers,
+      damageLog,
+      perf,
       hp: Math.round(this.hp),
       mag: this.mags[this.cur],
       weapon: this.def().name,
@@ -4256,6 +4528,9 @@ void main(){
     });
     for (const geometry of geometries) geometry.dispose();
     this.reflectionMap?.dispose();
+    this.skyEnv?.dispose();
+    this.composerTarget?.dispose();
+    this.dust = null; this.sky = null;
     this.renderer.dispose();
   }
 }

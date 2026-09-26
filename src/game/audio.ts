@@ -1,9 +1,30 @@
 // Recoil FPS — Spatial Audio Engine (Web Audio API with HRTF PannerNodes)
+export type StepSurface = 'sand' | 'concrete' | 'wood' | 'metal' | 'gravel' | 'grass';
+
+export interface MixSettings {
+  /** 0-1.5 weapon/world SFX trim. */
+  sfx?: number;
+  /** 0-1.5 footstep + foley trim. */
+  footsteps?: number;
+  /** 0-1 stingers and music beds. */
+  music?: number;
+  /** Output limiting: 'night' squashes hard for headphones after dark. */
+  range?: 'night' | 'normal' | 'wide';
+}
+
 export class SpatialAudioEngine {
   ctx: AudioContext | null = null;
+  /** SFX bus. Everything that is not a footstep or music connects here. */
   master: GainNode | null = null;
+  /** True output trim, downstream of every bus — this is the master volume slider. */
+  out: GainNode | null = null;
+  /** Footsteps, foley and gear rattle. Separately mixable: players fight over this. */
+  stepBus: GainNode | null = null;
+  musicBus: GainNode | null = null;
   comp: DynamicsCompressorNode | null = null;
   makeup: GainNode | null = null;
+  /** Optional output limiter for the dynamic-range preset; bypassed on 'normal'. */
+  rangeComp: DynamicsCompressorNode | null = null;
   echoBus: DelayNode | null = null;
   echoFb: GainNode | null = null;
   echoGain: GainNode | null = null;
@@ -13,14 +34,17 @@ export class SpatialAudioEngine {
   // Volume is stored even before the AudioContext exists: a settings tweak on the main
   // menu must not spin up the context (and the wind bed!) outside a live mission.
   private volume01 = 1;
+  private mix: Required<MixSettings> = { sfx: 1, footsteps: 1, music: 0.6, range: 'normal' };
   private spatialVoices = new Map<PannerNode,{send:GainNode; expires:number}>();
+  /** Which foot is next. Real walking alternates; identical repeats sound robotic. */
+  private footLeft = false;
 
   ensure(): AudioContext {
     if (!this.ctx) {
       const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = Math.max(0, Math.min(1.2, this.volume01)) * 0.85;
+      this.master.gain.value = this.mix.sfx;
       // Master bus glue: stacked gunshot bursts (gains 1.0 + 0.68 + 0.42) plus
       // explosions and callouts used to hard-clip the destination. Gentle 4:1
       // at −18 dB keeps transients punchy without the digital crunch.
@@ -33,9 +57,27 @@ export class SpatialAudioEngine {
       // because the squash happens before this gain stage, not after.
       this.makeup = this.ctx.createGain();
       this.makeup.gain.value = 1.12;
-      this.master.connect(this.comp);
+      // Bus tree: sfx / footsteps / music sum into `out` (the master volume), then
+      // through the locked glue compressor and an optional dynamic-range limiter.
+      this.out = this.ctx.createGain();
+      this.out.gain.value = Math.max(0, Math.min(1.2, this.volume01)) * 0.85;
+      this.stepBus = this.ctx.createGain();
+      this.stepBus.gain.value = this.mix.footsteps;
+      this.musicBus = this.ctx.createGain();
+      this.musicBus.gain.value = this.mix.music;
+      this.master.connect(this.out);
+      this.stepBus.connect(this.out);
+      this.musicBus.connect(this.out);
+      this.out.connect(this.comp);
       this.comp.connect(this.makeup);
-      this.makeup.connect(this.ctx.destination);
+      this.rangeComp = this.ctx.createDynamicsCompressor();
+      this.rangeComp.threshold.value = 0;
+      this.rangeComp.ratio.value = 1;
+      this.rangeComp.attack.value = 0.002;
+      this.rangeComp.release.value = 0.25;
+      this.makeup.connect(this.rangeComp);
+      this.rangeComp.connect(this.ctx.destination);
+      this.applyMix();
 
       // Reverb/Echo bus
       this.echoBus = this.ctx.createDelay(1.0);
@@ -127,7 +169,29 @@ export class SpatialAudioEngine {
     this.volume01 = Math.max(0, Math.min(1.2, v));
     // Deliberately does NOT call ensure(): adjusting volume from the menu before the
     // first deploy must not wake the AudioContext and start the ambient wind forever.
-    if (this.ctx && this.master) this.master.gain.value = this.volume01 * 0.85;
+    if (this.ctx && this.out) this.out.gain.value = this.volume01 * 0.85;
+  }
+
+  /** Per-bus trims + output limiting. Same no-wake contract as setMasterVolume(). */
+  setMix(m: MixSettings) {
+    if (m.sfx !== undefined) this.mix.sfx = Math.max(0, Math.min(1.5, m.sfx));
+    if (m.footsteps !== undefined) this.mix.footsteps = Math.max(0, Math.min(1.5, m.footsteps));
+    if (m.music !== undefined) this.mix.music = Math.max(0, Math.min(1.5, m.music));
+    if (m.range !== undefined) this.mix.range = m.range;
+    this.applyMix();
+  }
+
+  private applyMix() {
+    if (!this.ctx) return;
+    if (this.master) this.master.gain.value = this.mix.sfx;
+    if (this.stepBus) this.stepBus.gain.value = this.mix.footsteps;
+    if (this.musicBus) this.musicBus.gain.value = this.mix.music;
+    if (this.rangeComp) {
+      // 'night' pulls quiet detail up and caps the gunfire; 'wide' gets out of the way.
+      const r = this.mix.range;
+      this.rangeComp.threshold.value = r === 'night' ? -30 : r === 'wide' ? 0 : -6;
+      this.rangeComp.ratio.value = r === 'night' ? 8 : r === 'wide' ? 1 : 3;
+    }
   }
 
   /** Freeze the whole audio bed (wind + echo + in-flight one-shots) while paused or between missions. */
@@ -283,6 +347,21 @@ export class SpatialAudioEngine {
     // Pump-action cycle: back-clack + forward-slam.
     this.burstDirect({ dur: 0.03, gain: 0.30, freq: 1800, q: 1.6 });
     this.burstDirect({ dur: 0.035, gain: 0.36, freq: 2400, q: 1.6, when: 0.14 });
+  }
+
+  /** Steyr AUG A3, 5.56 from a 16" barrel with the chamber beside your cheek.
+   *  Brighter and flatter than the M4 (shorter gas system, muzzle brake) with a
+   *  hard mechanical clack layered in, because a bullpup's action is right at your
+   *  ear and you hear the bolt as much as the powder. */
+  fireAUG() {
+    this.burstDirect({ dur: 0.024, gain: 1.0, freq: this.rf(4400), q: 0.65, hp: 1500 });
+    this.burstDirect({ dur: 0.075, gain: 0.62, freq: this.rf(1450), q: 1.05, toEcho: 0.30 });
+    this.burstDirect({ dur: 0.105, gain: 0.34, freq: 230, q: 0.6, type: 'lowpass' });
+    this.subThump(180, 62, 0.38, 0.065);
+    // Brake blast: the ten ports throw a bright sheet of gas sideways.
+    this.burstDirect({ dur: 0.040, gain: 0.30, freq: this.rf(6100), q: 1.4, when: 0.006, hp: 3200 });
+    // Action clack right at the cheek weld — the bullpup signature.
+    this.burstDirect({ dur: 0.022, gain: 0.26, freq: this.rf(2700), q: 3.2, when: 0.028 });
   }
 
   fireSCAR() {
@@ -543,18 +622,45 @@ export class SpatialAudioEngine {
     src.stop(t + 0.05);
   }
 
-  // Reload stages
+  // ---- Reload stages -----------------------------------------------------
+  // Each beat is layered rather than a single noise burst: a reload you hear
+  // three times a minute is the most-repeated sound in the game, and one flat
+  // click is what made the old one feel cheap.
+
+  /** Catch paddle, then the magazine breaking free of the well. */
   magOut() {
     this.ensure();
-    this.burstDirect({ dur: 0.06, gain: 0.45, freq: 1200, q: 2.2 });
+    this.burstDirect({ dur: 0.022, gain: 0.34, freq: 2600, q: 3.2 });                 // paddle click
+    this.burstDirect({ dur: 0.075, gain: 0.46, freq: 1150, q: 2.0, when: 0.018 });    // body sliding out
+    this.burstDirect({ dur: 0.05, gain: 0.20, freq: 420, q: 1.4, when: 0.030 });      // low scrape
   }
+
+  /** The discarded magazine tumbling onto the deck a beat later. */
+  magDrop(indoor = false) {
+    this.ensure();
+    // Two bounces: the first sharp, the second softer and detuned.
+    this.burstDirect({ dur: 0.075, gain: 0.30, freq: 760, q: 1.6, when: 0.0, toEcho: indoor ? 0.35 : 0.1 });
+    this.subThump(150, 60, 0.20, 0.07);
+    this.burstDirect({ dur: 0.055, gain: 0.16, freq: 640, q: 1.9, when: 0.105 });
+    this.burstDirect({ dur: 0.04, gain: 0.08, freq: 900, q: 2.4, when: 0.175 });
+  }
+
+  /** Fresh magazine indexing on the well lip, then driven home with the palm. */
   magIn() {
     this.ensure();
-    this.burstDirect({ dur: 0.05, gain: 0.55, freq: 880, q: 2.5 });
+    this.burstDirect({ dur: 0.030, gain: 0.26, freq: 1500, q: 2.8 });                 // lip index
+    this.burstDirect({ dur: 0.06, gain: 0.58, freq: 820, q: 2.2, when: 0.045 });      // seated
+    this.subThump(190, 85, 0.30, 0.055);                                              // weight of it
+    this.burstDirect({ dur: 0.028, gain: 0.30, freq: 3100, q: 3.0, when: 0.072 });    // catch engages
   }
+
+  /** Charging handle run back and released; the bolt rides forward and slams. */
   boltRelease() {
     this.ensure();
-    this.burstDirect({ dur: 0.055, gain: 0.65, freq: 2400, q: 1.8 });
+    this.burstDirect({ dur: 0.055, gain: 0.40, freq: 2100, q: 2.0 });                 // handle drawn
+    this.burstDirect({ dur: 0.045, gain: 0.70, freq: 2600, q: 1.7, when: 0.055 });    // bolt home
+    this.subThump(230, 95, 0.34, 0.05);
+    this.burstDirect({ dur: 0.03, gain: 0.22, freq: 5200, q: 2.6, when: 0.062 });     // metallic ring
   }
   forwardAssist() {
     this.ensure();
@@ -576,21 +682,27 @@ export class SpatialAudioEngine {
     o.start(t); o.stop(t + 0.15);
   }
 
-  jumpLand(surface: 'sand' | 'concrete' | 'wood') {
+  jumpLand(surface: StepSurface, force = 1) {
     const ctx = this.ensure();
     const t = ctx.currentTime;
+    const s = SpatialAudioEngine.STEP[surface] ?? SpatialAudioEngine.STEP.sand;
+    const f = Math.max(0.35, Math.min(1.4, force));
+    // Full body weight arriving: deeper and longer than a step's thump.
     const o = ctx.createOscillator();
     o.type = 'triangle';
-    o.frequency.setValueAtTime(110, t);
-    o.frequency.exponentialRampToValueAtTime(45, t + 0.15);
+    o.frequency.setValueAtTime(118 * (0.95 + Math.random() * 0.1), t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.17);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.4, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-    o.connect(g); g.connect(this.master!);
-    o.start(t); o.stop(t + 0.17);
-
-    const f = surface === 'concrete' ? 1800 : surface === 'wood' ? 650 : 850;
-    this.burstDirect({ dur: 0.1, gain: 0.35, freq: f, q: 1.2 });
+    g.gain.setValueAtTime(0.34 * f, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    o.connect(g); g.connect(this.stepBus ?? this.master!);
+    o.start(t); o.stop(t + 0.19);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+    // Boot slap + the material's own scatter, both louder than a walking step.
+    this.burstDirect({ dur: s.tap[3] * 1.5, gain: 0.26 * f, freq: s.tap[0], q: s.tap[1], hp: s.tap[2], bus: 'step', toEcho: s.echo * (this.indoor ? 1.6 : 0.6) });
+    this.burstDirect({ dur: s.tail[2] * 1.4, gain: 0.2 * f * s.tail[3], freq: s.tail[0], q: s.tail[1], when: 0.02, bus: 'step', attack: 0.01 });
+    // Everything on the operator shifts at once.
+    this.gearRattle(0.11 * f, 0.02);
   }
 
   // Slide sound: cloth/body drag
@@ -662,15 +774,107 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.12, gain: 0.45, freq: 350, q: 0.8 });
   }
 
-  footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085);
-    if (surface === 'sand') {
-      this.burstDirect({ dur: 0.07, gain: g, freq: 850, q: 0.6 });
-    } else if (surface === 'concrete') {
-      this.burstDirect({ dur: 0.05, gain: g, freq: 1750, q: 1.4 });
-    } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
+  // ==================== FOOTSTEPS ====================
+  // A step is not one filtered noise burst. It is (1) the heel strike transient,
+  // (2) the low thump of body mass loading the floor, (3) a surface-coloured
+  // scatter tail — grit, sand, board resonance — and (4) the operator's own gear
+  // rattling half a beat behind. Layering those four, alternating feet, and
+  // jittering every parameter is the whole difference between "click" and "step".
+  private static readonly STEP: Record<StepSurface, {
+    /** heel transient: centre freq, Q, highpass, length */
+    tap: [number, number, number, number];
+    /** body thump: start freq, end freq, length, level */
+    body: [number, number, number, number];
+    /** scatter tail: centre freq, Q, length, level, delay */
+    tail: [number, number, number, number, number];
+    /** overall level trim + echo send */
+    trim: number; echo: number;
+  }> = {
+    // Soft, dry, no transient to speak of — sand swallows the crack and hisses out.
+    sand:     { tap: [780, 0.5, 260, 0.055], body: [120, 62, 0.085, 0.55], tail: [1850, 0.45, 0.16, 0.85, 0.012], trim: 1.0, echo: 0.05 },
+    // Hard slap, short body, bright grit skitter. The loudest surface to walk on.
+    concrete: { tap: [2400, 1.6, 900, 0.028], body: [150, 78, 0.06, 0.45], tail: [3400, 1.1, 0.075, 0.40, 0.016], trim: 1.12, echo: 0.30 },
+    // Boards ring: low mid resonance and a longer decay, plus an occasional creak.
+    wood:     { tap: [900, 1.3, 320, 0.04], body: [190, 96, 0.12, 0.75], tail: [1250, 2.2, 0.14, 0.35, 0.02], trim: 1.05, echo: 0.18 },
+    // Sheet steel: a clang with real sustain, very little low end.
+    metal:    { tap: [3100, 2.4, 1200, 0.035], body: [320, 168, 0.1, 0.4], tail: [2200, 6.0, 0.28, 0.5, 0.008], trim: 1.15, echo: 0.42 },
+    // Loose stone scattering away from the boot — long, busy, unmistakable.
+    gravel:   { tap: [1500, 0.8, 520, 0.05], body: [130, 70, 0.07, 0.4], tail: [2600, 0.5, 0.2, 1.0, 0.014], trim: 1.08, echo: 0.12 },
+    // Dry scrub: soft brush, almost no impact.
+    grass:    { tap: [620, 0.6, 200, 0.06], body: [110, 58, 0.07, 0.35], tail: [2900, 0.35, 0.18, 0.6, 0.01], trim: 0.9, echo: 0.04 },
+  };
+
+  footstep(surface: StepSurface, sprint: boolean, crouch = false) {
+    const ctx = this.ensure();
+    const s = SpatialAudioEngine.STEP[surface] ?? SpatialAudioEngine.STEP.sand;
+    // Alternating feet: the right foot lands marginally harder and brighter than
+    // the left for most people, and the ear reads that asymmetry as "a person".
+    this.footLeft = !this.footLeft;
+    const foot = this.footLeft ? 0.94 : 1.06;
+    const jitter = 0.9 + Math.random() * 0.2;
+    const level = (sprint ? 0.165 : crouch ? 0.042 : 0.092) * s.trim * foot;
+    const bright = sprint ? 1.12 : crouch ? 0.82 : 1;
+    const echo = s.echo * (this.indoor ? 1.8 : 0.5);
+    const t0 = ctx.currentTime;
+
+    // 1. heel strike
+    this.burstDirect({
+      dur: s.tap[3] * (crouch ? 1.2 : 1), gain: level, q: s.tap[1], bus: 'step',
+      freq: s.tap[0] * bright * jitter, hp: s.tap[2], toEcho: echo, attack: 0.001,
+    });
+    // 2. body thump through the floor — a pitched sine, not noise
+    if (!crouch || surface === 'wood' || surface === 'metal') {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(s.body[0] * jitter, t0);
+      o.frequency.exponentialRampToValueAtTime(s.body[1] * jitter, t0 + s.body[2]);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(level * s.body[3] * (crouch ? 0.5 : 1), t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + s.body[2]);
+      o.connect(g); g.connect(this.stepBus ?? this.master!);
+      o.start(t0); o.stop(t0 + s.body[2] + 0.02);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
     }
+    // 3. scatter tail (grit / sand / board ring), swelling then falling
+    this.burstDirect({
+      dur: s.tail[2] * (sprint ? 1.15 : 1), gain: level * s.tail[3] * (crouch ? 0.7 : 1),
+      freq: s.tail[1] > 3 ? s.tail[0] * jitter : s.tail[0] * bright * jitter,
+      q: s.tail[1], when: s.tail[4], toEcho: echo * 0.6, attack: s.tail[2] * 0.22, bus: 'step',
+    });
+    // 4. gear: sling swivel, mag in the pouch, buckle. Only when actually moving fast,
+    //    and only every other step or so, otherwise it becomes a metronome.
+    if (!crouch && Math.random() < (sprint ? 0.85 : 0.35)) {
+      this.gearRattle(level * (sprint ? 0.5 : 0.3), 0.03 + Math.random() * 0.04);
+    }
+  }
+
+  /** Kit noise: two or three short metallic ticks, deliberately irregular. */
+  private gearRattle(level: number, delay: number) {
+    const ctx = this.ensure();
+    const n = 2 + (Math.random() < 0.4 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const t = ctx.currentTime + delay + i * (0.012 + Math.random() * 0.03);
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(1800 + Math.random() * 2600, t);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 2600 + Math.random() * 1800; bp.Q.value = 3.5;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(level * (0.5 + Math.random() * 0.5), t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+      o.connect(bp); bp.connect(g); g.connect(this.stepBus ?? this.master!);
+      o.start(t); o.stop(t + 0.04);
+      o.onended = () => { o.disconnect(); bp.disconnect(); g.disconnect(); };
+    }
+  }
+
+  /** Boot scuff when a direction change drags the foot — pure texture, no impact. */
+  footScuff(surface: StepSurface, intensity = 1) {
+    const s = SpatialAudioEngine.STEP[surface] ?? SpatialAudioEngine.STEP.sand;
+    this.burstDirect({
+      dur: 0.13 + Math.random() * 0.06, gain: 0.05 * intensity * s.trim, bus: 'step',
+      freq: s.tail[0] * 0.8, q: 0.5, attack: 0.05, toEcho: s.echo * 0.3,
+    });
   }
 
   /** Sound-trap flooring: 1.8× louder than a normal step, with a distinct crunch.
@@ -678,10 +882,10 @@ export class SpatialAudioEngine {
   footstepTrap(kind: 'glass' | 'gravel', sprint: boolean, crouch = false) {
     const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * 1.8;
     if (kind === 'gravel') {
-      this.burstDirect({ dur: 0.1, gain: g, freq: 640, q: 0.7, type: 'lowpass' });
-      this.burstDirect({ dur: 0.045, gain: g * 0.5, freq: 1500, q: 1.4, when: 0.03 });
+      this.burstDirect({ dur: 0.1, gain: g, freq: 640, q: 0.7, type: 'lowpass', bus: 'step' });
+      this.burstDirect({ dur: 0.045, gain: g * 0.5, freq: 1500, q: 1.4, when: 0.03, bus: 'step' });
     } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 2600, q: 1.1, hp: 1400 });
+      this.burstDirect({ dur: 0.06, gain: g, freq: 2600, q: 1.1, hp: 1400, bus: 'step' });
       // shard tinkle
       for (let i = 0; i < 2; i++) {
         const ctx = this.ensure();
@@ -692,7 +896,7 @@ export class SpatialAudioEngine {
         const og = ctx.createGain();
         og.gain.setValueAtTime(g * 0.22, t);
         og.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
-        o.connect(og); og.connect(this.master!);
+        o.connect(og); og.connect(this.stepBus ?? this.master!);
         o.start(t); o.stop(t + 0.1);
         o.onended = () => { o.disconnect(); og.disconnect(); };
       }
@@ -1152,6 +1356,8 @@ export class SpatialAudioEngine {
   private burstDirect(opts: {
     dur: number; gain: number; freq: number; q?: number; type?: BiquadFilterType;
     attack?: number; toEcho?: number; when?: number; hp?: number;
+    /** Which mix bus to land on. Footsteps/foley must be separately trimmable. */
+    bus?: 'sfx' | 'step' | 'music';
   }) {
     const ctx = this.ensure();
     const t = ctx.currentTime + (opts.when ?? 0);
@@ -1176,7 +1382,7 @@ export class SpatialAudioEngine {
       out = h;
     }
     out.connect(g);
-    g.connect(this.master!);
+    g.connect((opts.bus === 'step' ? this.stepBus : opts.bus === 'music' ? this.musicBus : this.master) ?? this.master!);
     if (opts.toEcho && this.echoBus) {
       const eg = ctx.createGain(); echoSend=eg;
       eg.gain.value = opts.toEcho;

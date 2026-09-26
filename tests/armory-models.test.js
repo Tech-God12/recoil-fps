@@ -22,7 +22,7 @@ function finiteGroup(group) {
   });
 }
 
-test('all ten guns build with finite geometry and full armory wiring', () => {
+test('all eleven guns build with finite geometry and full armory wiring', () => {
   assert.deepEqual(Object.keys(WEAPON_BUILDERS).sort(), WEAPON_CATALOG.map(w => w.id).sort());
   for (const entry of WEAPON_CATALOG) {
     const model = WEAPON_BUILDERS[entry.id]();

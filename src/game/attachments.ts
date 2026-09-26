@@ -58,7 +58,7 @@ function compensator({ cls }: AttachContext): THREE.Object3D {
 
 function suppressor({ weapon }: AttachContext, _fat: boolean): THREE.Object3D {
   const p = group(), b = new GunBuilder(), k = 1;
-  const [radius,length] = ({m4a1:[.0155,.110],scar_h:[.017,.118],m249:[.0175,.123],ak47:[.0165,.114],mp7:[.0125,.078],vector:[.014,.085],m1911:[.0128,.078],awm:[.0195,.138]} as Partial<Record<WeaponId,[number,number]>>)[weapon] ?? [.016,.110];
+  const [radius,length] = ({m4a1:[.0155,.110],scar_h:[.017,.118],spear:[.017,.120],m249:[.0175,.123],ak47:[.0165,.114],mp7:[.0125,.078],vector:[.014,.085],m1911:[.0128,.078],awm:[.0195,.138]} as Partial<Record<WeaponId,[number,number]>>)[weapon] ?? [.016,.110];
   p.userData.host=weapon;
   b.name('suppressor body').tube(radius, 0.005, length, WM.darkSteel, 0, 0, -length / 2 + 0.002, HALF_PI, 0, 0, 32);
   b.name('quick-detach collar').tube(radius + 0.0015, radius - 0.001, 0.014, WM.dark, 0, 0, -0.009);
@@ -238,14 +238,14 @@ function magDimensions(weapon: WeaponId, extended = true) {
     case 'mp7': return { width: 0.023, depth: 0.029, length: extended ? 0.171 : 0.152, rake: extended ? 0.038 : 0.034, ribs: 2 };
     case 'vector': return { width: 0.026, depth: 0.037, length: extended ? 0.165 : 0.146, bend: 0.010, ribs: 2 };
     case 'ak47': return { width: 0.029, depth: 0.054, length: extended ? 0.198 : 0.171, bend: extended ? 0.080 : 0.067, ribs: 3 };
-    case 'scar_h': return { width: 0.031, depth: 0.066, length: extended ? 0.139 : 0.113, bend: 0.001, ribs: 2 };
+    case 'scar_h': case 'spear': return { width: weapon === 'spear' ? 0.033 : 0.031, depth: weapon === 'spear' ? 0.067 : 0.066, length: extended ? 0.139 : weapon === 'spear' ? 0.122 : 0.113, bend: 0.001, ribs: 2 };
     default: return { width: 0.027, depth: 0.054, length: extended ? 0.161 : 0.140, bend: 0.023, ribs: 3 };
   }
 }
 
 function mag_ext(ctx: AttachContext): THREE.Object3D {
   const p = group(), b = new GunBuilder();
-  magazine(b, { ...magDimensions(ctx.weapon), material: ctx.weapon==='scar_h' ? WM.fde : ctx.weapon==='vector'||ctx.weapon==='mp7' ? WM.darkSteel : WM.midSteel });
+  magazine(b, { ...magDimensions(ctx.weapon), material: (ctx.weapon==='scar_h'||ctx.weapon==='spear') ? WM.fde : ctx.weapon==='vector'||ctx.weapon==='mp7' ? WM.darkSteel : WM.midSteel });
   b.build(p); p.userData.variant = ctx.cls === 'PISTOL' ? 'pistol' : 'std';
   return p;
 }

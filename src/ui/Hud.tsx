@@ -145,7 +145,7 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
   const hpFilled = Math.min(hpSegs, Math.max(0, Math.ceil(hud.hp / maxHp * hpSegs)));
 
   return (
-    <div className="hud-root pointer-events-none select-none">
+    <div className={`hud-root pointer-events-none select-none ${s.hudContrast ? 'hud-high-contrast' : ''}`}>
       {/* HUD frame corners */}
       <span className="hud-corner tl" /><span className="hud-corner tr" />
       <span className="hud-corner bl" /><span className="hud-corner br" />
@@ -354,7 +354,7 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
           };
         }
         return (
-          <div className="radar-pos">
+          <div className="radar-pos" style={{ transform: `scale(${s.minimapScale / 100})`, transformOrigin: 'left bottom' }}>
             <div className={`radar ${hot > 0 ? 'contact' : ''}`} style={{ opacity: hud.ads > 0.6 ? 0.35 : 1, transition: 'opacity .2s' }}>
               <div className="radar-world" style={{ transform: `rotate(${-hud.bearing}deg)` }}>
                 <div className="radar-zoom" style={{ transform: `translate(${ox}%, ${oz}%) scale(${zoom})` }}>

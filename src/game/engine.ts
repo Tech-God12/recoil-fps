@@ -68,9 +68,15 @@ export interface GameSettings {
   filmGrain: number;        // 0 - 100
   brightness: number;       // 80 - 170 (exposure %)
   cameraShake: number;      // 0 - 100
+  reducedMotion: boolean;   // reduces camera/HUD movement without lowering visual detail
   showFps: boolean;
+  hudContrast: boolean;
+  minimapScale: number;     // 75 - 125 (%), screen-space accessibility control
+  autoReload: boolean;
+  autoSwapEmpty: boolean;
   // Audio
   masterVolume: number;     // 0 - 100
+  footstepVolume: number;   // 0 - 100, independent player movement cue mix
   voices: boolean;
   // Crosshair
   crosshairColor: string;
@@ -97,8 +103,14 @@ export const DEFAULT_SETTINGS: GameSettings = {
   filmGrain: 0,
   brightness: 110,
   cameraShake: 100,
+  reducedMotion: false,
   showFps: true,
+  hudContrast: false,
+  minimapScale: 100,
+  autoReload: true,
+  autoSwapEmpty: false,
   masterVolume: 85,
+  footstepVolume: 85,
   voices: true,
   crosshairColor: '#FF5C1A',
   crosshairSize: 9,
@@ -155,8 +167,14 @@ export function sanitizeSettings(input: unknown): GameSettings {
     filmGrain: number('filmGrain', DEFAULT_SETTINGS.filmGrain, 0, 100),
     brightness: number('brightness', DEFAULT_SETTINGS.brightness, 80, 170),
     cameraShake: number('cameraShake', DEFAULT_SETTINGS.cameraShake, 0, 100),
+    reducedMotion: boolean('reducedMotion', DEFAULT_SETTINGS.reducedMotion),
     showFps: boolean('showFps', DEFAULT_SETTINGS.showFps),
+    hudContrast: boolean('hudContrast', DEFAULT_SETTINGS.hudContrast),
+    minimapScale: number('minimapScale', DEFAULT_SETTINGS.minimapScale, 75, 125),
+    autoReload: boolean('autoReload', DEFAULT_SETTINGS.autoReload),
+    autoSwapEmpty: boolean('autoSwapEmpty', DEFAULT_SETTINGS.autoSwapEmpty),
     masterVolume: number('masterVolume', DEFAULT_SETTINGS.masterVolume, 0, 100),
+    footstepVolume: number('footstepVolume', DEFAULT_SETTINGS.footstepVolume, 0, 100),
     voices: boolean('voices', DEFAULT_SETTINGS.voices),
     crosshairColor: typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color : DEFAULT_SETTINGS.crosshairColor,
     crosshairSize: number('crosshairSize', DEFAULT_SETTINGS.crosshairSize, 3, 24),
@@ -318,7 +336,7 @@ interface WeaponDef {
   lpvo?: boolean;
   lpvoHigh?: boolean;
   pumpShotgun?: boolean;
-  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'vector' | 'lmg' | 'deagle';
+  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'spear' | 'vector' | 'lmg' | 'deagle';
   laser?: boolean;
   flashlight?: boolean;
   masterkey?: boolean;
@@ -380,7 +398,7 @@ const ADAPT_UP_WINDOWS = 3;
 const ADAPT_STALL_SECONDS = 0.25;
 // Maps armory weapon ids to the engine's legacy audio tags for loadout-built guns.
 const LOADOUT_AUDIO: Record<WeaponId, NonNullable<WeaponDef['audioTag']>> = {
-  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', m249: 'lmg', vector: 'vector', mp7: 'smg',
+  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', spear: 'spear', m249: 'lmg', vector: 'vector', mp7: 'smg',
   spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle',
 };
 
@@ -1718,6 +1736,17 @@ void main(){
     }, ms);
   }
 
+  /** Accessibility/QoL option: when the current gun is dry and cannot reload,
+   * swap only to a weapon that can actually fire. Never interrupts a reload/switch. */
+  private quickSwapIfEmpty() {
+    if (!this.autoSwapEmptyEnabled || this.reloadT >= 0 || this.switchT >= 0) return;
+    // This is a last-resort swap, not a replacement for reload. A dry weapon with
+    // reserve ammunition (or the training infinite-ammo flag) is still reloadable.
+    if (this.mags[this.cur] > 0 || this.reserves[this.cur] > 0 || this.INFINITE_AMMO) return;
+    const next = this.weapons.findIndex((w, i) => i !== this.cur && (this.mags[i] > 0 || this.reserves[i] > 0) && w.magSize > 0);
+    if (next >= 0) this.switchWeapon(next);
+  }
+
   private startReload() {
     const d = this.def();
     if (this.reloadT >= 0 || this.mags[this.cur] >= d.magSize) return;
@@ -1814,7 +1843,8 @@ void main(){
     if (this.mags[this.cur] <= 0) {
       audio.dryFire();
       this.fireCD = 0.22;
-      if (this.reserves[this.cur] > 0) this.startReload();
+      if (this.reserves[this.cur] > 0 && this.autoReloadEnabled) this.startReload();
+      else if (this.autoSwapEmptyEnabled) this.quickSwapIfEmpty();
       return;
     }
     this.mags[this.cur]--;
@@ -1829,7 +1859,7 @@ void main(){
       this.pumpT = 0.5;
       setTimeout(() => { if (!this.disposed && !this.ended) audio.pump(); }, 200);
     }
-    if (d.audioTag === 'pistol' || d.audioTag === 'deagle' || d.audioTag === 'scar') this.slideKick = 1;
+    if (d.audioTag === 'pistol' || d.audioTag === 'deagle' || d.audioTag === 'scar' || d.audioTag === 'spear') this.slideKick = 1;
 
     // 1. CALCULATE EXACT BULLET TRAJECTORY FIRST BEFORE RECOIL
     // Small calibrated dispersion in ADS; recoil moves the camera/aim between shots.
@@ -2043,6 +2073,7 @@ void main(){
       else if (tag === 'sniper') audio.fireSniper();
       else if (tag === 'shotgun') audio.fireShotgun();
       else if (tag === 'scar') audio.fireSCAR();
+      else if (tag === 'spear') audio.fireSpear();
       else if (tag === 'vector') audio.fireVector();
       else if (tag === 'lmg') audio.fireLMG();
       else if (tag === 'deagle') audio.fireDeagle();
@@ -3701,6 +3732,11 @@ void main(){
       } else if (tag === 'smg' || tag === 'vector') {
         // PDWs: fast, twitchy — sharp cant, quick mag punch, minimal dip.
         py -= dip * 0.055 * S; rx -= dip * 0.30; rz += dip * 0.32; ry += dip * 0.06;
+      } else if (tag === 'spear') {
+        // SPEAR: low-ready cant with a positive magazine seat, then the side charger returns.
+        py -= dip * 0.065 * S; rx -= dip * 0.34; rz += dip * 0.28; ry += dip * 0.08;
+        const charger = rt > 0.75 ? Math.sin(Math.min(1, (rt - 0.75) / 0.18) * Math.PI) : 0;
+        d.model.chargingHandle.position.z = charger * 0.040;
       } else {
         // AR family (M416/SCAR): controlled tactical reload at chest height.
         py -= dip * 0.08 * S; rx -= dip * 0.40; rz += dip * 0.24;
@@ -3758,7 +3794,7 @@ void main(){
     }
     // Reciprocating slide / bolt (pistols + SCAR): snap back, spring home.
     // (Skipped mid-reload — the reload keyframes own the slide then.)
-    if ((d.audioTag === 'pistol' || d.audioTag === 'deagle' || d.audioTag === 'scar') && this.reloadT < 0) {
+    if ((d.audioTag === 'pistol' || d.audioTag === 'deagle' || d.audioTag === 'scar' || d.audioTag === 'spear') && this.reloadT < 0) {
       this.slideKick = Math.max(0, this.slideKick - dt * 9);
       d.model.chargingHandle.position.z = ((d.model.chargingHandle.userData.homeZ as number | undefined) ?? 0) + this.slideKick * this.slideKick * 0.038;
     }
@@ -3923,6 +3959,9 @@ void main(){
     this.fovSetting = s.fov;
     voice.setEnabled(s.voices);
     audio.setMasterVolume(s.masterVolume / 100);
+    audio.setFootstepVolume(s.footstepVolume / 100);
+    this.autoReloadEnabled = s.autoReload;
+    this.autoSwapEmptyEnabled = s.autoSwapEmpty;
 
     // Resolution scale (biggest perf lever) — adaptive scaler works down from here.
     // NOTE: must go through syncPixelRatio so the composer (post-FX) follows too —
@@ -3962,10 +4001,12 @@ void main(){
     this.vignettePass.enabled = s.filmGrain > 0;
     this.postFxOn = usesPostChain(s);
     this.renderer.toneMappingExposure = s.brightness / 100;
-    this.motionBlurAmount = s.cameraShake / 100;
+    this.motionBlurAmount = (s.cameraShake / 100) * (s.reducedMotion ? 0.22 : 1);
   }
 
   motionBlurAmount = 1;
+  private autoReloadEnabled = true;
+  private autoSwapEmptyEnabled = false;
   private frameNo = 0;
   private postFxOn = true;
   // Adaptive resolution: holds FPS by scaling render resolution within the user's cap

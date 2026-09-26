@@ -13,10 +13,10 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export type MapId = 'alrasul' | 'kasbah' | 'arena' | 'sirocco';
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
-  { id: 'alrasul', name: 'Sandblast', desc: 'Two bridges. One dry river. A souk under siege in the shadow of the water tower.' },
-  { id: 'kasbah', name: 'Town', desc: 'Six trades beneath a stone crown. Break the citadel, then disappear through the west gate.' },
-  { id: 'arena', name: 'Warehouse', desc: '5v5 team deathmatch. Twin steel warehouses, container yards and barricade lines. Most kills in 2:30 wins.' },
-  { id: 'sirocco', name: 'Sirocco', desc: '5v5 bomb defusal. A desert town of three lanes — A long, mid and the B tunnels — around two bomb sites. First to 7 rounds.' },
+  { id: 'alrasul', name: 'Sandblast', desc: 'A contested river town: two bridges, a dry wadi and a water tower above the last open crossing.' },
+  { id: 'kasbah', name: 'Town', desc: 'A fortified trade town: kilns, caravan court and tannery roads converge beneath a signal citadel.' },
+  { id: 'arena', name: 'Warehouse', desc: '5v5 team deathmatch across twin steel halls, clean container lanes and disciplined loading-yard cover.' },
+  { id: 'sirocco', name: 'Sirocco', desc: '5v5 bomb defusal in a walled desert town: contest A long, mid and B tunnels around two distinct sites.' },
 ];
 /** Story maps with a mission runtime (theater select, settings map picker). */
 export const isMissionMap = (id: MapId): id is 'alrasul' | 'kasbah' => id === 'alrasul' || id === 'kasbah';

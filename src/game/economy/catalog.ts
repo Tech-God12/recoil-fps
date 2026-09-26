@@ -4,14 +4,14 @@ import type { StatMods } from './stats';
 
 export type WeaponId =
   | 'm4a1' | 'ak47' | 'm1911' | 'awm' | 'mp7'
-  | 'scar_h' | 'vector' | 'spas12' | 'deagle' | 'm249';
+  | 'scar_h' | 'spear' | 'vector' | 'spas12' | 'deagle' | 'm249';
 export type WeaponClass = 'AR' | 'BR' | 'SMG' | 'PDW' | 'SR' | 'SG' | 'LMG' | 'PISTOL';
 export type SlotId = 'primary' | 'secondary';
 export type AttachSlot = 'muzzle' | 'optic' | 'magazine' | 'underbarrel' | 'stock' | 'rail' | 'barrel';
 export type AttachmentId = string;
 export type AudioKind =
   | 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg'
-  | 'scar' | 'vector' | 'shotgun' | 'deagle' | 'lmg';
+  | 'scar' | 'spear' | 'vector' | 'shotgun' | 'deagle' | 'lmg';
 
 export interface BaseWeaponStats {
   auto: boolean; rpm: number; damage: number; headMul: number; limbMul: number;
@@ -139,6 +139,14 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     base: base({ pattern: [[1.45, 0.18], [1.62, -0.25], [1.78, 0.32], [1.87, 0.38], [1.95, -0.35], [1.97, -0.28]], auto: true, rpm: 600, damage: 48, headMul: 2.4, limbMul: 0.85, magSize: 20, reserve: 100, hipSpread: 0.010, adsFov: 55, tacReload: 2.3, emptyReload: 2.9, adsTime: 0.26, recoilMul: 1.35, falloffStart: 45, falloffMul: 0.9, noiseRadius: 75 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
     audio: 'scar',
+  },
+  {
+    id: 'spear', name: 'MCX-SPEAR', short: 'SPEAR', cls: 'BR', slot: 'primary',
+    price: 3600, starter: false,
+    blurb: 'A piston-driven 7.62 battle rifle with a folding stock, slim M-LOK handguard, and controlled recoil for deliberate long-lane work.',
+    base: base({ pattern: [[1.28, 0.10], [1.45, -0.18], [1.60, 0.24], [1.72, -0.26], [1.83, 0.20], [1.92, -0.30]], auto: true, rpm: 650, damage: 45, headMul: 2.45, limbMul: 0.84, magSize: 20, reserve: 120, hipSpread: 0.009, adsFov: 54, tacReload: 2.35, emptyReload: 2.95, adsTime: 0.25, recoilMul: 1.20, falloffStart: 50, falloffMul: 0.92, noiseRadius: 78, moveSpeedMul: 0.97 }),
+    slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
+    audio: 'spear',
   },
   {
     id: 'deagle', name: 'Deagle', short: 'Deagle', cls: 'PISTOL', slot: 'secondary',
@@ -1752,7 +1760,12 @@ export function attachmentById(id: string): AttachmentCatalogEntry | undefined {
 export function isCompatible(entry: AttachmentCatalogEntry, weapon: WeaponId): boolean {
   const w = byId.get(weapon);
   if (!w) return false;
-  return entry.compat.includes(weapon) && w.slots.includes(entry.slot);
+  // The MCX-SPEAR is deliberately supplied with the same modern 7.62 mount pattern
+  // as the SCAR-H family: muzzle devices, SR-25 magazines, M-LOK underbarrel/rail
+  // hardware and optic mounts are shared. Keeping this rule here prevents 59 copies
+  // of one id in static catalog records while preserving strict slot validation.
+  const familyCompatible = weapon === 'spear' && entry.compat.includes('scar_h');
+  return (entry.compat.includes(weapon) || familyCompatible) && w.slots.includes(entry.slot);
 }
 
 /** Every catalog attachment for a weapon+slot pair, tier order (then price). */

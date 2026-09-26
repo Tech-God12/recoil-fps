@@ -2975,3 +2975,33 @@ span.arm2-thumb { display: inline-block; }
 .pause-readout span { color:var(--bone-mute); font:10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; }
 .pause-note { margin-top:22px !important; color:var(--bone-mute) !important; font:10px/1 var(--mono) !important; letter-spacing:.12em; text-transform:uppercase; }
 @media (max-width:700px) { .pause-wrap { grid-template-columns:1fr; max-height:92vh; overflow:auto; } .pause-card { padding:18px; } .pause-title { font-size:58px; } }
+
+/* Accessibility: tuned to lift UI marks above bright sand without replacing the art palette. */
+.hud-high-contrast .hud-chip,
+.hud-high-contrast .radar-meta,
+.hud-high-contrast .compass-card,
+.hud-high-contrast .threat-range {
+  color: #fff7e8 !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.85);
+}
+.hud-high-contrast .radar-frame { border-color: rgba(255,245,220,0.62); }
+.hud-high-contrast .radar-map { opacity: 0.72; filter: contrast(1.35) saturate(0.75) brightness(0.78); }
+.hud-high-contrast .radar-enemy { background: #ffd45a; box-shadow: 0 0 7px rgba(255,212,90,0.95); }
+
+/* Theater dossier copy makes each operation a place before deployment, not a generic tile. */
+.map2-story {
+  display: -webkit-box;
+  margin-top: 5px;
+  max-width: 48ch;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-family: var(--body);
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(237,228,211,0.78);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.map2-card.sel .map2-story, .map2-card:hover .map2-story { opacity: 1; transform: translateY(0); }

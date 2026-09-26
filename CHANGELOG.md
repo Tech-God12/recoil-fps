@@ -1,3 +1,7 @@
+## 2026-09-26 — Arena map architecture and deterministic dressing
+
+Refined the Sirocco and Warehouse presentation with district-oriented architectural notes, readable perimeter and vertical-combat landmarks, and deterministic Warehouse light-shaft motes. Replaced inline tarp materials with cached accent materials so dressing remains batchable and does not add uncached world draws. Added map design notes in `docs/sirocco-overhaul.md` and `docs/warehouse-overhaul.md`.
+
 ## 2026-09-25 — Merge main into the Kits branch (PR #27)
 
 Merged `main` (Bomb Defusal on Sirocco, frame budget / light pool, hit reactions, gunfeel, and the 2026-09-25 gunfeel/perf/HUD headline) into the Kits branch. Kits stay in Missions and Warehouse TDM only; Bomb Defusal gets no kit and keeps Z for smoke. Home menu: Missions, Arena (Bomb Defusal + TDM), Kits, Loadout, Settings. The scorestreak system and Operation Blackout stay removed, as this branch already decided, so main's streak and ranked hooks were stripped from the engine, TDM bots, HUD, menus and results. The bind list shows `Field kit — Z` in place of Scorestreaks. The frame-budget test now counts the 4 extra Warehouse floodlights. The light pool still caps the shader at 4 point lights. Main's newest commit also had 5 lint errors (empty catch blocks, `let`→`const`, an unused test import); those are fixed.

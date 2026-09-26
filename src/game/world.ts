@@ -139,6 +139,11 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     return m;
   };
   const ACC_TURQ = col(0x2C7C8E, 0.7), ACC_TERRA = col(0x9A4A2E), METAL = col(0x2C2C2A, 0.5, 0.7);
+  // Seeded variation keeps offline renders, nav snapshots, and multiplayer builds identical.
+  const seeded = (n: number): number => {
+    const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
+    return x - Math.floor(x);
+  };
   const GLOW = col(0xFFE2A8, 0.4, 0, 2.4), FROND = col(0x4E6B34, 0.85, 0, 0, THREE.DoubleSide);
   const FABRIC = [0xB0402E, 0x2E6BA0, 0x3E7B52, 0xC7A24B, 0x8C4E86].map(c => col(c, 0.9, 0, 0, THREE.DoubleSide));
 
@@ -839,8 +844,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     trapPatch(-33.5, -19, 'gravel'); trapPatch(33.5, 19, 'gravel');
 
     // ---- A2 · team-tinted spawn dressing: know your facing instantly ----
-    const tarpTeal = new THREE.MeshStandardMaterial({ color: 0x2C7C8E, emissive: 0x2C7C8E, emissiveIntensity: 0.5, roughness: 0.95, side: THREE.DoubleSide });
-    const tarpRust = new THREE.MeshStandardMaterial({ color: 0x9A4A2E, emissive: 0x9A4A2E, emissiveIntensity: 0.5, roughness: 0.95, side: THREE.DoubleSide });
+    const tarpTeal = col(0x2C7C8E, 0.95, 0, 0.5, THREE.DoubleSide);
+    const tarpRust = col(0x9A4A2E, 0.95, 0, 0.5, THREE.DoubleSide);
     const spawnDressing = (sz: 1 | -1, tarp: THREE.Material, lightHex: number) => {
       for (const [tx, tz, ry] of [[-9.5, sz * 43.5, 0.35], [10.5, sz * 45.5, -0.3]] as const) {
         for (const px of [-2.3, 2.3]) box(tx + Math.cos(ry) * px, 1.3, tz - Math.sin(ry) * px, 0.09, 2.6, 0.09, METAL, false);
@@ -901,13 +906,14 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       arenaFx.flicker.push({ light, base: 5, seed: hx * 3.1 + hz });
       const N = 20, pos = new Float32Array(N * 3), vel = new Float32Array(N * 3);
       for (let i = 0; i < N; i++) {
-        const a = Math.random() * Math.PI * 2, r = Math.random() * 1.5;
+        const seed = i + (hx + 20) * 17 + (hz + 20) * 31;
+        const a = seeded(seed) * Math.PI * 2, r = seeded(seed + 1) * 1.5;
         pos[i * 3] = hx + Math.cos(a) * r;
-        pos[i * 3 + 1] = 0.6 + Math.random() * 4.2;
+        pos[i * 3 + 1] = 0.6 + seeded(seed + 2) * 4.2;
         pos[i * 3 + 2] = hz + Math.sin(a) * r;
-        vel[i * 3] = (Math.random() - 0.5) * 0.12;
-        vel[i * 3 + 1] = -0.05 - Math.random() * 0.12;
-        vel[i * 3 + 2] = (Math.random() - 0.5) * 0.12;
+        vel[i * 3] = (seeded(seed + 3) - 0.5) * 0.12;
+        vel[i * 3 + 1] = -0.05 - seeded(seed + 4) * 0.12;
+        vel[i * 3 + 2] = (seeded(seed + 5) - 0.5) * 0.12;
       }
       const mg = new THREE.BufferGeometry();
       mg.setAttribute('position', new THREE.BufferAttribute(pos, 3));

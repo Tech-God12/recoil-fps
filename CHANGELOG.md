@@ -1,3 +1,11 @@
+## 2026-09-26 — Texture overhaul: real normal + roughness maps on every world surface
+
+The world material pipeline (`textures.ts`) was upgraded from flat grayscale **bump maps** to proper tangent-space **normal maps** (Sobel gradient of the existing height field, wrap-aware so tiled textures have no seams), so every surface — sand, plaza stone, adobe, brick, concrete, asphalt, timber, corrugated/rusted metal, sandbags, tile, and the district masonry set — now catches light with real per-pixel relief instead of reading dead-flat. Added a derived **roughness map** per material (recessed joints/pitting read matte, raised faces glossier) and switched on **environment reflections** (`envMapIntensity`, from the existing PMREM room-env) so metal and grazing highlights actually show. Anisotropy raised 8→16 with explicit trilinear mipmapping for crisper textures at oblique angles. Normal/roughness generators fall back safely under the headless canvas stub so the perf/test harnesses still build the world.
+
+Also added `typescript` as a dev dependency so `tsc --noEmit` type-checks deterministically from the repo (previously relied on a global/npx copy).
+
+Verification: `tsc --noEmit` clean; `npm run build` clean; perf-probe (60 frames, GL stub) builds all four maps — frame P50 ≈1.0–1.7 ms, no regressions; weapon-finishes 6/6, frame-budget 10/10.
+
 ## 2026-09-26 — Overhaul: audio, M4 reload, MCX Spear, and 7 quality-of-life options
 
 Part of the ongoing "Recoil FPS" overhaul. This batch lands four areas.

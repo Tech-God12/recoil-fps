@@ -38,19 +38,93 @@ function tex(c: HTMLCanvasElement, rx: number, ry: number, srgb = true): THREE.C
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(rx, ry);
-  t.anisotropy = 8;
+  t.anisotropy = 16;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
+// Sample a grayscale height field (any canvas — we read luminance) with wrap-around
+// so tiled normal/roughness maps have no seams at the tile borders.
+function sampleHeight(data: Uint8ClampedArray, w: number, h: number, x: number, y: number): number {
+  x = ((x % w) + w) % w; y = ((y % h) + h) % h;
+  const i = (y * w + x) * 4;
+  return (data[i] + data[i + 1] + data[i + 2]) / 765; // /(255*3) → 0..1 luminance
+}
+
+// Convert a grayscale bump/height canvas into a proper tangent-space NORMAL map via a
+// Sobel gradient. Normal maps drive per-pixel lighting (three uses screen-space
+// derivatives for the tangent basis, so no explicit tangents are needed on the mesh),
+// giving surfaces far more convincing relief than the old flat bumpMap ever did.
+function heightToNormal(src: HTMLCanvasElement, strength: number): HTMLCanvasElement {
+  const w = src.width, h = src.height;
+  const sd = src.getContext('2d')!.getImageData(0, 0, w, h).data;
+  const [out, octx] = cv(w, h);
+  // Headless canvas stubs (test/perf harnesses) return no ImageData — fall back so the
+  // world can still be built without a real 2D context.
+  const nd = octx.createImageData(w, h) || { data: new Uint8ClampedArray(w * h * 4) };
+  const o = nd.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Sobel-weighted gradient for smoother, less noisy normals than a plain 3-tap.
+      const tl = sampleHeight(sd, w, h, x - 1, y - 1), tc = sampleHeight(sd, w, h, x, y - 1), tr = sampleHeight(sd, w, h, x + 1, y - 1);
+      const ml = sampleHeight(sd, w, h, x - 1, y), mr = sampleHeight(sd, w, h, x + 1, y);
+      const bl = sampleHeight(sd, w, h, x - 1, y + 1), bc = sampleHeight(sd, w, h, x, y + 1), br = sampleHeight(sd, w, h, x + 1, y + 1);
+      const dx = (tr + 2 * mr + br) - (tl + 2 * ml + bl);
+      const dy = (bl + 2 * bc + br) - (tl + 2 * tc + tr);
+      let nx = -dx * strength, ny = -dy * strength, nz = 1;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+      const i = (y * w + x) * 4;
+      o[i] = (nx * 0.5 + 0.5) * 255;
+      o[i + 1] = (ny * 0.5 + 0.5) * 255;
+      o[i + 2] = (nz * 0.5 + 0.5) * 255;
+      o[i + 3] = 255;
+    }
+  }
+  octx.putImageData(nd, 0, 0);
+  return out;
+}
+
+// Derive a subtle ROUGHNESS map from the same height field: recessed areas (mortar
+// joints, pitting, grooves) read slightly rougher/matte, raised faces a touch
+// glossier. Multiplied against the material's roughness by three (green channel).
+function heightToRough(src: HTMLCanvasElement, variance: number): HTMLCanvasElement {
+  const w = src.width, h = src.height;
+  const sd = src.getContext('2d')!.getImageData(0, 0, w, h).data;
+  const [out, octx] = cv(w, h);
+  const rd = octx.createImageData(w, h) || { data: new Uint8ClampedArray(w * h * 4) };
+  const o = rd.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const hgt = sampleHeight(sd, w, h, x, y);
+      // Height 0 (deep) → +variance rougher; height 1 (raised) → -variance glossier.
+      const g = Math.max(0, Math.min(1, 1 - (hgt - 0.5) * 2 * variance));
+      const i = (y * w + x) * 4;
+      o[i] = o[i + 1] = o[i + 2] = g * 255; o[i + 3] = 255;
+    }
+  }
+  octx.putImageData(rd, 0, 0);
+  return out;
+}
+
 function mat(diffuse: HTMLCanvasElement, bump: HTMLCanvasElement, rx: number, ry: number, rough: number, metal: number, bumpScale: number): THREE.MeshStandardMaterial {
-  const b = tex(bump, rx, ry, false);
+  // Old flat bumpScale (≈0.03–0.12) maps to a Sobel strength that produces real relief.
+  const strength = Math.max(1.5, bumpScale * 60);
+  const normal = tex(heightToNormal(bump, strength), rx, ry, false);
+  const roughMap = tex(heightToRough(bump, 0.22), rx, ry, false);
   return new THREE.MeshStandardMaterial({
     map: tex(diffuse, rx, ry),
-    bumpMap: b,
-    bumpScale,
+    normalMap: normal,
+    normalScale: new THREE.Vector2(1, 1),
+    roughnessMap: roughMap,
     roughness: rough,
     metalness: metal,
+    // Let the PMREM room-environment actually show on these surfaces (grazing sheen,
+    // metal reflections) instead of everything reading dead-flat.
+    envMapIntensity: metal > 0.2 ? 1.0 : 0.55,
   });
 }
 

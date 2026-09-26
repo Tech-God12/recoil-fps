@@ -1,5 +1,5 @@
 // Recoil FPS — Warehouse TDM pre-match loadout.
-// Pick armor, build your gun on the live viewer, read the enemy squad's kit.
+// Pick armor, build your gun on the live viewer, read the enemy squad's armor.
 import { useEffect, useMemo, useState } from 'react';
 import {
   WEAPON_CATALOG, attachmentById, attachmentsFor, weaponById,
@@ -17,8 +17,8 @@ import {
   ArmorIcon, CALIBER, CLASS_LABEL, HardpointRows, OrangeDeploy, PartsPanel, StatBars,
   TxBack, TxCheck, TxCoords, TxLock, txFmt, weaponTags,
 } from './tactical';
-import { KitEquipButton } from './Kits';
-import type { KitId } from '../game/kits';
+import { AbilityEquipButton } from './Abilities';
+import type { AbilityId } from '../game/abilities';
 import mapArena from '../assets/map-arena.jpg';
 import tdmBackdrop from '../assets/tdm-backdrop.jpg';
 
@@ -29,15 +29,15 @@ interface TdmSetupProps {
   onArmor: (a: TDMArmor) => void;
   onDeploy: () => void;
   onBack: () => void;
-  /** Equipped field kit carried into the match (ability on Z); null = none bought/equipped. */
-  kit?: KitId | null;
-  /** Opens the KITS menu (the kit itself is bought and equipped there). */
-  onKits?: () => void;
+  /** Equipped field ability carried into the match (ability on Z); null = none bought/equipped. */
+  ability?: AbilityId | null;
+  /** Opens the ABILITIES menu (the ability itself is bought and equipped there). */
+  onAbilities?: () => void;
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
-export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy, onBack, kit, onKits }: TdmSetupProps) {
+export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy, onBack, ability, onAbilities }: TdmSetupProps) {
   const [selected, setSelected] = useState<WeaponId>(profile.loadout.primary.weapon);
   const [gridTab, setGridTab] = useState<SlotId>(weaponById(profile.loadout.primary.weapon)?.slot ?? 'primary');
   const [menuSlot, setMenuSlot] = useState<AttachSlot | null>(null);
@@ -163,7 +163,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
             ))}
           </div>
 
-          <div className="tx-sec" style={{ marginTop: 16 }}><span>BRAVO SQUAD</span><b className="mono dim">ENEMY KIT</b></div>
+          <div className="tx-sec" style={{ marginTop: 16 }}><span>BRAVO SQUAD</span><b className="mono dim">ENEMY ARMOR</b></div>
           <div className="tdm2-enemy-list" aria-label="Enemy armor preview">
             {BRAVO_ROSTER.map(e => (
               <div key={e.name} className="tdm2-enemy mono">
@@ -257,10 +257,10 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
               <div className="tx-rulebox mono">
                 <p>▸ Every combatant spawns with <b>3 frags + 1 flash</b>.</p>
                 <p>▸ TDM ballistics: damage tuned so headshots take <b>3+ hits</b>.</p>
-                <p>▸ Armor cuts head and body damage — check Bravo's kit.</p>
+                <p>▸ Armor cuts head and body damage — check Bravo's armor.</p>
                 <p>▸ Respawn in <b>5s</b> at your protected yard.</p>
                 <p>▸ Most kills at <b>2:30</b> wins the match.</p>
-                <p>▸ Kit on <b>Z</b>: each kill cuts <b>8%</b> off its cooldown.</p>
+                <p>▸ Ability on <b>Z</b>: each kill cuts <b>8%</b> off its cooldown.</p>
               </div>
               <p className="tx-hint mono">CLICK A HARDPOINT OR THE GUN TO FIT PARTS</p>
             </>
@@ -278,7 +278,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
           {TDM_ARMOR_NAMES[armor].toUpperCase()} ARMOR · {TDM_BASE_HP + armor * TDM_HP_PER_ARMOR} HP
           &nbsp;·&nbsp; 1 {weaponById(profile.loadout.primary.weapon)?.short} · 2 {weaponById(profile.loadout.secondary.weapon)?.short}
         </div>
-        <KitEquipButton kit={kit ?? null} onOpen={onKits} compact />
+        <AbilityEquipButton ability={ability ?? null} onOpen={onAbilities} compact />
         <OrangeDeploy title="PLAY" hint="WAREHOUSE · 5V5 TDM" onClick={onDeploy} />
       </footer>
 

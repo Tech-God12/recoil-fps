@@ -275,7 +275,7 @@ export class Effects {
     this.flashTimer = 0.12;
   }
 
-  // ---- Field kit effects: same burst pool, kit-specific colours and motion. ----
+  // ---- Field ability effects: same burst pool, ability-specific colours and motion. ----
 
   /** Hot metal sparks off a barricade plate: fast, short, heavy gravity. */
   sparks(pos: THREE.Vector3) {
@@ -292,14 +292,14 @@ export class Effects {
   /** Sonar ping at the dart: cyan motes thrown up, plus a cold light flash. */
   sonarPulse(pos: THREE.Vector3) {
     this.burst(pos, 18, 0x5FE3FF, 2.6, 0.7, -0.8, 0.06, 1.8);
-    this.kitFlash(pos, 0x5FE3FF, 9, 0.16);
+    this.abilityFlash(pos, 0x5FE3FF, 9, 0.16);
   }
 
   /** Hologram materialise / glitch-out: cyan shards spraying outward. */
   holoBurst(pos: THREE.Vector3, big = false) {
     this.burst(pos, big ? 40 : 22, 0x6FE8FF, big ? 6.5 : 3.2, big ? 0.6 : 0.45, 0.5, big ? 0.09 : 0.06, 2.4);
     this.burst(pos, big ? 16 : 8, 0xE8FDFF, big ? 3 : 1.6, 0.25, 0, 0.12);
-    this.kitFlash(pos, 0x6FE8FF, big ? 26 : 10, big ? 0.22 : 0.12);
+    this.abilityFlash(pos, 0x6FE8FF, big ? 26 : 10, big ? 0.22 : 0.12);
   }
 
   /** Mine jumps out of the ground: a puff of dirt before the blast. */
@@ -312,8 +312,8 @@ export class Effects {
     this.burst(pos, 12, 0x6CFF9A, 1.1, 1.2, -1.2, 0.05, 2.4);
   }
 
-  /** Coloured point-light pop for kit events (shares the muzzle/explosion light). */
-  kitFlash(pos: THREE.Vector3, color: number, intensity: number, seconds: number) {
+  /** Coloured point-light pop for ability events (shares the muzzle/explosion light). */
+  abilityFlash(pos: THREE.Vector3, color: number, intensity: number, seconds: number) {
     this.flashLight.position.copy(pos);
     this.flashLight.color.setHex(color);
     this.flashLight.intensity = intensity;

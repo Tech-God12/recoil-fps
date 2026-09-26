@@ -1,13 +1,13 @@
-// Recoil FPS — procedural field-kit hardware: the Radar unit, the Barricade and the
+// Recoil FPS — procedural field-ability hardware: the Radar unit, the Barricade and the
 // Decoy hologram. Everything is built from primitives at runtime (no model files),
-// but detail parts are MERGED per material so a deployed kit costs a handful of draw
+// but detail parts are MERGED per material so a deployed ability costs a handful of draw
 // calls no matter how many rivets, pouches and struts it carries.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 // ---------------------------------------------------------------------------------
-// Shared materials + procedural textures (created once, shared by every kit)
+// Shared materials + procedural textures (created once, shared by every ability)
 // ---------------------------------------------------------------------------------
 type MatKey = 'olive' | 'gunmetal' | 'steel' | 'rubber' | 'dark' | 'glass' | 'hazard' | 'cyan' | 'amber' | 'label';
 let mats: Record<MatKey, THREE.MeshStandardMaterial> | null = null;
@@ -724,9 +724,9 @@ export function buildMine(): MineModel {
   return { group, body, led, ring, laser };
 }
 
-/** Disposes the mine's own materials (geometry via disposeKitObject). */
+/** Disposes the mine's own materials (geometry via disposeAbilityObject). */
 export function disposeMine(mm: MineModel) {
-  disposeKitObject(mm.group);
+  disposeAbilityObject(mm.group);
   for (const o of [mm.led, mm.ring, mm.laser]) (o.material as THREE.Material).dispose();
 }
 
@@ -830,9 +830,9 @@ export function buildMedkit(): MedkitModel {
   return { group, setOpen, cross, glow, ring, dome };
 }
 
-/** Disposes the medkit's own materials (geometry via disposeKitObject). */
+/** Disposes the medkit's own materials (geometry via disposeAbilityObject). */
 export function disposeMedkit(mk: MedkitModel) {
-  disposeKitObject(mk.group);
+  disposeAbilityObject(mk.group);
   mk.glow.dispose();
   (mk.ring.material as THREE.Material).dispose();
   (mk.dome.material as THREE.Material).dispose();
@@ -860,14 +860,14 @@ export function makeSonarMarkerMaterial(): THREE.SpriteMaterial {
   return new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true, sizeAttenuation: false });
 }
 
-/** Disposes geometries under a kit object (shared materials and the shared ghost body are kept). */
-export function disposeKitObject(o: THREE.Object3D) {
+/** Disposes geometries under an ability object (shared materials and the shared ghost body are kept). */
+export function disposeAbilityObject(o: THREE.Object3D) {
   o.traverse(c => { if (c instanceof THREE.Mesh && c.geometry !== ghostGeo && !c.userData.sharedGeometry) c.geometry.dispose(); });
 }
 
 /** Everything the decoy owns beyond geometry: hologram, cone and scan materials. */
 export function disposeDecoy(m: DecoyModel) {
-  disposeKitObject(m.group);
+  disposeAbilityObject(m.group);
   m.mat.dispose();
   (m.cone.material as THREE.Material).dispose();
   (m.scan.material as THREE.Material).dispose();

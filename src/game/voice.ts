@@ -104,7 +104,7 @@ class VoiceManager {
     };
     this.speak(map[label] ?? label, 'announcer', { key: `streak:${label}`, cooldownMs: 1500, rate: 1.1 });
   }
-  /** General announcer line (kit and match callouts). Interrupts nothing important. */
+  /** General announcer line (ability and match callouts). Interrupts nothing important. */
   announce(text: string) {
     this.speak(text, 'announcer', { key: `announce:${text}`, cooldownMs: 1200, rate: 1.05, volume: 0.85 });
   }

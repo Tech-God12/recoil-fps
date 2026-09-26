@@ -6,7 +6,7 @@ import {
 } from './catalog';
 import { emptyBuild, repairLoadout, migrateAttachmentId, type Loadout, type WeaponBuild } from './loadout';
 import { DEFAULT_SKIN, isKnownSkin, type SkinId } from './skins';
-import { readKits, type KitId } from './kit-shop';
+import { readAbilities, type AbilityId } from './ability-shop';
 
 export type { Loadout, WeaponBuild } from './loadout';
 
@@ -22,10 +22,10 @@ export interface PlayerProfile {
   loadout: Loadout;
   skins: Partial<Record<WeaponId, SkinId>>;
   seenArmoryTutorial: boolean;
-  /** Field kits bought in the KITS menu (permanent unlocks). */
-  ownedKits: KitId[];
-  /** Kit carried into the next deployment; null = deploy without one. */
-  equippedKit: KitId | null;
+  /** Field abilities bought in the ABILITIES menu (permanent unlocks). */
+  ownedAbilities: AbilityId[];
+  /** Ability carried into the next deployment; null = deploy without one. */
+  equippedAbility: AbilityId | null;
 }
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -51,8 +51,8 @@ export const DEFAULT_PROFILE: PlayerProfile = {
   },
   skins: {},
   seenArmoryTutorial: false,
-  ownedKits: [],
-  equippedKit: null,
+  ownedAbilities: [],
+  equippedAbility: null,
 };
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
@@ -140,7 +140,10 @@ export function migrateProfile(raw: unknown): PlayerProfile {
       loadout,
       skins,
       seenArmoryTutorial: d.seenArmoryTutorial === true,
-      ...readKits(d.ownedKits, d.equippedKit),
+      // The system was renamed from "kits" to "abilities"; saves written before the
+      // rename carry the old keys, so read those as the fallback and keep every
+      // purchase and the equipped choice.
+      ...readAbilities(d.ownedAbilities ?? d.ownedKits, d.equippedAbility ?? d.equippedKit),
     };
   } catch {
     return fresh();
@@ -153,7 +156,7 @@ export function loadProfile(storage?: Store): PlayerProfile {
   try {
     const raw = store.getItem(PROFILE_KEY);
     if (raw) return migrateProfile(raw);
-    // One-time v1 → v2 migration: stale saves kept long-equipped kits forever,
+    // One-time v1 → v2 migration: stale saves kept long-equipped abilities forever,
     // so spawns arrived with silencers and drum mags. Keep all progress and
     // ownership, but strip every equipped attachment — spawns are bare
     // iron-sight guns with stock mags until the armory equips something new.

@@ -6,13 +6,13 @@ import { MainMenu, PauseMenu, ResultsScreen, BootScreen, type Results, type Defu
 import BuyMenu from './ui/BuyMenu';
 import Armory from './ui/armory/Armory';
 import TdmSetup from './ui/TdmSetup';
-import KitsMenu from './ui/KitsMenu';
+import AbilitiesMenu from './ui/AbilitiesMenu';
 import { buildForWeapon, developmentCashGrant, grantCash, loadProfile, resetCurrentCash, saveProfile, type PlayerProfile } from './game/economy/profile';
 import { settleResult } from './game/economy/settlement';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
-type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'kits';
+type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'abilities';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const LEGACY_WALLET_NOTICE_THRESHOLD = 9_000_000;
 const DEFUSAL_KEY = 'recoilfps.defusal.v1';
@@ -41,7 +41,7 @@ const DEFAULT_HUD: HudState = {
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, renderScale: 100, worldHalf: 104, landmark: null,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, abilityMsg: null, abilityFx: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
@@ -61,6 +61,11 @@ export default function App() {
   const [settings, setSettings] = useState<GameSettings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
   const [launching, setLaunching] = useState(false);
+  /** Live name of the engine build stage, straight from Engine.init — so a slow or
+   *  stuck deploy says what it is waiting on instead of a generic "Loading world…". */
+  const [bootStage, setBootStageState] = useState('');
+  const stageRef = useRef('Preparing');
+  const setBootStage = useCallback((stage: string) => { stageRef.current = stage; setBootStageState(stage); }, []);
   const [error, setError] = useState('');
   const [hud, setHud] = useState(DEFAULT_HUD);
   const [results, setResults] = useState<Results | null>(null);
@@ -203,13 +208,13 @@ export default function App() {
         setFx(f => ({ ...f, banner: { id, label: event.label } }));
         later(() => setFx(f => f.banner?.id === id ? { ...f, banner: null } : f), 1600);
         break;
-      case 'kitfx':
-        setFx(f => ({ ...f, kitFx: { id, kind: event.kind } }));
-        later(() => setFx(f => f.kitFx?.id === id ? { ...f, kitFx: null } : f), 900);
+      case 'abilityfx':
+        setFx(f => ({ ...f, abilityFx: { id, kind: event.kind } }));
+        later(() => setFx(f => f.abilityFx?.id === id ? { ...f, abilityFx: null } : f), 900);
         break;
-      case 'kitmsg':
-        setFx(f => ({ ...f, kitMsg: { id, text: event.text } }));
-        later(() => setFx(f => f.kitMsg?.id === id ? { ...f, kitMsg: null } : f), 2800);
+      case 'abilitymsg':
+        setFx(f => ({ ...f, abilityMsg: { id, text: event.text } }));
+        later(() => setFx(f => f.abilityMsg?.id === id ? { ...f, abilityMsg: null } : f), 2800);
         break;
       case 'buymenu':
         if (event.open) openBuy();
@@ -323,7 +328,7 @@ export default function App() {
     launchMode.current = mode;
     const epoch = ++session.current;
     clearTimers();
-    setLaunching(true); setError(''); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
+    setLaunching(true); setError(''); setBootStage('Preparing'); setShowSettings(false); setResults(null); setWallet(null); setFx(emptyFx());
     // The boot screen must be the ONLY thing on screen — leaving the loadout
     // phase mounted produced the "loading + loadout at the same time" overlap.
     if (phaseRef.current === 'tdm-setup') changePhase('menu');
@@ -335,13 +340,13 @@ export default function App() {
     if (session.current !== epoch) return;
     try {
       // Bomb Defusal fields your own armory builds.
-      // The kit is whatever the player bought and equipped in KITS — none means none. It is
+      // The ability is whatever the player bought and equipped in ABILITIES — none means none. It is
       // fixed for the whole deployment and only used in Missions and Warehouse TDM
       // (Bomb Defusal buys its utility each round instead).
       const prof = profileRef.current;
       const launchOptions = map === 'sirocco'
-        ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
-        : mode === 'tdm' ? { mode: 'tdm' as const, kit: prof.equippedKit } : { mode: 'mission' as const, kit: prof.equippedKit };
+        ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])), onStage: setBootStage }
+        : mode === 'tdm' ? { mode: 'tdm' as const, ability: prof.equippedAbility, onStage: setBootStage } : { mode: 'mission' as const, ability: prof.equippedAbility, onStage: setBootStage };
       buyOpenRef.current = false; setBuyOpen(false);
       const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, launchOptions);
       engineRef.current = engine;
@@ -362,7 +367,11 @@ export default function App() {
       }
     } catch (cause) {
       if (session.current !== epoch) return;
-      setError(cause instanceof Error ? cause.message : 'Mission could not start. Try again.');
+      // Never swallow this. The banner is the only thing the player sees, and a
+      // launch that failed with nothing in the console is a launch nobody can fix.
+      console.error(`[recoil] ${map} failed to launch during "${stageRef.current}"`, cause);
+      const why = cause instanceof Error ? cause.message : 'The match could not start. Try again.';
+      setError(`${why} (failed during: ${stageRef.current})`);
       if (engineRef.current) { engineRef.current.setPaused(true); changePhase('paused'); }
       else changePhase('menu');
     } finally {
@@ -396,13 +405,13 @@ export default function App() {
     changePhase('armory');
     if (document.pointerLockElement) document.exitPointerLock();
   };
-  // KITS opens from the home menu or the TDM loadout screen and returns there.
-  const [kitsFrom, setKitsFrom] = useState<'menu' | 'tdm-setup'>('menu');
-  const openKits = (from: 'menu' | 'tdm-setup' = 'menu') => {
-    setKitsFrom(from);
+  // ABILITIES opens from the home menu or the TDM loadout screen and returns there.
+  const [abilitiesFrom, setAbilitiesFrom] = useState<'menu' | 'tdm-setup'>('menu');
+  const openAbilities = (from: 'menu' | 'tdm-setup' = 'menu') => {
+    setAbilitiesFrom(from);
     if (from === 'menu') setMenuView('home');
     setShowSettings(false);
-    changePhase('kits');
+    changePhase('abilities');
   };
   const armoryBack = () => {
     changePhase(armoryFrom === 'results' && results ? 'results' : 'menu');
@@ -434,7 +443,7 @@ export default function App() {
         <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: vignetteBg }} />
       )}
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} onKits={openKits} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} onAbilities={openAbilities} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>
@@ -455,7 +464,7 @@ export default function App() {
           onClose={closeBuy}
         />
       )}
-      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} kit={hud.kit} tdm={hud.tdm} mapName={settings.map === 'arena' ? 'Warehouse · 5v5 TDM' : (MAPS.find(m => m.id === settings.map)?.name ?? '')} defusal={hud.defusal} onResume={resume} onRestart={restart} onSettings={() => setShowSettings(true)} onQuit={quit} />}
+      {phase === 'paused' && !showSettings && <PauseMenu mission={hud.mission} ability={hud.ability} tdm={hud.tdm} mapName={settings.map === 'arena' ? 'Warehouse · 5v5 TDM' : (MAPS.find(m => m.id === settings.map)?.name ?? '')} defusal={hud.defusal} onResume={resume} onRestart={restart} onSettings={() => setShowSettings(true)} onQuit={quit} />}
       {phase === 'results' && results && wallet && <ResultsScreen r={results} wallet={wallet} onRedeploy={restart} onMenu={quit} onArmory={() => openArmory('results')} />}
       {phase === 'armory' && <Armory profile={profile} onProfile={updateProfile} onDeploy={() => { void deploy(); }} onBack={armoryBack} deployHint={settings.map === 'arena' ? 'WAREHOUSE · 5V5 TDM' : settings.map === 'sirocco' ? 'SIROCCO · BOMB DEFUSAL' : `${(MAPS.find(m => m.id === settings.map)?.name ?? '').toUpperCase()} · OPERATION`} />}
       {phase === 'tdm-setup' && !launching && (
@@ -466,19 +475,19 @@ export default function App() {
           onArmor={setTdmArmor}
           onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
-          kit={profile.equippedKit}
-          onKits={() => openKits('tdm-setup')}
+          ability={profile.equippedAbility}
+          onAbilities={() => openAbilities('tdm-setup')}
         />
       )}
-      {phase === 'kits' && (
-        <KitsMenu profile={profile} onProfile={updateProfile} onBack={() => changePhase(kitsFrom)} />
+      {phase === 'abilities' && (
+        <AbilitiesMenu profile={profile} onProfile={updateProfile} onBack={() => changePhase(abilitiesFrom)} />
       )}
       {showSettings && <Settings s={settings} set={set} onClose={() => setShowSettings(false)} />}
       {phase !== 'playing' && !showSettings && <div className="fullscreen-control">
         <button onClick={fullscreen} className="util-btn inline-flex items-center gap-2" title="Toggle fullscreen"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>Fullscreen</button>
       </div>}
       {error && <div className="mission-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss message">DISMISS</button></div>}
-      {launching && <BootScreen map={settings.map} />}
+      {launching && <BootScreen map={settings.map} stage={bootStage} />}
     </div>
   );
 }

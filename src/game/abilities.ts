@@ -1,7 +1,7 @@
 // ============================================================================
-// Recoil FPS — FIELD KITS: one tactical ability per operator, on a cooldown.
+// Recoil FPS — FIELD ABILITIES: one tactical ability per operator, on a cooldown.
 //
-// Kits are bought once in the KITS menu and equipped there; the equipped kit is
+// Abilities are bought once in the ABILITIES menu and equipped there; the equipped ability is
 // locked for the whole deployment (no mid-match swapping) and arrives HALF charged,
 // so nobody opens a match with a free ability.
 //   RECON   · Sonar Dart  — thrown sensor: three pulses tag hostiles through walls as
@@ -19,9 +19,9 @@
 //                           out fire; heals only the player.
 //
 // The director is mode-agnostic: it talks
-// to the engine only through `KitContext`, so missions and Warehouse TDM share every
-// line of it. The AI side (mission `Enemy`, TDM `TDMBot`) sees kits through two tiny
-// hooks: `KitLure` (who to shoot instead of the player) and `userData.kitHit` on
+// to the engine only through `AbilityContext`, so missions and Warehouse TDM share every
+// line of it. The AI side (mission `Enemy`, TDM `TDMBot`) sees abilities through two tiny
+// hooks: `AbilityLure` (who to shoot instead of the player) and `userData.abilityHit` on
 // barricade plates (bullets that strike it damage it).
 // ============================================================================
 import * as THREE from 'three';
@@ -29,24 +29,24 @@ import type { Effects } from './effects';
 import type { AABB } from './world';
 import { audio } from './audio';
 import {
-  buildBarricade, buildDart, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
+  buildBarricade, buildDart, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDartFx, disposeDecoy, disposeAbilityObject,
   disposeMedkit, disposeMine, makeSonarMarkerMaterial,
   type BarricadeModel, type DartModel, type DecoyModel, type MedkitModel, type MineModel, type TagGhost,
-} from './kit-models';
-import { KIT_IDS, KIT_PRICES, isKitId, type KitId } from './economy/kit-shop';
+} from './ability-models';
+import { ABILITY_IDS, ABILITY_PRICES, isAbilityId, type AbilityId } from './economy/ability-shop';
 
-export { KIT_IDS, KIT_PRICES, isKitId, type KitId };
-export const KIT_KEY = 'Z';
+export { ABILITY_IDS, ABILITY_PRICES, isAbilityId, type AbilityId };
+export const ABILITY_KEY = 'Z';
 
 // --------------------------------------------------------------- tuning ----
 // Every number here was set against the existing combat model:
 //   * mission hostile hit = 7–14 dmg (avg 10.5), TDM bot hit = 18–24 (avg 21);
 //   * a TDM match is 150 s with a 5 s respawn; a mission phase runs 60–120 s;
 //   * player HP is 100 in missions (regen to 50) and 100 + armour in TDM (regen to 40 %).
-// Kits must be worth pressing every fight but never win a match on their own. Playtest
-// feedback on the first pass: kills refunded the kit in a few seconds, so the
+// Abilities must be worth pressing every fight but never win a match on their own. Playtest
+// feedback on the first pass: kills refunded the ability in a few seconds, so the
 // cooldowns went up by ~50 % and kill refunds went from 20 % to 8 % with a cap.
-export const KIT_TUNING = {
+export const ABILITY_TUNING = {
   recon: {
     /** 45 s: ~3 darts per 150 s TDM match — intel you plan around, not spam. */
     cooldown: 45,
@@ -182,16 +182,17 @@ export const KIT_TUNING = {
   },
   /** Every kill knocks 8 % of the full cooldown off (3.6 s on Recon)… */
   killRefund: 0.08,
-  /** …but no more than 30 % of one cooldown per charge, so a multi-kill can't chain kits. */
+  /** …but no more than 30 % of one cooldown per charge, so a multi-kill can't chain abilities. */
   refundCap: 0.3,
-  /** Kits deploy 50 % charged: the first use comes 22–30 s in, never at the spawn. */
+  /** Abilities deploy 50 % charged: the first use comes 22–30 s in, never at the spawn. */
   deployCharge: 0.5,
 } as const;
 
-export interface KitDef {
-  id: KitId;
+export interface AbilityDef {
+  id: AbilityId;
   name: string;
-  ability: string;
+  /** What the announcer/HUD calls it — equals `name` so "… READY" reads naturally. */
+  callout: string;
   role: string;
   blurb: string;
   /** One-line rule shown on menu cards and in the pause reference. */
@@ -200,20 +201,20 @@ export interface KitDef {
   steps: string[];
   cooldown: number;
   price: number;
-  /** Menu stat bars: 0..1 against the three kits. */
+  /** Menu stat bars: 0..1 against the three abilities. */
   stats: { label: string; value: string; bar: number }[];
 }
 
-// Player-facing names are plain words: the kit IS the thing it deploys. (`ability`
-// equals `name` so every "… READY" / "… RECHARGING" message reads naturally.)
-export const KIT_DEFS: Record<KitId, KitDef> = {
+// Player-facing names are plain words: the ability IS the thing it deploys, and
+// `callout` repeats it so every "… READY" / "… RECHARGING" message reads naturally.
+export const ABILITY_DEFS: Record<AbilityId, AbilityDef> = {
   recon: {
-    id: 'recon', name: 'Radar', ability: 'Radar', role: 'Intel',
+    id: 'recon', name: 'Radar', callout: 'Radar', role: 'Intel',
     blurb: 'Throw a small radar unit. It sets itself up and shows every enemy within 24 m through walls.',
     rule: 'Enemies it finds take 10% more damage. It is loud — enemies within 14 m will come to check it out.',
     steps: ['Throw it into the room before you go in.', 'It scans 3 times and shows enemies through walls.', 'Push while they are marked: +10% damage.'],
-    cooldown: KIT_TUNING.recon.cooldown,
-    price: KIT_PRICES.recon,
+    cooldown: ABILITY_TUNING.recon.cooldown,
+    price: ABILITY_PRICES.recon,
     stats: [
       { label: 'RANGE', value: '24 m', bar: 0.8 },
       { label: 'SHOWS', value: '≈8 s', bar: 0.55 },
@@ -221,12 +222,12 @@ export const KIT_DEFS: Record<KitId, KitDef> = {
     ],
   },
   bulwark: {
-    id: 'bulwark', name: 'Barricade', ability: 'Barricade', role: 'Cover',
+    id: 'bulwark', name: 'Barricade', callout: 'Barricade', role: 'Cover',
     blurb: 'Drop a folding steel shield in front of you. It stops bullets and blocks the way.',
     rule: 'Crouch behind it to stay safe, stand up to shoot over it. 450 HP. Press Z next to it to pick it back up.',
     steps: ['Look at open ground and press Z.', 'Crouch to hide, stand to shoot over it.', 'Walk up to it and press Z to pick it up.'],
-    cooldown: KIT_TUNING.bulwark.cooldown,
-    price: KIT_PRICES.bulwark,
+    cooldown: ABILITY_TUNING.bulwark.cooldown,
+    price: ABILITY_PRICES.bulwark,
     stats: [
       { label: 'HEALTH', value: '450 HP', bar: 1 },
       { label: 'LASTS', value: '24 s', bar: 0.9 },
@@ -234,12 +235,12 @@ export const KIT_DEFS: Record<KitId, KitDef> = {
     ],
   },
   phantom: {
-    id: 'phantom', name: 'Decoy', ability: 'Decoy', role: 'Distraction',
+    id: 'phantom', name: 'Decoy', callout: 'Decoy', role: 'Distraction',
     blurb: 'Send out a fake soldier that runs ahead and fires blanks. Enemies who see it shoot at it instead of you.',
     rule: 'Works on enemies within 32 m who can see it. When it is destroyed it stuns enemies within 6 m.',
     steps: ['Aim down a lane and press Z.', 'Flank them while they shoot at it.', 'When it breaks, anyone close gets stunned.'],
-    cooldown: KIT_TUNING.phantom.cooldown,
-    price: KIT_PRICES.phantom,
+    cooldown: ABILITY_TUNING.phantom.cooldown,
+    price: ABILITY_PRICES.phantom,
     stats: [
       { label: 'RANGE', value: '32 m', bar: 0.9 },
       { label: 'STUN', value: '6 m', bar: 0.6 },
@@ -247,12 +248,12 @@ export const KIT_DEFS: Record<KitId, KitDef> = {
     ],
   },
   mine: {
-    id: 'mine', name: 'Mine', ability: 'Mine', role: 'Trap',
+    id: 'mine', name: 'Mine', callout: 'Mine', role: 'Trap',
     blurb: 'Plant a jumping mine on the ground. When an enemy walks close it pops up and explodes.',
     rule: 'Arms after 1 s. Deals up to 150 damage within 5 m, and marks enemies within 10 m for 4 s so you can finish them.',
     steps: ['Plant it in a doorway or on a path.', 'Watch another angle while it guards this one.', 'When it goes off, push the marked enemies.'],
-    cooldown: KIT_TUNING.mine.cooldown,
-    price: KIT_PRICES.mine,
+    cooldown: ABILITY_TUNING.mine.cooldown,
+    price: ABILITY_PRICES.mine,
     stats: [
       { label: 'DAMAGE', value: '150', bar: 0.75 },
       { label: 'TRIGGER', value: '2.4 m', bar: 0.45 },
@@ -260,12 +261,12 @@ export const KIT_DEFS: Record<KitId, KitDef> = {
     ],
   },
   medic: {
-    id: 'medic', name: 'Medkit', ability: 'Medkit', role: 'Healing',
+    id: 'medic', name: 'Medkit', callout: 'Medkit', role: 'Healing',
     blurb: 'Drop a med case that opens into a healing field. Stand inside it to heal quickly.',
     rule: 'Heals 14 HP per second for 8 s inside 4 m. It also puts out fire. Only heals you.',
     steps: ['Drop it behind cover after a fight.', 'Stay inside the green ring to heal.', 'You can keep shooting while you heal.'],
-    cooldown: KIT_TUNING.medic.cooldown,
-    price: KIT_PRICES.medic,
+    cooldown: ABILITY_TUNING.medic.cooldown,
+    price: ABILITY_PRICES.medic,
     stats: [
       { label: 'HEALS', value: '112 HP', bar: 0.9 },
       { label: 'RADIUS', value: '4 m', bar: 0.5 },
@@ -278,14 +279,14 @@ export const KIT_DEFS: Record<KitId, KitDef> = {
  * Chance that a lured hostile hit by the player drops the decoy and turns on the real
  * shooter. 50 %: shooting from behind your decoy is strong but not free.
  */
-export const KIT_LURE_BREAK_CHANCE = 0.5;
+export const ABILITY_LURE_BREAK_CHANCE = 0.5;
 
-export function kitDef(id: KitId): KitDef { return KIT_DEFS[id]; }
+export function abilityDef(id: AbilityId): AbilityDef { return ABILITY_DEFS[id]; }
 
 // ----------------------------------------------------------- pure logic ----
 
 /** Cooldown meter. Pure: no time source, the caller ticks it. */
-export class KitCharge {
+export class AbilityCharge {
   left: number;
   /** Fraction of a cooldown refunded since the last spend (capped by `refundCap`). */
   refunded = 0;
@@ -329,7 +330,7 @@ export function snapCardinal(dx: number, dz: number): { x: number; z: number } {
  * `placeDist` ahead of the feet with its face toward the look direction.
  */
 export function barricadePlacement(feet: { x: number; y: number; z: number }, dir: { x: number; z: number },
-  cfg: { placeDist: number; width: number; height: number; collideDepth: number } = KIT_TUNING.bulwark) {
+  cfg: { placeDist: number; width: number; height: number; collideDepth: number } = ABILITY_TUNING.bulwark) {
   const f = snapCardinal(dir.x, dir.z);
   const cx = feet.x + f.x * cfg.placeDist, cz = feet.z + f.z * cfg.placeDist;
   // Local -Z of the model must point along f: rotation θ maps -Z to (-sin θ, -cos θ).
@@ -343,7 +344,7 @@ export function barricadePlacement(feet: { x: number; y: number; z: number }, di
 }
 
 /** Recall refund in seconds for a wall at `hpFrac` integrity (pure). */
-export function recallRefundSeconds(hpFrac: number, cfg: { cooldown: number; recallRefund: number } = KIT_TUNING.bulwark): number {
+export function recallRefundSeconds(hpFrac: number, cfg: { cooldown: number; recallRefund: number } = ABILITY_TUNING.bulwark): number {
   return cfg.cooldown * cfg.recallRefund * Math.max(0, Math.min(1, hpFrac));
 }
 
@@ -362,7 +363,7 @@ export function burstVictims<T extends { pos: { x: number; z: number } }>(center
 }
 
 /** Anything a hostile can be tricked into shooting at. */
-export interface KitLure {
+export interface AbilityLure {
   /** Aim point (chest/eye height). Live vector — read, never mutate. */
   eye: THREE.Vector3;
   /** Ground position. Live vector — read, never mutate. */
@@ -376,8 +377,8 @@ export interface KitLure {
  * The lure a hostile at `eye` locks onto: the nearest active lure inside `radius`
  * that it can actually see. Pure given the visibility predicate.
  */
-export function chooseLure(eye: THREE.Vector3, lures: KitLure[], radius: number, visible: (from: THREE.Vector3, to: THREE.Vector3) => boolean): KitLure | null {
-  let best: KitLure | null = null, bestD = radius;
+export function chooseLure(eye: THREE.Vector3, lures: AbilityLure[], radius: number, visible: (from: THREE.Vector3, to: THREE.Vector3) => boolean): AbilityLure | null {
+  let best: AbilityLure | null = null, bestD = radius;
   for (const l of lures) {
     if (!l.active()) continue;
     const d = eye.distanceTo(l.eye);
@@ -390,7 +391,7 @@ export function chooseLure(eye: THREE.Vector3, lures: KitLure[], radius: number,
 
 // -------------------------------------------------------------- context ----
 
-export interface KitHostile {
+export interface AbilityHostile {
   /** Stable identity (the Enemy / TDMBot object) — reveal tags are keyed on it. */
   ref: object;
   pos: THREE.Vector3;
@@ -399,14 +400,14 @@ export interface KitHostile {
   stun?(seconds: number): void;
   /** Crouched right now (the sonar silhouette drops to crouch height). */
   crouched?(): boolean;
-  /** Kit damage from the player (the Mine). `weapon` names the kill in the feed. True = killed. */
+  /** Ability damage from the player (the Mine). `weapon` names the kill in the feed. True = killed. */
   damage?(amount: number, weapon: string): boolean;
 }
 
 /** Screen/camera feedback the engine turns into a HUD overlay and camera shake. */
-export type KitFxKind = 'ping' | 'slam' | 'recall' | 'decoy' | 'burst' | 'break' | 'ready' | 'blast' | 'heal';
+export type AbilityFxKind = 'ping' | 'slam' | 'recall' | 'decoy' | 'burst' | 'break' | 'ready' | 'blast' | 'heal';
 
-export interface KitContext {
+export interface AbilityContext {
   scene: THREE.Scene;
   effects: Effects;
   /** Live world occluder list — barricade plates are pushed in/out of it. */
@@ -416,7 +417,7 @@ export interface KitContext {
   playerEye(): THREE.Vector3;
   playerDir(): THREE.Vector3;
   playerAlive(): boolean;
-  hostiles(): KitHostile[];
+  hostiles(): AbilityHostile[];
   /** Is this footprint clear of world solids and of the player's own capsule? */
   canPlaceBox(box: AABB): boolean;
   /** Add/remove a movement blocker; the engine refreshes its collision grid and hittables. */
@@ -431,29 +432,30 @@ export interface KitContext {
   healPlayer?(amount: number): number;
   playerHealth?(): { hp: number; max: number };
   /** Optional HUD / camera feedback (overlay flash, shake). */
-  feedback?(kind: KitFxKind, at?: THREE.Vector3): void;
+  feedback?(kind: AbilityFxKind, at?: THREE.Vector3): void;
 }
 
-export interface KitLiveHud { kind: 'dart' | 'barricade' | 'decoy' | 'mine' | 'medkit'; label: string; timeLeft: number; total: number; detail?: string; health?: number }
+export interface AbilityLiveHud { kind: 'dart' | 'barricade' | 'decoy' | 'mine' | 'medkit'; label: string; timeLeft: number; total: number; detail?: string; health?: number }
 
-export interface KitHud {
-  id: KitId;
+export interface AbilityHud {
+  id: AbilityId;
   name: string;
-  ability: string;
+  /** Announcer/HUD callout name (equals `name`). */
+  callout: string;
   key: string;
   ready: boolean;
   /** 0..1 charge. */
   pct: number;
   cooldownLeft: number;
   cooldown: number;
-  live: KitLiveHud[];
+  live: AbilityLiveHud[];
   /** Hostiles currently sonar-tagged. */
   tagged: number;
   /** Show the onboarding prompt (early in the deployment and never used yet). */
   hint: boolean;
   /** Bulwark: standing next to your wall — Z recalls it. */
   recall: boolean;
-  /** Bumps each time the kit becomes ready / is used — drives HUD burst animations. */
+  /** Bumps each time the ability becomes ready / is used — drives HUD burst animations. */
   readyEpoch: number;
   useEpoch: number;
   blurb: string;
@@ -478,8 +480,8 @@ class SonarDart {
   private ringT = -1;
   done = false;
 
-  constructor(private ctx: KitContext, private dir: KitDirector, from: THREE.Vector3, aim: THREE.Vector3) {
-    const T = KIT_TUNING.recon;
+  constructor(private ctx: AbilityContext, private dir: AbilityDirector, from: THREE.Vector3, aim: THREE.Vector3) {
+    const T = ABILITY_TUNING.recon;
     this.model = buildDart();
     this.pos = from.clone();
     this.vel = aim.clone().normalize().multiplyScalar(T.throwSpeed);
@@ -494,7 +496,7 @@ class SonarDart {
     this.model.group.rotation.set(0, Math.atan2(-d.x, -d.z), 0);
   }
 
-  static readonly LIFE = KIT_TUNING.recon.firstPulse + KIT_TUNING.recon.pulseEvery * (KIT_TUNING.recon.pulses - 1) + 0.8;
+  static readonly LIFE = ABILITY_TUNING.recon.firstPulse + ABILITY_TUNING.recon.pulseEvery * (ABILITY_TUNING.recon.pulses - 1) + 0.8;
 
   get timeLeft(): number {
     if (!this.stuck) return SonarDart.LIFE;
@@ -502,7 +504,7 @@ class SonarDart {
   }
 
   update(dt: number) {
-    const T = KIT_TUNING.recon;
+    const T = ABILITY_TUNING.recon;
     if (!this.stuck) {
       this.flight += dt;
       this.vel.y -= 9.8 * T.gravityScale * dt;
@@ -581,7 +583,7 @@ class SonarDart {
   }
 
   private pulse() {
-    const T = KIT_TUNING.recon;
+    const T = ABILITY_TUNING.recon;
     this.pulsesFired++;
     this.ringT = 0;
     this.spin = 14;
@@ -604,7 +606,7 @@ class SonarDart {
 
   dispose() {
     this.ctx.scene.remove(this.model.group);
-    disposeKitObject(this.model.group);
+    disposeAbilityObject(this.model.group);
     disposeDartFx(this.model);
   }
 }
@@ -616,8 +618,8 @@ const SCORCHED = new THREE.Color(0x3A3128);
 
 class Barricade {
   model: BarricadeModel;
-  hp: number = KIT_TUNING.bulwark.hp;
-  life: number = KIT_TUNING.bulwark.life;
+  hp: number = ABILITY_TUNING.bulwark.hp;
+  life: number = ABILITY_TUNING.bulwark.life;
   done = false;
   damageTaken = 0;
   /** Folding away (recall / expiry): blocker already lifted, removed when the fold ends. */
@@ -630,8 +632,8 @@ class Barricade {
   private slammed = false;
   private blockerLive = true;
 
-  constructor(private ctx: KitContext, public box: AABB, center: { x: number; y: number; z: number }, yaw: number) {
-    const T = KIT_TUNING.bulwark;
+  constructor(private ctx: AbilityContext, public box: AABB, center: { x: number; y: number; z: number }, yaw: number) {
+    const T = ABILITY_TUNING.bulwark;
     this.model = buildBarricade(T.width, T.height, T.depth);
     const g = this.model.group;
     g.position.set(center.x, center.y, center.z);
@@ -640,9 +642,9 @@ class Barricade {
     ctx.scene.add(g);
     g.updateMatrixWorld(true);
     for (const p of this.model.plates) {
-      p.userData.kitBarricade = true;
+      p.userData.abilityBarricade = true;
       // Any hostile round that stops on a plate damages the wall (see ai.ts / tdm.ts).
-      p.userData.kitHit = (amount: number, at?: THREE.Vector3) => this.damage(amount, at);
+      p.userData.abilityHit = (amount: number, at?: THREE.Vector3) => this.damage(amount, at);
       ctx.occluders.push(p);
     }
     ctx.addBlocker(box);
@@ -679,7 +681,7 @@ class Barricade {
 
   update(dt: number) {
     if (this.done) return;
-    const T = KIT_TUNING.bulwark;
+    const T = ABILITY_TUNING.bulwark;
     this.age += dt;
     this.sparkT -= dt;
     if (this.folding) {
@@ -724,7 +726,7 @@ class Barricade {
     for (const p of this.model.plates) {
       const i = this.ctx.occluders.indexOf(p);
       if (i >= 0) this.ctx.occluders.splice(i, 1);
-      delete p.userData.kitHit;
+      delete p.userData.abilityHit;
     }
     this.ctx.removeBlocker(this.box);
   }
@@ -751,7 +753,7 @@ class Barricade {
   /** Player recall: fold it up and hand back the remaining integrity fraction. */
   recall(): number {
     if (!this.active) return 0;
-    const frac = Math.max(0, this.hp / KIT_TUNING.bulwark.hp);
+    const frac = Math.max(0, this.hp / ABILITY_TUNING.bulwark.hp);
     this.release();
     this.folding = true;
     const c = this.center;
@@ -766,18 +768,18 @@ class Barricade {
   dispose() {
     this.release();
     this.ctx.scene.remove(this.model.group);
-    disposeKitObject(this.model.group);
+    disposeAbilityObject(this.model.group);
     this.model.plateMat.dispose();
   }
 }
 
 // --------------------------------------------------------------- decoy ----
-class HoloDecoy implements KitLure {
+class HoloDecoy implements AbilityLure {
   model: DecoyModel;
   feet: THREE.Vector3;
   eye = new THREE.Vector3();
-  hp: number = KIT_TUNING.phantom.hp;
-  life: number = KIT_TUNING.phantom.life;
+  hp: number = ABILITY_TUNING.phantom.hp;
+  life: number = ABILITY_TUNING.phantom.life;
   done = false;
   private age = 0;
   private fireT = 0.35;
@@ -793,7 +795,7 @@ class HoloDecoy implements KitLure {
   /** Hostiles stunned by this decoy's burst (tests + debrief). */
   stunned = 0;
 
-  constructor(private ctx: KitContext, from: THREE.Vector3, dx: number, dz: number) {
+  constructor(private ctx: AbilityContext, from: THREE.Vector3, dx: number, dz: number) {
     this.model = buildDecoy();
     const l = Math.hypot(dx, dz) || 1;
     this.dirX = dx / l; this.dirZ = dz / l;
@@ -824,7 +826,7 @@ class HoloDecoy implements KitLure {
   private pop(shot: boolean) {
     if (this.popT >= 0) return;
     this.popT = 0;
-    const P = KIT_TUNING.phantom;
+    const P = ABILITY_TUNING.phantom;
     const c = tmpA.set(this.feet.x, this.feet.y + 1, this.feet.z);
     audio.decoyPop(c.x, c.y, c.z);
     audio.decoyBurst(c.x, c.y, c.z);
@@ -839,7 +841,7 @@ class HoloDecoy implements KitLure {
 
   update(dt: number) {
     if (this.done) return;
-    const T = KIT_TUNING.phantom;
+    const T = ABILITY_TUNING.phantom;
     const g = this.model.group;
     this.model.mat.uniforms.uTime.value += dt; // scanlines crawl, sweep band travels
     if (this.popT >= 0) {
@@ -938,7 +940,7 @@ class HoloDecoy implements KitLure {
       : tmpB.set(muzzle.x - Math.sin(g.rotation.y) * 30, muzzle.y, muzzle.z - Math.cos(g.rotation.y) * 30);
     this.ctx.effects.tracer(muzzle, to.clone(), false);
     audio.decoyFire(muzzle.x, muzzle.y, muzzle.z);
-    this.ctx.alertAt(this.feet, KIT_TUNING.phantom.noiseRadius);
+    this.ctx.alertAt(this.feet, ABILITY_TUNING.phantom.noiseRadius);
   }
 
   /** Hard stop (match end): no burst, no announcement. */
@@ -955,7 +957,7 @@ class ProximityMine {
   model: MineModel;
   pos: THREE.Vector3;
   age = 0;
-  life: number = KIT_TUNING.mine.life;
+  life: number = ABILITY_TUNING.mine.life;
   done = false;
   /** -1 until tripped, then seconds since the trip. */
   private tripT = -1;
@@ -965,18 +967,18 @@ class ProximityMine {
   marked = 0;
   private armedSaid = false;
 
-  constructor(private ctx: KitContext, private dir: KitDirector, at: THREE.Vector3) {
+  constructor(private ctx: AbilityContext, private dir: AbilityDirector, at: THREE.Vector3) {
     this.model = buildMine();
     this.pos = at.clone();
     this.model.group.position.copy(this.pos);
-    this.model.ring.scale.setScalar(KIT_TUNING.mine.triggerRadius);
-    this.model.laser.scale.setScalar(KIT_TUNING.mine.triggerRadius);
+    this.model.ring.scale.setScalar(ABILITY_TUNING.mine.triggerRadius);
+    this.model.laser.scale.setScalar(ABILITY_TUNING.mine.triggerRadius);
     ctx.scene.add(this.model.group);
     audio.minePlant(at.x, at.y, at.z);
     ctx.effects.footDust(at);
   }
 
-  get armed(): boolean { return this.age >= KIT_TUNING.mine.armDelay; }
+  get armed(): boolean { return this.age >= ABILITY_TUNING.mine.armDelay; }
   get tripped(): boolean { return this.tripT >= 0; }
   get active(): boolean { return !this.done && !this.tripped; }
 
@@ -989,7 +991,7 @@ class ProximityMine {
 
   update(dt: number) {
     if (this.done) return;
-    const T = KIT_TUNING.mine;
+    const T = ABILITY_TUNING.mine;
     this.age += dt;
     const led = this.model.led.material as THREE.MeshStandardMaterial;
     const ring = this.model.ring.material as THREE.MeshBasicMaterial;
@@ -1036,7 +1038,7 @@ class ProximityMine {
   }
 
   private detonate() {
-    const T = KIT_TUNING.mine;
+    const T = ABILITY_TUNING.mine;
     this.done = true;
     const c = tmpA.set(this.pos.x, this.pos.y + T.jumpHeight, this.pos.z).clone();
     this.ctx.effects.explosion(c);
@@ -1074,7 +1076,7 @@ class ProximityMine {
  * Mine damage at `d` m from the canister (pure). Full damage inside the core radius,
  * falling linearly to `edgeDamage` at the blast radius, nothing beyond.
  */
-export function mineDamage(d: number, cfg: { blastRadius: number; coreRadius: number; damage: number; edgeDamage: number } = KIT_TUNING.mine): number {
+export function mineDamage(d: number, cfg: { blastRadius: number; coreRadius: number; damage: number; edgeDamage: number } = ABILITY_TUNING.mine): number {
   if (d > cfg.blastRadius) return 0;
   if (d <= cfg.coreRadius) return cfg.damage;
   return THREE.MathUtils.lerp(cfg.damage, cfg.edgeDamage, (d - cfg.coreRadius) / (cfg.blastRadius - cfg.coreRadius));
@@ -1085,14 +1087,14 @@ class MedStation {
   model: MedkitModel;
   pos: THREE.Vector3;
   age = 0;
-  life: number = KIT_TUNING.medic.life;
+  life: number = ABILITY_TUNING.medic.life;
   done = false;
   healed = 0;
   private tickT = 0;
   private moteT = 0;
   private closing = -1;
 
-  constructor(private ctx: KitContext, at: THREE.Vector3, yaw: number) {
+  constructor(private ctx: AbilityContext, at: THREE.Vector3, yaw: number) {
     this.model = buildMedkit();
     this.pos = at.clone();
     this.model.group.position.copy(this.pos);
@@ -1108,7 +1110,7 @@ class MedStation {
 
   update(dt: number) {
     if (this.done) return;
-    const T = KIT_TUNING.medic;
+    const T = ABILITY_TUNING.medic;
     const m = this.model;
     const domeMat = m.dome.material as THREE.ShaderMaterial & { opacity: number };
     const ringMat = m.ring.material as THREE.MeshBasicMaterial;
@@ -1163,9 +1165,9 @@ class MedStation {
 /** Tagged-hostile markers pooled at 16 — more than any squad the game fields at once. */
 const TAG_POOL = 16;
 
-export class KitDirector {
-  readonly kit: KitId;
-  charge: KitCharge;
+export class AbilityDirector {
+  readonly ability: AbilityId;
+  charge: AbilityCharge;
   uses = 0;
   elapsed = 0;
   /** Lifetime stats for the debrief / tests. */
@@ -1185,12 +1187,12 @@ export class KitDirector {
   private useEpoch = 0;
 
   /**
-   * `startCharge` is the fraction of a full charge the kit deploys with
-   * (KIT_TUNING.deployCharge = 0.5 in play; tests pass 1 to start ready).
+   * `startCharge` is the fraction of a full charge the ability deploys with
+   * (ABILITY_TUNING.deployCharge = 0.5 in play; tests pass 1 to start ready).
    */
-  constructor(private ctx: KitContext, kit: KitId, startCharge: number = KIT_TUNING.deployCharge) {
-    this.kit = kit;
-    this.charge = new KitCharge(KIT_DEFS[kit].cooldown, startCharge);
+  constructor(private ctx: AbilityContext, ability: AbilityId, startCharge: number = ABILITY_TUNING.deployCharge) {
+    this.ability = ability;
+    this.charge = new AbilityCharge(ABILITY_DEFS[ability].cooldown, startCharge);
     this.wasReady = this.charge.ready;
     this.markerMat = makeSonarMarkerMaterial();
     for (let i = 0; i < TAG_POOL; i++) {
@@ -1206,7 +1208,7 @@ export class KitDirector {
     }
   }
 
-  get def(): KitDef { return KIT_DEFS[this.kit]; }
+  get def(): AbilityDef { return ABILITY_DEFS[this.ability]; }
 
   /** Z pressed. Returns true when the ability (or a recall) actually went out. */
   activate(): boolean {
@@ -1222,17 +1224,17 @@ export class KitDirector {
       return true;
     }
     if (!this.charge.ready) {
-      audio.kitDenied();
-      this.ctx.announce(`${this.def.ability.toUpperCase()} RECHARGING — ${Math.ceil(this.charge.left)}s`);
+      audio.abilityDenied();
+      this.ctx.announce(`${this.def.callout.toUpperCase()} RECHARGING — ${Math.ceil(this.charge.left)}s`);
       return false;
     }
     let ok = false;
-    if (this.kit === 'recon') ok = this.throwDart();
-    else if (this.kit === 'bulwark') ok = this.plantBarricade();
-    else if (this.kit === 'phantom') ok = this.sendDecoy();
-    else if (this.kit === 'mine') ok = this.plantMine();
+    if (this.ability === 'recon') ok = this.throwDart();
+    else if (this.ability === 'bulwark') ok = this.plantBarricade();
+    else if (this.ability === 'phantom') ok = this.sendDecoy();
+    else if (this.ability === 'mine') ok = this.plantMine();
     else ok = this.dropMedkit();
-    if (!ok) { audio.kitDenied(); return false; }
+    if (!ok) { audio.abilityDenied(); return false; }
     this.charge.spend();
     this.uses++;
     this.useEpoch++;
@@ -1242,11 +1244,11 @@ export class KitDirector {
 
   /** The player's live wall within recall range, if any. */
   private recallable(): Barricade | null {
-    if (this.kit !== 'bulwark') return null;
+    if (this.ability !== 'bulwark') return null;
     const feet = this.ctx.playerFeet();
     for (const w of this.walls) {
       if (!w.active) continue;
-      if (Math.hypot(w.center.x - feet.x, w.center.z - feet.z) <= KIT_TUNING.bulwark.recallRange) return w;
+      if (Math.hypot(w.center.x - feet.x, w.center.z - feet.z) <= ABILITY_TUNING.bulwark.recallRange) return w;
     }
     return null;
   }
@@ -1312,7 +1314,7 @@ export class KitDirector {
   }
 
   private plantMine(): boolean {
-    const at = this.groundAhead(KIT_TUNING.mine.placeDist);
+    const at = this.groundAhead(ABILITY_TUNING.mine.placeDist);
     if (!at) return false;
     for (const m of this.mines) m.kill(); // one mine at a time
     this.mines.push(new ProximityMine(this.ctx, this, at));
@@ -1322,7 +1324,7 @@ export class KitDirector {
   }
 
   private dropMedkit(): boolean {
-    const at = this.groundAhead(KIT_TUNING.medic.placeDist);
+    const at = this.groundAhead(ABILITY_TUNING.medic.placeDist);
     if (!at) return false;
     const d = this.ctx.playerDir();
     for (const m of this.meds) m.kill(); // one station at a time
@@ -1334,7 +1336,7 @@ export class KitDirector {
 
   /** A kill landed: shave the cooldown (8 % each, capped at 30 % per charge). */
   onKill(count = 1) {
-    for (let i = 0; i < count; i++) this.charge.refund(KIT_TUNING.killRefund, KIT_TUNING.refundCap);
+    for (let i = 0; i < count; i++) this.charge.refund(ABILITY_TUNING.killRefund, ABILITY_TUNING.refundCap);
   }
 
   /** Sonar tag a hostile for `seconds`. */
@@ -1349,16 +1351,16 @@ export class KitDirector {
   isRevealed(ref: object): boolean { return (this.tags.get(ref) ?? 0) > 0; }
 
   /** Player damage multiplier against `ref` (Recon mark). */
-  damageMul(ref: object): number { return this.isRevealed(ref) ? KIT_TUNING.recon.markDamageMul : 1; }
+  damageMul(ref: object): number { return this.isRevealed(ref) ? ABILITY_TUNING.recon.markDamageMul : 1; }
 
   /** Lures active right now (the decoys). */
-  lures(): KitLure[] { return this.decoys.filter(d => d.active()); }
+  lures(): AbilityLure[] { return this.decoys.filter(d => d.active()); }
 
   /** The decoy a hostile at `eye` would lock onto, if any. Visibility = world occluders. */
-  lureFor(eye: THREE.Vector3): KitLure | null {
+  lureFor(eye: THREE.Vector3): AbilityLure | null {
     const lures = this.lures();
     if (!lures.length) return null;
-    return chooseLure(eye, lures, KIT_TUNING.phantom.lureRadius, (from, to) => {
+    return chooseLure(eye, lures, ABILITY_TUNING.phantom.lureRadius, (from, to) => {
       const d = from.distanceTo(to);
       ray.set(from, tmpA.copy(to).sub(from).normalize()); ray.far = Math.max(0, d - 0.3);
       return ray.intersectObjects(this.ctx.occluders, false).length === 0;
@@ -1367,13 +1369,13 @@ export class KitDirector {
 
   /** Explosion: cracks walls and pops decoys in range. */
   blast(pos: THREE.Vector3, radius: number) {
-    const T = KIT_TUNING.bulwark;
+    const T = ABILITY_TUNING.bulwark;
     for (const w of this.walls) {
       if (!w.active) continue;
       const d = tmpA.set(w.center.x, w.center.y + 0.7, w.center.z).distanceTo(pos);
       if (d < radius) w.damage(T.blastDamage * THREE.MathUtils.lerp(1, 0.4, d / radius));
     }
-    for (const d of this.decoys) if (d.active() && d.eye.distanceTo(pos) < radius) d.hit(KIT_TUNING.phantom.hp);
+    for (const d of this.decoys) if (d.active() && d.eye.distanceTo(pos) < radius) d.hit(ABILITY_TUNING.phantom.hp);
     // A blast sets off any armed mine it reaches (chain reactions are part of the trap).
     for (const m of this.mines) if (m.active && m.armed && m.pos.distanceTo(pos) < radius * 0.6) m.trip();
   }
@@ -1383,10 +1385,10 @@ export class KitDirector {
     this.charge.tick(dt);
     // Charged (by time or a kill refund): chime + ticker so the player knows to use it.
     if (this.charge.ready && !this.wasReady && this.ctx.playerAlive()) {
-      audio.kitReady();
+      audio.abilityReady();
       this.readyEpoch++;
       this.ctx.feedback?.('ready');
-      this.ctx.announce(`${this.def.ability.toUpperCase()} READY — PRESS ${KIT_KEY}`);
+      this.ctx.announce(`${this.def.callout.toUpperCase()} READY — PRESS ${ABILITY_KEY}`);
     }
     this.wasReady = this.charge.ready;
     for (const d of this.darts) d.update(dt);
@@ -1436,25 +1438,25 @@ export class KitDirector {
     return keep;
   }
 
-  /** Number of live kit entities (tests + HUD). */
+  /** Number of live ability entities (tests + HUD). */
   get liveCount(): number { return this.darts.length + this.walls.length + this.decoys.length + this.mines.length + this.meds.length; }
 
-  hud(): KitHud {
-    const live: KitLiveHud[] = [];
-    const R = KIT_TUNING.recon, B = KIT_TUNING.bulwark, P = KIT_TUNING.phantom;
+  hud(): AbilityHud {
+    const live: AbilityLiveHud[] = [];
+    const R = ABILITY_TUNING.recon, B = ABILITY_TUNING.bulwark, P = ABILITY_TUNING.phantom;
     for (const d of this.darts) live.push({ kind: 'dart', label: 'RADAR', timeLeft: d.timeLeft, total: SonarDart.LIFE, detail: d.stuck ? `SCAN ${d.pulsesFired}/${R.pulses}` : 'THROWN' });
     for (const w of this.walls) if (w.active) live.push({ kind: 'barricade', label: 'BARRICADE', timeLeft: Math.max(0, w.life), total: B.life, health: Math.max(0, w.hp / B.hp), detail: `${Math.max(0, Math.ceil(w.hp))} HP` });
-    const Mi = KIT_TUNING.mine, Me = KIT_TUNING.medic;
+    const Mi = ABILITY_TUNING.mine, Me = ABILITY_TUNING.medic;
     for (const m of this.mines) if (m.active) live.push({ kind: 'mine', label: 'MINE', timeLeft: Math.max(0, m.life), total: Mi.life, detail: m.armed ? 'ARMED' : 'ARMING' });
     for (const m of this.meds) if (m.active) live.push({ kind: 'medkit', label: 'MEDKIT', timeLeft: Math.max(0, m.life), total: Me.life, detail: `+${Math.round(m.healed)} HP` });
     for (const d of this.decoys) if (d.active()) live.push({ kind: 'decoy', label: 'DECOY', timeLeft: Math.max(0, d.life), total: P.life, health: Math.max(0, d.hp / P.hp), detail: `${d.hitsTaken} HITS TAKEN` });
     let tagged = 0;
     for (const t of this.tags.values()) if (t > 0) tagged++;
     return {
-      id: this.kit, name: this.def.name, ability: this.def.ability, key: KIT_KEY,
+      id: this.ability, name: this.def.name, callout: this.def.callout, key: ABILITY_KEY,
       ready: this.charge.ready, pct: this.charge.pct, cooldownLeft: this.charge.left, cooldown: this.charge.cooldown,
       live, tagged,
-      // Onboarding: the prompt shows for the first 45 s of a deployment until the kit is used
+      // Onboarding: the prompt shows for the first 45 s of a deployment until the ability is used
       // (long enough to cover the half-charge wait and a few seconds of READY).
       hint: this.uses === 0 && this.elapsed < 45,
       recall: !!this.recallable(),
@@ -1482,7 +1484,7 @@ export class KitDirector {
     for (const s of this.markers) this.ctx.scene.remove(s);
     for (const g of this.ghosts) {
       this.ctx.scene.remove(g.group);
-      disposeKitObject(g.group);
+      disposeAbilityObject(g.group);
       g.mat.dispose();
     }
     this.markerMat.map?.dispose();

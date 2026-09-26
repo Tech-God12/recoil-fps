@@ -1,3 +1,62 @@
+## 2026-09-26 — Deploy can no longer hang silently: bounded boot, named stages
+
+**The Warehouse "won't launch" report.** The symptom given was a deploy that sits on
+"Loading world…", shows an error, or drops back to the menu, **with nothing in the
+console**. Auditing the launch path for that combination points at exactly one place it
+can come from, and it was real: `launch()` caught every `Engine.create` failure and put
+it in a banner without ever logging it, and `Engine.init` had two awaits that can wait
+forever without ever settling.
+
+* `nextFrame()` was a bare double-`requestAnimationFrame`. Every stage of the build
+  awaits it — and a browser delivers **no** frames to a hidden or occluded tab. Click
+  Deploy, alt-tab, come back: the boot screen is frozen mid-build with no error, because
+  nothing threw. It now races a 250 ms timer against rAF, so frames still yield when
+  there are frames and a plain macrotask carries the build when there are not.
+* `await this.renderer.compileAsync(...)` gates the end of every launch, and it resolves
+  only once every material's program answers `COMPLETION_STATUS_KHR`. That poll is
+  answered by the GPU; a driver that stalls, or a context lost mid-compile, leaves it
+  false forever and three.js simply keeps re-checking every 10 ms. A new `compileShaders`
+  bounds it (20 s world, 10 s viewmodel) and falls through — shaders compile lazily on
+  first use anyway, so the cost is one frame of stutter, not the match.
+* `launch()` now `console.error`s the cause **and** names the stage it died on, both in
+  the console and in the banner. The old path produced a red banner and an empty console,
+  which is why the report came in with no error to go on.
+* Two bare assertions replaced with real ones: `getContext('2d')!` in `makeCanvas` (a null
+  context used to surface as a TypeError from inside `generateMapImage`), and
+  `new THREE.WebGLRenderer(...)`, whose failure now reports hardware acceleration /
+  context exhaustion in words a player can act on.
+* `Engine.init` reports its stages through a new `EngineLaunchOptions.onStage`, and the
+  boot screen shows the live one instead of a fixed "Loading world…" — so a stalled build
+  names itself on screen.
+
+**Why the existing harnesses never saw this.** `scripts/headless-shim.ts` answers
+`getExtension()` with `null`, so `KHR_parallel_shader_compile` reads as unavailable and
+three.js flags every program ready immediately — `compileAsync` resolves without ever
+polling. The stub also never throttles rAF. Both gates that only a real GPU and a real
+tab enforce were structurally invisible to them. `tests/boot-resilience.test.js` closes
+that: the arena boots to `Ready` with the rAF queue never pumped, `compileShaders` gives
+up in ~120 ms against a `compileAsync` that never settles, a rejected precompile falls
+through instead of rejecting the launch, and all nine stage names arrive in order.
+
+Not verified: no browser exists in this sandbox (no chromium/firefox binary; the
+Playwright CDN is blocked), so real shader compilation, pixels and frame rate remain
+unchecked. If Warehouse still misbehaves after this, the boot screen and the console will
+now name the stage it stops on — that line is the thing to report back.
+
+Verification: `node scripts/validate.mjs` — lint, typecheck, 236/236 Node tests (232 + 4
+new), 44/44 mutations killed; `npm run build` 5,029.13 kB / 2,914.97 kB gzip;
+`scripts/tdm-engine-smoke.ts` 25/25; `scripts/ui-smoke.mjs` 19/19, zero console errors.
+
+## 2026-09-25 — "Kits" are now "Abilities"; Warehouse TDM audited end to end
+
+**Rename: kits → abilities.** Every player-facing mention of the Z cooldown system now says *ability*. The home tile is **ABILITIES**, the showroom reads "Abilities — one ability per game · use it with Z", and the HUD slot, onboarding hint, event ticker, pause card, deploy button, bind list (`Field ability — Z`), mission deploy panel and TDM loadout rules all follow. The code moved with it so the name cannot drift back: `game/kits.ts`→`abilities.ts`, `kit-models.ts`→`ability-models.ts`, `economy/kit-shop.ts`→`ability-shop.ts`, `ui/Kits.tsx`→`Abilities.tsx`, `KitsMenu.tsx`→`AbilitiesMenu.tsx`, `KitViewer.tsx`→`AbilityViewer.tsx`; `KitDirector`→`AbilityDirector`, `KitId`/`KIT_IDS`/`KIT_DEFS`/`KIT_PRICES`/`KIT_TUNING`→`AbilityId`/`ABILITY_IDS`/`ABILITY_DEFS`/`ABILITY_PRICES`/`ABILITY_TUNING`, `equippedKit`/`ownedKits`/`buyKit`/`equipKit`/`readKits`→`equippedAbility`/`ownedAbilities`/`buyAbility`/`equipAbility`/`readAbilities`, the `kitfx`/`kitmsg` engine events→`abilityfx`/`abilitymsg`, and the 51 `.kit-*` CSS classes with their keyframes. `AbilityDef.ability` (which only duplicated `name`) is now `callout`, so `def.callout` no longer reads as `def.ability`. Saved profiles migrate on read: `readAbilities` falls back to the old `ownedKits`/`equippedKit` keys, so an existing purchase and the equipped choice survive the rename. `tests/field-kits.test.js`→`field-abilities.test.js`, `docs/field-kits.md`→`field-abilities.md`.
+
+Deliberately **not** renamed, because they are different things that happen to contain the word: the Bomb Defusal **Defuse Kit** (`TIMING.defuseKit`, the `kit` buy-menu item, `KitGlyph`, `.df-kit`/`.df-row-kit`), the **Medkit** ability's own name and its models/sounds, the armory's "Lightweight Stock Kit" attachments, `-webkit-*` CSS properties and `webkitAudioContext`. One label was also corrected rather than translated: the TDM loadout's "ENEMY KIT" header lists Bravo's *armor* tiers, so it is now "ENEMY ARMOR" (and "check Bravo's armor" in the rules box).
+
+**Warehouse TDM: audited end to end — no defect reproduced.** Two new headless harnesses now pin the mode down. `scripts/tdm-engine-smoke.ts` boots the real `Engine` on `arena` against the stub WebGL2 context and asserts 25 behaviours: `isTDM`, the 9-bot roster, the 2:30 clock, the alpha spawn is outside every solid and walkable in all four directions, a scripted 12 m duel where the player's own bullets register hits and the kill credits `playerKills` and the alpha score, Z deploys the ability and starts its cooldown, death → 5 s redeploy at full HP, and the match runs out to a 10-row debrief with a decided outcome. `scripts/ui-harness.mjs` + `scripts/ui-smoke.mjs` load the *real built bundle* into jsdom (`vite.uitest.config.ts` builds it as an IIFE because jsdom cannot run module scripts) and click the way a player does: home → ARENA MODE → WAREHOUSE → Play, the "Set up loadout" route through `TdmSetup`, the ABILITIES screen, and a full 2:30 match through to the results screen. All 25 engine checks and all 19 UI checks pass with zero console errors, so whatever "not working" means for Warehouse is not the launch path, the HUD, the bots, the clock or the debrief. Not checked: anything that needs a real GPU — no browser is reachable in this sandbox (the Playwright CDN is blocked), so shader compile, actual pixels and frame rate are still unverified.
+
+Verification: `node scripts/validate.mjs` — lint, typecheck, 232/232 Node tests, 44/44 mutations killed; `npm run build` 5,027.48 kB / 2,913.94 kB gzip; `scripts/tdm-engine-smoke.ts` 25/25; `scripts/ui-smoke.mjs` 19/19. `jsdom` added as a devDependency for the UI harness.
+
 ## 2026-09-25 — Merge main into the Kits branch (PR #27)
 
 Merged `main` (Bomb Defusal on Sirocco, frame budget / light pool, hit reactions, gunfeel, and the 2026-09-25 gunfeel/perf/HUD headline) into the Kits branch. Kits stay in Missions and Warehouse TDM only; Bomb Defusal gets no kit and keeps Z for smoke. Home menu: Missions, Arena (Bomb Defusal + TDM), Kits, Loadout, Settings. The scorestreak system and Operation Blackout stay removed, as this branch already decided, so main's streak and ranked hooks were stripped from the engine, TDM bots, HUD, menus and results. The bind list shows `Field kit — Z` in place of Scorestreaks. The frame-budget test now counts the 4 extra Warehouse floodlights. The light pool still caps the shader at 4 point lights. Main's newest commit also had 5 lint errors (empty catch blocks, `let`→`const`, an unused test import); those are fixed.

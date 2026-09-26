@@ -4,7 +4,7 @@
 // Lethal hits kill outright and score immediately — no wounded state, no revives.
 // Momentum layer: 3 kills inside 30 s ignites ON FIRE (+damage, +speed) but every enemy hunts you.
 import * as THREE from 'three';
-import { KIT_LURE_BREAK_CHANCE, type KitLure } from './kits';
+import { ABILITY_LURE_BREAK_CHANCE, type AbilityLure } from './abilities';
 import { buildArmoredSoldier, HIT_PROXY_MAT, type SoldierModel } from './models';
 import type { Effects } from './effects';
 import { BodyReactions, surfaceUnder, type HitInfo } from './reactions';
@@ -68,10 +68,10 @@ export interface TDMContext {
   onScore(): void; // roster / scoreboard changed
   playerOnFire(): boolean;
   /**
-   * Field kits: the player's holo-decoy a bravo bot at `eye` can see, if any. Bravo
+   * Field abilities: the player's holo-decoy a bravo bot at `eye` can see, if any. Bravo
    * bots prefer a visible decoy over any other target — that is the whole trick.
    */
-  lureFor?(eye: THREE.Vector3): KitLure | null;
+  lureFor?(eye: THREE.Vector3): AbilityLure | null;
   /** Optional sight blocker (smoke clouds). True = the segment is obscured. */
   sightBlocked?(from: THREE.Vector3, to: THREE.Vector3): boolean;
   /** Death feedback hooks (engine routes them to spatial audio; absent in headless sims). */
@@ -205,8 +205,8 @@ interface TargetRef {
   eye: THREE.Vector3;
   isPlayer: boolean;
   bot: TDMBot | null;
-  /** Field-kit holo-decoy: rounds that land go to the decoy, not a body. */
-  lure?: KitLure;
+  /** Field-ability holo-decoy: rounds that land go to the decoy, not a body. */
+  lure?: AbilityLure;
 }
 
 let tdmIds = 0;
@@ -273,7 +273,7 @@ export class TDMBot {
   private coverPos: THREE.Vector3 | null = null;
   private patrolTarget: THREE.Vector3 | null = null;
   private crouched = false;
-  /** Read-only crouch state (field-kit sonar silhouettes drop to crouch height). */
+  /** Read-only crouch state (field-ability sonar silhouettes drop to crouch height). */
   get isCrouched(): boolean { return this.crouched; }
   private strafeDir = Math.random() > 0.5 ? 1 : -1;
   private strafeT = 0;
@@ -472,10 +472,10 @@ export class TDMBot {
    * Returns true on a killing blow — HP at 0 means dead, immediately. */
   takeDamage(amount: number, isHead: boolean, attacker: TDMBot | 'player', applyArmor = true): boolean {
     if (this.dead) return false;
-    // Field kits: taking the player's fire snaps half of the lured bots out of the
+    // Field abilities: taking the player's fire snaps half of the lured bots out of the
     // decoy illusion for 3 s (same odds as the mission AI) — shoot a lured target and
     // it may turn on you.
-    if (attacker === 'player' && Math.random() < KIT_LURE_BREAK_CHANCE) this.lureImmuneT = 3;
+    if (attacker === 'player' && Math.random() < ABILITY_LURE_BREAK_CHANCE) this.lureImmuneT = 3;
     let dmg = amount;
     if (applyArmor) dmg *= 1 - (isHead ? TDM_HEAD_REDUCTION[this.armor] : TDM_BODY_REDUCTION[this.armor]);
     this.mgr.onDamage?.(attacker, this, Math.min(dmg, this.hp));
@@ -773,9 +773,9 @@ export class TDMBot {
     const hostile = this.team === 'bravo';
     if (wall) {
       this.ctx.effects.tracer(muzzle, wall.point, hostile);
-      // Field-kit barricade plates take the round (same 18–24 roll as a body hit).
-      const kitHit = wall.object.userData.kitHit as ((n: number, at?: THREE.Vector3) => void) | undefined;
-      if (kitHit) kitHit(18 + Math.random() * 6, wall.point);
+      // Field-ability barricade plates take the round (same 18–24 roll as a body hit).
+      const abilityHit = wall.object.userData.abilityHit as ((n: number, at?: THREE.Vector3) => void) | undefined;
+      if (abilityHit) abilityHit(18 + Math.random() * 6, wall.point);
       return;
     }
     if (Math.random() < acc) {

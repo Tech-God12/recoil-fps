@@ -12,12 +12,12 @@ test('bind reference covers every engine binding', () => {
     'Move', 'Sprint', 'Crouch', 'Slide', 'Jump / Vault', 'Fire', 'Aim', 'Reload',
     'Lean left', 'Lean right', 'Frag grenade', 'Flashbang', 'Primary / Sidearm',
     'Last weapon', 'Plant / Detonate', 'Underbarrel shotgun', 'Scope zoom',
-    'Canted sight', 'Field kit', 'Scoreboard', 'Pause',
+    'Canted sight', 'Field ability', 'Scoreboard', 'Pause',
   ]) {
     assert.ok(BINDS.some(([a]) => a === action), `missing action: ${action}`);
   }
   assert.match(text, /Tap Q/, 'Q-tap vs Q-hold must be spelled out');
-  assert.match(text, /Field kit=Z/, 'the kit hotkey must be discoverable');
+  assert.match(text, /Field ability=Z/, 'the ability hotkey must be discoverable');
   assert.match(text, /Tab/, 'scoreboard hold must be discoverable');
 });
 

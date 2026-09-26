@@ -7,9 +7,9 @@ import type { DefusalHud, DefusalResult } from '../game/defusal/mode';
 import { WEAPON_CATALOG } from '../game/economy/catalog';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
-import type { KitHud } from '../game/kits';
-import { KitEquipButton, KitIcon, KitPauseCard } from './Kits';
-import { KIT_DEFS } from '../game/kits';
+import type { AbilityHud } from '../game/abilities';
+import { AbilityEquipButton, AbilityIcon, AbilityPauseCard } from './Abilities';
+import { ABILITY_DEFS } from '../game/abilities';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
@@ -95,9 +95,9 @@ const INTEL_TABS = [
    Right: wallet + operator chip, intel tabs, loadout card, motto.
    Fully interactive: mouse + WASD/arrows + Enter + Tab profile.
    ================================================================ */
-function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings, onKits }: {
+function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings, onAbilities }: {
   prof: PlayerProfile; primaryName: string; secondaryName: string;
-  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void; onKits: () => void;
+  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void; onAbilities: () => void;
 }) {
   const [sel, setSel] = useState(0);
   const [intel, setIntel] = useState(2);
@@ -146,7 +146,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
     { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 · BOMB DEFUSAL · TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'kits', idx: '03', title: 'KITS', sub: prof.equippedKit ? `${KIT_DEFS[prof.equippedKit].name.toUpperCase()} EQUIPPED` : 'RADAR · BARRICADE · DECOY · MINE · MEDKIT', action: onKits },
+    { id: 'abilities', idx: '03', title: 'ABILITIES', sub: prof.equippedAbility ? `${ABILITY_DEFS[prof.equippedAbility].name.toUpperCase()} EQUIPPED` : 'RADAR · BARRICADE · DECOY · MINE · MEDKIT', action: onAbilities },
     { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
     { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
   ];
@@ -217,9 +217,9 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
               >
                 <span className="rm-idx mono">{it.idx}</span>
                 <span className="rm-item-body"><b>{it.title}</b><em>{it.sub}</em></span>
-                {it.id === 'kits' && prof.equippedKit && (
-                  <span className={`rm-kit-badge kit-${prof.equippedKit}`} aria-hidden="true">
-                    <KitIcon id={prof.equippedKit} size={16} />
+                {it.id === 'abilities' && prof.equippedAbility && (
+                  <span className={`rm-ability-badge ability-${prof.equippedAbility}`} aria-hidden="true">
+                    <AbilityIcon id={prof.equippedAbility} size={16} />
                   </span>
                 )}
                 <span className="rm-arrow"><Arrow /></span>
@@ -491,11 +491,11 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, onKits, defusal, onDefusal }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, onAbilities, defusal, onDefusal }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
   onArmory?: () => void; onArenaSetup?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
-  /** Opens the KITS menu (home tile and the missions deploy panel). */
-  onKits?: () => void;
+  /** Opens the ABILITIES menu (home tile and the missions deploy panel). */
+  onAbilities?: () => void;
   defusal?: DefusalMenuOptions; onDefusal?: (o: DefusalMenuOptions) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
@@ -536,7 +536,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onSelect={v => setView(v)}
         onArmory={() => onArmory?.()}
         onSettings={onSettings}
-        onKits={() => onKits?.()}
+        onAbilities={() => onAbilities?.()}
       />
     );
   }
@@ -702,7 +702,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
           ))}
         </ol>
         <div className="msn-cta seq" style={{ animationDelay: `${0.15 + mission.phases.length * 0.05}s` }}>
-          <KitEquipButton kit={prof.equippedKit} onOpen={onKits} />
+          <AbilityEquipButton ability={prof.equippedAbility} onOpen={onAbilities} />
           <button className="deploy-btn" onClick={() => onDeploy()}>
             <span>Deploy</span>
             <span className="hint">{mapName} · {mission.phases.length} objectives</span>
@@ -730,10 +730,10 @@ const BOOT_TIPS = [
   'Lean with Q and E, then return to cover before firing.',
   'Reload before crossing an exposed lane.',
   'Manage the magazine; reserve ammunition is not consumed.',
-  'Buy a kit in KITS, then press Z in game: Radar, Barricade or Decoy.',
+  'Buy an ability in ABILITIES, then press Z in game: Radar, Barricade or Decoy.',
 ];
 
-export function BootScreen({ map }: { map?: MapId }) {
+export function BootScreen({ map, stage }: { map?: MapId; stage?: string }) {
   const [tipIndex, setTipIndex] = useState(0);
   const isDefusal = map === 'sirocco';
   const mission = map && !isMissionMap(map) ? null : getMission(map && isMissionMap(map) ? map : 'alrasul');
@@ -779,7 +779,9 @@ export function BootScreen({ map }: { map?: MapId }) {
           </div>
           <div className="boot-cine-railmeta mono">
             <span>{mission ? `${mission.phases[0].title} · ${mission.phases[0].location}` : isDefusal ? 'Plant on A or B · defuse · buy every round' : 'Loading world…'}</span>
-            <span>Loading world…</span>
+            {/* The real engine stage, reported live from Engine.init. If the build ever
+                stalls, this is the line that names what it stalled on. */}
+            <span>{stage || 'Loading world…'}</span>
           </div>
         </div>
       </div>
@@ -797,8 +799,8 @@ const PZ_ICONS: Record<string, React.ReactNode> = {
   quit: <><path d="M14 4h5v16h-5" /><path d="M10 8l-4 4 4 4M6 12h10" /></>,
 };
 
-export function PauseMenu({ mission, kit, tdm, mapName, defusal, onResume, onRestart, onSettings, onQuit }: {
-  mission?: MissionHud; kit?: KitHud; tdm?: TdmHud; mapName?: string; defusal?: DefusalHud;
+export function PauseMenu({ mission, ability, tdm, mapName, defusal, onResume, onRestart, onSettings, onQuit }: {
+  mission?: MissionHud; ability?: AbilityHud; tdm?: TdmHud; mapName?: string; defusal?: DefusalHud;
   onResume: () => void; onRestart: () => void; onSettings: () => void; onQuit: () => void;
 }) {
   const readout = mission && !tdm ? objectiveReadout(mission) : undefined;
@@ -809,7 +811,7 @@ export function PauseMenu({ mission, kit, tdm, mapName, defusal, onResume, onRes
     { id: 'resume', label: 'Resume', sub: 'Back into the fight', run: onResume },
     { id: 'settings', label: 'Settings', sub: 'Controls · video · audio', run: onSettings },
     { id: 'restart', label: armed === 'restart' ? 'Confirm restart' : 'Restart', sub: armed === 'restart' ? 'Progress this match is lost' : 'Same map, fresh start', run: () => (armed === 'restart' ? onRestart() : setArmed('restart')) },
-    { id: 'quit', label: armed === 'quit' ? 'Confirm quit' : 'Quit to menu', sub: armed === 'quit' ? 'Ends the game · change kits in KITS' : 'End the game', run: () => (armed === 'quit' ? onQuit() : setArmed('quit')) },
+    { id: 'quit', label: armed === 'quit' ? 'Confirm quit' : 'Quit to menu', sub: armed === 'quit' ? 'Ends the game · change abilities in ABILITIES' : 'End the game', run: () => (armed === 'quit' ? onQuit() : setArmed('quit')) },
   ];
   const btns = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => { btns.current[0]?.focus(); }, []);
@@ -921,8 +923,8 @@ export function PauseMenu({ mission, kit, tdm, mapName, defusal, onResume, onRes
           )}
 
           <div className="pz-panel" style={{ animationDelay: '140ms' }}>
-            <div className="pz-panel-head mono"><span>KIT</span><span>{kit ? <span className="keycap">{kit.key}</span> : 'NONE'}</span></div>
-            <KitPauseCard kit={kit} />
+            <div className="pz-panel-head mono"><span>ABILITY</span><span>{ability ? <span className="keycap">{ability.key}</span> : 'NONE'}</span></div>
+            <AbilityPauseCard ability={ability} />
           </div>
 
         </div>

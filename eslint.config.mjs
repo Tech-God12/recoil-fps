@@ -15,6 +15,6 @@ export default tseslint.config(
   {
     files: ['tests/**/*.js', 'scripts/*.mjs', 'eslint.config.mjs'],
     extends: [js.configs.recommended],
-    languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { console: 'readonly', process: 'readonly', structuredClone: 'readonly', URL: 'readonly', Set: 'readonly', Map: 'readonly' } },
+    languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { console: 'readonly', process: 'readonly', structuredClone: 'readonly', URL: 'readonly', Set: 'readonly', Map: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly', setInterval: 'readonly', clearInterval: 'readonly', performance: 'readonly' } },
   },
 );

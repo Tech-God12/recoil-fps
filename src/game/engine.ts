@@ -20,7 +20,7 @@ import { recoilImpulse, recoilRecovery } from './recoil';
 import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
-import { KitDirector, type KitContext, type KitFxKind, type KitHostile, type KitHud, type KitId } from './kits';
+import { AbilityDirector, type AbilityContext, type AbilityFxKind, type AbilityHostile, type AbilityHud, type AbilityId } from './abilities';
 import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './ai';
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
 import type { MissionReport, MissionPhase } from './systems/mission';
@@ -45,8 +45,13 @@ export interface EngineLaunchOptions {
   side?: Side | 'random';
   format?: MatchFormatId;
   builds?: Partial<Record<WeaponId, WeaponBuild>>;
-  /** Field kit the operator bought and equipped; null deploys without one (Missions/TDM only). */
-  kit?: KitId | null;
+  /** Field ability the operator bought and equipped; null deploys without one (Missions/TDM only). */
+  ability?: AbilityId | null;
+  /**
+   * Called as each boot stage starts, so the loading screen can say what it is actually
+   * doing. A build that stalls is only diagnosable if the player can name the stage.
+   */
+  onStage?: (stage: string) => void;
 }
 
 export interface GameSettings {
@@ -216,8 +221,8 @@ export interface HudState {
   landmark?: { name: string; dist: number; angle: number } | null;
   mission?: MissionHud;
   tdm?: TdmHud;
-  /** Field kit: ability charge, live gadgets, sonar tags, onboarding prompt. */
-  kit?: KitHud;
+  /** Field ability: ability charge, live gadgets, sonar tags, onboarding prompt. */
+  ability?: AbilityHud;
   /** Bomb Defusal (Sirocco) — present only in that mode. */
   defusal?: DefusalHud;
   /** Dead in a defusal round: whose eyes you are watching through. */
@@ -266,8 +271,8 @@ export type GameEvent =
   | { type: 'flash'; power: number }
   | { type: 'callout'; text: string }
   | { type: 'streak'; label: string }
-  | { type: 'kitmsg'; text: string }
-  | { type: 'kitfx'; kind: KitFxKind }
+  | { type: 'abilitymsg'; text: string }
+  | { type: 'abilityfx'; kind: AbilityFxKind }
   | { type: 'objective'; phase: MissionPhase; index: number }
   | { type: 'cash'; amount: number; reason: string; total: number }
   | { type: 'tdmfeed'; killer: string; weapon: string; victim: string; headshot: boolean; killerTeam: TDMTeam; zone?: string }
@@ -341,10 +346,24 @@ const V = () => new THREE.Vector3();
  * Two animation frames, not one: the first runs before the browser has painted, so a
  * single rAF does not guarantee the boot screen is actually on screen. Used to break
  * the staged mission build into chunks the main thread can breathe between.
+ *
+ * The timer race is not a fallback for slowness — it is a fallback for a browser that
+ * has stopped calling rAF at all. Every stage of the build awaits this, and a hidden or
+ * occluded tab gets no frames, so a player who clicked Deploy and alt-tabbed used to
+ * come back to a boot screen that never moved and no error anywhere. Frames keep the
+ * yield; the timer only fires when there are none coming.
  */
-function nextFrame(): Promise<void> {
+function nextFrame(timeoutMs = 250): Promise<void> {
   return new Promise(resolve => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    requestAnimationFrame(() => requestAnimationFrame(finish));
   });
 }
 
@@ -354,7 +373,7 @@ function nextFrame(): Promise<void> {
  * player shoots first — you do not get to fire into a crowd and still be "unseen".
  */
 const OPENING_GRACE = 8;
-/** Hostiles inside this range always show on the radar; beyond it they must be engaging or kit-revealed. */
+/** Hostiles inside this range always show on the radar; beyond it they must be engaging or ability-revealed. */
 const RADAR_NEAR = 22;
 /** Capsule heights used for AI movement. The crouch height is what lets a squad duck
  *  under a bridge deck instead of jamming on its underside. */
@@ -419,11 +438,11 @@ export class Engine {
   private effects!: Effects;
   private ai!: AIManager;
   private missionRuntime!: MissionRuntime;
-  // ---- Kits (Radar / Barricade / Decoy / Mine / Medkit) ----
-  // Null when no kit was bought/equipped.
-  private kits: KitDirector | null = null;
-  private kitKillsSeen = 0;
-  private kitLureT = 0;
+  // ---- Abilities (Radar / Barricade / Decoy / Mine / Medkit) ----
+  // Null when no ability was bought/equipped.
+  private abilities: AbilityDirector | null = null;
+  private abilityKillsSeen = 0;
+  private abilityLureT = 0;
   // ---- Warehouse 5v5 TDM (arena map only) ----
   private isTDM = false;
   private tdm: TDMManager | null = null;
@@ -464,6 +483,43 @@ export class Engine {
   private onEvent!: (e: GameEvent) => void;
   private composer!: EffectComposer;
   private lightBudget!: LightBudget;
+  /** Name of the boot stage currently running. Surfaced on the loading screen and in
+   *  any launch error, so a build that stalls says what it stalled on. */
+  bootStage = 'Preparing';
+  private onStage: ((stage: string) => void) | null = null;
+  private setStage(stage: string) { this.bootStage = stage; try { this.onStage?.(stage); } catch { /* a broken UI hook must not kill the build */ } }
+  /**
+   * Pre-compile a scene's shaders, but never let it own the boot.
+   *
+   * compileAsync resolves only once every material's program reports
+   * COMPLETION_STATUS_KHR, and that poll is answered by the GPU. A driver that stalls,
+   * or a context lost mid-compile, leaves it false forever — three.js just keeps
+   * re-checking every 10 ms and never resolves, so the boot screen sits on "Loading
+   * world…" indefinitely with nothing in the console. Shaders are compiled lazily on
+   * first use regardless, so falling through costs a frame of stutter, not the match.
+   */
+  private async compileShaders(what: string, scene: THREE.Scene, camera: THREE.Camera, ms: number) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const giveUp = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => {
+        console.warn(`[recoil] shader precompile for ${what} did not finish in ${ms} ms — compiling lazily on first render.`);
+        resolve('timeout');
+      }, ms);
+    });
+    try {
+      await Promise.race([
+        this.renderer.compileAsync(scene, camera).then(() => 'compiled' as const, (cause: unknown) => {
+          console.warn(`[recoil] shader precompile for ${what} failed — compiling lazily on first render.`, cause);
+          return 'failed' as const;
+        }),
+        giveUp,
+      ]);
+    } finally {
+      // Winning the race must also silence the watchdog, or every healthy boot logs a
+      // phantom timeout once the budget elapses.
+      clearTimeout(timer);
+    }
+  }
   /** Corpse feedback (reactions.ts): body-fall thud + rifle clatter, spatialised. Past
    *  45 m both are below the HRTF rolloff floor anyway, so skip the node churn. */
   private readonly deathAudio = {
@@ -644,6 +700,7 @@ export class Engine {
 
   private async init(difficulty: string, onEvent: (e: GameEvent) => void, mapId: MapId = 'alrasul', loadout: Loadout | null = null, tdmArmor: TDMArmor = 1, options: EngineLaunchOptions & Partial<DefusalLaunch> = {}) {
     this.onEvent = onEvent;
+    this.onStage = options.onStage ?? null;
     // Sirocco Bomb Defusal arrives through the same launch object as TDM.
     const defusalLaunch: DefusalLaunch | null = options.mode === 'defusal'
       ? { side: options.side ?? 'random', format: options.format ?? 'short', builds: options.builds ?? {} }
@@ -656,7 +713,16 @@ export class Engine {
       this.hp = TDM_BASE_HP + tdmArmor * TDM_HP_PER_ARMOR;
       this.frags = 3; this.flashes = 1;
     }
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+    this.setStage('Starting renderer');
+    // A refused WebGL context (driver blocklist, GPU reset, too many live contexts in the
+    // tab) used to surface as three.js's bare "Error creating WebGL context." — accurate,
+    // and no use at all to the player standing in front of it.
+    try {
+      this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+    } catch (cause) {
+      console.error('[recoil] WebGL context could not be created', cause);
+      throw new Error('This browser could not open a 3D graphics context. Hardware acceleration may be disabled, or too many tabs are holding one — reload and try again.');
+    }
     // Cap pixel ratio at 1.25 — the single biggest FPS win on high-DPI screens
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     this.renderer.shadowMap.enabled = true;
@@ -709,6 +775,7 @@ export class Engine {
 
     // Heaviest single stage: procedural texture set plus all world geometry.
     await nextFrame();
+    this.setStage('Building the world');
     this.world = buildWorld(this.scene, mapId);
     this.buildSolidGrid();
     const maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
@@ -739,6 +806,7 @@ export class Engine {
       this.fireLight = new THREE.PointLight(0xFF8A2A, 0, 10, 1.8);
       this.scene.add(this.fireLight);
     }
+    this.setStage('Lighting');
     this.effects = new Effects(this.scene);
     await nextFrame();
 
@@ -779,6 +847,7 @@ void main(){
 
     // Accurate tactical map rendered from the real world collision geometry
     await nextFrame();
+    this.setStage('Tactical map');
     this.mapImage = this.generateMapImage();
     this.pos = this.world.playerSpawn.clone();
     this.lastPos.copy(this.pos);
@@ -786,6 +855,7 @@ void main(){
     // Viewmodel lighting — PMREM renders a whole environment scene, so give the
     // browser a frame either side of it.
     await nextFrame();
+    this.setStage('Reflections');
     this.createReflections();
     this.canvas.addEventListener('webglcontextlost',this.onGraphicsLost);
     this.canvas.addEventListener('webglcontextrestored',this.onGraphicsRestored);
@@ -808,6 +878,7 @@ void main(){
 
     // Weapons: 1. M416, 2. AK-47, 3. 1911, 4. AWM, 5. MP
     await nextFrame();
+    this.setStage('Weapons');
     const m4 = buildM4();
     const ak = buildAK47();
     const m1911 = buildM1911();
@@ -995,6 +1066,7 @@ void main(){
 
     // Ten pooled soldier models plus the nav grid over the whole sector.
     await nextFrame();
+    this.setStage(this.isTDM ? 'Deploying both squads' : 'Deploying the squad');
     if (this.isTDM) {
       // ---- Warehouse TDM: no mission runtime, no pressure director. A single
       // TDMManager owns both five-man teams and the match clock. ----
@@ -1035,7 +1107,7 @@ void main(){
         onFeed: (killer, weapon, victim, headshot, killerTeam, zone) => this.onEvent({ type: 'tdmfeed', killer, weapon, victim, headshot, killerTeam, zone }),
         onScore: () => { /* scoreboard reads live values from hud() */ },
         playerOnFire: () => this.onFire,
-        lureFor: eye => this.kits?.lureFor(eye) ?? null,
+        lureFor: eye => this.abilities?.lureFor(eye) ?? null,
       };
       this.tdm = new TDMManager(tdmCtx);
       this.ai = new AIManager(ctx, []); // empty roster: keeps every mission-path callsite alive
@@ -1112,8 +1184,9 @@ void main(){
     this.rebuildHittables();
     }
 
-    if (options.kit) this.kits = new KitDirector(this.kitContext(), options.kit);
+    if (options.ability) this.abilities = new AbilityDirector(this.abilityContext(), options.ability);
 
+    this.setStage('Compiling shaders');
     this.bindInput();
     this.resize();
     this.composeCamera(1 / 60);
@@ -1122,8 +1195,9 @@ void main(){
     // Pre-compile every shader variant off the blocking path. The single synchronous
     // render() this replaces linked dozens of programs inside the deploy click, and
     // program linking was the largest slice of the spawn freeze.
-    await this.renderer.compileAsync(this.scene, this.camera);
-    await this.renderer.compileAsync(this.vmScene, this.vmCamera);
+    await this.compileShaders('the battlefield', this.scene, this.camera, 20000);
+    await this.compileShaders('the weapon viewmodel', this.vmScene, this.vmCamera, 10000);
+    this.setStage('Ready');
     await nextFrame();
     this.render();
     window.addEventListener('resize', this.resize);
@@ -1163,7 +1237,7 @@ void main(){
     }
 
     if (e.code === 'KeyR') this.startReload();
-    if (e.code === 'KeyZ' && this.kits) { this.kits.activate(); return; }
+    if (e.code === 'KeyZ' && this.abilities) { this.abilities.activate(); return; }
     if (e.code === 'Digit1') this.switchWeapon(0);
     if (e.code === 'Digit2') this.switchWeapon(1);
     if (e.code === 'Digit3') this.switchWeapon(2);
@@ -1565,7 +1639,11 @@ void main(){
   private makeCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
-    return [c, c.getContext('2d')!];
+    // getContext returns null when the browser has run out of surfaces. Asserting it away
+    // used to surface later as a TypeError from deep inside generateMapImage.
+    const ctx = c.getContext('2d');
+    if (!ctx) throw new Error('This browser refused a 2D drawing surface for the tactical map. Close a tab and try again.');
+    return [c, ctx];
   }
 
   /** Returns the largest-magnitude lean in [-1,1] whose head position stays out of geometry */
@@ -1920,7 +1998,7 @@ void main(){
       }
       if (tdmBot && !tdmBot.dead && this.isTDM && this.tdm) {
         const part = h.object.userData.part as string;
-        let dmg = d.damage * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1) * (this.kits?.damageMul(tdmBot) ?? 1);
+        let dmg = d.damage * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1) * (this.abilities?.damageMul(tdmBot) ?? 1);
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
@@ -1951,7 +2029,7 @@ void main(){
       if (enemy && !enemy.dead) {
         const part = h.object.userData.part as string;
         // Recon sonar mark: tagged hostiles take +10 %.
-        let dmg = d.damage * (this.kits?.damageMul(enemy) ?? 1);
+        let dmg = d.damage * (this.abilities?.damageMul(enemy) ?? 1);
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > (d.falloffStart ?? 35)) dmg *= (d.falloffMul ?? 0.85);
@@ -2240,7 +2318,7 @@ void main(){
       }
       if (mkBot && !mkBot.dead && this.isTDM && this.tdm) {
         const part = h.object.userData.part as string;
-        let dmg = 12 * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1) * (this.kits?.damageMul(mkBot) ?? 1);
+        let dmg = 12 * TDM_DAMAGE_MUL * (this.onFire ? TDM_FIRE_DMG_MUL : 1) * (this.abilities?.damageMul(mkBot) ?? 1);
         if (part === 'head') dmg *= d.headMul;
         else if (part === 'limb') dmg *= d.limbMul;
         if (h.distance > 14) dmg *= 0.4;
@@ -2259,7 +2337,7 @@ void main(){
       enemy?.noteHit({ from: this.camera.position.clone(), zone: hitZone(h.object.userData.part) });
       if (!enemy || enemy.dead) continue;
       const part = h.object.userData.part as string;
-      let dmg = 12 * (this.kits?.damageMul(enemy) ?? 1);
+      let dmg = 12 * (this.abilities?.damageMul(enemy) ?? 1);
       if (part === 'head') dmg *= d.headMul;
       else if (part === 'limb') dmg *= d.limbMul;
       if (h.distance > 14) dmg *= 0.4;
@@ -2463,9 +2541,9 @@ void main(){
         }
       }
       // Hostile frags are the counter to a planted barricade or a decoy; the player's
-      // own frags never crack their own kit.
+      // own frags never crack their own ability.
       // Only hostile frags crack the player's barricade: TDM allies (alpha) never do.
-      if (g.fromAI && g.owner?.team !== 'alpha') this.kits?.blast(g.pos, 7);
+      if (g.fromAI && g.owner?.team !== 'alpha') this.abilities?.blast(g.pos, 7);
       for (const e of this.ai.enemies) {
         if (e.dead) continue;
         const d = e.pos.distanceTo(g.pos);
@@ -2523,33 +2601,33 @@ void main(){
     g.mesh.geometry.dispose();
   }
 
-  // ==================== FIELD KITS ====================
-  /** The kit in hand (null when the operator deployed without one). Kits are locked
-   *  for the whole deployment: swapping happens in the Kits menu between games. */
-  get kitId(): KitId | null { return this.kits?.kit ?? null; }
+  // ==================== FIELD ABILITIES ====================
+  /** The ability in hand (null when the operator deployed without one). Abilities are locked
+   *  for the whole deployment: swapping happens in the Abilities menu between games. */
+  get abilityId(): AbilityId | null { return this.abilities?.ability ?? null; }
 
-  /** Per-frame kit upkeep: gadgets, kill refunds and which hostiles a decoy has fooled. */
-  private updateKits(dt: number) {
-    const kits = this.kits;
-    if (!kits) return;
-    kits.update(dt);
-    if (this.kills > this.kitKillsSeen) { kits.onKill(this.kills - this.kitKillsSeen); this.kitKillsSeen = this.kills; }
+  /** Per-frame ability upkeep: gadgets, kill refunds and which hostiles a decoy has fooled. */
+  private updateAbilities(dt: number) {
+    const abilities = this.abilities;
+    if (!abilities) return;
+    abilities.update(dt);
+    if (this.kills > this.abilityKillsSeen) { abilities.onKill(this.kills - this.abilityKillsSeen); this.abilityKillsSeen = this.kills; }
     // Mission AI reads its lure from a field (TDM bots ask through their context).
     // 5 Hz is plenty — the decoy moves at jog speed and brains run staggered anyway.
-    this.kitLureT -= dt;
-    if (this.kitLureT > 0) return;
-    this.kitLureT = 0.2;
-    const any = kits.lures().length > 0;
+    this.abilityLureT -= dt;
+    if (this.abilityLureT > 0) return;
+    this.abilityLureT = 0.2;
+    const any = abilities.lures().length > 0;
     for (const e of this.ai.enemies) {
       if (e.dead || e.dormant || !any) { e.lure = null; continue; }
       // Once fooled a soldier stays committed until the decoy dies or a hit snaps him out.
       if (e.lure && e.lure.active()) continue;
-      e.lure = kits.lureFor(e.eyePos());
+      e.lure = abilities.lureFor(e.eyePos());
     }
   }
 
-  private kitHostiles() {
-    const out: KitHostile[] = [];
+  private abilityHostiles() {
+    const out: AbilityHostile[] = [];
     if (this.isTDM && this.tdm) {
       for (const b of this.tdm.bots) {
         if (!b.dead && b.team === 'bravo') out.push({
@@ -2558,7 +2636,7 @@ void main(){
             if (b.dead) return false;
             b.noteHit({ explosive: true });
             const killed = b.takeDamage(amount, false, 'player');
-            if (killed) this.creditKitKill(b.name, weapon, b);
+            if (killed) this.creditAbilityKill(b.name, weapon, b);
             return killed;
           },
         });
@@ -2571,7 +2649,7 @@ void main(){
             if (e.dead) return false;
             e.noteHit({ explosive: true });
             const killed = e.takeDamage(amount, false);
-            if (killed) this.creditKitKill(e.name, weapon, null);
+            if (killed) this.creditAbilityKill(e.name, weapon, null);
             return killed;
           },
         });
@@ -2581,7 +2659,7 @@ void main(){
   }
 
   /** Footprint check for the barricade: inside the map, clear of solids, clear of the player. */
-  private kitCanPlace(box: AABB): boolean {
+  private abilityCanPlace(box: AABB): boolean {
     const lim = this.world.half - 2.5;
     if (box.minX < -lim || box.maxX > lim || box.minZ < -lim || box.maxZ > lim) return false;
     // The ground under both ends must be within a step of the feet (no bridging a drop).
@@ -2602,7 +2680,7 @@ void main(){
    *  hittables and both AI nav grids so soldiers path around the wall instead
    *  of grinding against it. A full NavGrid rebuild measures ~2 ms on the
    *  largest map and happens at most once per plant/expiry. */
-  private kitSolidsChanged() {
+  private abilitySolidsChanged() {
     this.buildSolidGrid();
     this.rebuildHittables();
     const height = this.world.navigationHeight ?? this.world.groundHeight;
@@ -2611,7 +2689,7 @@ void main(){
     if (this.tdm?.nav) this.tdm.nav.blocked.set(fresh);
   }
 
-  private kitContext(): KitContext {
+  private abilityContext(): AbilityContext {
     return {
       scene: this.scene,
       effects: this.effects,
@@ -2621,13 +2699,13 @@ void main(){
       playerEye: () => this.eyePos().clone(),
       playerDir: () => this.camDir().clone(),
       playerAlive: () => !this.dead && !this.ended,
-      hostiles: () => this.kitHostiles(),
-      canPlaceBox: box => this.kitCanPlace(box),
-      addBlocker: box => { this.world.solids.push(box); this.kitSolidsChanged(); },
+      hostiles: () => this.abilityHostiles(),
+      canPlaceBox: box => this.abilityCanPlace(box),
+      addBlocker: box => { this.world.solids.push(box); this.abilitySolidsChanged(); },
       removeBlocker: box => {
         const i = this.world.solids.indexOf(box);
         if (i >= 0) this.world.solids.splice(i, 1);
-        this.kitSolidsChanged();
+        this.abilitySolidsChanged();
       },
       healPlayer: amount => {
         if (this.dead || this.ended) return 0;
@@ -2641,11 +2719,11 @@ void main(){
       moveCollide: (p, dx, dz, r) => { this.moveAxis(p, dx, dz, r, AI_STAND_HEIGHT); p.y = this.supportHeight(p, r); },
       alertAt: (p, r) => { this.ai.notifyGunshot(p, r); this.tdm?.notifyGunshot(p, r); },
       announce: (text, spoken) => {
-        this.onEvent({ type: 'kitmsg', text });
+        this.onEvent({ type: 'abilitymsg', text });
         if (spoken) voice.announce(spoken);
       },
       feedback: (kind, at) => {
-        this.onEvent({ type: 'kitfx', kind });
+        this.onEvent({ type: 'abilityfx', kind });
         // Camera weight for physical events, scaled by distance (full at 0 m, none past 14 m).
         const base = kind === 'slam' ? 0.32 : kind === 'break' ? 0.4 : kind === 'burst' ? 0.5 : kind === 'blast' ? 0.7 : kind === 'recall' ? 0.12 : 0;
         if (base > 0) {
@@ -2656,8 +2734,8 @@ void main(){
     };
   }
 
-  /** A kit (the Mine) killed something: score, cash and a feed entry with the kit's name. */
-  private creditKitKill(name: string, weapon: string, bot: TDMBot | null) {
+  /** An ability (the Mine) killed something: score, cash and a feed entry with the ability's name. */
+  private creditAbilityKill(name: string, weapon: string, bot: TDMBot | null) {
     const killsBefore = this.kills;
     if (this.isTDM && this.tdm && bot) {
       this.creditTdmKill(bot, false, weapon, 100);
@@ -2669,8 +2747,8 @@ void main(){
       audio.killConfirm();
       this.onEvent({ type: 'kill', name, weapon, headshot: false });
     }
-    // A kit kill must not refund the kit that made it: mark it as already seen.
-    this.kitKillsSeen += this.kills - killsBefore;
+    // An ability kill must not refund the ability that made it: mark it as already seen.
+    this.abilityKillsSeen += this.kills - killsBefore;
     this.rebuildHittables();
   }
 
@@ -2915,7 +2993,7 @@ void main(){
       },
     };
     this.finishDelay = 1.2;
-    this.kits?.quiet();
+    this.abilities?.quiet();
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Match over. Alpha squad takes the yard.');
     else if (outcome === 'draw') voice.objective('Match tied. No side takes the yard.');
@@ -3150,7 +3228,7 @@ void main(){
       mission, pressure: this.missionRuntime.pressure.stats(),
     };
     this.finishDelay = win ? 0.6 : 0.8;
-    this.kits?.quiet();
+    this.abilities?.quiet();
     this.triggerHeld = false; this.rmb = false; this.keys.clear();
     if (win) voice.objective('Extraction complete. Nomad has you.');
     else voice.defeat();
@@ -3499,7 +3577,7 @@ void main(){
 
     this.updateGrenades(dt);
     this.ai.update(dt);
-    this.updateKits(dt);
+    this.updateAbilities(dt);
     this.effects.update(dt, this.pos);
     this.composeCamera(dt);
     this.animateViewmodel(dt);
@@ -4147,13 +4225,13 @@ void main(){
         } else if (this.isTDM && this.tdm) {
           for (const b of this.tdm.bots) {
             if (b.dead || b.team !== 'bravo') continue;
-            if (!(this.kits?.isRevealed(b) || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR)) continue;
+            if (!(this.abilities?.isRevealed(b) || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK' || b.onFire || b.pos.distanceTo(this.pos) < RADAR_NEAR)) continue;
             push((b.pos.x + H) / (2 * H), (b.pos.z + H) / (2 * H), -b.yaw * 180 / Math.PI, !!(b.onFire || b.state === 'ENGAGE' || b.state === 'PUSH' || b.state === 'FLANK'));
           }
         } else {
           for (const e of this.ai.enemies) {
             if (e.dead) continue;
-            if (!(this.kits?.isRevealed(e) || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR)) continue;
+            if (!(this.abilities?.isRevealed(e) || e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE' || e.pos.distanceTo(this.pos) < RADAR_NEAR)) continue;
             push((e.pos.x + H) / (2 * H), (e.pos.z + H) / (2 * H), -e.yaw * 180 / Math.PI, !!(e.seesPlayer || e.state === 'ENGAGE' || e.state === 'SUPPRESS' || e.state === 'FLANK' || e.state === 'ADVANCE'));
           }
         }
@@ -4181,7 +4259,7 @@ void main(){
       magSize: this.def().magSize,
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),
-      kit: this.kits?.hud(),
+      ability: this.abilities?.hud(),
       mission: this.isTDM || this.isDefusal ? undefined : this.missionRuntime.hud(((-this.yaw * 180 / Math.PI) % 360 + 360) % 360),
       tdm: this.isTDM && this.tdm ? {
         alphaScore: this.tdm.alphaScore,
@@ -4231,7 +4309,7 @@ void main(){
       material.dispose();
     }
     for(const texture of textures) texture.dispose();
-    this.kits?.dispose();
+    this.abilities?.dispose();
     this.effects.dispose();
     this.missionRuntime?.dispose();
     this.tdm?.dispose();

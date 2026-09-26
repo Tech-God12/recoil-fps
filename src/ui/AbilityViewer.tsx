@@ -1,20 +1,20 @@
-// Recoil FPS — KITS menu 3-D showcase. Renders the real in-game kit hardware
-// (kit-models.ts, so the menu never drifts from what spawns in a match) on a lit
-// pedestal and loops a short demo of what the kit does: the radar unfolds, spins and
+// Recoil FPS — ABILITIES menu 3-D showcase. Renders the real in-game ability hardware
+// (ability-models.ts, so the menu never drifts from what spawns in a match) on a lit
+// pedestal and loops a short demo of what the ability does: the radar unfolds, spins and
 // scans, finding enemy silhouettes; the barricade drops and unfolds; the decoy
 // materialises and patrols. One renderer per mount, 2× DPR cap, paused when hidden.
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import type { KitId } from '../game/kits';
+import type { AbilityId } from '../game/abilities';
 import {
-  buildBarricade, buildDart, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
+  buildBarricade, buildDart, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDartFx, disposeDecoy, disposeAbilityObject,
   disposeMedkit, disposeMine, type BarricadeModel, type DartModel, type DecoyModel, type MedkitModel, type MineModel, type TagGhost,
-} from '../game/kit-models';
+} from '../game/ability-models';
 
-const ACCENT: Record<KitId, number> = { recon: 0x5fe3ff, bulwark: 0xff8a3d, phantom: 0x7cf5d8, mine: 0xff4a3a, medic: 0x6cff9a };
-/** Demo loop length per kit (s). */
-const LOOP: Record<KitId, number> = { recon: 5, bulwark: 5, phantom: 5, mine: 5.5, medic: 5 };
+const ACCENT: Record<AbilityId, number> = { recon: 0x5fe3ff, bulwark: 0xff8a3d, phantom: 0x7cf5d8, mine: 0xff4a3a, medic: 0x6cff9a };
+/** Demo loop length per ability (s). */
+const LOOP: Record<AbilityId, number> = { recon: 5, bulwark: 5, phantom: 5, mine: 5.5, medic: 5 };
 
 type Rig =
   | { id: 'recon'; m: DartModel; root: THREE.Group; ghosts: TagGhost[] }
@@ -30,7 +30,7 @@ const MINE_RING = 1.3;
 const MED_SHOW = 2;
 const MED_RING = 1.5;
 
-function buildRig(id: KitId): Rig {
+function buildRig(id: AbilityId): Rig {
   const root = new THREE.Group();
   if (id === 'recon') {
     const m = buildDart();
@@ -83,12 +83,12 @@ function buildRig(id: KitId): Rig {
 
 function disposeRig(r: Rig) {
   if (r.id === 'recon') {
-    disposeDartFx(r.m); disposeKitObject(r.m.group);
+    disposeDartFx(r.m); disposeAbilityObject(r.m.group);
     for (const g of r.ghosts) g.mat.dispose();
   } else if (r.id === 'bulwark') {
-    disposeKitObject(r.m.group); r.m.plateMat.dispose(); (r.m.lamp.material as THREE.Material).dispose();
+    disposeAbilityObject(r.m.group); r.m.plateMat.dispose(); (r.m.lamp.material as THREE.Material).dispose();
   } else if (r.id === 'mine') {
-    disposeMine(r.m); disposeKitObject(r.walker.group); r.walker.mat.dispose();
+    disposeMine(r.m); disposeAbilityObject(r.walker.group); r.walker.mat.dispose();
     r.flash.geometry.dispose(); (r.flash.material as THREE.Material).dispose();
   } else if (r.id === 'medic') disposeMedkit(r.m);
   else disposeDecoy(r.m);
@@ -214,7 +214,7 @@ function shadowTexture(inner = 'rgba(0,0,0,0.75)', outer = 'rgba(0,0,0,0)'): THR
  * `shift` moves the subject sideways in screen space (fraction of the width), so the
  * showcase can sit to the right of the menu text without moving the camera.
  */
-export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className?: string; shift?: number }) {
+export function AbilityViewer({ ability, className, shift = 0 }: { ability: AbilityId; className?: string; shift?: number }) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = host.current;
@@ -243,8 +243,8 @@ export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className
     const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 60);
     scene.add(new THREE.HemisphereLight(0xf0e6d2, 0x1a150f, 0.7));
     const key = new THREE.DirectionalLight(0xfff0d8, 2.6); key.position.set(3, 5, 4); scene.add(key);
-    const rim = new THREE.DirectionalLight(ACCENT[kit], 3.2); rim.position.set(-4, 3, -4); scene.add(rim);
-    const fill = new THREE.PointLight(ACCENT[kit], 5, 7); fill.position.set(0, 0.4, 1.8); scene.add(fill);
+    const rim = new THREE.DirectionalLight(ACCENT[ability], 3.2); rim.position.set(-4, 3, -4); scene.add(rim);
+    const fill = new THREE.PointLight(ACCENT[ability], 5, 7); fill.position.set(0, 0.4, 1.8); scene.add(fill);
 
     // floor: dark disc, accent ring pair, contact shadow
     const disposables: { dispose(): void }[] = [];
@@ -252,18 +252,18 @@ export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className
     // Floor fades to nothing at the edges so there is no visible horizon line.
     const floorTex = shadowTexture('rgba(12,10,8,0.55)', 'rgba(12,10,8,0)'); disposables.push(floorTex);
     add(new THREE.Mesh(new THREE.PlaneGeometry(7, 7), new THREE.MeshBasicMaterial({ map: floorTex, transparent: true, depthWrite: false }))).rotation.x = -Math.PI / 2;
-    const ringMat = new THREE.MeshBasicMaterial({ color: ACCENT[kit], transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+    const ringMat = new THREE.MeshBasicMaterial({ color: ACCENT[ability], transparent: true, opacity: 0.55, side: THREE.DoubleSide });
     const ring1 = add(new THREE.Mesh(new THREE.RingGeometry(1.55, 1.58, 96), ringMat)); ring1.rotation.x = -Math.PI / 2; ring1.position.y = 0.003;
-    const ring2Mat = new THREE.MeshBasicMaterial({ color: ACCENT[kit], transparent: true, opacity: 0.18, side: THREE.DoubleSide });
+    const ring2Mat = new THREE.MeshBasicMaterial({ color: ACCENT[ability], transparent: true, opacity: 0.18, side: THREE.DoubleSide });
     const ring2 = add(new THREE.Mesh(new THREE.RingGeometry(1.7, 1.9, 96, 1, 0, Math.PI * 1.4), ring2Mat)); ring2.rotation.x = -Math.PI / 2; ring2.position.y = 0.002;
     const shTex = shadowTexture(); disposables.push(shTex);
     const shadow = add(new THREE.Mesh(new THREE.PlaneGeometry(3.2, 3.2), new THREE.MeshBasicMaterial({ map: shTex, transparent: true, depthWrite: false })));
     shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.004;
 
-    const rig = buildRig(kit);
+    const rig = buildRig(ability);
     scene.add(rig.root);
     // Frame on the fully-deployed pose.
-    animate(rig, LOOP[kit] * 0.5, 0);
+    animate(rig, LOOP[ability] * 0.5, 0);
     rig.root.updateMatrixWorld(true);
     const box = new THREE.Box3();
     rig.root.traverse(o => { if (o instanceof THREE.Mesh && o.visible && o !== (rig.id === 'recon' ? rig.m.ring : null) && o !== (rig.id === 'recon' ? rig.m.echo : null)) box.expandByObject(o); });
@@ -300,9 +300,9 @@ export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const clock = (now - t0) / 1000;
-      animate(rig, reduce ? LOOP[kit] * 0.5 : clock % LOOP[kit], reduce ? 0 : dt);
+      animate(rig, reduce ? LOOP[ability] * 0.5 : clock % LOOP[ability], reduce ? 0 : dt);
       ring2.rotation.z = clock * 0.25;
-      // slow orbit across the front, never showing the back of the kit for long
+      // slow orbit across the front, never showing the back of the ability for long
       const a = reduce ? 0.5 : 0.5 + Math.sin(clock * 0.3) * 0.6;
       camera.position.set(centre.x + Math.sin(a) * dist, centre.y + dist * 0.28, centre.z + Math.cos(a) * dist);
       camera.lookAt(centre.x, centre.y * 0.92, centre.z);
@@ -319,6 +319,6 @@ export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [kit, shift]);
-  return <div ref={host} className={`kit-viewer ${className ?? ''}`} aria-hidden="true" />;
+  }, [ability, shift]);
+  return <div ref={host} className={`ability-viewer ${className ?? ''}`} aria-hidden="true" />;
 }

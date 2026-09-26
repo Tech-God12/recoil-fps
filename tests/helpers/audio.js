@@ -1,4 +1,4 @@
-// Web Audio stand-in. Field-kit effects reuse the real detonation pipeline —
+// Web Audio stand-in. Field-ability effects reuse the real detonation pipeline —
 // glass, debris, spatial audio — so an engine test needs the audio layer to
 // exist without a browser. Every unknown property resolves to a callable that
 // returns another node, which is enough for a graph-building audio engine.

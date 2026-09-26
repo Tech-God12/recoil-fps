@@ -956,8 +956,8 @@ export class SpatialAudioEngine {
     });
   }
 
-  // ==================== FIELD KITS ====================
-  /** Spatial filtered-noise hit at a world point (kit hardware foley). */
+  // ==================== FIELD ABILITIES ====================
+  /** Spatial filtered-noise hit at a world point (ability hardware foley). */
   private spatialNoise(wx: number, wy: number, wz: number, o: { dur: number; gain: number; freq: number; q?: number; type?: BiquadFilterType; when?: number }) {
     const ctx = this.ensure();
     const panner = this.createSpatialPanner(wx, wy, wz);
@@ -992,8 +992,8 @@ export class SpatialAudioEngine {
     osc.onended = () => { osc.disconnect(); g.disconnect(); panner.disconnect(); };
   }
 
-  /** Kit charged: two soft rising blips, lower than the streak chime so they never blur. */
-  kitReady() {
+  /** Ability charged: two soft rising blips, lower than the streak chime so they never blur. */
+  abilityReady() {
     const ctx = this.ensure();
     const t = ctx.currentTime;
     [[520, 0], [780, 0.08]].forEach(([f, when]) => {
@@ -1010,7 +1010,7 @@ export class SpatialAudioEngine {
   }
 
   /** Pressed Z on cooldown / refused placement: a dull double tick. */
-  kitDenied() {
+  abilityDenied() {
     this.burstDirect({ dur: 0.04, gain: 0.12, freq: 900, q: 3 });
     this.burstDirect({ dur: 0.04, gain: 0.1, freq: 700, q: 3, when: 0.07 });
   }
@@ -1125,8 +1125,8 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.08, gain: 0.05, freq: 1400 + pct * 900, q: 8 });
   }
 
-  /** Kits menu: purchase confirmed — register drawer plus a rising two-note seal. */
-  kitPurchase() {
+  /** Abilities menu: purchase confirmed — register drawer plus a rising two-note seal. */
+  abilityPurchase() {
     this.burstDirect({ dur: 0.05, gain: 0.3, freq: 2600, q: 2 });
     this.burstDirect({ dur: 0.18, gain: 0.16, freq: 5200, q: 6, when: 0.05 });
     const ctx = this.ensure();
@@ -1144,8 +1144,8 @@ export class SpatialAudioEngine {
     });
   }
 
-  /** Kits menu: moving the selection between kits — a dry mechanical tick. */
-  kitSelect() {
+  /** Abilities menu: moving the selection between abilities — a dry mechanical tick. */
+  abilitySelect() {
     this.burstDirect({ dur: 0.025, gain: 0.12, freq: 3400, q: 5 });
   }
 

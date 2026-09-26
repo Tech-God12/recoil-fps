@@ -7,7 +7,7 @@ import { audio } from './audio';
 import type { AABB } from './world';
 import { PRESSURE_BUDGET, type ReinforcementBatch } from './systems/reinforcements';
 import type { Position } from './systems/mission';
-import { KIT_LURE_BREAK_CHANCE, type KitLure } from './kits';
+import { ABILITY_LURE_BREAK_CHANCE, type AbilityLure } from './abilities';
 
 export type AIState = 'PATROL' | 'ALERT' | 'SEARCH' | 'ENGAGE' | 'SUPPRESS' | 'FLANK' | 'ADVANCE' | 'RETREAT' | 'DEAD';
 export type CalloutKind = 'contact' | 'flank' | 'grenade' | 'mandown' | 'fallback' | 'push';
@@ -229,7 +229,7 @@ export class Enemy {
   private recentDamage = 0;
   private grenadeCD = 0;
   private crouched = false;
-  /** Read-only crouch state (field-kit sonar silhouettes drop to crouch height). */
+  /** Read-only crouch state (field-ability sonar silhouettes drop to crouch height). */
   get isCrouched(): boolean { return this.crouched; }
   private strafeDir = 0; private strafeT = 0; private strafeCD = 0;
   private lastX = 0; private lastZ = 0;
@@ -248,11 +248,11 @@ export class Enemy {
   private personality: number; // 0 cautious .. 1 aggressive
   stunTimer = 0;
   /**
-   * Field-kit holo-decoy this soldier has locked onto (assigned by the engine). While
+   * Field-ability holo-decoy this soldier has locked onto (assigned by the engine). While
    * set, every "where is the threat" question — sight, aim, cover, flanking, frags —
    * is answered with the decoy instead of the player, and rounds land on the decoy.
    */
-  lure: KitLure | null = null;
+  lure: AbilityLure | null = null;
 
   /** Current threat eye: the decoy while lured, otherwise the player. */
   private tEye(): THREE.Vector3 { return this.lure && this.lure.active() ? this.lure.eye.clone() : this.ctx.playerPos(); }
@@ -365,7 +365,7 @@ export class Enemy {
     if (!hit.zone) hit.zone = isHead ? 'head' : 'torso';
     if (!hit.from) hit.from = this.ctx.playerFeet();
     // Getting shot snaps half of the decoy-lured soldiers back onto the real shooter.
-    if (this.lure && Math.random() < KIT_LURE_BREAK_CHANCE) this.lure = null;
+    if (this.lure && Math.random() < ABILITY_LURE_BREAK_CHANCE) this.lure = null;
     if (this.hp <= 0) { this.die(hit); return true; }
     this.reactions.hit(hit.zone, tmpV.set(this.pos.x - hit.from.x, 0, this.pos.z - hit.from.z).normalize(), this.yaw);
     this.lastKnown.copy(this.ctx.playerFeet()); this.lastSeenT = 0;
@@ -505,9 +505,9 @@ export class Enemy {
     const roll = 7 + Math.floor(Math.random() * 8);
     if (obstruction) {
       ctx.effects.tracer(muzzle,obstruction.point,true);
-      // Field-kit barricade plates carry a damage hook: rounds that stop on them count.
-      const kitHit = obstruction.object.userData.kitHit as ((n: number, at?: THREE.Vector3) => void) | undefined;
-      if (kitHit) kitHit(roll, obstruction.point);
+      // Field-ability barricade plates carry a damage hook: rounds that stop on them count.
+      const abilityHit = obstruction.object.userData.abilityHit as ((n: number, at?: THREE.Vector3) => void) | undefined;
+      if (abilityHit) abilityHit(roll, obstruction.point);
       return;
     }
     if (lure && this.hasLOS && Math.random() < acc) {

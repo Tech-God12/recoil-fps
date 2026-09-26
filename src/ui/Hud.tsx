@@ -6,8 +6,8 @@ import { isLowAmmo, shouldShowReload } from './hud-math';
 import MissionObjective, { missionClock } from './MissionObjective';
 import ScopeView, { type ScopeControls } from './ScopeView';
 import DefusalHudLayer, { C4Glyph } from './DefusalHud';
-import { KitFx, KitHint, KitLive, KitMessage, KitSlot } from './Kits';
-import type { KitFxKind } from '../game/kits';
+import { AbilityFx, AbilityHint, AbilityLive, AbilityMessage, AbilitySlot } from './Abilities';
+import type { AbilityFxKind } from '../game/abilities';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean; headshot?: boolean } | null;
@@ -18,9 +18,9 @@ export interface HudFx {
   callout: { id: number; text: string } | null;
   flashPow: number;
   missionBanner: { id: number; title: string; index: number } | null;
-  kitMsg: { id: number; text: string } | null;
-  /** Screen-space kit effect (ping sweep, slam dust, decoy glitch...); keyed to replay. */
-  kitFx: { id: number; kind: KitFxKind } | null;
+  abilityMsg: { id: number; text: string } | null;
+  /** Screen-space ability effect (ping sweep, slam dust, decoy glitch...); keyed to replay. */
+  abilityFx: { id: number; kind: AbilityFxKind } | null;
 }
 
 /* ================================================================
@@ -162,10 +162,10 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
       {df && <DefusalHudLayer hud={hud} showBoard={showBoard} />}
 
 
-      {/* ============ FIELD KIT ============ */}
-      {fx.kitFx && <KitFx key={fx.kitFx.id} kind={fx.kitFx.kind} />}
-      {fx.kitMsg && <KitMessage key={fx.kitMsg.id} text={fx.kitMsg.text} />}
-      {hud.kit?.hint && active !== false && !hud.tdm?.playerDead && <KitHint kit={hud.kit} />}
+      {/* ============ FIELD ABILITY ============ */}
+      {fx.abilityFx && <AbilityFx key={fx.abilityFx.id} kind={fx.abilityFx.kind} />}
+      {fx.abilityMsg && <AbilityMessage key={fx.abilityMsg.id} text={fx.abilityMsg.text} />}
+      {hud.ability?.hint && active !== false && !hud.tdm?.playerDead && <AbilityHint ability={hud.ability} />}
 
       {/* ============ FULL SCOREBOARD (hold Tab) ============ */}
       {hud.tdm && showBoard && <TdmFullBoard tdm={hud.tdm} />}
@@ -469,7 +469,7 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
             <i /><span className="keycap">Q·E</span> HOLD LEAN
             <i /><span className="keycap">SPACE</span> VAULT
             <i /><span className="keycap">X</span> ATTACH / BLAST
-            <i /><span className="keycap">Z</span> KIT
+            <i /><span className="keycap">Z</span> ABILITY
           </span>
         </div>
       )}
@@ -497,10 +497,10 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
             {df ? <div>ROUND <b className="cy">{df.round}/{df.maxRounds}</b></div> : <div>SCORE <b className="cy">{hud.score.toLocaleString('en-US')}</b></div>}
           </div>
         </div>
-        {hud.kit && (
-          <div className="kit-col">
-            <KitLive kit={hud.kit} />
-            <KitSlot kit={hud.kit} />
+        {hud.ability && (
+          <div className="ability-col">
+            <AbilityLive ability={hud.ability} />
+            <AbilitySlot ability={hud.ability} />
           </div>
         )}
       </div>}

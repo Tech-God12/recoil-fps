@@ -29,7 +29,7 @@ import {
   TDMManager, TDM_BASE_HP, TDM_HP_PER_ARMOR, TDM_DAMAGE_MUL, TDM_MATCH_SECONDS, TDM_RESPAWN_SECONDS,
   TDM_HEAD_REDUCTION, TDM_BODY_REDUCTION, TDM_ARMOR_ICONS,
   TDM_FIRE_KILLS, TDM_FIRE_WINDOW, TDM_FIRE_SECONDS, TDM_FIRE_COOLDOWN,
-  TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL, TDM_SHUTDOWN_CASH, TDM_DRAW_CASH, tdmOutcome,
+  TDM_FIRE_DMG_MUL, TDM_FIRE_SPEED_MUL, TDM_SHUTDOWN_CASH, TDM_DRAW_CASH, TDM_MATCH_WIN_CASH, TDM_MATCH_LOSS_CASH, TDM_KILL_CASH, tdmOutcome,
   type TDMArmor, type TDMBot, type TDMContext, type TDMTeam, type TDMOutcome, type BotHit,
 } from './tdm';
 import { LightBudget } from './light-budget';
@@ -650,7 +650,10 @@ export class Engine {
       : null;
     this.isDefusal = !!defusalLaunch || mapId === 'sirocco';
     this.dfBuilds = defusalLaunch?.builds ?? {};
-    this.isTDM = !this.isDefusal && mapId === 'arena';
+    // The launch mode is authoritative for Warehouse. Keep the map fallback for
+    // saved links and older callers, but do not let a stale map selection turn a
+    // TDM deployment into a story mission.
+    this.isTDM = !this.isDefusal && (options.mode === 'tdm' || mapId === 'arena');
     this.tdmArmor = tdmArmor;
     if (this.isTDM) {
       this.hp = TDM_BASE_HP + tdmArmor * TDM_HP_PER_ARMOR;
@@ -912,7 +915,7 @@ void main(){
       weapon.pattern=entry.base.pattern.map(p=>[...p] as [number,number]);
       weapon.recoilBase=weapon.recoilMul=entry.base.recoilMul;
       weapon.adsSpread=entry.base.adsSpread;
-      if(entry.scoped){weapon.reticle='sniper';weapon.scopePower=weapon.scopeMinPower=weapon.scopeMaxPower=6;}
+      if(entry.scoped){weapon.reticle='sniper';weapon.scopePower=weapon.scopeMaxPower=8;weapon.scopeMinPower=3;}
     });
     this.mags = [30, 30, 8, 5, 40];
     this.reserves = [Infinity, Infinity, Infinity, Infinity, Infinity];
@@ -1112,7 +1115,9 @@ void main(){
     this.rebuildHittables();
     }
 
-    if (options.kit) this.kits = new KitDirector(this.kitContext(), options.kit);
+    // Abilities are an Arena/TDM system only. Never construct the director for
+    // story missions, even if an older caller passes a saved kit option.
+    if (this.isTDM && options.kit) this.kits = new KitDirector(this.kitContext(), options.kit);
 
     this.bindInput();
     this.resize();
@@ -2055,10 +2060,9 @@ void main(){
     this.muzzleFlash.scale.setScalar((0.85 + Math.random() * 0.5) * (d.suppressed ? 0.45 : 1.2) * (d.flashMul ?? 1));
     this.vmLight.intensity = d.suppressed ? 1.2 : 3.5;
     this.vmRimBoost = 1.0; // W3 material rim boost
-    // One scratch vector feeds the muzzle light, the hanging smoke puff and the
-    // brass origin — no per-shot allocation on top of the existing pellet math.
-    // Smoke fires even suppressed (cans trap gas and puff harder); only the light
-    // is stealth-gated.
+    // One scratch vector feeds the muzzle light, a tiny hot grey-amber residue puff
+    // and the brass origin. The residue is one pooled particle lasting 80 ms, so it
+    // reads like propellant without obscuring the sight picture or adding a new draw.
     this._t3.copy(origin).addScaledVector(dir, 1.0);
     if (!d.suppressed) this.effects.playerFlash(this._t3);
     this.effects.gunSmoke(this._t3);
@@ -2120,9 +2124,9 @@ void main(){
       suppressed: stats.suppressed,
       boltAction: id === 'awm', audioTag: LOADOUT_AUDIO[id], masterkey: stats.masterkey,
       reticle: stats.reticle === 'none' && entry.scoped ? 'sniper' : stats.reticle,
-      scopePower: stats.reticle === 'none' && entry.scoped ? 6 : stats.scopePower,
-      scopeMaxPower: stats.reticle === 'none' && entry.scoped ? 6 : stats.scopePower,
-      scopeMinPower: stats.reticle === 'none' && entry.scoped ? 6 : stats.scopeMinPower,
+      scopePower: stats.reticle === 'none' && entry.scoped ? 8 : stats.scopePower,
+      scopeMaxPower: stats.reticle === 'none' && entry.scoped ? 8 : stats.scopePower,
+      scopeMinPower: stats.reticle === 'none' && entry.scoped ? 3 : stats.scopeMinPower,
       canted:stats.canted, pellets:entry.pellets, bloomSpec:entry.bloom, bloomNow:0,
       lpvo: stats.lpvo, pumpShotgun: id === 'spas12',
       laser: stats.laser, flashlight: stats.flashlight,
@@ -2803,6 +2807,8 @@ void main(){
     const wasFire = bot.onFire;
     audio.killConfirm();
     this.tdm?.handleKill('player', bot, headshot, weapon);
+    // Warehouse kills pay immediately, in addition to the match result payout.
+    this.earnCash(headshot ? REWARDS.headshot : TDM_KILL_CASH, headshot ? 'headshot' : 'kill');
     this.registerFireKill();
     if (wasFire) this.awardShutdown();
   }
@@ -2894,7 +2900,9 @@ void main(){
     const outcome = tdmOutcome(this.tdm.alphaScore, this.tdm.bravoScore);
     const win = outcome === 'win';
     if (win) this.score += 500; // match victory bonus
-    if (outcome === 'draw') this.earnCash(TDM_DRAW_CASH, 'draw');
+    if (outcome === 'win') this.earnCash(TDM_MATCH_WIN_CASH, 'match win');
+    else if (outcome === 'loss') this.earnCash(TDM_MATCH_LOSS_CASH, 'match played');
+    else this.earnCash(TDM_DRAW_CASH, 'draw');
     const mission: MissionReport = {
       id: 'tdm-warehouse', name: 'Warehouse TDM', map: 'arena',
       status: outcome === 'loss' ? 'failed' : 'complete', duration: TDM_MATCH_SECONDS - this.tdm.timeLeft,
@@ -3106,6 +3114,9 @@ void main(){
     const res = this.defusal.result();
     const win = res.winner === 'alpha';
     if (win) this.score += 1000;
+    // Arena participation payout: Sirocco's internal round wallet is separate
+    // from the persistent profile wallet, so settle a match-level reward here.
+    this.earnCash(win ? 500 : 150, win ? 'match win' : 'match played');
     const mission: MissionReport = {
       id: 'defusal-sirocco', name: 'Sirocco Bomb Defusal', map: 'sirocco',
       status: win ? 'complete' : 'failed', duration: (performance.now() - this.runStartT) / 1000, phases: [],
@@ -3844,14 +3855,13 @@ void main(){
     this.frameNo++;
     this.renderer.shadowMap.autoUpdate = false;
     // Static-only shadow updates left every soldier shadowless (audit R1): the map
-    // rendered once on frame 1 and never again. Refreshing every 10th frame keeps
-    // characters grounded at ~6 Hz — imperceptible staleness for ~1/10th of one
-    // shadow pass amortised, and still zero cost with shadows off.
+    // rendered once on frame 1 and never again. Refreshing every 30th frame keeps
+    // characters grounded at roughly 2 Hz instead of forcing a full shadow pass
+    // every sixth of a second. While the trigger is held, defer refreshes entirely;
+    // sustained fire should never compete with a shadow-map render.
     // Dirty-flag: skip the re-render if the player and every living enemy/bot
     // have been still (±0.5 m player, ±0.8 m enemies) since the last shadow frame.
-    // Six hitches/s collapses to ~1/s when holding an angle — exactly when the
-    // player is trying to aim (R1).
-    if (this.frameNo <= 2 || this.frameNo % 10 === 0) {
+    if ((this.frameNo <= 2 || this.frameNo % 30 === 0) && (!this.triggerHeld || this.frameNo <= 2)) {
       const q = (v: number) => Math.round(v / 0.8);
       let curHash = `${q(this.pos.x)},${q(this.pos.z)}|`;
       if (this.ai) for (const e of this.ai.enemies) if (!e.dead) curHash += `${e.id}:${q(e.pos.x)},${q(e.pos.z)};`;

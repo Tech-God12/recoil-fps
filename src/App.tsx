@@ -341,7 +341,7 @@ export default function App() {
       const prof = profileRef.current;
       const launchOptions = map === 'sirocco'
         ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
-        : mode === 'tdm' ? { mode: 'tdm' as const, kit: prof.equippedKit } : { mode: 'mission' as const, kit: prof.equippedKit };
+        : mode === 'tdm' ? { mode: 'tdm' as const, kit: prof.equippedKit } : { mode: 'mission' as const };
       buyOpenRef.current = false; setBuyOpen(false);
       const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, launchOptions);
       engineRef.current = engine;
@@ -397,10 +397,9 @@ export default function App() {
     if (document.pointerLockElement) document.exitPointerLock();
   };
   // KITS opens from the home menu or the TDM loadout screen and returns there.
-  const [kitsFrom, setKitsFrom] = useState<'menu' | 'tdm-setup'>('menu');
-  const openKits = (from: 'menu' | 'tdm-setup' = 'menu') => {
+  const [kitsFrom, setKitsFrom] = useState<'tdm-setup'>('tdm-setup');
+  const openKits = (from: 'tdm-setup' = 'tdm-setup') => {
     setKitsFrom(from);
-    if (from === 'menu') setMenuView('home');
     setShowSettings(false);
     changePhase('kits');
   };
@@ -434,7 +433,7 @@ export default function App() {
         <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: vignetteBg }} />
       )}
       {(phase === 'playing' || phase === 'paused') && <Hud active={phase === 'playing'} hud={hud} s={settings} fx={fx} onScopePower={power=>engineRef.current?.setScopePower(power)} onScopeAdjust={()=>engineRef.current?.beginScopeAdjustment()} onScopeDone={()=>{void engineRef.current?.finishScopeAdjustment().catch(()=>{engineRef.current?.setPaused(true);changePhase('paused');setError('Mouse capture was blocked. Select Resume to try again.');});}} />}
-      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} onKits={openKits} />}
+      {phase === 'menu' && <MainMenu s={settings} onDeploy={map => { void launch(map, map === 'sirocco' ? 'defusal' : map === 'arena' ? 'tdm' : 'mission'); }} onSettings={() => setShowSettings(true)} onMap={map => set({ map })} onArmory={() => openArmory('menu')} onArenaSetup={() => { setMenuView('arena'); changePhase('tdm-setup'); }} initialView={menuView} profile={profile} defusal={defusalOpts} onDefusal={setDefusalOpts} onAbilities={() => openKits('tdm-setup')} />}
       {showLegacyWalletNotice && phase === 'menu' && !showSettings && (
         <aside className="legacy-wallet-notice" aria-labelledby="legacy-wallet-title">
           <div>

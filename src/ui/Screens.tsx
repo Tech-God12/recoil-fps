@@ -8,8 +8,7 @@ import { WEAPON_CATALOG } from '../game/economy/catalog';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
 import type { KitHud } from '../game/kits';
-import { KitEquipButton, KitIcon, KitPauseCard } from './Kits';
-import { KIT_DEFS } from '../game/kits';
+import { KitPauseCard } from './Kits';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
@@ -95,9 +94,9 @@ const INTEL_TABS = [
    Right: wallet + operator chip, intel tabs, loadout card, motto.
    Fully interactive: mouse + WASD/arrows + Enter + Tab profile.
    ================================================================ */
-function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings, onKits }: {
+function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, onSettings }: {
   prof: PlayerProfile; primaryName: string; secondaryName: string;
-  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void; onKits: () => void;
+  onSelect: (view: 'maps' | 'arena') => void; onArmory: () => void; onSettings: () => void;
 }) {
   const [sel, setSel] = useState(0);
   const [intel, setIntel] = useState(2);
@@ -146,7 +145,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const items = [
     { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
     { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 · BOMB DEFUSAL · TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'kits', idx: '03', title: 'KITS', sub: prof.equippedKit ? `${KIT_DEFS[prof.equippedKit].name.toUpperCase()} EQUIPPED` : 'RADAR · BARRICADE · DECOY · MINE · MEDKIT', action: onKits },
     { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
     { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
   ];
@@ -217,11 +215,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
               >
                 <span className="rm-idx mono">{it.idx}</span>
                 <span className="rm-item-body"><b>{it.title}</b><em>{it.sub}</em></span>
-                {it.id === 'kits' && prof.equippedKit && (
-                  <span className={`rm-kit-badge kit-${prof.equippedKit}`} aria-hidden="true">
-                    <KitIcon id={prof.equippedKit} size={16} />
-                  </span>
-                )}
                 <span className="rm-arrow"><Arrow /></span>
               </button>
             ))}
@@ -343,10 +336,10 @@ const SEG = <T extends string,>({ value, options, onChange, label }: { value: T;
   </div>
 );
 
-function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup, defusal, onDefusal }: {
+function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup, onAbilities, defusal, onDefusal }: {
   primaryName: string; secondaryName: string;
   onBack: () => void; onMap: (map: GameSettings['map']) => void;
-  onDeploy: (map?: GameSettings['map']) => void; onArenaSetup?: () => void;
+  onDeploy: (map?: GameSettings['map']) => void; onArenaSetup?: () => void; onAbilities: () => void;
   defusal: DefusalMenuOptions; onDefusal: (o: DefusalMenuOptions) => void;
 }) {
   const [mode, setMode] = useState<'defusal' | 'tdm'>('defusal');
@@ -446,6 +439,7 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
               <span className="hint">Sirocco · Bomb Defusal</span>
               <Arrow />
             </button>
+            <button className="menu-secondary-btn" onClick={onAbilities}>Abilities <span>choose your arena ability</span></button>
           </>
         ) : (
           <>
@@ -457,6 +451,9 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
             <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
               Set up loadout <span>armor + weapon</span>
             </button>
+            <button className="menu-secondary-btn" onClick={onAbilities}>
+              Abilities <span>choose your arena ability</span>
+            </button>
           </>
         )}
       </div>
@@ -464,7 +461,7 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
         <ul className="df-rules seq" style={{ animationDelay: '.26s' }} aria-label="Bomb defusal rules">
           <li><b>BUY</b><span>$800 start · CS2 economy · win, loss &amp; kill bonuses</span></li>
           <li><b>PLANT</b><span>Attackers carry the bomb to A or B · hold X for 3.2s</span></li>
-          <li><b>DEFUSE</b><span>40s fuse · 10s defuse · 5s with a kit</span></li>
+          <li><b>DEFUSE</b><span>40s fuse · 10s defuse · 5s with an ability</span></li>
           <li><b>SURVIVE</b><span>No respawns · keep your gun if you live</span></li>
           <li><b>COMMAND</b><span>6 / 7 call A / B · 8 follow me · 5 drop bomb</span></li>
         </ul>
@@ -491,11 +488,9 @@ const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
 };
 
-export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, initialView, profile, onKits, defusal, onDefusal }: {
+export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, onAbilities, initialView, profile, defusal, onDefusal }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; onArenaSetup?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
-  /** Opens the KITS menu (home tile and the missions deploy panel). */
-  onKits?: () => void;
+  onArmory?: () => void; onArenaSetup?: () => void; onAbilities?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
   defusal?: DefusalMenuOptions; onDefusal?: (o: DefusalMenuOptions) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
@@ -536,7 +531,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onSelect={v => setView(v)}
         onArmory={() => onArmory?.()}
         onSettings={onSettings}
-        onKits={() => onKits?.()}
       />
     );
   }
@@ -656,6 +650,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onMap={onMap}
         onDeploy={onDeploy}
         onArenaSetup={onArenaSetup}
+        onAbilities={() => onAbilities?.()}
         defusal={defusal ?? { side: 'random', format: 'short' }}
         onDefusal={o => onDefusal?.(o)}
       />
@@ -702,7 +697,6 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
           ))}
         </ol>
         <div className="msn-cta seq" style={{ animationDelay: `${0.15 + mission.phases.length * 0.05}s` }}>
-          <KitEquipButton kit={prof.equippedKit} onOpen={onKits} />
           <button className="deploy-btn" onClick={() => onDeploy()}>
             <span>Deploy</span>
             <span className="hint">{mapName} · {mission.phases.length} objectives</span>
@@ -730,7 +724,7 @@ const BOOT_TIPS = [
   'Lean with Q and E, then return to cover before firing.',
   'Reload before crossing an exposed lane.',
   'Manage the magazine; reserve ammunition is not consumed.',
-  'Buy a kit in KITS, then press Z in game: Radar, Barricade or Decoy.',
+  'Buy an ability in ABILITIES, then press Z in game: Radar, Barricade or Decoy.',
 ];
 
 export function BootScreen({ map }: { map?: MapId }) {
@@ -809,10 +803,17 @@ export function PauseMenu({ mission, kit, tdm, mapName, defusal, onResume, onRes
     { id: 'resume', label: 'Resume', sub: 'Back into the fight', run: onResume },
     { id: 'settings', label: 'Settings', sub: 'Controls · video · audio', run: onSettings },
     { id: 'restart', label: armed === 'restart' ? 'Confirm restart' : 'Restart', sub: armed === 'restart' ? 'Progress this match is lost' : 'Same map, fresh start', run: () => (armed === 'restart' ? onRestart() : setArmed('restart')) },
-    { id: 'quit', label: armed === 'quit' ? 'Confirm quit' : 'Quit to menu', sub: armed === 'quit' ? 'Ends the game · change kits in KITS' : 'End the game', run: () => (armed === 'quit' ? onQuit() : setArmed('quit')) },
+    { id: 'quit', label: armed === 'quit' ? 'Confirm quit' : 'Quit to menu', sub: armed === 'quit' ? 'Ends the game · change abilities in ABILITIES' : 'End the game', run: () => (armed === 'quit' ? onQuit() : setArmed('quit')) },
   ];
   const btns = useRef<(HTMLButtonElement | null)[]>([]);
-  useEffect(() => { btns.current[0]?.focus(); }, []);
+  useEffect(() => {
+    btns.current[0]?.focus();
+    const resumeOnEscape = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.preventDefault(); onResume(); }
+    };
+    window.addEventListener('keydown', resumeOnEscape);
+    return () => window.removeEventListener('keydown', resumeOnEscape);
+  }, [onResume]);
   const onKey = (e: React.KeyboardEvent) => {
     const n = actions.length;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

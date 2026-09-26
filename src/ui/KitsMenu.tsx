@@ -1,6 +1,6 @@
-// Recoil FPS — KITS: buy and equip the kit you carry into a game. Full-screen 3-D
-// showcase of the selected kit, its details on the left, the three kits as cards
-// along the bottom, and the buy/equip action bottom-right. The equipped kit is
+// Recoil FPS — ABILITIES: buy and equip the kit you carry into a game. Full-screen 3-D
+// showcase of the selected kit, its details on the left, the three abilities as cards
+// along the bottom, and the buy/equip action bottom-right. The equipped ability is
 // locked in when a game starts; this screen is the only place to change it.
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { KIT_DEFS, KIT_IDS, KIT_KEY, type KitId } from '../game/kits';
@@ -74,8 +74,8 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
         <button type="button" className="kits-back" onClick={onBack}>
           <span aria-hidden="true">‹</span> Back <span className="keycap">Esc</span>
         </button>
-        <h1 id="kits-title" className="kits-title">Kits</h1>
-        <span className="kits-sub mono">One kit per game · use it with <span className="keycap">{KIT_KEY}</span></span>
+        <h1 id="kits-title" className="kits-title">Abilities</h1>
+        <span className="kits-sub mono">One ability per game · use it with <span className="keycap">{KIT_KEY}</span></span>
         <div className="kits-wallet" title="Wallet balance">
           <span className="mono">Wallet</span>
           <b className="tabular">{money(profile.cash)}</b>
@@ -117,7 +117,7 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
       </div>
 
       <footer className="kits-bottom">
-        <nav className="kits-cards" aria-label="Kits" role="tablist">
+        <nav className="kits-cards" aria-label="Abilities" role="tablist">
           {KIT_IDS.map((id, i) => {
             const d = KIT_DEFS[id];
             const own = profile.ownedKits.includes(id);

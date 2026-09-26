@@ -69,9 +69,9 @@ export default function ScopeView({ hud, active = true, onScopePower, onScopeAdj
     {hud.canted && <span className="canted-hint mono">BACKUP IRONS · RELEASE T</span>}
     {variable && hud.ads > .65 && <section className={`scope-zoom-panel ${hud.scopeAdjusting ? 'editing' : ''}`} aria-label="Variable scope adjustment"
       onPointerDown={e=>e.stopPropagation()} onWheel={e=>e.stopPropagation()} onKeyDown={e=>{if(e.key!=='Escape')e.stopPropagation();}}>
-      <div className="scope-zoom-heading"><span>6× PRECISION</span><output aria-live="off">{power.toFixed(1)}×</output></div>
+      <div className="scope-zoom-heading"><span>VARIABLE PRECISION</span><output aria-live="off">{power.toFixed(1)}×</output></div>
       <label htmlFor="scope-magnification">MAGNIFICATION</label>
-      <input id="scope-magnification" aria-label="6x scope magnification" type="range" min={hud.scopeMinPower} max={hud.scopeMaxPower} step="0.1"
+      <input id="scope-magnification" aria-label="Scope magnification" type="range" min={hud.scopeMinPower} max={hud.scopeMaxPower} step="0.1"
         value={power} disabled={!hud.scopeAdjusting} onChange={e=>onScopePower?.(Number(e.currentTarget.value))} />
       <div className="scope-zoom-limits"><span>{hud.scopeMinPower.toFixed(0)}× · WIDE</span><span>{hud.scopeMaxPower.toFixed(0)}× · TIGHT</span></div>
       <small>{hud.zoomFov.toFixed(1)}° FOV · {hud.scopeAdjusting ? 'Aim stays up. The mission continues.' : 'WHEEL / [ ] TO ADJUST'}</small>

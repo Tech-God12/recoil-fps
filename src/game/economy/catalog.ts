@@ -1268,9 +1268,9 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "awm"
     ],
-    "desc": "AWM-only long-range optic with a fine ranging tree and restrained objective bell.",
+    "desc": "AWM-only variable long-range optic. Switch smoothly from 3\u00d7 wide view to 8\u00d7 precision.",
     "pros": [
-      "Fixed 8\u00d7 optical zoom",
+      "Variable 3\u20138\u00d7 optical zoom",
       "Ranging-tree reticle"
     ],
     "cons": [
@@ -1280,6 +1280,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "mods": {
       "scopeReticle": "mil8",
       "scopePower": 8,
+      "scopeMinPower": 3,
       "adsTimeMul": 1.34,
       "swayMul": 1.15,
       "swayMulCrouched": 0.75

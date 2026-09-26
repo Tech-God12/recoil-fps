@@ -1,4 +1,4 @@
-// Recoil FPS — KITS menu 3-D showcase. Renders the real in-game kit hardware
+// Recoil FPS — ABILITIES menu 3-D showcase. Renders the real in-game kit hardware
 // (kit-models.ts, so the menu never drifts from what spawns in a match) on a lit
 // pedestal and loops a short demo of what the kit does: the radar unfolds, spins and
 // scans, finding enemy silhouettes; the barricade drops and unfolds; the decoy

@@ -94,13 +94,6 @@ const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3(1, 1, 1);
 
-/** Stable per-map variation for dressing. World generation must never consume the
- * runtime random stream: a replay and its screenshot should have the same skyline. */
-function worldHash(a: number, b: number): number {
-  const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
-  return s - Math.floor(s);
-}
-
 /** Small procedural canvas texture (arena dressing). Safe under the Node smoke shim. */
 function canvasTexture(size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -936,13 +929,14 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       arenaFx.flicker.push({ light, base: 5, seed: hx * 3.1 + hz });
       const N = 20, pos = new Float32Array(N * 3), vel = new Float32Array(N * 3);
       for (let i = 0; i < N; i++) {
-        const a = worldHash(hx + i, hz) * Math.PI * 2, r = worldHash(hz + i, hx) * 1.5;
+        const seed = i + (hx + 20) * 17 + (hz + 20) * 31;
+        const a = seeded(seed) * Math.PI * 2, r = seeded(seed + 1) * 1.5;
         pos[i * 3] = hx + Math.cos(a) * r;
-        pos[i * 3 + 1] = 0.6 + worldHash(i, hx + hz) * 4.2;
+        pos[i * 3 + 1] = 0.6 + seeded(seed + 2) * 4.2;
         pos[i * 3 + 2] = hz + Math.sin(a) * r;
-        vel[i * 3] = (worldHash(i + 3, hx) - 0.5) * 0.12;
-        vel[i * 3 + 1] = -0.05 - worldHash(i + 7, hz) * 0.12;
-        vel[i * 3 + 2] = (worldHash(i + 11, hx + hz) - 0.5) * 0.12;
+        vel[i * 3] = (seeded(seed + 3) - 0.5) * 0.12;
+        vel[i * 3 + 1] = -0.05 - seeded(seed + 4) * 0.12;
+        vel[i * 3 + 2] = (seeded(seed + 5) - 0.5) * 0.12;
       }
       const mg = new THREE.BufferGeometry();
       mg.setAttribute('position', new THREE.BufferAttribute(pos, 3));

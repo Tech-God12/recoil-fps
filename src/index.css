@@ -708,7 +708,29 @@ img { display: block; max-width: 100%; }
 /* ============================================================
    HUD — steel-on-dark, tabular, no neon
    ============================================================ */
-.hud-root { position: absolute; inset: 0; pointer-events: none; }
+.hud-root { position: absolute; inset: 0; pointer-events: none; transform: scale(var(--hud-scale, 1)); transform-origin: center; }
+
+/* Full tactical map: uses the same collision-derived raster as the minimap. It is
+   deliberately compact enough to retain peripheral combat visibility. */
+.tactical-map { position:absolute; z-index:31; left:50%; top:50%; width:min(560px,70vw); padding:10px; transform:translate(-50%,-50%); border:1px solid rgba(200,155,90,.72); background:rgba(11,13,14,.92); box-shadow:0 18px 70px rgba(0,0,0,.58), inset 0 0 0 1px rgba(255,255,255,.035); color:var(--bone); font:700 10px/1 var(--mono); letter-spacing:.15em; backdrop-filter:blur(7px); }
+.tactical-map header,.tactical-map footer { display:flex; align-items:center; min-height:25px; gap:12px; padding:0 4px; color:var(--bone-mute); }
+.tactical-map header span { color:var(--brass); }.tactical-map header b { margin-left:auto; color:var(--bone); font-size:12px; }.tactical-map header em { font-style:normal; font-size:8px; }
+.tactical-map-canvas { position:relative; overflow:hidden; aspect-ratio:1; border:1px solid rgba(237,228,211,.26); background:#5f5847; box-shadow:inset 0 0 45px rgba(0,0,0,.42); }
+.tactical-map-canvas>img { display:block; width:100%; height:100%; object-fit:cover; opacity:.94; }
+.tactical-map-canvas>i,.tactical-map-canvas>b { position:absolute; z-index:2; display:block; transform-origin:center; }
+.tmap-player { width:0; height:0; margin:-9px 0 0 -7px; border-left:7px solid transparent; border-right:7px solid transparent; border-bottom:18px solid var(--signal); filter:drop-shadow(0 0 4px rgba(255,145,52,.9)); }
+.tmap-ally { width:9px; height:9px; margin:-4.5px; border:1px solid rgba(5,18,20,.9); border-radius:50% 50% 50% 0; background:#63d8db; box-shadow:0 0 5px rgba(99,216,219,.8); }
+.tmap-enemy { width:10px; height:10px; margin:-5px; background:var(--brass); border:1px solid #1c1710; border-radius:50%; box-shadow:0 0 6px rgba(200,155,90,.9); }.tmap-enemy.hot { background:var(--blood); box-shadow:0 0 10px color-mix(in srgb,var(--blood) 85%,transparent); }
+.tmap-site { width:21px; height:21px; margin:-10.5px; display:grid!important; place-items:center; border:1px solid var(--brass); border-radius:50%; background:rgba(20,15,8,.7); color:var(--brass); font-size:11px; }
+.tmap-bomb { padding:3px 4px; transform:translate(-50%,-50%); border:1px solid var(--blood); background:#250d0a; color:#ff9a8e; font-size:8px; }.tmap-bomb.planted { animation:hotPing .85s ease-in-out infinite; }
+.tmap-objective-ring { box-sizing:border-box; margin:0; transform:translate(-50%,-50%); border:1px solid var(--olive); border-radius:50%; }.tmap-objective { width:10px; height:10px; margin:-5px; border:2px solid var(--bone); border-radius:50%; background:var(--olive); }.tmap-objective.extract,.tmap-objective-ring.extract { border-color:#7fc4d4; }.tmap-objective.extract { background:#7fc4d4; }
+.tactical-map footer { flex-wrap:wrap; justify-content:center; gap:10px 15px; padding-top:7px; font-size:8px; }.tactical-map footer span { display:inline-flex; align-items:center; gap:5px; }.tactical-map footer i { width:7px; height:7px; display:inline-block; }.legend-player { background:var(--signal); transform:rotate(45deg); }.legend-ally { background:#63d8db; border-radius:50%; }.legend-contact { background:var(--blood); border-radius:50%; }.legend-objective { background:var(--olive); border-radius:50%; }
+.app-root[data-color-vision='protanopia'] { --brass:#F6C445; --brass-2:#FFE08A; --blood:#2D9CDB; --olive:#A979D8; --signal:#F2B01E; }
+.app-root[data-color-vision='deuteranopia'] { --brass:#F6C445; --brass-2:#FFE08A; --blood:#3F8EDE; --olive:#C26CCF; --signal:#F2B01E; }
+.app-root[data-color-vision='tritanopia'] { --brass:#FF9F43; --brass-2:#FFD08A; --blood:#E85D75; --olive:#41B883; --signal:#FF9F43; }
+.app-root[data-reduced-motion='true'] *, .app-root[data-reduced-motion='true'] *::before, .app-root[data-reduced-motion='true'] *::after { animation-duration:1ms!important; animation-iteration-count:1!important; transition-duration:1ms!important; scroll-behavior:auto!important; }
+@media (max-width:700px) { .tactical-map { width:min(92vw,500px); }.tactical-map header em { display:none; } }
+
 .hud-corner { position: absolute; width: 14px; height: 14px; border-color: rgba(237,228,211,0.18); border-style: solid; }
 .hud-corner.tl { top: 10px; left: 10px; border-width: 1px 0 0 1px; }
 .hud-corner.tr { top: 10px; right: 10px; border-width: 1px 1px 0 0; }

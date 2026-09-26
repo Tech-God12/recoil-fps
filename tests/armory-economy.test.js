@@ -16,12 +16,12 @@ const { REWARDS, gradeFor, gradeBonus, streakBonus, streakAward, difficultyMulti
 const m4base = () => weaponById('m4a1').base;
 const modsOf = (...ids) => ids.map(id => attachmentById(id).mods);
 
-test('catalog ships ten weapons and the full 59-part attachment catalog', () => {
-  assert.equal(WEAPON_CATALOG.length, 10);
+test('catalog ships eleven weapons and the full 59-part attachment catalog', () => {
+  assert.equal(WEAPON_CATALOG.length, 11);
   assert.equal(ATTACHMENT_CATALOG.length, 59);
   assert.equal(new Set(ATTACHMENT_CATALOG.map(a => a.id)).size, ATTACHMENT_CATALOG.length);
   assert.deepEqual(WEAPON_CATALOG.map(w => w.id).sort(), [
-    'ak47', 'awm', 'deagle', 'm1911', 'm249', 'm4a1', 'mp7', 'scar_h', 'spas12', 'vector',
+    'ak47', 'awm', 'deagle', 'm1911', 'm249', 'm4a1', 'm7_spear', 'mp7', 'scar_h', 'spas12', 'vector',
   ]);
 });
 
@@ -94,7 +94,7 @@ test('grade thresholds match the results stamp', () => {
   assert.equal(gradeFor({ win: true, kills: 12, shots: 100, hits: 100 }).tint, '#3FD68E');
 });
 
-test('competent first run pays ≈ $3,350 and full unlock takes 15–20 runs', () => {
+test('competent first run pays ≈ $3,350 and the expanded armory remains a 15–20 run unlock', () => {
   // 15 kills (3 headshots), two streaks, 3 phases, extraction, B grade, Normal.
   const run = 12 * REWARDS.kill + 3 * REWARDS.headshot
     + streakBonus(3) + streakBonus(4) + 3 * REWARDS.phase + REWARDS.extraction;
@@ -102,7 +102,7 @@ test('competent first run pays ≈ $3,350 and full unlock takes 15–20 runs', (
   assert.ok(total >= 3000 && total <= 3700, `run pays $${total}`);
   const catalogValue = WEAPON_CATALOG.reduce((a, w) => a + w.price, 0)
     + ATTACHMENT_CATALOG.reduce((a, x) => a + x.price, 0);
-  assert.ok(catalogValue >= 55000 && catalogValue <= 66000, `catalog worth $${catalogValue}`);
+  assert.ok(catalogValue >= 55000 && catalogValue <= 67000, `catalog worth $${catalogValue}`);
   const runs = catalogValue / total;
   assert.ok(runs >= 15 && runs <= 20, `${runs.toFixed(1)} runs to full unlock`);
 });
@@ -232,7 +232,7 @@ test('catalog uses full real-steel display names with stable ids and shorts', ()
     m4a1: ['M416', 'M416'], ak47: ['AK-47', 'AK-47'],
     m1911: ['1911', '1911'], awm: ['AWM', 'AWM'],
     mp7: ['MP', 'MP'], vector: ['Vector', 'Vector'],
-    spas12: ['SPAS', 'SPAS'], scar_h: ['SCAR', 'SCAR'],
+    spas12: ['SPAS', 'SPAS'], scar_h: ['SCAR', 'SCAR'], m7_spear: ['M7 SPEAR', 'M7'],
     deagle: ['Deagle', 'Deagle'], m249: ['M249', 'M249'],
   };
   assert.deepEqual(Object.keys(names).sort(), WEAPON_CATALOG.map(w => w.id).sort());

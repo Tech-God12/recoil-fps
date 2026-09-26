@@ -13,6 +13,8 @@ test('settings sanitizer clamps numeric ranges, validates choices and restores i
     sensitivity: -20,
     adsSensitivity: Number.POSITIVE_INFINITY,
     invertY: 'yes',
+    autoSprint: 'yes',
+    autoReload: 1,
     fov: 999,
     difficulty: 'Nightmare',
     map: 'missing-map',
@@ -23,6 +25,12 @@ test('settings sanitizer clamps numeric ranges, validates choices and restores i
     brightness: 200,
     cameraShake: -2,
     masterVolume: 101,
+    effectsVolume: -1,
+    footstepVolume: 110,
+    ambienceVolume: Number.POSITIVE_INFINITY,
+    hudScale: 999,
+    colorVision: 'laser-rainbow',
+    reducedMotion: 'true',
     voices: 0,
     crosshairColor: 'url(javascript:alert(1))',
     crosshairSize: 0,
@@ -35,6 +43,8 @@ test('settings sanitizer clamps numeric ranges, validates choices and restores i
   assert.equal(settings.sensitivity, 0.5);
   assert.equal(settings.adsSensitivity, DEFAULT_SETTINGS.adsSensitivity);
   assert.equal(settings.invertY, DEFAULT_SETTINGS.invertY);
+  assert.equal(settings.autoSprint, DEFAULT_SETTINGS.autoSprint);
+  assert.equal(settings.autoReload, DEFAULT_SETTINGS.autoReload);
   assert.equal(settings.fov, 120);
   assert.equal(settings.difficulty, DEFAULT_SETTINGS.difficulty);
   assert.equal(settings.map, DEFAULT_SETTINGS.map);
@@ -45,6 +55,12 @@ test('settings sanitizer clamps numeric ranges, validates choices and restores i
   assert.equal(settings.brightness, 170);
   assert.equal(settings.cameraShake, 0);
   assert.equal(settings.masterVolume, 100);
+  assert.equal(settings.effectsVolume, 0);
+  assert.equal(settings.footstepVolume, 100);
+  assert.equal(settings.ambienceVolume, DEFAULT_SETTINGS.ambienceVolume);
+  assert.equal(settings.hudScale, 125);
+  assert.equal(settings.colorVision, DEFAULT_SETTINGS.colorVision);
+  assert.equal(settings.reducedMotion, DEFAULT_SETTINGS.reducedMotion);
   assert.equal(settings.voices, DEFAULT_SETTINGS.voices);
   assert.equal(settings.crosshairColor, DEFAULT_SETTINGS.crosshairColor);
   assert.equal(settings.crosshairSize, 3);
@@ -55,11 +71,19 @@ test('settings sanitizer clamps numeric ranges, validates choices and restores i
 });
 
 test('settings sanitizer accepts a valid JSON save and safely handles malformed or non-object input', () => {
-  const settings = sanitizeSettings('{"sensitivity":2.25,"difficulty":"Hard","map":"kasbah","crosshairColor":"#12aBcD","voices":false}');
+  const settings = sanitizeSettings('{"sensitivity":2.25,"difficulty":"Hard","map":"kasbah","crosshairColor":"#12aBcD","voices":false,"autoSprint":true,"autoReload":false,"effectsVolume":64,"footstepVolume":72,"ambienceVolume":48,"hudScale":115,"colorVision":"deuteranopia","reducedMotion":true}');
   assert.equal(settings.sensitivity, 2.25);
   assert.equal(settings.difficulty, 'Hard');
   assert.equal(settings.map, 'kasbah');
   assert.equal(settings.crosshairColor, '#12aBcD');
+  assert.equal(settings.autoSprint, true);
+  assert.equal(settings.autoReload, false);
+  assert.equal(settings.effectsVolume, 64);
+  assert.equal(settings.footstepVolume, 72);
+  assert.equal(settings.ambienceVolume, 48);
+  assert.equal(settings.hudScale, 115);
+  assert.equal(settings.colorVision, 'deuteranopia');
+  assert.equal(settings.reducedMotion, true);
   assert.equal(settings.voices, false);
   assert.deepEqual(sanitizeSettings('{broken'), DEFAULT_SETTINGS);
   assert.deepEqual(sanitizeSettings(null), DEFAULT_SETTINGS);

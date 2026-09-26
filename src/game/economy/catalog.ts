@@ -4,14 +4,14 @@ import type { StatMods } from './stats';
 
 export type WeaponId =
   | 'm4a1' | 'ak47' | 'm1911' | 'awm' | 'mp7'
-  | 'scar_h' | 'vector' | 'spas12' | 'deagle' | 'm249';
+  | 'scar_h' | 'm7_spear' | 'vector' | 'spas12' | 'deagle' | 'm249';
 export type WeaponClass = 'AR' | 'BR' | 'SMG' | 'PDW' | 'SR' | 'SG' | 'LMG' | 'PISTOL';
 export type SlotId = 'primary' | 'secondary';
 export type AttachSlot = 'muzzle' | 'optic' | 'magazine' | 'underbarrel' | 'stock' | 'rail' | 'barrel';
 export type AttachmentId = string;
 export type AudioKind =
   | 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg'
-  | 'scar' | 'vector' | 'shotgun' | 'deagle' | 'lmg';
+  | 'scar' | 'spear' | 'vector' | 'shotgun' | 'deagle' | 'lmg';
 
 export interface BaseWeaponStats {
   auto: boolean; rpm: number; damage: number; headMul: number; limbMul: number;
@@ -73,6 +73,14 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     base: base({ pattern: [[1.05, 0.08], [1.15, 0.12], [1.25, -0.12], [1.3, 0.2], [1.4, 0.28], [1.48, 0.18], [1.5, -0.25], [1.55, -0.32], [1.6, -0.18], [1.6, 0.23], [1.58, 0.3], [1.55, -0.16]], auto: true, rpm: 780, damage: 34, headMul: 2.3, limbMul: 0.85, magSize: 30, reserve: 150, hipSpread: 0.008, adsFov: 56, tacReload: 2.1, emptyReload: 2.7, adsTime: 0.22 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
     audio: 'm4',
+  },
+  {
+    id: 'm7_spear', name: 'M7 SPEAR', short: 'M7', cls: 'BR', slot: 'primary',
+    price: 3600, starter: false,
+    blurb: 'Modern 6.8mm piston rifle. Twenty deliberate rounds, a monolithic rail and enough authority to own the long lane.',
+    base: base({ pattern: [[1.35, 0.10], [1.48, -0.15], [1.58, 0.22], [1.67, -0.26], [1.75, 0.28], [1.82, -0.20]], auto: true, rpm: 675, damage: 43, headMul: 2.45, limbMul: 0.82, magSize: 20, reserve: 100, hipSpread: 0.009, adsFov: 55, tacReload: 2.28, emptyReload: 2.82, adsTime: 0.25, recoilMul: 1.18, falloffStart: 48, falloffMul: 0.91, noiseRadius: 76, moveSpeedMul: 0.98 }),
+    slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
+    audio: 'spear',
   },
   {
     id: 'ak47', name: 'AK-47', short: 'AK-47', cls: 'AR', slot: 'primary',
@@ -167,6 +175,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249"
     ],
@@ -191,6 +200,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h"
     ],
     "desc": "Side-port compensator for the M416 and SCAR. Flatter bursts, louder report.",
@@ -219,6 +229,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249"
     ],
@@ -355,6 +366,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249",
       "mp7",
@@ -385,6 +397,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249",
       "mp7",
@@ -415,6 +428,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "mp7",
       "vector"
@@ -442,6 +456,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249"
     ],
@@ -470,6 +485,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249",
       "awm"
@@ -500,6 +516,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 3,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249",
       "awm"
@@ -557,7 +574,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 600,
     "tier": 2,
     "compat": [
-      "m4a1"
+      "m4a1",
+      "m7_spear"
     ],
     "desc": "Extended STANAG with the original feed neck and a modest lower extension.",
     "pros": [
@@ -584,7 +602,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 1350,
     "tier": 3,
     "compat": [
-      "m4a1"
+      "m4a1",
+      "m7_spear"
     ],
     "desc": "Compact 60-round drum with a short STANAG feed tower.",
     "pros": [
@@ -613,6 +632,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
+      "m7_spear",
       "ak47"
     ],
     "desc": "A seated magazine plus a supported spare. Faster reloads, more carried bulk.",
@@ -712,6 +732,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "vector"
     ],
@@ -737,6 +758,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "vector"
     ],
@@ -789,7 +811,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 1800,
     "tier": 3,
     "compat": [
-      "m4a1"
+      "m4a1",
+      "m7_spear"
     ],
     "desc": "Compact receiver-mounted breacher with a dedicated M416 clamp. Press B; its own three-shell tube.",
     "pros": [
@@ -815,7 +838,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 300,
     "tier": 1,
     "compat": [
-      "m4a1"
+      "m4a1",
+      "m7_spear"
     ],
     "desc": "Minimal cheek sleeve and pull tab on the original stock. Keeps the AR silhouette.",
     "pros": [
@@ -841,6 +865,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249"
     ],
@@ -896,6 +921,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249"
     ],
@@ -924,6 +950,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249",
       "spas12",
@@ -953,6 +980,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h"
     ],
     "desc": "Small offset backup sights on a proper side-rail bracket. Hold T to use the 1\u00d7 backup while ADS.",
@@ -976,6 +1004,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "m249"
     ],
@@ -1003,6 +1032,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 2,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "vector"
     ],
@@ -1566,6 +1596,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h",
       "vector"
     ],
@@ -1593,6 +1624,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h"
     ],
     "desc": "Small thumb ledge and handstop; prioritises ADS, not spray control.",
@@ -1619,6 +1651,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
+      "m7_spear",
       "scar_h"
     ],
     "desc": "Skeletonised palm support for steady single shots. Less helpful in long bursts.",

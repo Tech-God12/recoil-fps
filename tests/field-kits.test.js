@@ -526,22 +526,22 @@ test('HUD slot, prompt, fx, equipped-kit button, read-only pause card and KITS m
   }
   const none = renderToStaticMarkup(React.createElement(KitEquipButton, { kit: null, onOpen() {} }));
   assert.match(none, /NONE EQUIPPED/);
-  assert.match(none, /GET A KIT/);
+  assert.match(none, /GET AN ABILITY/);
   const eq = renderToStaticMarkup(React.createElement(KitEquipButton, { kit: 'phantom', onOpen() {} }));
   assert.match(eq, /Decoy/);
   d.activate();
   const pause = renderToStaticMarkup(React.createElement(KitPauseCard, { kit: d.hud() }));
   assert.match(pause, /LOCKED FOR THIS DEPLOYMENT/);
   assert.doesNotMatch(pause, /SWAP|<button/, 'no way to change kits mid-game');
-  assert.match(renderToStaticMarkup(React.createElement(KitPauseCard, {})), /No kit/);
+  assert.match(renderToStaticMarkup(React.createElement(KitPauseCard, {})), /No ability/);
   const noop = () => {};
   const menu = renderToStaticMarkup(React.createElement(PauseMenu, { kit: d.hud(), onResume: noop, onRestart: noop, onSettings: noop, onQuit: noop }));
   for (const label of ['Resume', 'Settings', 'Restart', 'Quit to menu', 'KIT']) assert.match(menu, new RegExp(label));
   assert.doesNotMatch(menu, /SWAP/);
   d.dispose();
-  // KITS menu: three cards, the price on the buy button, the wallet on screen
+  // Abilities menu: five cards, the price on the buy button, the wallet on screen
   const shop = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, cash: 5000 }, onProfile: noop, onBack: noop }));
-  assert.match(shop, />Kits</);
+  assert.match(shop, />Abilities</);
   assert.equal((shop.match(/role="tab"/g) ?? []).length, 5);
   assert.match(shop, /Buy · \$4,500/, 'recon is affordable at $5,000');
   assert.match(shop, /\$5,000/);

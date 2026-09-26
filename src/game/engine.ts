@@ -55,6 +55,10 @@ export interface GameSettings {
   adsSensitivity: number;   // 0.2 - 1.5 multiplier
   invertY: boolean;
   adsToggle: boolean;       // click MMB to keep scoped instead of holding
+  /** Keeps forward movement in sprint when the weapon can sprint. */
+  autoSprint: boolean;
+  /** Starts a reload after the final round instead of requiring a dry trigger pull. */
+  autoReload: boolean;
   fov: number;              // 70 - 120
   difficulty: string;
   map: MapId;
@@ -71,6 +75,9 @@ export interface GameSettings {
   showFps: boolean;
   // Audio
   masterVolume: number;     // 0 - 100
+  effectsVolume: number;    // guns, impacts and UI
+  footstepVolume: number;   // self movement detail
+  ambienceVolume: number;   // wind / map beds
   voices: boolean;
   // Crosshair
   crosshairColor: string;
@@ -78,6 +85,10 @@ export interface GameSettings {
   crosshairGap: number;     // 0 - 26
   crosshairThickness: number; // 1 - 6
   crosshairDot: boolean;
+  // Comfort / accessibility
+  hudScale: number;         // 75 - 125 (%)
+  colorVision: 'default' | 'protanopia' | 'deuteranopia' | 'tritanopia';
+  reducedMotion: boolean;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -85,6 +96,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   adsSensitivity: 0.7,
   invertY: false,
   adsToggle: false,
+  autoSprint: false,
+  autoReload: true,
   fov: 95,
   difficulty: 'Normal',
   map: 'alrasul',
@@ -99,12 +112,18 @@ export const DEFAULT_SETTINGS: GameSettings = {
   cameraShake: 100,
   showFps: true,
   masterVolume: 85,
+  effectsVolume: 90,
+  footstepVolume: 85,
+  ambienceVolume: 70,
   voices: true,
   crosshairColor: '#FF5C1A',
   crosshairSize: 9,
   crosshairGap: 8,
   crosshairThickness: 2,
   crosshairDot: true,
+  hudScale: 100,
+  colorVision: 'default',
+  reducedMotion: false,
 };
 
 /** True when the settings need the off-screen EffectComposer chain. Everything
@@ -143,6 +162,8 @@ export function sanitizeSettings(input: unknown): GameSettings {
     adsSensitivity: number('adsSensitivity', DEFAULT_SETTINGS.adsSensitivity, 0.2, 1.5),
     invertY: boolean('invertY', DEFAULT_SETTINGS.invertY),
     adsToggle: boolean('adsToggle', DEFAULT_SETTINGS.adsToggle),
+    autoSprint: boolean('autoSprint', DEFAULT_SETTINGS.autoSprint),
+    autoReload: boolean('autoReload', DEFAULT_SETTINGS.autoReload),
     fov: number('fov', DEFAULT_SETTINGS.fov, 70, 120),
     difficulty: choice('difficulty', ['Easy', 'Normal', 'Hard'], DEFAULT_SETTINGS.difficulty),
     map: choice('map', ['alrasul', 'kasbah', 'arena', 'sirocco'], DEFAULT_SETTINGS.map),
@@ -157,12 +178,18 @@ export function sanitizeSettings(input: unknown): GameSettings {
     cameraShake: number('cameraShake', DEFAULT_SETTINGS.cameraShake, 0, 100),
     showFps: boolean('showFps', DEFAULT_SETTINGS.showFps),
     masterVolume: number('masterVolume', DEFAULT_SETTINGS.masterVolume, 0, 100),
+    effectsVolume: number('effectsVolume', DEFAULT_SETTINGS.effectsVolume, 0, 100),
+    footstepVolume: number('footstepVolume', DEFAULT_SETTINGS.footstepVolume, 0, 100),
+    ambienceVolume: number('ambienceVolume', DEFAULT_SETTINGS.ambienceVolume, 0, 100),
     voices: boolean('voices', DEFAULT_SETTINGS.voices),
     crosshairColor: typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color : DEFAULT_SETTINGS.crosshairColor,
     crosshairSize: number('crosshairSize', DEFAULT_SETTINGS.crosshairSize, 3, 24),
     crosshairGap: number('crosshairGap', DEFAULT_SETTINGS.crosshairGap, 0, 26),
     crosshairThickness: number('crosshairThickness', DEFAULT_SETTINGS.crosshairThickness, 1, 6),
     crosshairDot: boolean('crosshairDot', DEFAULT_SETTINGS.crosshairDot),
+    hudScale: number('hudScale', DEFAULT_SETTINGS.hudScale, 75, 125),
+    colorVision: choice('colorVision', ['default', 'protanopia', 'deuteranopia', 'tritanopia'], DEFAULT_SETTINGS.colorVision),
+    reducedMotion: boolean('reducedMotion', DEFAULT_SETTINGS.reducedMotion),
   };
 }
 
@@ -194,6 +221,8 @@ export interface HudState {
   scopePower: number; scopeMinPower: number; scopeMaxPower: number; scopeAdjusting: boolean; canted: boolean;
   lpvoHigh: boolean;
   pumping: boolean;
+  /** M toggles this full-map planning overlay without pausing the match. */
+  tacticalMapOpen: boolean;
   pings: { dir: number; age: number }[];
   grenadeDist?: number;
   grenadeAngle?: number;
@@ -318,7 +347,7 @@ interface WeaponDef {
   lpvo?: boolean;
   lpvoHigh?: boolean;
   pumpShotgun?: boolean;
-  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'vector' | 'lmg' | 'deagle';
+  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'vector' | 'lmg' | 'deagle' | 'spear';
   laser?: boolean;
   flashlight?: boolean;
   masterkey?: boolean;
@@ -380,7 +409,7 @@ const ADAPT_UP_WINDOWS = 3;
 const ADAPT_STALL_SECONDS = 0.25;
 // Maps armory weapon ids to the engine's legacy audio tags for loadout-built guns.
 const LOADOUT_AUDIO: Record<WeaponId, NonNullable<WeaponDef['audioTag']>> = {
-  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', m249: 'lmg', vector: 'vector', mp7: 'smg',
+  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', m7_spear: 'spear', m249: 'lmg', vector: 'vector', mp7: 'smg',
   spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle',
 };
 
@@ -619,6 +648,9 @@ export class Engine {
   private hittables: THREE.Object3D[] = [];
   private raycaster = new THREE.Raycaster();
   private rmb = false;
+  private tacticalMapOpen = false;
+  private autoSprint = false;
+  private autoReload = true;
   private boltCycle = 0;
   private adaptiveEnabled = true;
   private appliedPR = -1;
@@ -1167,6 +1199,11 @@ void main(){
       }
     }
 
+    if (e.code === 'KeyM') {
+      this.tacticalMapOpen = !this.tacticalMapOpen;
+      this.onEvent({ type: 'callout', text: this.tacticalMapOpen ? 'Tactical map open — M to close.' : 'Tactical map closed.' });
+      return;
+    }
     if (e.code === 'KeyR') this.startReload();
     if (e.code === 'KeyZ' && this.kits) { this.kits.activate(); return; }
     if (e.code === 'Digit1') this.switchWeapon(0);
@@ -1818,6 +1855,7 @@ void main(){
       return;
     }
     this.mags[this.cur]--;
+    const reloadAfterShot = this.autoReload && this.mags[this.cur] === 0;
     this.fireCD = 60 / d.rpm;
     this.shots++;
     // G4: Bolt-actions keep ADS if the player is still holding RMB — the 1.25 s
@@ -2046,6 +2084,7 @@ void main(){
       else if (tag === 'vector') audio.fireVector();
       else if (tag === 'lmg') audio.fireLMG();
       else if (tag === 'deagle') audio.fireDeagle();
+      else if (tag === 'spear') audio.fireSpear();
       else audio.fireSMG();
     }
     // Every shot ejects: the delayed metallic tink lands ~90 ms after the report,
@@ -2071,6 +2110,10 @@ void main(){
     this.tdm?.notifyGunshot(this.pos, d.noiseRadius ?? 65);
     this.defusal?.notifyGunshot(this.pos, d.noiseRadius ?? 65);
     this.staticTime = 0;
+    // QoL: a full magazine is chambered as soon as the last round leaves, rather
+    // than making the player dry-fire into a dangerous silence. Manual reload still
+    // wins whenever there are rounds remaining.
+    if (reloadAfterShot) this.startReload();
   }
 
   /** Replace the stock arsenal with the player's armory loadout (primary + sidearm). */
@@ -3280,7 +3323,7 @@ void main(){
     const wasSprinting = this.sprinting;
     // Cannot sprint from crouch without standing first
     // Cannot sprint while aiming down sights or while leaning
-    this.sprinting = k.has('ShiftLeft') && !this.rmb && iz < 0 && !this.crouched && !this.sliding
+    this.sprinting = (k.has('ShiftLeft') || this.autoSprint) && !this.rmb && iz < 0 && !this.crouched && !this.sliding
       && this.ads < 0.25 && this.reloadT < 0 && this.switchT < 0 && Math.abs(this.lean) < 0.25 && moving;
 
     if (wasSprinting && !this.sprinting) {
@@ -3920,9 +3963,12 @@ void main(){
     this.adsSensMul = s.adsSensitivity;
     this.invertY = s.invertY;
     this.adsToggle = s.adsToggle;
+    this.autoSprint = s.autoSprint;
+    this.autoReload = s.autoReload;
     this.fovSetting = s.fov;
     voice.setEnabled(s.voices);
     audio.setMasterVolume(s.masterVolume / 100);
+    audio.setMix({ effects: s.effectsVolume / 100, footsteps: s.footstepVolume / 100, ambience: s.ambienceVolume / 100 });
 
     // Resolution scale (biggest perf lever) — adaptive scaler works down from here.
     // NOTE: must go through syncPixelRatio so the composer (post-FX) follows too —
@@ -3962,7 +4008,9 @@ void main(){
     this.vignettePass.enabled = s.filmGrain > 0;
     this.postFxOn = usesPostChain(s);
     this.renderer.toneMappingExposure = s.brightness / 100;
-    this.motionBlurAmount = s.cameraShake / 100;
+    // Reduced motion is a hard comfort cap on world shake; recoil and aim response
+    // stay intact, but explosions never throw the horizon around.
+    this.motionBlurAmount = s.cameraShake / 100 * (s.reducedMotion ? 0.35 : 1);
   }
 
   motionBlurAmount = 1;
@@ -4099,6 +4147,7 @@ void main(){
       canted: this.cantedActive(),
       lpvoHigh: this.def().lpvoHigh ?? false,
       pumping: this.pumpT > 0,
+      tacticalMapOpen: this.tacticalMapOpen,
       reloading: this.reloadT >= 0,
       reloadStage: this.currentReloadStage,
       frags: this.frags,

@@ -38,7 +38,7 @@ const DEFAULT_HUD: HudState = {
   hp: 100, mag: 30, magSize: 30, weapon: 'M416', reloading: false, reloadStage: 'idle',
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false, sprintLock: 0,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
-  bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
+  bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, tacticalMapOpen: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, renderScale: 100, worldHalf: 104, landmark: null,
 };
 const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null });
@@ -426,7 +426,7 @@ export default function App() {
   // Built once per render (the App re-renders ~20×/s with the HUD tick).
   const vignetteBg = vignetteOverlay(settings.vignette);
   return (
-    <div className="w-full h-full relative bg-black overflow-hidden app-root">
+    <div className="w-full h-full relative bg-black overflow-hidden app-root" data-color-vision={settings.colorVision} data-reduced-motion={settings.reducedMotion ? 'true' : 'false'} style={{ '--hud-scale': String(settings.hudScale / 100) } as React.CSSProperties}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" aria-label="Recoil FPS game world" />
       {/* Screen vignette as a compositor overlay — free, instead of a post pass (engine.ts usesPostChain). */}
       {(phase === 'playing' || phase === 'paused') && vignetteBg && (

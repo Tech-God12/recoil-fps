@@ -1,4 +1,5 @@
 import { WM, type WeaponModel } from './core';
+import { GunBuilder } from './geometry';
 import { HALF_PI, WeaponAssembly, flashHider, ironSights, magazine, pistolGrip, rail, screw, sideRail, stamp, triggerGuard } from './furniture';
 
 /** HK-pattern carbine: forged receivers, vented quad rail and telescopic stock. */
@@ -79,6 +80,89 @@ export function buildM4(): WeaponModel {
   return a.finish({mag:mag.group,handle:charging.group,sightY:.078,
     sockets:{muzzle:[0,.013,-.568],barrel:[0,.013,-.416],optic:[0,.045,-.110],magazine:[0,-.033,-.165],underbarrel:[0,-.013,-.335],stock:[0,.017,-.013],rail:[-.030,.004,-.320]},
     muzzleTip:[0,.013,-.615],arms:{fore:[0,-.025,-.332],mag:[0,-.147,-.183],fa:[0,.030,0]}});
+}
+
+/**
+ * SIG MCX SPEAR (XM7) — flagship 6.8×51 assault rifle. A monolithic matte-black
+ * upper with a full-length top rail, a slim OD-green M-LOK handguard, a folding
+ * skeletal stock and a three-prong flash hider. Built on the proven AR bore axis
+ * and anchor scheme so every optic, mag and rail seats with no gaps.
+ */
+export function buildMCX(): WeaponModel {
+  const a = new WeaponAssembly('MCX Spear'), b = a.body;
+  const stock = a.part('stock', 'folding skeleton stock'), barrel = a.part('barrel', 'MCX barrel and gas piston');
+  const mag = a.part('magazine', '6.8 steel magazine'), charging = a.moving('non-reciprocating side charger');
+  // Monolithic rounded upper — a longer, squarer bolt tunnel than the AR (reads as the MCX one-piece upper).
+  const arch: [number, number][] = [[-0.019, -0.013], [0.019, -0.013], [0.020, -0.003]];
+  for (let i = 0; i <= 20; i++) { const t = i / 20 * Math.PI; arch.push([0.020 * Math.cos(t), 0.001 + 0.017 * Math.sin(t)]); }
+  b.name('MCX monolithic upper').section(arch, 0.214, WM.dark, 0, 0.020, -0.118)
+    .mill([{ x: 0.021, y: 0.021, z: -0.115, w: 0.011, h: 0.016, d: 0.070, radius: 0.002 }]);
+  b.name('MCX forged lower').profile([[-0.211, 0.009], [-0.035, 0.009], [-0.016, 0.022], [-0.006, 0.020], [-0.007, -0.002], [-0.028, -0.018], [-0.050, -0.020], [-0.066, -0.030], [-0.109, -0.028], [-0.119, -0.043], [-0.207, -0.043]], 0.035, WM.dark, 0, 0.0023);
+  b.name('MCX flared magazine well').profile([[-0.211, -0.003], [-0.122, -0.003], [-0.123, -0.032], [-0.130, -0.047], [-0.207, -0.044]], 0.042, WM.dark, 0, 0.0020)
+    .mill([{ x: 0, y: -0.040, z: -0.165, w: 0.029, h: 0.032, d: 0.057, radius: 0.0015 }]);
+  for (const side of [-1, 1]) {
+    b.name('MCX takedown pin boss').cyl(0.0054, 0.0054, 0.003, WM.midSteel, side * 0.019, 0.001, -0.029, 0, 0, HALF_PI);
+    screw(b, side * 0.0205, -0.002, -0.201, 0.0029);
+    b.name('MCX ambi selector drum').cyl(0.0049, 0.0049, 0.0035, WM.midSteel, side * 0.0185, -0.014, -0.067, 0, 0, HALF_PI);
+    b.name('MCX teardrop selector').profile([[-0.069, -0.009], [-0.063, -0.009], [-0.051, -0.018], [-0.051, -0.022], [-0.057, -0.021], [-0.070, -0.014]], 0.003, WM.midSteel, side * 0.0205, 0.0005);
+    b.name('MCX mag release button').box(0.004, 0.008, 0.016, WM.midSteel, side * 0.0188, -0.008, -0.106);
+    for (let i = 0; i < 4; i++) b.name('release checkering').box(0.001, 0.0007, 0.012, WM.dark, side * 0.0209, -0.0105 + i * 0.0017, -0.106);
+    stamp(b, 15, side * 0.0213, -0.016, -0.164, 0.074, 0.020);
+  }
+  b.name('MCX bolt catch').profile([[-0.102, -0.012], [-0.091, -0.012], [-0.093, 0.014], [-0.104, 0.014]], 0.0045, WM.midSteel, -0.021, 0.0008);
+  b.name('MCX exposed bolt').box(0.0018, 0.010, 0.052, WM.steel, 0.0162, 0.021, -0.114);
+  b.name('MCX ejection door').profile([[-0.148, 0.011], [-0.079, 0.011], [-0.079, 0.001], [-0.148, 0.001]], 0.0022, WM.midSteel, 0.0200, 0.0004);
+  b.name('MCX door hinge').cyl(0.0017, 0.0017, 0.069, WM.steel, 0.0208, 0.011, -0.114, HALF_PI);
+  b.name('MCX brass deflector').loft([[-0.080, 0.029, 0.014, 0.005], [-0.070, 0.027, 0.011, 0.019], [-0.061, 0.023, 0.012, 0.003]], WM.dark, 0.40, 0.021);
+  triggerGuard(b, -0.066, -0.121, -0.026, -0.062, WM.dark, true);
+  pistolGrip(b, -0.049, -0.022, 0.090, 0.032, WM.grip, 0.026);
+  // Continuous monolithic Picatinny top: receiver rail flows straight into the handguard rail.
+  rail(b, -0.014, -0.211, 0.039, 0.031, WM.dark);
+  // Slim rounded M-LOK handguard — a hexagonal tube with real slots milled down each face.
+  const hex: [number, number][] = [[-.016, -.021], [.016, -.021], [.023, -.011], [.023, .011], [.016, .022], [-.016, .022], [-.023, .011], [-.023, -.011]];
+  b.name('MCX M-LOK handguard').section(hex, 0.202, WM.od, 0, 0.013, -0.319, { y: 0, radius: 0.016 })
+    .mill([
+      ...Array.from({ length: 6 }, (_, i) => ({ x: -0.023, y: 0.006, z: -0.245 - i * 0.026, w: 0.006, h: 0.014, d: 0.017, radius: 0.002 })),
+      ...Array.from({ length: 6 }, (_, i) => ({ x: 0.023, y: 0.006, z: -0.245 - i * 0.026, w: 0.006, h: 0.014, d: 0.017, radius: 0.002 })),
+      ...Array.from({ length: 6 }, (_, i) => ({ x: 0, y: -0.021, z: -0.245 - i * 0.026, w: 0.014, h: 0.006, d: 0.017, radius: 0.002 })),
+    ]);
+  b.name('MCX barrel nut').tube(0.023, 0.010, 0.018, WM.midSteel, 0, 0.013, -0.216);
+  b.name('MCX free floating barrel').cyl(0.0085, 0.0085, 0.214, WM.darkSteel, 0, 0.013, -0.318, HALF_PI);
+  rail(b, -0.217, -0.420, 0.039, 0.031, WM.dark);
+  sideRail(b, -0.0245, 0.004, -0.319, 0.176); sideRail(b, 0.0245, 0.004, -0.319, 0.176);
+  b.name('MCX handguard bottom spine').box(0.024, 0.008, 0.196, WM.od, 0, -0.009, -0.318);
+  b.name('MCX handguard hand stop').box(0.020, 0.016, 0.020, WM.poly, 0, -0.019, -0.262);
+  // Folding skeletal stock (deployed) in OD polymer — anchored to the receiver
+  // extension tube, then a spine, a strut and a rubber pad.
+  const s = stock.b;
+  s.name('MCX receiver end plate').box(0.034, 0.040, 0.008, WM.dark, 0, 0.014, -0.006);
+  s.name('MCX receiver extension').cyl(0.014, 0.014, 0.120, WM.darkSteel, 0, 0.016, 0.048, HALF_PI);
+  s.name('MCX castle nut').tube(0.017, 0.013, 0.012, WM.midSteel, 0, 0.016, 0.006);
+  s.name('MCX stock top spine').box(0.018, 0.013, 0.160, WM.poly, 0, 0.030, 0.098);
+  s.name('MCX stock lower strut').box(0.016, 0.011, 0.150, WM.poly, 0, -0.010, 0.100);
+  s.name('MCX stock riser column').box(0.015, 0.066, 0.018, WM.poly, 0, 0.011, 0.042);
+  s.name('MCX cheek riser').loft([[0.050, 0.038, 0.016, 0.026], [0.068, 0.043, 0.014, 0.032], [0.160, 0.043, 0.014, 0.032], [0.176, 0.036, 0.014, 0.024]], WM.poly, 0.40);
+  s.name('MCX buttpad').profile([[0.168, 0.044], [0.188, 0.040], [0.189, -0.050], [0.168, -0.054]], 0.040, WM.rubber, 0, 0.002);
+  for (let i = 0; i < 8; i++) s.name('buttpad traction rib').box(0.033, 0.0025, 0.002, WM.grip, 0, 0.028 - i * 0.011, 0.188);
+  for (const side of [-1, 1]) s.name('MCX stock sling loop').box(0.006, 0.014, 0.016, WM.darkSteel, side * 0.008, 0.002, 0.045);
+  const r = barrel.b;
+  r.name('MCX open barrel').tube(0.009, 0.004, 0.160, WM.darkSteel, 0, 0.013, -0.492);
+  r.name('MCX gas block').tube(0.014, 0.008, 0.024, WM.darkSteel, 0, 0.013, -0.430);
+  r.name('MCX two-position gas plug').cyl(0.006, 0.006, 0.012, WM.midSteel, 0, 0.030, -0.430, HALF_PI);
+  r.name('MCX gas block riser').box(0.019, 0.024, 0.022, WM.darkSteel, 0, 0.024, -0.430);
+  // Three-prong flash hider: the base device plus three tines around the crown.
+  const fh = flashHider(a, -0.568, 0.013, 0.046, 0.0108);
+  const fhb = new GunBuilder();
+  for (let i = 0; i < 3; i++) { const th = i / 3 * Math.PI * 2; fhb.name('flash hider prong').box(0.0026, 0.0026, 0.020, WM.darkSteel, Math.sin(th) * 0.0085, 0.013 + Math.cos(th) * 0.0085, -0.606, 0, 0, -th); }
+  fhb.build(fh);
+  ironSights(a, -0.043, -0.428, 0.046, 0.032, 0.078, true);
+  charging.b.name('side charging shaft').box(0.024, 0.006, 0.011, WM.darkSteel, -0.028, 0.028, -0.070);
+  charging.b.name('side charging paddle').box(0.010, 0.011, 0.024, WM.dark, -0.041, 0.028, -0.070);
+  magazine(mag.b, { width: 0.027, depth: 0.054, length: 0.138, bend: 0.018, material: WM.midSteel, ribs: 3 });
+  mag.group.position.set(0, -0.033, -0.165);
+  return a.finish({ mag: mag.group, handle: charging.group, sightY: 0.078,
+    sockets: { muzzle: [0, 0.013, -0.568], barrel: [0, 0.013, -0.416], optic: [0, 0.045, -0.110], magazine: [0, -0.033, -0.165], underbarrel: [0, -0.013, -0.335], stock: [0, 0.017, -0.013], rail: [-0.030, 0.004, -0.320] },
+    muzzleTip: [0, 0.013, -0.615], arms: { fore: [0, -0.025, -0.332], mag: [0, -0.147, -0.183], fa: [0, 0.030, 0] } });
 }
 
 /** Stamped AK with a rounded dust cover, a true banana magazine and shaped walnut furniture. */

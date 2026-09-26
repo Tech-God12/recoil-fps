@@ -163,18 +163,26 @@ export function attachArms(gun: THREE.Group, a: ArmAnchors): { lArm: THREE.Group
   for (let i = 0; i < 3; i++) gloveBox(lArm, 0.042, 0.012, 0.016, fw.x, fw.y - 0.012 - i * 0.015, fw.z - 0.028);
   gloveBox(lArm, 0.02, 0.05, 0.02, fw.x - 0.026, fw.y - 0.005, fw.z + 0.005, 0, 0, 0.4);
 
-  // reload keyframes: hand travels foregrip → mag → magwell → forward-assist → foregrip
+  // Reload keyframes for the support hand, in gun-local space (offsets from the
+  // foregrip rest `fw`). The hand DROPS to the magazine and stays low at the
+  // magwell while it strips/seats — tracking the mag below the receiver instead
+  // of sweeping straight through the receiver body (which read as arm clipping).
+  // A short lateral kick (−x) keeps the forearm off the bore centreline, then it
+  // slaps the charging handle / forward-assist and returns to the handguard.
   const mg = new THREE.Vector3(...a.mag), fa = new THREE.Vector3(...a.fa);
-  const toMag: [number, number, number] = [mg.x - fw.x, mg.y - fw.y + 0.02, mg.z - fw.z];
+  const toMag: [number, number, number] = [mg.x - fw.x, mg.y - fw.y, mg.z - fw.z];
+  const side = -0.022;      // keep the wrist to the support side of the receiver
+  const drop = 0.085;       // how far the hand rides the mag down on the strip
   const keys: LArmKey[] = [
-    { t: 0.0, p: [0, 0, 0], r: [0, 0, 0] },
-    { t: 0.13, p: [0, 0, 0], r: [0, 0, 0] },
-    { t: 0.30, p: toMag, r: [0.5, 0, 0.12] },
-    { t: 0.50, p: [toMag[0], toMag[1] - 0.075, toMag[2]], r: [0.62, 0, 0.12] },
-    { t: 0.62, p: [toMag[0] * 0.4, toMag[1] * 0.35, toMag[2] * 0.4], r: [0.3, 0, 0.05] },
-    { t: 0.74, p: [fa.x - fw.x, fa.y - fw.y, fa.z - fw.z], r: [-0.35, 0, -0.15] },
-    { t: 0.86, p: [0, 0, 0], r: [0, 0, 0] },
-    { t: 1.0, p: [0, 0, 0], r: [0, 0, 0] },
+    { t: 0.00, p: [0, 0, 0], r: [0, 0, 0] },
+    { t: 0.12, p: [0, 0, 0], r: [0, 0, 0] },                                              // still on the handguard
+    { t: 0.24, p: [toMag[0] + side, toMag[1] + 0.012, toMag[2]], r: [0.55, 0.10, 0.15] }, // reach down onto the mag
+    { t: 0.40, p: [toMag[0] + side, toMag[1] - drop, toMag[2] + 0.012], r: [0.64, 0.08, 0.13] }, // strip: ride it out & down
+    { t: 0.56, p: [toMag[0] + side * 0.6, toMag[1] - 0.02, toMag[2]], r: [0.58, 0.05, 0.10] },    // fresh mag rising to the well
+    { t: 0.66, p: [toMag[0], toMag[1] + 0.01, toMag[2]], r: [0.50, 0.0, 0.06] },          // seat: firm push up
+    { t: 0.78, p: [fa.x - fw.x, fa.y - fw.y, fa.z - fw.z], r: [-0.42, 0, -0.18] },        // slap charging handle / forward assist
+    { t: 0.90, p: [0, 0, 0], r: [0, 0, 0] },
+    { t: 1.00, p: [0, 0, 0], r: [0, 0, 0] },
   ];
   batchRigidGroup(r);
   batchRigidGroup(lArm);

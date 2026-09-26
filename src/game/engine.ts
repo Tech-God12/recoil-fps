@@ -69,8 +69,16 @@ export interface GameSettings {
   brightness: number;       // 80 - 170 (exposure %)
   cameraShake: number;      // 0 - 100
   showFps: boolean;
+  // Quality-of-life
+  weaponBob: number;        // 0 - 150 (%) — viewmodel bob/sway intensity
+  minimapZoom: number;      // 70 - 160 (%) — tactical minimap scale
+  crouchHold: boolean;      // true = hold to crouch, false = toggle
+  autoSprint: boolean;      // sprint automatically when moving forward
+  damageNumbers: boolean;   // floating combat damage numbers
+  fpsLimit: 'off' | '30' | '60' | '120' | '144';
   // Audio
   masterVolume: number;     // 0 - 100
+  sfxVolume: number;        // 0 - 100 — weapons, world, footsteps
   voices: boolean;
   // Crosshair
   crosshairColor: string;
@@ -98,7 +106,14 @@ export const DEFAULT_SETTINGS: GameSettings = {
   brightness: 110,
   cameraShake: 100,
   showFps: true,
+  weaponBob: 100,
+  minimapZoom: 100,
+  crouchHold: false,
+  autoSprint: false,
+  damageNumbers: true,
+  fpsLimit: 'off',
   masterVolume: 85,
+  sfxVolume: 100,
   voices: true,
   crosshairColor: '#FF5C1A',
   crosshairSize: 9,
@@ -156,7 +171,14 @@ export function sanitizeSettings(input: unknown): GameSettings {
     brightness: number('brightness', DEFAULT_SETTINGS.brightness, 80, 170),
     cameraShake: number('cameraShake', DEFAULT_SETTINGS.cameraShake, 0, 100),
     showFps: boolean('showFps', DEFAULT_SETTINGS.showFps),
+    weaponBob: number('weaponBob', DEFAULT_SETTINGS.weaponBob, 0, 150),
+    minimapZoom: number('minimapZoom', DEFAULT_SETTINGS.minimapZoom, 70, 160),
+    crouchHold: boolean('crouchHold', DEFAULT_SETTINGS.crouchHold),
+    autoSprint: boolean('autoSprint', DEFAULT_SETTINGS.autoSprint),
+    damageNumbers: boolean('damageNumbers', DEFAULT_SETTINGS.damageNumbers),
+    fpsLimit: choice('fpsLimit', ['off', '30', '60', '120', '144'], DEFAULT_SETTINGS.fpsLimit),
     masterVolume: number('masterVolume', DEFAULT_SETTINGS.masterVolume, 0, 100),
+    sfxVolume: number('sfxVolume', DEFAULT_SETTINGS.sfxVolume, 0, 100),
     voices: boolean('voices', DEFAULT_SETTINGS.voices),
     crosshairColor: typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color : DEFAULT_SETTINGS.crosshairColor,
     crosshairSize: number('crosshairSize', DEFAULT_SETTINGS.crosshairSize, 3, 24),
@@ -260,7 +282,7 @@ export interface TdmRosterEntry {
 
 export type GameEvent =
   | { type: 'graphics'; text: string }
-  | { type: 'hit'; kill: boolean; headshot?: boolean }
+  | { type: 'hit'; kill: boolean; headshot?: boolean; dmg?: number }
   | { type: 'kill'; name: string; weapon: string; headshot: boolean }
   | { type: 'damage'; dir: number; amount: number }
   | { type: 'flash'; power: number }
@@ -380,7 +402,7 @@ const ADAPT_UP_WINDOWS = 3;
 const ADAPT_STALL_SECONDS = 0.25;
 // Maps armory weapon ids to the engine's legacy audio tags for loadout-built guns.
 const LOADOUT_AUDIO: Record<WeaponId, NonNullable<WeaponDef['audioTag']>> = {
-  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', m249: 'lmg', vector: 'vector', mp7: 'smg',
+  m4a1: 'm4', ak47: 'ak', scar_h: 'scar', mcx: 'scar', m249: 'lmg', vector: 'vector', mp7: 'smg',
   spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle',
 };
 
@@ -1201,7 +1223,8 @@ void main(){
         this.startSlide();
       } else {
         if (!this.sliding) {
-          this.crouched = !this.crouched;
+          // Hold mode: press = crouch, release = stand. Toggle mode: press flips it.
+          this.crouched = this.crouchHold ? true : !this.crouched;
           this.crouchT = 0;
           if (this.crouched) this.sprinting = false;
         }
@@ -1224,6 +1247,10 @@ void main(){
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
+    // Hold-to-crouch: releasing the crouch key stands back up (toggle mode ignores this).
+    if (this.crouchHold && (e.code === 'KeyC' || e.code === 'ControlLeft') && this.crouched && !this.sliding) {
+      this.crouched = false; this.crouchT = 0;
+    }
     // Q is dual-purpose: tap = quick-swap to last weapon, hold = lean left.
     if (e.code === 'KeyQ' && this.qDownT >= 0 && !this.paused && !this.dead && !this.ended) {
       if (performance.now() - this.qDownT < 220 && Math.abs(this.lean) < 0.15) this.switchWeapon(this.lastCur);
@@ -1915,11 +1942,11 @@ void main(){
           audio.killConfirm();
           this.defusal.handleKill('player', tdmBot, part === 'head', wid);
           this.hitstopT = HITSTOP_KILL_SECONDS;
-          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head' });
+          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head', dmg: this.damageNumbers ? Math.round(dmg) : undefined });
           this.rebuildHittables();
         } else {
           audio.hitMarker();
-          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head' });
+          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head', dmg: this.damageNumbers ? Math.round(dmg) : undefined });
         }
         continue;
       }
@@ -1942,11 +1969,11 @@ void main(){
           if (part === 'head') { this.headshots++; voice.headshot(); }
           this.creditTdmKill(tdmBot, part === 'head', d.name, part === 'head' ? 150 : 100);
           this.hitstopT = HITSTOP_KILL_SECONDS;
-          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head' });
+          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head', dmg: this.damageNumbers ? Math.round(dmg) : undefined });
           this.rebuildHittables();
         } else {
           audio.hitMarker();
-          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head' });
+          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head', dmg: this.damageNumbers ? Math.round(dmg) : undefined });
         }
         continue;
       }
@@ -2003,12 +2030,12 @@ void main(){
             }
           }
           this.hitstopT = HITSTOP_KILL_SECONDS;
-          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head' });
+          this.onEvent({ type: 'hit', kill: true, headshot: part === 'head', dmg: this.damageNumbers ? Math.round(dmg) : undefined });
           this.onEvent({ type: 'kill', name: enemy.name, weapon: d.name, headshot: part === 'head' });
           this.rebuildHittables();
         } else {
           audio.hitMarker();
-          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head' });
+          this.onEvent({ type: 'hit', kill: false, headshot: part === 'head', dmg: this.damageNumbers ? Math.round(dmg) : undefined });
         }
       } else {
         const n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : dir.clone().negate();
@@ -2199,6 +2226,7 @@ void main(){
     const me = this.camera.matrix.elements;
     let anyHit = false;
     let anyKill = false;
+    let anyDmg = 0;
     for (let i = 0; i < 8; i++) {
       const dir = new THREE.Vector3(
         base.x + (Math.random() - 0.5) * 0.09 * (d.spreadX ?? 1),
@@ -2233,6 +2261,7 @@ void main(){
         const dmg = hitDamage('spas12', part, mkBot.armor, 0.5, h.distance > 14 ? 0.4 : 1);
         this.hits++;
         anyHit = true;
+        anyDmg += dmg;
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         if (mkBot.takeDamage(dmg, part === 'head', 'player', false)) {
@@ -2250,6 +2279,7 @@ void main(){
         if (h.distance > 14) dmg *= 0.4;
         this.hits++;
         anyHit = true;
+        anyDmg += dmg;
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         if (mkBot.takeDamage(dmg, part === 'head', 'player')) {
@@ -2269,6 +2299,7 @@ void main(){
       if (h.distance > 14) dmg *= 0.4;
       this.hits++;
       anyHit = true;
+        anyDmg += dmg;
       this.effects.blood(h.point);
       audio.fleshImpact(0);
       const isHead = part === 'head';
@@ -2288,8 +2319,8 @@ void main(){
       }
     }
     this.raycaster.far = 300;
-    if (anyHit && !anyKill) { audio.hitMarker(); this.onEvent({ type: 'hit', kill: false }); }
-    if (anyKill) { this.hitstopT = HITSTOP_KILL_SECONDS; this.onEvent({ type: 'hit', kill: true }); this.rebuildHittables(); }
+    if (anyHit && !anyKill) { audio.hitMarker(); this.onEvent({ type: 'hit', kill: false, dmg: this.damageNumbers ? Math.round(anyDmg) : undefined }); }
+    if (anyKill) { this.hitstopT = HITSTOP_KILL_SECONDS; this.onEvent({ type: 'hit', kill: true, dmg: this.damageNumbers ? Math.round(anyDmg) : undefined }); this.rebuildHittables(); }
     this.ai.notifyGunshot(this.pos, 70);
     this.tdm?.notifyGunshot(this.pos, 70);
     this.defusal?.notifyGunshot(this.pos, 70);
@@ -3176,6 +3207,9 @@ void main(){
   private frame = (t: number) => {
     if (this.disposed) return;
     requestAnimationFrame(this.frame);
+    // Optional FPS cap: skip processing this rAF tick until enough time has elapsed.
+    // lastT is left untouched so the accumulated dt is applied on the frame we keep.
+    if (this.fpsMinDelta > 0 && (t - this.lastT) < this.fpsMinDelta) return;
     const frameSeconds = Math.max(0, (t - this.lastT) / 1000);
     const dt = Math.min(0.05, frameSeconds);
     this.lastT = t;
@@ -3280,7 +3314,7 @@ void main(){
     const wasSprinting = this.sprinting;
     // Cannot sprint from crouch without standing first
     // Cannot sprint while aiming down sights or while leaning
-    this.sprinting = k.has('ShiftLeft') && !this.rmb && iz < 0 && !this.crouched && !this.sliding
+    this.sprinting = (k.has('ShiftLeft') || this.autoSprint) && !this.rmb && iz < 0 && !this.crouched && !this.sliding
       && this.ads < 0.25 && this.reloadT < 0 && this.switchT < 0 && Math.abs(this.lean) < 0.25 && moving;
 
     if (wasSprinting && !this.sprinting) {
@@ -3634,8 +3668,8 @@ void main(){
     let ry = THREE.MathUtils.lerp(hip.ry, 0, a);
     let rz = cantRoll*a;
 
-    // Idle sway
-    const swayM = (1 - a * 0.95) * (d.swayMul ?? 1) * (this.crouched ? (d.swayMulCrouched ?? 1) : 1);
+    // Idle sway (scaled by the QoL weapon-bob intensity setting)
+    const swayM = (1 - a * 0.95) * (d.swayMul ?? 1) * (this.crouched ? (d.swayMulCrouched ?? 1) : 1) * this.weaponBobMul;
     px += Math.sin(t * Math.PI) * 0.004 * S * swayM;
     py += Math.sin(t * Math.PI * 2 + 1) * 0.0035 * S * swayM;
 
@@ -3702,12 +3736,24 @@ void main(){
         // PDWs: fast, twitchy — sharp cant, quick mag punch, minimal dip.
         py -= dip * 0.055 * S; rx -= dip * 0.30; rz += dip * 0.32; ry += dip * 0.06;
       } else {
-        // AR family (M416/SCAR): controlled tactical reload at chest height.
-        py -= dip * 0.08 * S; rx -= dip * 0.40; rz += dip * 0.24;
+        // AR family (M416/SCAR): controlled tactical reload. The rifle cants into
+        // the chest workspace so the magwell presents to the support hand, snaps
+        // as the fresh mag seats, then a forward jab on the charging handle.
+        const strip = rt < 0.52 ? Math.sin((rt / 0.52) * Math.PI) : 0;   // 0..1 during the mag swap
+        const seat = rt > 0.60 && rt < 0.72 ? Math.sin(((rt - 0.60) / 0.12) * Math.PI) : 0;
+        const chP = rt > 0.74 && rt < 0.88 ? Math.sin(((rt - 0.74) / 0.14) * Math.PI) : 0;
+        py -= dip * 0.075 * S;
+        pz += dip * 0.02 * S;               // draw the rifle back toward the shooter
+        rx -= 0.30 * strip + dip * 0.10;    // muzzle up into the workspace
+        rz += 0.34 * strip;                 // roll the magwell toward the support hand
+        ry += 0.06 * strip;
+        rz -= seat * 0.11;                  // counter-rock when the mag locks in
+        rx += chP * 0.16;                   // forward-assist / charging-handle jab
       }
       if (!d.pumpShotgun) {
-        // Mag travel: straight drop for STANAG guns, forward pivot for the AK rock.
-        const out = rt > 0.14 && rt < 0.58 ? Math.sin(((rt - 0.14) / 0.44) * Math.PI) : 0;
+        // Mag travel: old mag drops out and the fresh one rides back up. The arc is
+        // timed so the support hand (which tracks it) never crosses the receiver.
+        const out = rt > 0.16 && rt < 0.66 ? Math.sin(((rt - 0.16) / 0.50) * Math.PI) : 0;
         magObj.position.y = magHomeY - out * 0.17 * S;
         if (tag === 'ak') {
           magObj.position.z = magHomeZ - out * 0.05 * S;
@@ -3923,6 +3969,7 @@ void main(){
     this.fovSetting = s.fov;
     voice.setEnabled(s.voices);
     audio.setMasterVolume(s.masterVolume / 100);
+    audio.setSfxVolume(s.sfxVolume / 100);
 
     // Resolution scale (biggest perf lever) — adaptive scaler works down from here.
     // NOTE: must go through syncPixelRatio so the composer (post-FX) follows too —
@@ -3963,8 +4010,20 @@ void main(){
     this.postFxOn = usesPostChain(s);
     this.renderer.toneMappingExposure = s.brightness / 100;
     this.motionBlurAmount = s.cameraShake / 100;
+    // Quality-of-life
+    this.weaponBobMul = s.weaponBob / 100;
+    this.autoSprint = s.autoSprint;
+    this.crouchHold = s.crouchHold;
+    this.damageNumbers = s.damageNumbers;
+    this.fpsMinDelta = s.fpsLimit === 'off' ? 0 : 1000 / Number(s.fpsLimit) - 3;
   }
 
+  // QoL runtime state (see GameSettings).
+  private weaponBobMul = 1;
+  private autoSprint = false;
+  private crouchHold = false;
+  private damageNumbers = true;
+  private fpsMinDelta = 0;   // ms; 0 = uncapped
   motionBlurAmount = 1;
   private frameNo = 0;
   private postFxOn = true;

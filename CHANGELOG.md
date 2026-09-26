@@ -1,3 +1,26 @@
+## 2026-09-26 — Overhaul: audio, M4 reload, MCX Spear, and 7 quality-of-life options
+
+Part of the ongoing "Recoil FPS" overhaul. This batch lands four areas.
+
+**Audio (footsteps headline):** Rebuilt the footstep/jump-land/slide-drag synthesis in `audio.ts` for a weightier, less synthetic step. Also split the mix bus: a dedicated **SFX sub-bus** now sits between every gameplay source and the master/compressor chain, so *Effects volume* is genuinely independent of *Master volume* (and future music can bypass it). New `setSfxVolume` API.
+
+**Animations / reload:** Reworked the AR reload keyframes (`weapons/core.ts`) and the engine's reload motion + magazine timing so the M4 no longer dips down/up with the arm clipping through the receiver.
+
+**New gun — SIG MCX Spear (`mcx`):** A top-tier battle-rifle added end-to-end — modular components built and assembled with no gaps, wired through the full weapon-id surface (catalog, builders, furniture ids, bot loadouts, ballistics/shop, loadout audio, caliber map, attachments). BR class, $3600, 40 dmg, 720 rpm, 2.4× head, 30-round mag, 7 attachment slots. Verified in the geometry harness (weapon-assembly 144 pairings + bore-alignment, 20/20) and armory-economy (catalog worth raised to $66,950; bound to $68k).
+
+**Quality of life (7 new options):**
+- **Hold-to-crouch vs toggle** — pick either behaviour for crouch.
+- **Auto-sprint** — sprint automatically when moving forward.
+- **Damage numbers** — floating hit damage pops near the crosshair (white / orange headshot / gold kill), driven off the real per-shot damage the engine already computes.
+- **Weapon bob** (0–150%) — scales viewmodel bob/sway intensity.
+- **Minimap zoom** (70–160%) — tightens or widens the radar framing.
+- **Frame-rate cap** (Off / 30 / 60 / 120 / 144) — throttles the render loop while preserving accumulated dt.
+- **Effects volume** — the SFX sub-bus level described above.
+
+All wired into the Settings suite (Gameplay → Quality of life, Graphics → Performance, Audio).
+
+Verification: `npx tsc --noEmit` clean; `npm run build` clean (single-file); settings-wallet / field-kits / frame-budget / ui-binds suites at baseline (pre-existing #98 HUD "GET A KIT" text-regex failure unchanged); weapon-assembly + bore-alignment 20/20; armory-economy 23/23.
+
 ## 2026-09-25 — Merge main into the Kits branch (PR #27)
 
 Merged `main` (Bomb Defusal on Sirocco, frame budget / light pool, hit reactions, gunfeel, and the 2026-09-25 gunfeel/perf/HUD headline) into the Kits branch. Kits stay in Missions and Warehouse TDM only; Bomb Defusal gets no kit and keeps Z for smoke. Home menu: Missions, Arena (Bomb Defusal + TDM), Kits, Loadout, Settings. The scorestreak system and Operation Blackout stay removed, as this branch already decided, so main's streak and ranked hooks were stripped from the engine, TDM bots, HUD, menus and results. The bind list shows `Field kit — Z` in place of Scorestreaks. The frame-budget test now counts the 4 extra Warehouse floodlights. The light pool still caps the shader at 4 point lights. Main's newest commit also had 5 lint errors (empty catch blocks, `let`→`const`, an unused test import); those are fixed.

@@ -13,6 +13,8 @@ export interface HudFx {
   hitmark: { id: number; kill: boolean; headshot?: boolean } | null;
   feed: { id: number; text: string; headshot: boolean; tdm?: { killer: string; weapon: string; victim: string; killerTeam: 'alpha' | 'bravo'; zone?: string } }[];
   dmgArcs: { id: number; dir: number; opacity: number }[];
+  /** Floating outgoing-damage numbers near the crosshair (QoL: damageNumbers). */
+  dmgPops: { id: number; dmg: number; kill: boolean; headshot: boolean; dx: number; dy: number }[];
   scorePops: { id: number; text: string; headshot: boolean; cash?: boolean }[];
   banner: { id: number; label: string } | null;
   callout: { id: number; text: string } | null;
@@ -286,6 +288,35 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
         </div>
       )}
 
+      {/* ============ DAMAGE NUMBERS (outgoing, float up & fade) ============ */}
+      {fx.dmgPops.map(p => (
+        <div
+          key={p.id}
+          style={{
+            position: 'absolute', left: '50%', top: '50%',
+            transform: `translate(calc(-50% + ${34 + p.dx}px), calc(-50% + ${p.dy}px))`,
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            className="dmg-pop"
+            style={{
+              fontWeight: 800, letterSpacing: '.02em',
+              fontSize: p.kill ? 30 : p.headshot ? 26 : 20,
+              color: p.kill ? '#FFD84D' : p.headshot ? '#FF6B57' : '#fff',
+              textShadow: p.kill
+                ? '0 0 10px rgba(255,190,60,.9), 0 2px 3px rgba(0,0,0,.85)'
+                : p.headshot
+                  ? '0 0 8px rgba(255,80,60,.85), 0 2px 3px rgba(0,0,0,.85)'
+                  : '0 2px 3px rgba(0,0,0,.85)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {p.dmg}
+          </div>
+        </div>
+      ))}
+
       {/* ============ DAMAGE ARCS (directional, subtle) ============ */}
       {fx.dmgArcs.map(a => (
         <div key={a.id} className="absolute inset-0 grid place-items-center dmg-arc" style={{ transform: `rotate(${a.dir}deg)` }}>
@@ -338,7 +369,8 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
       {/* ============ TACTICAL RADAR (bottom-left, 60m zoom) ============ */}
       {hud.mapImage && (() => {
         // 60m radius fills the dish; scale the full-map image so 120m spans the 168px diameter.
-        const zoom = (hud.worldHalf * 2) / 170;
+        // QoL minimapZoom (70–160%) tightens or widens that framing around the player.
+        const zoom = (hud.worldHalf * 2) / 170 * (s.minimapZoom / 100);
         const ox = (0.5 - hud.playerMap.nx) * 100 * zoom;
         const oz = (0.5 - hud.playerMap.nz) * 100 * zoom;
         const hot = hud.enemiesMap.filter(e => e.hot).length;

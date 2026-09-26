@@ -58,7 +58,7 @@ function compensator({ cls }: AttachContext): THREE.Object3D {
 
 function suppressor({ weapon }: AttachContext, _fat: boolean): THREE.Object3D {
   const p = group(), b = new GunBuilder(), k = 1;
-  const [radius,length] = ({m4a1:[.0155,.110],scar_h:[.017,.118],m249:[.0175,.123],ak47:[.0165,.114],mp7:[.0125,.078],vector:[.014,.085],m1911:[.0128,.078],awm:[.0195,.138]} as Partial<Record<WeaponId,[number,number]>>)[weapon] ?? [.016,.110];
+  const [radius,length] = ({m4a1:[.0155,.110],mcx:[.016,.112],scar_h:[.017,.118],m249:[.0175,.123],ak47:[.0165,.114],mp7:[.0125,.078],vector:[.014,.085],m1911:[.0128,.078],awm:[.0195,.138]} as Partial<Record<WeaponId,[number,number]>>)[weapon] ?? [.016,.110];
   p.userData.host=weapon;
   b.name('suppressor body').tube(radius, 0.005, length, WM.darkSteel, 0, 0, -length / 2 + 0.002, HALF_PI, 0, 0, 32);
   b.name('quick-detach collar').tube(radius + 0.0015, radius - 0.001, 0.014, WM.dark, 0, 0, -0.009);

@@ -2,6 +2,9 @@
 export class SpatialAudioEngine {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
+  /** SFX sub-bus: every gameplay sound routes through here so SFX volume is
+   *  independent of the master (future music can connect straight to master). */
+  sfx: GainNode | null = null;
   comp: DynamicsCompressorNode | null = null;
   makeup: GainNode | null = null;
   echoBus: DelayNode | null = null;
@@ -13,6 +16,7 @@ export class SpatialAudioEngine {
   // Volume is stored even before the AudioContext exists: a settings tweak on the main
   // menu must not spin up the context (and the wind bed!) outside a live mission.
   private volume01 = 1;
+  private sfx01 = 1;
   private spatialVoices = new Map<PannerNode,{send:GainNode; expires:number}>();
 
   ensure(): AudioContext {
@@ -21,6 +25,10 @@ export class SpatialAudioEngine {
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = Math.max(0, Math.min(1.2, this.volume01)) * 0.85;
+      // SFX sub-bus sits between all gameplay sources and the master/compressor chain.
+      this.sfx = this.ctx.createGain();
+      this.sfx.gain.value = Math.max(0, Math.min(1.2, this.sfx01));
+      this.sfx.connect(this.master);
       // Master bus glue: stacked gunshot bursts (gains 1.0 + 0.68 + 0.42) plus
       // explosions and callouts used to hard-clip the destination. Gentle 4:1
       // at −18 dB keeps transients punchy without the digital crunch.
@@ -51,7 +59,7 @@ export class SpatialAudioEngine {
       this.echoFb.connect(this.echoBus);
       this.echoBus.connect(lp);
       lp.connect(this.echoGain);
-      this.echoGain.connect(this.master);
+      this.echoGain.connect(this.sfx!);
     }
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume();
@@ -112,7 +120,7 @@ export class SpatialAudioEngine {
     } else {
       panner.setPosition(x, y, z);
     }
-    panner.connect(this.master!);
+    panner.connect(this.sfx!);
     if (this.echoBus) {
       const eg = ctx.createGain();
       eg.gain.value = 0.25;
@@ -128,6 +136,12 @@ export class SpatialAudioEngine {
     // Deliberately does NOT call ensure(): adjusting volume from the menu before the
     // first deploy must not wake the AudioContext and start the ambient wind forever.
     if (this.ctx && this.master) this.master.gain.value = this.volume01 * 0.85;
+  }
+
+  /** SFX bus level (0..1.2), independent of master — scales all gameplay sounds. */
+  setSfxVolume(v: number) {
+    this.sfx01 = Math.max(0, Math.min(1.2, v));
+    if (this.ctx && this.sfx) this.sfx.gain.value = this.sfx01;
   }
 
   /** Freeze the whole audio bed (wind + echo + in-flight one-shots) while paused or between missions. */
@@ -178,7 +192,7 @@ export class SpatialAudioEngine {
     lfoG.connect(g.gain);
     src.connect(lp);
     lp.connect(g);
-    g.connect(this.master);
+    g.connect(this.sfx!);
     src.start();
     lfo.start();
   }
@@ -200,7 +214,7 @@ export class SpatialAudioEngine {
     const og = ctx.createGain();
     og.gain.setValueAtTime(gain, t);
     og.gain.exponentialRampToValueAtTime(0.0001, t + dur * 1.1);
-    o.connect(og); og.connect(this.master!);
+    o.connect(og); og.connect(this.sfx!);
     o.start(t); o.stop(t + dur * 1.2);
     o.onended = () => { o.disconnect(); og.disconnect(); };
   }
@@ -331,7 +345,7 @@ export class SpatialAudioEngine {
     const og = ctx.createGain();
     og.gain.setValueAtTime(0.7, t);
     og.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
-    o.connect(og); og.connect(this.master!);
+    o.connect(og); og.connect(this.sfx!);
     o.start(t); o.stop(t + 0.2);
   }
 
@@ -465,7 +479,7 @@ export class SpatialAudioEngine {
       rg.gain.setValueAtTime(0.2, t + 0.05);
       rg.gain.exponentialRampToValueAtTime(0.0001, t + 2.8);
       ring.connect(rg);
-      rg.connect(this.master!);
+      rg.connect(this.sfx!);
       ring.start(t + 0.05);
       ring.stop(t + 2.9);
     }
@@ -572,31 +586,43 @@ export class SpatialAudioEngine {
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.18, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
-    o.connect(g); g.connect(this.master!);
+    o.connect(g); g.connect(this.sfx!);
     o.start(t); o.stop(t + 0.15);
   }
 
   jumpLand(surface: 'sand' | 'concrete' | 'wood') {
     const ctx = this.ensure();
     const t = ctx.currentTime;
+    // Body-weight thud — deeper and heavier than a step.
     const o = ctx.createOscillator();
     o.type = 'triangle';
-    o.frequency.setValueAtTime(110, t);
-    o.frequency.exponentialRampToValueAtTime(45, t + 0.15);
+    o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.16);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.4, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-    o.connect(g); g.connect(this.master!);
-    o.start(t); o.stop(t + 0.17);
+    g.gain.setValueAtTime(0.42, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.17);
+    o.connect(g); g.connect(this.sfx!);
+    o.start(t); o.stop(t + 0.18);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
 
-    const f = surface === 'concrete' ? 1800 : surface === 'wood' ? 650 : 850;
-    this.burstDirect({ dur: 0.1, gain: 0.35, freq: f, q: 1.2 });
+    if (surface === 'concrete') {
+      this.burstDirect({ dur: 0.06, gain: 0.34, freq: this.rf(1900), q: 1.0, hp: 700, toEcho: 0.16 });
+      this.burstDirect({ dur: 0.11, gain: 0.18, freq: 300, q: 0.8, type: 'lowpass' });
+    } else if (surface === 'wood') {
+      this.burstDirect({ dur: 0.09, gain: 0.32, freq: 460, q: 2.2, toEcho: 0.12 });
+      this.burstDirect({ dur: 0.16, gain: 0.16, freq: 150, q: 0.7, type: 'lowpass' });
+    } else {
+      this.burstDirect({ dur: 0.13, gain: 0.30, freq: 640, q: 0.5, type: 'lowpass', attack: 0.006 });
+    }
+    // Gear settle — pouches and sling jostle on landing.
+    this.burstDirect({ dur: 0.11, gain: 0.05, freq: this.rf(1300), q: 0.5, hp: 800, when: 0.05, attack: 0.03 });
   }
 
-  // Slide sound: cloth/body drag
+  // Slide sound: cloth/body drag over the surface + a bit of grit spray.
   slideDrag(surface: 'sand' | 'concrete' | 'wood') {
-    const f = surface === 'concrete' ? 1400 : surface === 'wood' ? 550 : 750;
-    this.burstDirect({ dur: 0.55, gain: 0.28, freq: f, q: 0.8, attack: 0.05 });
+    const f = surface === 'concrete' ? 1400 : surface === 'wood' ? 560 : 760;
+    this.burstDirect({ dur: 0.55, gain: 0.26, freq: f, q: 0.7, attack: 0.05, toEcho: 0.12 });
+    this.burstDirect({ dur: 0.4, gain: 0.10, freq: surface === 'sand' ? 520 : 2400, q: 0.6, hp: surface === 'sand' ? undefined : 900, type: surface === 'sand' ? 'lowpass' : undefined, attack: 0.08, when: 0.06 });
   }
 
   // Hit & Kill Confirm (Iconic CoD ding)
@@ -609,7 +635,7 @@ export class SpatialAudioEngine {
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.24, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-    o.connect(g); g.connect(this.master!);
+    o.connect(g); g.connect(this.sfx!);
     o.start(t); o.stop(t + 0.055);
   }
 
@@ -626,7 +652,7 @@ export class SpatialAudioEngine {
       g.gain.setValueAtTime(0, t);
       g.gain.linearRampToValueAtTime(gain, t + 0.004);
       g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-      o.connect(g); g.connect(this.master!);
+      o.connect(g); g.connect(this.sfx!);
       o.start(t); o.stop(t + dur + 0.02);
       o.onended = () => { o.disconnect(); g.disconnect(); };
     }
@@ -644,7 +670,7 @@ export class SpatialAudioEngine {
     const g1 = ctx.createGain();
     g1.gain.setValueAtTime(0.3, t);
     g1.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
-    o1.connect(g1); g1.connect(this.master!);
+    o1.connect(g1); g1.connect(this.sfx!);
     o1.start(t); o1.stop(t + 0.065);
     // Layer 2
     const o2 = ctx.createOscillator();
@@ -653,7 +679,7 @@ export class SpatialAudioEngine {
     const g2 = ctx.createGain();
     g2.gain.setValueAtTime(0.28, t + 0.04);
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-    o2.connect(g2); g2.connect(this.master!);
+    o2.connect(g2); g2.connect(this.sfx!);
     o2.start(t + 0.04); o2.stop(t + 0.13);
   }
 
@@ -662,14 +688,43 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.12, gain: 0.45, freq: 350, q: 0.8 });
   }
 
+  /** Left/right foot alternates so the two boots never sound identical (heel/toe
+   *  weighting flips) — tracked here instead of per-caller. */
+  private stepFoot = 0;
+
+  /**
+   * Layered, surface-aware footstep. Each step stacks a weighted heel-strike
+   * (body mass, low-mid) with a surface-specific grit/scuff tail, plus a faint
+   * boot-leather + gear rustle on the sprint. Pitch, timing and level are
+   * randomised every step so a run never turns into a loop pedal.
+   */
   footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085);
-    if (surface === 'sand') {
-      this.burstDirect({ dur: 0.07, gain: g, freq: 850, q: 0.6 });
-    } else if (surface === 'concrete') {
-      this.burstDirect({ dur: 0.05, gain: g, freq: 1750, q: 1.4 });
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+    const foot = (this.stepFoot ^= 1);          // 0 = left, 1 = right
+    const lvl = sprint ? 1.0 : crouch ? 0.42 : 0.72;
+    const pitch = rnd(0.9, 1.12) * (foot ? 1.0 : 0.965); // one boot rides a touch lower
+    const toe = rnd(0.02, 0.055);               // heel→toe roll delay
+    if (surface === 'concrete') {
+      // Hard sole on stone: a crisp heel slap, a bright toe click, room echo indoors.
+      this.burstDirect({ dur: 0.024, gain: 0.10 * lvl, freq: this.rf(2050) * pitch, q: 1.2, hp: 800, toEcho: 0.14 });
+      this.burstDirect({ dur: 0.05,  gain: 0.065 * lvl, freq: 360 * pitch, q: 0.9, type: 'lowpass' });
+      this.burstDirect({ dur: 0.03,  gain: 0.045 * lvl, freq: this.rf(3400) * pitch, q: 1.6, hp: 1900, when: toe });
+      if (sprint) this.burstDirect({ dur: 0.07, gain: 0.035, freq: this.rf(2600), q: 0.9, hp: 1400, when: toe + 0.02, attack: 0.02 }); // scuff
+    } else if (surface === 'wood') {
+      // Hollow plank: a resonant knock over a soft board flex, occasional creak.
+      this.burstDirect({ dur: 0.045, gain: 0.095 * lvl, freq: 500 * pitch, q: 2.4, toEcho: 0.09 });
+      this.burstDirect({ dur: 0.07,  gain: 0.05 * lvl, freq: 165 * pitch, q: 0.8, type: 'lowpass' });
+      this.burstDirect({ dur: 0.035, gain: 0.03 * lvl, freq: this.rf(2200) * pitch, q: 1.4, hp: 1200, when: toe });
+      if (!crouch && Math.random() < 0.22) this.burstDirect({ dur: 0.14, gain: 0.03 * lvl, freq: rnd(360, 620), q: 5.0, when: rnd(0.01, 0.04), attack: 0.04 }); // creak
     } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
+      // Sand/grit: no sharp transient — a soft muffled crush with a fine grit sprinkle.
+      this.burstDirect({ dur: 0.09, gain: 0.10 * lvl, freq: 680 * pitch, q: 0.5, type: 'lowpass', attack: 0.008 });
+      this.burstDirect({ dur: 0.055, gain: 0.045 * lvl, freq: this.rf(1650) * pitch, q: 0.6, hp: 500, when: rnd(0, 0.02) });
+      if (sprint) this.burstDirect({ dur: 0.06, gain: 0.03, freq: this.rf(900), q: 0.5, type: 'lowpass', when: toe });
+    }
+    // Boot-leather + webbing rustle — only when moving with weight, kept faint.
+    if (sprint && Math.random() < 0.55) {
+      this.burstDirect({ dur: 0.09, gain: 0.022, freq: this.rf(1400), q: 0.5, hp: 900, when: rnd(0.03, 0.08), attack: 0.03 });
     }
   }
 
@@ -692,7 +747,7 @@ export class SpatialAudioEngine {
         const og = ctx.createGain();
         og.gain.setValueAtTime(g * 0.22, t);
         og.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
-        o.connect(og); og.connect(this.master!);
+        o.connect(og); og.connect(this.sfx!);
         o.start(t); o.stop(t + 0.1);
         o.onended = () => { o.disconnect(); og.disconnect(); };
       }
@@ -719,7 +774,7 @@ export class SpatialAudioEngine {
         const g = ctx.createGain();
         g.gain.setValueAtTime(0.13, st);
         g.gain.exponentialRampToValueAtTime(0.0001, st + 0.15);
-        o.connect(bp); bp.connect(g); g.connect(this.master!);
+        o.connect(bp); bp.connect(g); g.connect(this.sfx!);
         o.start(st); o.stop(st + 0.17);
         o.onended = () => { o.disconnect(); bp.disconnect(); g.disconnect(); };
       }
@@ -733,7 +788,7 @@ export class SpatialAudioEngine {
       g.gain.setValueAtTime(0.0001, t);
       g.gain.linearRampToValueAtTime(0.15, t + 1.1);
       g.gain.linearRampToValueAtTime(0.0001, t + 2.8);
-      src.connect(bp); bp.connect(g); g.connect(this.master!);
+      src.connect(bp); bp.connect(g); g.connect(this.sfx!);
       src.start(t, Math.random() * 0.5); src.stop(t + 2.9);
       src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); };
     } else {
@@ -753,7 +808,7 @@ export class SpatialAudioEngine {
       g.gain.setValueAtTime(0.0001, t);
       g.gain.linearRampToValueAtTime(0.09, t + 0.25);
       g.gain.linearRampToValueAtTime(0.0001, t + 1.45);
-      o.connect(lp); lp.connect(g); g.connect(this.master!);
+      o.connect(lp); lp.connect(g); g.connect(this.sfx!);
       o.start(t); o.stop(t + 1.5); lfo.start(t); lfo.stop(t + 1.5);
       o.onended = () => { o.disconnect(); lp.disconnect(); g.disconnect(); lfo.disconnect(); lfoG.disconnect(); };
     }
@@ -774,7 +829,7 @@ export class SpatialAudioEngine {
     g.gain.setValueAtTime(0.28, t);
     g.gain.linearRampToValueAtTime(0.12, t + 0.9);
     g.gain.linearRampToValueAtTime(0.0001, t + 1.4);
-    src.connect(bp); bp.connect(g); g.connect(this.master!);
+    src.connect(bp); bp.connect(g); g.connect(this.sfx!);
     src.start(t, Math.random() * 0.4); src.stop(t + 1.45);
     src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); };
   }
@@ -791,7 +846,7 @@ export class SpatialAudioEngine {
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.22, t + when);
       g.gain.exponentialRampToValueAtTime(0.0001, t + when + dur);
-      o.connect(g); g.connect(this.master!);
+      o.connect(g); g.connect(this.sfx!);
       o.start(t + when); o.stop(t + when + dur + 0.02);
       o.onended = () => { o.disconnect(); g.disconnect(); };
     }
@@ -810,7 +865,7 @@ export class SpatialAudioEngine {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.linearRampToValueAtTime(gain, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(this.master!);
+    o.connect(g); g.connect(this.sfx!);
     o.start(t); o.stop(t + dur + 0.02);
     o.onended = () => { o.disconnect(); g.disconnect(); };
   }
@@ -909,7 +964,7 @@ export class SpatialAudioEngine {
     g.gain.setValueAtTime(0.22, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
     ring.connect(g);
-    g.connect(this.master!);
+    g.connect(this.sfx!);
     ring.start(t);
     ring.stop(t + 2.3);
   }
@@ -950,7 +1005,7 @@ export class SpatialAudioEngine {
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.08, t + 0.05 + i * 0.08);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.12 + i * 0.08);
-      o.connect(g); g.connect(this.master!);
+      o.connect(g); g.connect(this.sfx!);
       o.start(t + 0.05 + i * 0.08);
       o.stop(t + 0.13 + i * 0.08);
     });
@@ -1003,7 +1058,7 @@ export class SpatialAudioEngine {
       g.gain.setValueAtTime(0.0001, t + when);
       g.gain.exponentialRampToValueAtTime(0.2, t + when + 0.012);
       g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.22);
-      o.connect(g); g.connect(this.master!);
+      o.connect(g); g.connect(this.sfx!);
       o.start(t + when); o.stop(t + when + 0.24);
       o.onended = () => { o.disconnect(); g.disconnect(); };
     });
@@ -1138,7 +1193,7 @@ export class SpatialAudioEngine {
       g.gain.setValueAtTime(0.0001, t + when);
       g.gain.exponentialRampToValueAtTime(0.16, t + when + 0.012);
       g.gain.exponentialRampToValueAtTime(0.0001, t + when + 0.3);
-      o.connect(g); g.connect(this.master!);
+      o.connect(g); g.connect(this.sfx!);
       o.start(t + when); o.stop(t + when + 0.32);
       o.onended = () => { o.disconnect(); g.disconnect(); };
     });
@@ -1176,7 +1231,7 @@ export class SpatialAudioEngine {
       out = h;
     }
     out.connect(g);
-    g.connect(this.master!);
+    g.connect(this.sfx!);
     if (opts.toEcho && this.echoBus) {
       const eg = ctx.createGain(); echoSend=eg;
       eg.gain.value = opts.toEcho;

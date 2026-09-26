@@ -41,7 +41,7 @@ const DEFAULT_HUD: HudState = {
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
   mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, renderScale: 100, worldHalf: 104, landmark: null,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], dmgPops: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
@@ -154,12 +154,23 @@ export default function App() {
       case 'graphics':
         setError(event.text); changePhase('paused');
         break;
-      case 'hit':
-        setFx(f => ({ ...f, hitmark: { id, kill: event.kill, headshot: !!event.headshot } }));
+      case 'hit': {
+        const dmg = event.dmg;
+        setFx(f => ({
+          ...f,
+          hitmark: { id, kill: event.kill, headshot: !!event.headshot },
+          // Damage numbers (only present when the QoL toggle is on). Scatter them a
+          // little around the crosshair so rapid hits don't perfectly overlap.
+          dmgPops: typeof dmg === 'number' && dmg > 0
+            ? [...f.dmgPops.slice(-5), { id, dmg, kill: event.kill, headshot: !!event.headshot, dx: (Math.random() * 2 - 1) * 26, dy: (Math.random() * 2 - 1) * 12 }]
+            : f.dmgPops,
+        }));
         // Hitmarkers must never linger: clear after the flash unless a newer one replaced it.
         // Headshot confirms get a slightly longer linger so the diamond reads (G6).
         later(() => setFx(f => f.hitmark?.id === id ? { ...f, hitmark: null } : f), event.headshot ? 520 : event.kill ? 450 : 260);
+        later(() => setFx(f => ({ ...f, dmgPops: f.dmgPops.filter(row => row.id !== id) })), 850);
         break;
+      }
       case 'kill':
         setFx(f => ({
           ...f,

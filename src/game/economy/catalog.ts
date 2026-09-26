@@ -4,7 +4,7 @@ import type { StatMods } from './stats';
 
 export type WeaponId =
   | 'm4a1' | 'ak47' | 'm1911' | 'awm' | 'mp7'
-  | 'scar_h' | 'vector' | 'spas12' | 'deagle' | 'm249';
+  | 'scar_h' | 'vector' | 'spas12' | 'deagle' | 'm249' | 'mcx';
 export type WeaponClass = 'AR' | 'BR' | 'SMG' | 'PDW' | 'SR' | 'SG' | 'LMG' | 'PISTOL';
 export type SlotId = 'primary' | 'secondary';
 export type AttachSlot = 'muzzle' | 'optic' | 'magazine' | 'underbarrel' | 'stock' | 'rail' | 'barrel';
@@ -73,6 +73,18 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     base: base({ pattern: [[1.05, 0.08], [1.15, 0.12], [1.25, -0.12], [1.3, 0.2], [1.4, 0.28], [1.48, 0.18], [1.5, -0.25], [1.55, -0.32], [1.6, -0.18], [1.6, 0.23], [1.58, 0.3], [1.55, -0.16]], auto: true, rpm: 780, damage: 34, headMul: 2.3, limbMul: 0.85, magSize: 30, reserve: 150, hipSpread: 0.008, adsFov: 56, tacReload: 2.1, emptyReload: 2.7, adsTime: 0.22 }),
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
     audio: 'm4',
+  },
+  {
+    // MCX SPEAR (XM7): the flagship. 6.8×51 hits between the M416 and the SCAR —
+    // 40 dmg three-taps the 100 HP pool (0.17 s), one-taps to the head, and rides
+    // a soft, controllable recoil pattern. The reward pick once you can afford it:
+    // SCAR range with AR handling, at a premium price. Full attachment ecosystem.
+    id: 'mcx', name: 'MCX Spear', short: 'SPEAR', cls: 'BR', slot: 'primary',
+    price: 3600, starter: false,
+    blurb: 'Next-gen 6.8 flagship. Monolithic upper, silk-smooth piston action — SCAR punch with carbine handling.',
+    base: base({ pattern: [[1.15, 0.10], [1.28, 0.14], [1.4, -0.14], [1.48, 0.22], [1.55, 0.28], [1.6, -0.2], [1.64, -0.3], [1.66, -0.16], [1.66, 0.24], [1.62, 0.3], [1.58, -0.14]], auto: true, rpm: 720, damage: 40, headMul: 2.4, limbMul: 0.85, magSize: 30, reserve: 150, hipSpread: 0.0085, adsFov: 56, tacReload: 2.2, emptyReload: 2.8, adsTime: 0.23, recoilMul: 0.92, falloffStart: 42, falloffMul: 0.9, noiseRadius: 70 }),
+    slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
+    audio: 'scar',
   },
   {
     id: 'ak47', name: 'AK-47', short: 'AK-47', cls: 'AR', slot: 'primary',
@@ -166,7 +178,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 250,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249"
     ],
@@ -190,7 +202,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 500,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h"
     ],
     "desc": "Side-port compensator for the M416 and SCAR. Flatter bursts, louder report.",
@@ -218,7 +230,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 800,
     "tier": 2,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249"
     ],
@@ -354,7 +366,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 450,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249",
       "mp7",
@@ -384,7 +396,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 700,
     "tier": 2,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249",
       "mp7",
@@ -414,7 +426,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 600,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "mp7",
       "vector"
@@ -441,7 +453,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 900,
     "tier": 2,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249"
     ],
@@ -469,7 +481,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 1200,
     "tier": 2,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249",
       "awm"
@@ -499,7 +511,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 1600,
     "tier": 3,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249",
       "awm"
@@ -557,7 +569,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 600,
     "tier": 2,
     "compat": [
-      "m4a1"
+      "m4a1", "mcx"
     ],
     "desc": "Extended STANAG with the original feed neck and a modest lower extension.",
     "pros": [
@@ -584,7 +596,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 1350,
     "tier": 3,
     "compat": [
-      "m4a1"
+      "m4a1", "mcx"
     ],
     "desc": "Compact 60-round drum with a short STANAG feed tower.",
     "pros": [
@@ -612,7 +624,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 700,
     "tier": 2,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "ak47"
     ],
     "desc": "A seated magazine plus a supported spare. Faster reloads, more carried bulk.",
@@ -711,7 +723,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 400,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "vector"
     ],
@@ -736,7 +748,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 500,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "vector"
     ],
@@ -789,7 +801,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 1800,
     "tier": 3,
     "compat": [
-      "m4a1"
+      "m4a1", "mcx"
     ],
     "desc": "Compact receiver-mounted breacher with a dedicated M416 clamp. Press B; its own three-shell tube.",
     "pros": [
@@ -815,7 +827,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 300,
     "tier": 1,
     "compat": [
-      "m4a1"
+      "m4a1", "mcx"
     ],
     "desc": "Minimal cheek sleeve and pull tab on the original stock. Keeps the AR silhouette.",
     "pros": [
@@ -840,7 +852,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 650,
     "tier": 2,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249"
     ],
@@ -895,7 +907,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 450,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249"
     ],
@@ -923,7 +935,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 350,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249",
       "spas12",
@@ -952,7 +964,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 400,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h"
     ],
     "desc": "Small offset backup sights on a proper side-rail bracket. Hold T to use the 1\u00d7 backup while ADS.",
@@ -975,7 +987,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 750,
     "tier": 2,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "m249"
     ],
@@ -1002,7 +1014,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 700,
     "tier": 2,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "vector"
     ],
@@ -1565,7 +1577,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 550,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h",
       "vector"
     ],
@@ -1592,7 +1604,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 600,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h"
     ],
     "desc": "Small thumb ledge and handstop; prioritises ADS, not spray control.",
@@ -1618,7 +1630,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 500,
     "tier": 1,
     "compat": [
-      "m4a1",
+      "m4a1", "mcx",
       "scar_h"
     ],
     "desc": "Skeletonised palm support for steady single shots. Less helpful in long bursts.",

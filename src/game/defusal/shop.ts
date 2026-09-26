@@ -45,6 +45,7 @@ export const SHOP: ShopItem[] = [
   { id: 'ak47', name: 'AK-47', category: 'rifles', price: 2700, kind: 'primary', weapon: 'ak47', side: 'attack', killClass: 'rifle', tag: 'Attackers · one-tap headshots' },
   { id: 'm4a1', name: 'M416', category: 'rifles', price: 3100, kind: 'primary', weapon: 'm4a1', side: 'defend', killClass: 'rifle', tag: 'Defenders · accurate, controllable' },
   { id: 'scar_h', name: 'SCAR', category: 'rifles', price: 3300, kind: 'primary', weapon: 'scar_h', killClass: 'rifle', tag: 'Hard-hitting battle rifle' },
+  { id: 'mcx', name: 'SPEAR', category: 'rifles', price: 3600, kind: 'primary', weapon: 'mcx', killClass: 'rifle', tag: 'Flagship · SCAR punch, AR handling' },
   { id: 'awm', name: 'AWM', category: 'rifles', price: 4750, kind: 'primary', weapon: 'awm', killClass: 'sniper', tag: 'One shot, one kill' },
   { id: 'spas12', name: 'SPAS', category: 'heavy', price: 1050, kind: 'primary', weapon: 'spas12', killClass: 'shotgun', tag: 'Close quarters · $900 kills' },
   { id: 'm249', name: 'M249', category: 'heavy', price: 5200, kind: 'primary', weapon: 'm249', killClass: 'lmg', tag: '100-round suppression' },
@@ -160,6 +161,7 @@ export const LIMB_MUL = 0.75;
 export interface Ballistics { damage: number; armorRatio: number; pellets?: number }
 export const BALLISTICS: Record<WeaponId, Ballistics> = {
   m4a1: { damage: 33, armorRatio: 0.70 },
+  mcx: { damage: 38, armorRatio: 0.82 },
   ak47: { damage: 36, armorRatio: 0.775 },
   scar_h: { damage: 40, armorRatio: 0.85 },
   awm: { damage: 115, armorRatio: 0.975 },

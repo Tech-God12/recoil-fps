@@ -63,6 +63,14 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                     <SectionTitle sub="Enemy reaction and squad tactics">Difficulty</SectionTitle>
                     <Segmented label="Threat level" value={s.difficulty} options={[{ v: 'Easy', l: 'Recruit' }, { v: 'Normal', l: 'Regular' }, { v: 'Hard', l: 'Veteran' }]} onChange={v => set({ difficulty: v })} />
                   </div>
+                  <div className="mt-6">
+                    <SectionTitle sub="Comfort and feedback options">Quality of life</SectionTitle>
+                    <Toggle label="Hold to crouch" value={s.crouchHold} onChange={v => set({ crouchHold: v })} hint={s.crouchHold ? 'Crouch stays down only while held' : 'Press once to toggle crouch'} />
+                    <Toggle label="Auto-sprint" value={s.autoSprint} onChange={v => set({ autoSprint: v })} hint="Sprint automatically when moving forward" />
+                    <Toggle label="Damage numbers" value={s.damageNumbers} onChange={v => set({ damageNumbers: v })} hint="Show floating hit damage near the crosshair" />
+                    <Slider label="Weapon bob" value={s.weaponBob} min={0} max={150} unit="%" onChange={v => set({ weaponBob: v })} hint="Viewmodel sway and bob intensity" />
+                    <Slider label="Minimap zoom" value={s.minimapZoom} min={70} max={160} unit="%" onChange={v => set({ minimapZoom: v })} hint="Radar framing around you" />
+                  </div>
                 </div>
                 <div>
                   <SectionTitle sub="Applies on next deployment">Area of operations</SectionTitle>
@@ -99,6 +107,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <Slider label="Resolution scale" value={s.resolutionScale} min={50} max={100} unit="%" onChange={v => set({ resolutionScale: v })} />
                   <Segmented label="Shadows" value={s.shadowQuality} options={[{ v: 'off', l: 'Off' }, { v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High' }]} onChange={v => set({ shadowQuality: v })} />
                   <Toggle label="Adaptive resolution" value={s.adaptiveResolution ?? true} onChange={v => set({ adaptiveResolution: v })} />
+                  <Segmented label="Frame rate cap" value={s.fpsLimit} options={[{ v: 'off', l: 'Off' }, { v: '30', l: '30' }, { v: '60', l: '60' }, { v: '120', l: '120' }, { v: '144', l: '144' }]} onChange={v => set({ fpsLimit: v })} />
                   <Toggle label="Show FPS" value={s.showFps} onChange={v => set({ showFps: v })} />
                 </div>
                 <div>
@@ -117,6 +126,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
               <div className="anim-fade">
                 <SectionTitle sub="Spatial audio mix">Sound</SectionTitle>
                 <Slider label="Master volume" value={s.masterVolume} min={0} max={100} unit="%" onChange={v => set({ masterVolume: v })} />
+                <Slider label="Effects volume" value={s.sfxVolume} min={0} max={100} unit="%" onChange={v => set({ sfxVolume: v })} hint="Weapons, footsteps and world sounds" />
                 <Toggle label="Voice lines" value={s.voices} onChange={v => set({ voices: v })} hint="Announcer and squad chatter" />
                 <div className="mt-6 p-4 audio-block">
                   <p className="text-[13px] leading-relaxed text-[var(--bone-dim)]">3D audio with HRTF. Gunfire and grenades are positioned in world space.</p>

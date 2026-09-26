@@ -41,3 +41,25 @@ test('casing tink is delayed, quiet, and highpassed', () => {
   assert.equal(tink.hp, 4200, 'casing is all ping: highpass the body out');
   assert.ok(tink.freq > 5000 && tink.freq < 8000, `brass rings at ~6.4 kHz (got ${tink.freq})`);
 });
+
+test('footsteps use their own layered mix bus and can be tuned without waking a menu context', () => {
+  const restore = installAudioStub();
+  const calls = [];
+  const real = audio.burstDirect.bind(audio);
+  audio.burstDirect = opts => { calls.push(opts); return real(opts); };
+  try {
+    audio.setMix({ effects: 0.42, footsteps: 0.68, ambience: 0.31 });
+    audio.ensure();
+    assert.equal(audio.effects.gain.value, 0.42);
+    assert.equal(audio.footsteps.gain.value, 0.68);
+    assert.equal(audio.ambience.gain.value, 0.31);
+    audio.footstep('concrete', true);
+  } finally {
+    audio.burstDirect = real;
+    restore();
+  }
+  assert.equal(calls.length, 3, 'heel body, surface scrape and sole tick');
+  assert.ok(calls.every(c => c.bus === 'footsteps'), 'movement detail never competes with the weapons bus');
+  assert.ok(calls.some(c => c.type === 'lowpass'), 'heel body has low-frequency weight');
+  assert.ok(calls.some(c => c.when === 0.018), 'sole tick lands after the heel');
+});

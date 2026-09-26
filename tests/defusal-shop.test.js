@@ -9,7 +9,7 @@ const { SHOP, GRENADE_LIMITS, freshInventory, canBuy, buy, afterDeath, grantMone
 
 test('the shop sells every armory gun at CS2 price bands, with class kill rewards', () => {
   const guns = SHOP.filter(i => i.weapon).map(i => i.weapon).sort();
-  assert.deepEqual(guns, WEAPON_CATALOG.map(w => w.id).sort(), 'all ten armory weapons are buyable');
+  assert.deepEqual(guns, WEAPON_CATALOG.map(w => w.id).sort(), 'all eleven armory weapons are buyable');
   for (const i of SHOP) if (i.weapon) assert.equal(i.kind === 'secondary', WEAPON_CATALOG.find(w => w.id === i.weapon).slot === 'secondary', `${i.id} lands in its armory slot`);
   assert.equal(shopItem('ak47').price, 2700);
   assert.equal(shopItem('m4a1').price, 3100);

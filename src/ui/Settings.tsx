@@ -13,13 +13,14 @@ const PRESETS: { id: string; label: string; hint: string; tag: string; v: Partia
   { id: 'ultra', label: 'Cinematic', hint: 'Soft highlights', tag: 'Max', v: { resolutionScale: 100, shadowQuality: 'medium', bloom: true, bloomStrength: 34, vignette: 20, filmGrain: 0 } },
 ];
 
-type Tab = 'gameplay' | 'graphics' | 'audio' | 'crosshair' | 'controls';
+type Tab = 'gameplay' | 'graphics' | 'audio' | 'crosshair' | 'accessibility' | 'controls';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'gameplay', label: 'Gameplay' },
   { id: 'graphics', label: 'Graphics' },
   { id: 'audio', label: 'Audio' },
   { id: 'crosshair', label: 'Reticle' },
+  { id: 'accessibility', label: 'Comfort' },
   { id: 'controls', label: 'Controls' },
 ];
 
@@ -59,6 +60,8 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <Slider label="Field of view" value={s.fov} min={70} max={120} unit="°" onChange={v => set({ fov: v })} />
                   <Toggle label="Invert vertical look" value={s.invertY} onChange={v => set({ invertY: v })} />
                   <Toggle label="Hold to aim" value={!s.adsToggle} onChange={v => set({ adsToggle: !v })} hint={s.adsToggle ? 'Click to toggle scope' : 'Hold right mouse to aim'} />
+                  <Toggle label="Auto sprint" value={s.autoSprint} onChange={v => set({ autoSprint: v })} hint="Forward movement sprints whenever your weapon is ready" />
+                  <Toggle label="Auto reload on empty" value={s.autoReload} onChange={v => set({ autoReload: v })} hint="Chambers a new magazine after the final round" />
                   <div className="mt-6">
                     <SectionTitle sub="Enemy reaction and squad tactics">Difficulty</SectionTitle>
                     <Segmented label="Threat level" value={s.difficulty} options={[{ v: 'Easy', l: 'Recruit' }, { v: 'Normal', l: 'Regular' }, { v: 'Hard', l: 'Veteran' }]} onChange={v => set({ difficulty: v })} />
@@ -117,9 +120,12 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
               <div className="anim-fade">
                 <SectionTitle sub="Spatial audio mix">Sound</SectionTitle>
                 <Slider label="Master volume" value={s.masterVolume} min={0} max={100} unit="%" onChange={v => set({ masterVolume: v })} />
+                <Slider label="Effects" value={s.effectsVolume} min={0} max={100} unit="%" onChange={v => set({ effectsVolume: v })} hint="Weapons, impacts and interaction sounds" />
+                <Slider label="Footsteps" value={s.footstepVolume} min={0} max={100} unit="%" onChange={v => set({ footstepVolume: v })} hint="Three-layer surface detail for your movement" />
+                <Slider label="Ambience" value={s.ambienceVolume} min={0} max={100} unit="%" onChange={v => set({ ambienceVolume: v })} hint="Wind, distant activity and map beds" />
                 <Toggle label="Voice lines" value={s.voices} onChange={v => set({ voices: v })} hint="Announcer and squad chatter" />
                 <div className="mt-6 p-4 audio-block">
-                  <p className="text-[13px] leading-relaxed text-[var(--bone-dim)]">3D audio with HRTF. Gunfire and grenades are positioned in world space.</p>
+                  <p className="text-[13px] leading-relaxed text-[var(--bone-dim)]">3D audio with HRTF. Gunfire and grenades are positioned in world space; category buses preserve the cues you care about.</p>
                 </div>
               </div>
             )}
@@ -139,6 +145,26 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                     <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: 'linear-gradient(rgba(237,228,211,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(237,228,211,0.12) 1px, transparent 1px)', backgroundSize: '16px 16px' }} />
                     <Reticle s={s} />
                     <span className="absolute bottom-2 text-[10px] tracking-[0.12em] text-[var(--bone-mute)] uppercase">Preview</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === 'accessibility' && (
+              <div className="anim-fade set-cols">
+                <div>
+                  <SectionTitle sub="Readable in every firefight">Display comfort</SectionTitle>
+                  <Slider label="HUD scale" value={s.hudScale} min={75} max={125} unit="%" onChange={v => set({ hudScale: v })} hint="Scales the combat HUD without changing render resolution" />
+                  <Toggle label="Reduced motion" value={s.reducedMotion} onChange={v => set({ reducedMotion: v })} hint="Caps camera shake and removes nonessential UI motion" />
+                </div>
+                <div>
+                  <SectionTitle sub="Semantic colors update across radar, teams and damage">Color vision</SectionTitle>
+                  <Segmented label="Color profile" value={s.colorVision} options={[
+                    { v: 'default', l: 'Default' }, { v: 'protanopia', l: 'Protan' },
+                    { v: 'deuteranopia', l: 'Deutan' }, { v: 'tritanopia', l: 'Tritan' },
+                  ]} onChange={v => set({ colorVision: v })} />
+                  <div className="mt-6 p-4 audio-block">
+                    <p className="text-[13px] leading-relaxed text-[var(--bone-dim)]">Use <b className="text-[var(--bone)]">M</b> during play for a full tactical map. It stays live, so planning never interrupts the match.</p>
                   </div>
                 </div>
               </div>

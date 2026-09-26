@@ -42,7 +42,7 @@ test('contact audit detects a genuinely displaced stock, not just scene-graph pa
   disposeWeapon(model);
 });
 
-test('all 119 supported attachment/weapon pairings have a continuous contact path', () => {
+test('all 144 supported attachment/weapon pairings have a continuous contact path', () => {
   let checked = 0;
   for (const entry of ATTACHMENT_CATALOG) for (const id of entry.compat) {
     if (!weaponById(id).slots.includes(entry.slot)) continue;
@@ -54,7 +54,7 @@ test('all 119 supported attachment/weapon pairings have a continuous contact pat
       checked++;
     } finally { disposeWeapon(model); }
   }
-  assert.equal(checked, 119);
+  assert.equal(checked, 144);
 });
 
 test('fully equipped builds remain connected when replacement slots overlap', () => {

@@ -22,7 +22,7 @@ function finiteGroup(group) {
   });
 }
 
-test('all ten guns build with finite geometry and full armory wiring', () => {
+test('all eleven guns build with finite geometry and full armory wiring', () => {
   assert.deepEqual(Object.keys(WEAPON_BUILDERS).sort(), WEAPON_CATALOG.map(w => w.id).sort());
   for (const entry of WEAPON_CATALOG) {
     const model = WEAPON_BUILDERS[entry.id]();
@@ -53,6 +53,22 @@ test('guns stay inside the measured render budgets', () => {
     const floor = entry.slot === 'primary' ? 20000 : 10000;
     assert.ok(triangles >= floor, `${entry.id}: ${Math.round(triangles)} tris under richness floor`);
   }
+});
+
+test('M7 SPEAR ships as a complete piston rifle, not a paint variant', () => {
+  const model = WEAPON_BUILDERS.m7_spear();
+  const { draws, triangles } = geometryBudget(model.group);
+  assert.ok(triangles >= 30000 && triangles <= 48000, `M7 detail budget ${triangles}`);
+  assert.ok(draws <= 44, `M7 draw budget ${draws}`);
+  const pieces = [];
+  model.group.traverse(o => {
+    if (!o.isMesh) return;
+    for (const piece of o.geometry.userData.pieces ?? []) pieces.push(piece.name);
+  });
+  for (const signature of ['SPEAR swept monolithic upper', 'SPEAR short-stroke piston', 'SPEAR upper skeleton strut', 'SPEAR folding charge handle']) {
+    assert.ok(pieces.includes(signature), `M7 missing its ${signature}`);
+  }
+  for (const slot of weaponById('m7_spear').slots) assert.ok(model.sockets[slot], `M7 missing ${slot} socket`);
 });
 
 test('every catalog attachment has a builder that produces finite meshes', () => {

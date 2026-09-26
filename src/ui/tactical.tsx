@@ -103,6 +103,7 @@ export const CALIBER: Record<WeaponId, { round: string; note: string }> = {
   vector: { round: '.45 ACP', note: 'Pistol-caliber thumper in a fire hose of a gun. Manage the climb.' },
   spas12: { round: '12 GAUGE', note: 'Eight pellets per trigger pull. Devastating inside a doorway.' },
   scar_h: { round: '7.62×51MM', note: 'Full-power battle rifle round. Two taps solve most problems.' },
+  m7_spear: { round: '6.8×51MM', note: 'High-pressure intermediate battle round. Deliberate twenty-round magazines reward lane discipline.' },
   deagle: { round: '.50 AE', note: 'Hand-cannon magnum. Loud, proud, and wrist-breaking.' },
   m249: { round: '5.56×45 BELT', note: 'Linked suppression. One hundred rounds before the long reload.' },
 };

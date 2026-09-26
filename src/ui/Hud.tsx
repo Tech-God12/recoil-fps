@@ -109,6 +109,28 @@ const HudCompass = memo(function HudCompass({ bearing, pings, landmark, missionB
   );
 });
 
+/** Full-map planning layer. It shares the same authoritative collision-map image and
+ * radar contacts as the minimap, so it cannot reveal anything the player does not own. */
+function TacticalMap({ hud, df }: { hud: HudState; df: HudState['defusal'] }) {
+  const objective = hud.missionMap;
+  return (
+    <section className="tactical-map" role="status" aria-label="Tactical map">
+      <header><span>TACTICAL MAP</span><b>{String(Math.round(hud.bearing)).padStart(3, '0')}°</b><em>M — CLOSE</em></header>
+      <div className="tactical-map-canvas">
+        <img src={hud.mapImage} alt="Accurate tactical map" draggable={false} />
+        {hud.alliesMap?.map((ally, i) => <i key={`ally-${i}`} className="tmap-ally" style={{ left: `${ally.nx * 100}%`, top: `${ally.nz * 100}%`, transform: `rotate(${ally.yaw}deg)` }} />)}
+        {hud.enemiesMap.map((enemy, i) => <i key={`enemy-${i}`} className={`tmap-enemy ${enemy.hot ? 'hot' : ''}`} style={{ left: `${enemy.nx * 100}%`, top: `${enemy.nz * 100}%`, transform: `rotate(${enemy.yaw}deg)` }} />)}
+        {df?.radar.sites.map(site => <b key={site.id} className="tmap-site" style={{ left: `${site.nx * 100}%`, top: `${site.nz * 100}%` }}>{site.id}</b>)}
+        {df?.radar.allies.map((ally, i) => <i key={`dfally-${i}`} className="tmap-ally" style={{ left: `${ally.nx * 100}%`, top: `${ally.nz * 100}%`, transform: `rotate(${ally.yaw}deg)` }} />)}
+        {df?.radar.bomb && <b className={`tmap-bomb ${df.radar.bomb.planted ? 'planted' : ''}`} style={{ left: `${df.radar.bomb.nx * 100}%`, top: `${df.radar.bomb.nz * 100}%` }}>C4</b>}
+        {objective && <><i className={`tmap-objective-ring ${objective.extract ? 'extract' : ''}`} style={{ left: `${objective.nx * 100}%`, top: `${objective.nz * 100}%`, width: `${objective.ringPct * 2}%`, height: `${objective.ringPct * 2}%` }} /><i className={`tmap-objective ${objective.extract ? 'extract' : ''}`} style={{ left: `${objective.nx * 100}%`, top: `${objective.nz * 100}%` }} /></>}
+        <i className="tmap-player" style={{ left: `${hud.playerMap.nx * 100}%`, top: `${hud.playerMap.nz * 100}%`, transform: `rotate(${-hud.bearing}deg)` }} />
+      </div>
+      <footer><span><i className="legend-player" /> YOU</span><span><i className="legend-ally" /> ALLY</span><span><i className="legend-contact" /> CONTACT</span>{objective && <span><i className="legend-objective" /> OBJECTIVE</span>}</footer>
+    </section>
+  );
+}
+
 function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameSettings; fx: HudFx; active?: boolean } & ScopeControls) {
   // Hold-Tab scoreboard (TDM only). Listens on window so it works regardless
   // of pointer lock; Tab's default focus-move is suppressed while playing.
@@ -159,6 +181,7 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
       <div className="absolute inset-0 bg-white" style={{ opacity: fx.flashPow, transition: fx.flashPow > 0 ? 'opacity 30ms' : 'opacity 2400ms' }} />
       {hud.mission && <MissionObjective mission={hud.mission} />}
       {df && <DefusalHudLayer hud={hud} showBoard={showBoard} />}
+      {hud.tacticalMapOpen && hud.mapImage && <TacticalMap hud={hud} df={df} />}
 
 
       {/* ============ FIELD KIT ============ */}
@@ -518,7 +541,7 @@ function hudPropsEqual(a: { hud: HudState; s: GameSettings; fx: HudFx; active?: 
   if (a.active !== b.active) return false;
   const ah = a.hud, bh = b.hud;
   // fast lane: if any combat-critical changed we must render
-  if (ah.hp !== bh.hp || ah.mag !== bh.mag || ah.reloading !== bh.reloading || ah.ads !== bh.ads || ah.spread !== bh.spread || ah.sprinting !== bh.sprinting || ah.sprintLock !== bh.sprintLock) return false;
+  if (ah.tacticalMapOpen !== bh.tacticalMapOpen || ah.hp !== bh.hp || ah.mag !== bh.mag || ah.reloading !== bh.reloading || ah.ads !== bh.ads || ah.spread !== bh.spread || ah.sprinting !== bh.sprinting || ah.sprintLock !== bh.sprintLock) return false;
   // slow lane: if boring fields equal, we can bail even though hud object is new
   if (ah.bearing !== bh.bearing || ah.enemiesLeft !== bh.enemiesLeft || ah.pings.length !== bh.pings.length || ah.landmark?.name !== bh.landmark?.name || ah.mapImage !== bh.mapImage) return false;
   // check deep pings reference equality (new array each tick but content often same) — if lengths equal and bearing same we consider equal

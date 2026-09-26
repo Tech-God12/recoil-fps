@@ -229,3 +229,97 @@ export function buildSCARH(): WeaponModel {
     muzzleTip: [0, 0.014, -0.617], arms: { fore: [0, -0.025, -0.319], mag: [0, -0.137, -0.167], fa: [-0.043, 0.030, -0.232] },
   });
 }
+
+
+/** M7 SPEAR: a modern 6.8mm short-stroke piston rifle. The receiver, handguard,
+ * folding stock and controls are deliberately independent shapes so it reads as a
+ * new silhouette rather than a recoloured M4 or SCAR. */
+export function buildM7Spear(): WeaponModel {
+  const a = new WeaponAssembly('M7 SPEAR'), b = a.body;
+  const stock = a.part('stock', 'side-folding SPEAR stock');
+  const barrel = a.part('barrel', '6.8 piston barrel assembly');
+  const mag = a.part('magazine', '20-round 6.8 magazine');
+  const charging = a.moving('non-reciprocating charging handle');
+
+  // A distinct tall, swept monolithic upper with a recessed side channel and true
+  // ejection-port pocket. This keeps the silhouette lighter than SCAR's slab upper.
+  b.name('SPEAR swept monolithic upper').profile([
+    [-.016,-.010],[-.364,-.010],[-.383,.001],[-.379,.026],[-.360,.042],[-.046,.046],[-.020,.033],[-.013,.012],
+  ], .049, WM.fde, 0, .0024).mill([
+    { x:.025, y:.020, z:-.154, w:.008, h:.018, d:.070, radius:.003 },
+    ...[-1,1].flatMap(side => [
+      { x:side*.025, y:.030, z:-.238, w:.006, h:.007, d:.175, radius:.003 },
+      ...Array.from({ length: 5 }, (_, i) => ({ x:side*.025, y:.040, z:-.302 + i*.026, w:.010, h:.005, d:.017, radius:.0026 })),
+    ]),
+  ]);
+  b.name('SPEAR separate lower').profile([
+    [-.208,-.010],[-.035,-.010],[-.021,-.019],[-.029,-.033],[-.073,-.036],[-.085,-.050],[-.195,-.049],[-.210,-.031],
+  ], .039, WM.tan, 0, .0025);
+  b.name('SPEAR flared magazine tunnel').profile([[-.206,-.012],[-.126,-.012],[-.122,-.045],[-.135,-.056],[-.205,-.051]], .043, WM.tan, 0, .0018)
+    .mill([{ x:0, y:-.052, z:-.165, w:.032, h:.031, d:.064, radius:.0015 }]);
+  b.name('piston barrel within handguard').cyl(.010,.010,.212,WM.darkSteel,0,.015,-.310,HALF_PI);
+  rail(b, -.024, -.374, .046, .033, WM.darkSteel);
+  // A single belly web physically joins the barrel channel and the bottom rail;
+  // its overlap also gives every fitted vertical grip a real structural seat.
+  b.name('SPEAR handguard belly web').box(.031,.040,.205,WM.darkSteel,0,-.005,-.302);
+  b.name('continuous lower rail spine').box(.029,.006,.168,WM.darkSteel,0,-.020,-.305);
+  for (let i=0;i<14;i++) b.name('lower rail lug').box(.034,.005,.006,WM.darkSteel,0,-.024,-.224-i*.0115);
+  sideRail(b,-.027,-.001,-.319,.126); sideRail(b,.027,-.001,-.319,.126);
+  for (const side of [-1,1]) {
+    // The ambidextrous controls are shallow on both faces, not floating decorative discs.
+    b.name('SPEAR ambi selector drum').cyl(.0046,.0046,.0034,WM.midSteel,side*.021,-.020,-.061,0,0,HALF_PI,16);
+    b.name('SPEAR selector wing').profile([[-.071,-.015],[-.056,-.015],[-.050,-.022],[-.058,-.025],[-.074,-.020]],.003,WM.darkSteel,side*.023,.0004);
+    b.name('SPEAR magazine release fence').profile([[-.121,-.004],[-.098,-.004],[-.097,-.016],[-.114,-.023],[-.122,-.017]],.0035,WM.fde,side*.024,.0005);
+    b.name('SPEAR magazine release').box(.004,.007,.015,WM.midSteel,side*.025,-.013,-.106);
+    b.name('SPEAR bolt catch').profile([[-.118,-.008],[-.108,-.008],[-.108,-.034],[-.114,-.040],[-.122,-.034]],.004,WM.darkSteel,side*.022,.0005);
+    b.name('SPEAR takedown boss').cyl(.0047,.0047,.003,WM.midSteel,side*.023,.000,-.028,0,0,HALF_PI,16);
+    screw(b,side*.025,.000,-.028,.003); screw(b,side*.025,-.003,-.202,.003);
+    stamp(b, 4, side*.025, .014, -.089, .088, .007);
+  }
+  b.name('SPEAR ejection door').profile([[-.186,.008],[-.112,.008],[-.112,-.003],[-.186,-.003]],.0022,WM.midSteel,.025,.0004);
+  b.name('SPEAR brass deflector').loft([[-.104,.027,.011,.006],[-.091,.026,.014,.017],[-.078,.021,.011,.005]],WM.fde,.42,.026);
+  b.name('SPEAR textured forward assist').cyl(.006,.005,.017,WM.darkSteel,.030,.022,-.045,0,0,HALF_PI,16);
+  triggerGuard(b,-.072,-.137,-.028,-.066,WM.tan,true);
+  pistolGrip(b,-.050,-.025,.091,.034,WM.tanGrip,.026);
+
+  // Non-reciprocating left-side charger lives in the moving group; during reload
+  // the engine drives this group rather than allowing the hand to intersect metal.
+  charging.b.name('SPEAR charge track').box(.002,.007,.058,WM.dark, -.024,.027,-.116);
+  charging.b.name('SPEAR folding charge handle').box(.013,.013,.030,WM.darkSteel,-.032,.027,-.086);
+  charging.b.name('SPEAR charge handle texture').box(.016,.003,.021,WM.grip,-.046,.027,-.086);
+
+  // Receiver bridge overlaps the upper, hinge and both skeleton struts. It is a
+  // real reinforcement plate rather than a hidden contact-test shim.
+  b.name('SPEAR rear stock reinforcement').box(.047,.050,.034,WM.darkSteel,0,.010,-.001);
+  const st=stock.b;
+  st.name('SPEAR rear hinge block').box(.045,.048,.023,WM.darkSteel,0,.010,-.004);
+  st.name('SPEAR folding hinge pin').cyl(.005,.005,.054,WM.steel,-.014,.010,-.004,0,0,0,16);
+  // Open triangular struts prevent the solid-boot silhouette shared by the SCAR.
+  for (const side of [-1,1]) {
+    st.name('SPEAR upper skeleton strut').profile([[.012,.030],[.188,.030],[.204,.019],[.075,.009]],.006,WM.poly,side*.018,.0007);
+    st.name('SPEAR lower skeleton strut').profile([[.022,-.010],[.075,-.027],[.202,-.056],[.211,-.044],[.081,-.012]],.006,WM.poly,side*.018,.0007);
+    // Slim web carries the side fastener through the hollow stock, keeping the
+    // skeleton profile open while making its hardware structurally seated.
+    st.name('SPEAR stock side web').box(.006,.050,.200,WM.poly,side*.018,-.010,.110);
+    st.name('SPEAR stock latch').box(.004,.010,.019,WM.midSteel,side*.021,.003,.021);
+    screw(st,side*.020,-.020,.183,.003);
+  }
+  st.name('SPEAR adjustable cheek riser').loft([[.062,.030,.018,.026],[.085,.041,.021,.035],[.174,.041,.019,.036],[.193,.029,.012,.029]],WM.fde,.48);
+  st.name('SPEAR rubber butt pad').profile([[.203,.022],[.222,.017],[.224,-.062],[.208,-.067]],.041,WM.rubber,0,.0015);
+  for(let i=0;i<8;i++) st.name('SPEAR buttpad traction').box(.033,.0025,.002,WM.grip,0,.014-i*.009,.222);
+
+  const r=barrel.b;
+  r.name('SPEAR open tapered barrel').tube(.010,.004,.205,WM.darkSteel,0,.015,-.486);
+  r.name('SPEAR gas block').tube(.016,.009,.026,WM.darkSteel,0,.015,-.407);
+  r.name('SPEAR short-stroke piston').cyl(.0055,.0055,.071,WM.darkSteel,0,.036,-.386,HALF_PI);
+  r.name('SPEAR regulator cap').cyl(.008,.008,.011,WM.steel,0,.045,-.408,0,0,0,12);
+  flashHider(a,-.589,.015,.051,.012);
+  ironSights(a,-.046,-.364,.052,.052,.079);
+  magazine(mag.b,{width:.032,depth:.062,length:.119,bend:.006,material:WM.midSteel,ribs:2});
+  // Front toe sits below the well with a clear gap to the lower rail / forehand.
+  mag.group.position.set(0,-.041,-.166);
+  return a.finish({ mag:mag.group, handle:charging.group, sightY:.079,
+    sockets:{ muzzle:[0,.015,-.589], barrel:[0,.015,-.392], optic:[0,.052,-.138], magazine:[0,-.041,-.166], underbarrel:[0,-.025,-.315], stock:[0,.010,-.012], rail:[-.030,-.001,-.319] },
+    muzzleTip:[0,.015,-.644], arms:{ fore:[0,-.046,-.318], mag:[0,-.157,-.170], fa:[-.045,.027,-.086], grip:[.004,-.079,-.022] },
+  });
+}

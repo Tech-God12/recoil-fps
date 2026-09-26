@@ -4,6 +4,10 @@ export class SpatialAudioEngine {
   master: GainNode | null = null;
   comp: DynamicsCompressorNode | null = null;
   makeup: GainNode | null = null;
+  /** Separate buses let players preserve tactical cues without flattening the full mix. */
+  effects: GainNode | null = null;
+  footsteps: GainNode | null = null;
+  ambience: GainNode | null = null;
   echoBus: DelayNode | null = null;
   echoFb: GainNode | null = null;
   echoGain: GainNode | null = null;
@@ -13,6 +17,7 @@ export class SpatialAudioEngine {
   // Volume is stored even before the AudioContext exists: a settings tweak on the main
   // menu must not spin up the context (and the wind bed!) outside a live mission.
   private volume01 = 1;
+  private mix = { effects: 0.9, footsteps: 0.85, ambience: 0.7 };
   private spatialVoices = new Map<PannerNode,{send:GainNode; expires:number}>();
 
   ensure(): AudioContext {
@@ -33,6 +38,17 @@ export class SpatialAudioEngine {
       // because the squash happens before this gain stage, not after.
       this.makeup = this.ctx.createGain();
       this.makeup.gain.value = 1.12;
+      // Category buses feed the shared compressor. The limiter still sees every
+      // source, but menus can turn wind down without losing footsteps or shots.
+      this.effects = this.ctx.createGain();
+      this.footsteps = this.ctx.createGain();
+      this.ambience = this.ctx.createGain();
+      this.effects.gain.value = this.mix.effects;
+      this.footsteps.gain.value = this.mix.footsteps;
+      this.ambience.gain.value = this.mix.ambience;
+      this.effects.connect(this.master);
+      this.footsteps.connect(this.master);
+      this.ambience.connect(this.master);
       this.master.connect(this.comp);
       this.comp.connect(this.makeup);
       this.makeup.connect(this.ctx.destination);
@@ -123,6 +139,15 @@ export class SpatialAudioEngine {
     return panner;
   }
 
+  /** Applies category levels without waking a menu-time AudioContext. */
+  setMix(mix: Partial<{ effects: number; footsteps: number; ambience: number }>) {
+    this.mix = { ...this.mix, ...mix };
+    const clamp = (n: number) => Math.max(0, Math.min(1.2, n));
+    if (this.effects) this.effects.gain.value = clamp(this.mix.effects);
+    if (this.footsteps) this.footsteps.gain.value = clamp(this.mix.footsteps);
+    if (this.ambience) this.ambience.gain.value = clamp(this.mix.ambience);
+  }
+
   setMasterVolume(v: number) {
     this.volume01 = Math.max(0, Math.min(1.2, v));
     // Deliberately does NOT call ensure(): adjusting volume from the menu before the
@@ -178,7 +203,7 @@ export class SpatialAudioEngine {
     lfoG.connect(g.gain);
     src.connect(lp);
     lp.connect(g);
-    g.connect(this.master);
+    g.connect(this.ambience ?? this.master);
     src.start();
     lfo.start();
   }
@@ -200,7 +225,7 @@ export class SpatialAudioEngine {
     const og = ctx.createGain();
     og.gain.setValueAtTime(gain, t);
     og.gain.exponentialRampToValueAtTime(0.0001, t + dur * 1.1);
-    o.connect(og); og.connect(this.master!);
+    o.connect(og); og.connect(this.effects ?? this.master!);
     o.start(t); o.stop(t + dur * 1.2);
     o.onended = () => { o.disconnect(); og.disconnect(); };
   }
@@ -293,6 +318,17 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.26, gain: 0.68, freq: 120, q: 0.6, type: 'lowpass' });
     this.subThump(125, 38, 0.65, 0.13);
     this.burstDirect({ dur: 0.045, gain: 0.2, freq: this.rf(4200), q: 2.0, when: 0.05 });
+  }
+
+  /** M7 SPEAR: deep 6.8mm pulse with a piston clack after the pressure wave. */
+  fireSpear() {
+    this.burstDirect({ dur: 0.042, gain: 1.0, freq: this.rf(2350), q: 0.7, hp: 480 });
+    this.burstDirect({ dur: 0.19, gain: 0.92, freq: this.rf(610), q: 0.75, toEcho: 0.52 });
+    this.burstDirect({ dur: 0.27, gain: 0.72, freq: 102, q: 0.58, type: 'lowpass' });
+    this.subThump(118, 34, 0.68, 0.14, 'triangle');
+    // Short-stroke piston settling in the receiver, intentionally distinct from the SCAR's bolt slap.
+    this.burstDirect({ dur: 0.026, gain: 0.24, freq: this.rf(3650), q: 3.2, when: 0.052 });
+    this.burstDirect({ dur: 0.018, gain: 0.13, freq: this.rf(5100), q: 4.1, when: 0.086 });
   }
 
   fireVector() {
@@ -662,15 +698,20 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.12, gain: 0.45, freq: 350, q: 0.8 });
   }
 
+  /**
+   * Close player footsteps: a low heel-body, surface-specific scrape and a tiny
+   * sole tick. Layering gives each surface a footprint without using dozens of
+   * decoded files or allocating persistent sources. Every layer is routed through
+   * the footstep bus so competitive players can lift them independently.
+   */
   footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085);
-    if (surface === 'sand') {
-      this.burstDirect({ dur: 0.07, gain: g, freq: 850, q: 0.6 });
-    } else if (surface === 'concrete') {
-      this.burstDirect({ dur: 0.05, gain: g, freq: 1750, q: 1.4 });
-    } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
-    }
+    const gain = sprint ? 0.18 : crouch ? 0.040 : 0.095;
+    const body = surface === 'concrete' ? 155 : surface === 'wood' ? 110 : 82;
+    const scrape = surface === 'concrete' ? 1850 : surface === 'wood' ? 700 : 560;
+    const tick = surface === 'concrete' ? 3100 : surface === 'wood' ? 1180 : 1300;
+    this.burstDirect({ dur: sprint ? 0.095 : 0.075, gain: gain * 0.72, freq: body, q: 0.62, type: 'lowpass', bus: 'footsteps' });
+    this.burstDirect({ dur: surface === 'sand' ? 0.12 : 0.06, gain: gain * (surface === 'sand' ? 0.68 : 0.52), freq: scrape, q: surface === 'sand' ? 0.48 : 1.35, bus: 'footsteps' });
+    this.burstDirect({ dur: 0.022, gain: gain * 0.22, freq: tick, q: 2.2, when: 0.018, bus: 'footsteps' });
   }
 
   /** Sound-trap flooring: 1.8× louder than a normal step, with a distinct crunch.
@@ -678,10 +719,10 @@ export class SpatialAudioEngine {
   footstepTrap(kind: 'glass' | 'gravel', sprint: boolean, crouch = false) {
     const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * 1.8;
     if (kind === 'gravel') {
-      this.burstDirect({ dur: 0.1, gain: g, freq: 640, q: 0.7, type: 'lowpass' });
-      this.burstDirect({ dur: 0.045, gain: g * 0.5, freq: 1500, q: 1.4, when: 0.03 });
+      this.burstDirect({ dur: 0.1, gain: g, freq: 640, q: 0.7, type: 'lowpass', bus: 'footsteps' });
+      this.burstDirect({ dur: 0.045, gain: g * 0.5, freq: 1500, q: 1.4, when: 0.03, bus: 'footsteps' });
     } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 2600, q: 1.1, hp: 1400 });
+      this.burstDirect({ dur: 0.06, gain: g, freq: 2600, q: 1.1, hp: 1400, bus: 'footsteps' });
       // shard tinkle
       for (let i = 0; i < 2; i++) {
         const ctx = this.ensure();
@@ -692,7 +733,7 @@ export class SpatialAudioEngine {
         const og = ctx.createGain();
         og.gain.setValueAtTime(g * 0.22, t);
         og.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
-        o.connect(og); og.connect(this.master!);
+        o.connect(og); og.connect(this.footsteps ?? this.master!);
         o.start(t); o.stop(t + 0.1);
         o.onended = () => { o.disconnect(); og.disconnect(); };
       }
@@ -719,7 +760,7 @@ export class SpatialAudioEngine {
         const g = ctx.createGain();
         g.gain.setValueAtTime(0.13, st);
         g.gain.exponentialRampToValueAtTime(0.0001, st + 0.15);
-        o.connect(bp); bp.connect(g); g.connect(this.master!);
+        o.connect(bp); bp.connect(g); g.connect(this.ambience ?? this.master!);
         o.start(st); o.stop(st + 0.17);
         o.onended = () => { o.disconnect(); bp.disconnect(); g.disconnect(); };
       }
@@ -733,7 +774,7 @@ export class SpatialAudioEngine {
       g.gain.setValueAtTime(0.0001, t);
       g.gain.linearRampToValueAtTime(0.15, t + 1.1);
       g.gain.linearRampToValueAtTime(0.0001, t + 2.8);
-      src.connect(bp); bp.connect(g); g.connect(this.master!);
+      src.connect(bp); bp.connect(g); g.connect(this.ambience ?? this.master!);
       src.start(t, Math.random() * 0.5); src.stop(t + 2.9);
       src.onended = () => { src.disconnect(); bp.disconnect(); g.disconnect(); };
     } else {
@@ -753,7 +794,7 @@ export class SpatialAudioEngine {
       g.gain.setValueAtTime(0.0001, t);
       g.gain.linearRampToValueAtTime(0.09, t + 0.25);
       g.gain.linearRampToValueAtTime(0.0001, t + 1.45);
-      o.connect(lp); lp.connect(g); g.connect(this.master!);
+      o.connect(lp); lp.connect(g); g.connect(this.ambience ?? this.master!);
       o.start(t); o.stop(t + 1.5); lfo.start(t); lfo.stop(t + 1.5);
       o.onended = () => { o.disconnect(); lp.disconnect(); g.disconnect(); lfo.disconnect(); lfoG.disconnect(); };
     }
@@ -1152,6 +1193,8 @@ export class SpatialAudioEngine {
   private burstDirect(opts: {
     dur: number; gain: number; freq: number; q?: number; type?: BiquadFilterType;
     attack?: number; toEcho?: number; when?: number; hp?: number;
+    /** Explicit bus for low-level detail; most actions use the effects bus. */
+    bus?: 'effects' | 'footsteps' | 'ambience';
   }) {
     const ctx = this.ensure();
     const t = ctx.currentTime + (opts.when ?? 0);
@@ -1176,7 +1219,8 @@ export class SpatialAudioEngine {
       out = h;
     }
     out.connect(g);
-    g.connect(this.master!);
+    const bus = opts.bus === 'footsteps' ? this.footsteps : opts.bus === 'ambience' ? this.ambience : this.effects;
+    g.connect(bus ?? this.master!);
     if (opts.toEcho && this.echoBus) {
       const eg = ctx.createGain(); echoSend=eg;
       eg.gain.value = opts.toEcho;

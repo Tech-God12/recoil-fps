@@ -31,7 +31,7 @@ interface TdmSetupProps {
   onBack: () => void;
   /** Equipped field kit carried into the match (ability on Z); null = none bought/equipped. */
   kit?: KitId | null;
-  /** Opens the KITS menu (the kit itself is bought and equipped there). */
+  /** Opens the ABILITIES menu (the kit itself is bought and equipped there). */
   onKits?: () => void;
 }
 
@@ -163,7 +163,7 @@ export default function TdmSetup({ profile, onProfile, armor, onArmor, onDeploy,
             ))}
           </div>
 
-          <div className="tx-sec" style={{ marginTop: 16 }}><span>BRAVO SQUAD</span><b className="mono dim">ENEMY KIT</b></div>
+          <div className="tx-sec" style={{ marginTop: 16 }}><span>BRAVO SQUAD</span><b className="mono dim">ENEMY LOADOUT</b></div>
           <div className="tdm2-enemy-list" aria-label="Enemy armor preview">
             {BRAVO_ROSTER.map(e => (
               <div key={e.name} className="tdm2-enemy mono">

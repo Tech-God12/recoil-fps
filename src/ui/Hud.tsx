@@ -86,7 +86,6 @@ const HudCompass = memo(function HudCompass({ bearing, pings, landmark, missionB
             <div key={deg} className="compass-tick" style={{ left: 230 + rel * 3.75 - 12 }}>
               <i style={{ width: 1, height: card ? 9 : inter ? 6 : 3, background: card ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.45)', boxShadow: 'none' }} />
               {(card || inter) && <div className={`compass-card ${card ? 'text-white' : 'text-white/40'}`}>{card || inter}</div>}
-              {deg % 5 === 0 && <div className="compass-deg">{deg % 360}</div>}
             </div>
           );
         })}

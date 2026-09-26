@@ -34,6 +34,10 @@ export const TDM_FIRE_DMG_MUL = 1.1;
 export const TDM_FIRE_SPEED_MUL = 1.05;
 export const TDM_FIRE_HUNT_RANGE = 50;
 export const TDM_SHUTDOWN_CASH = 500;
+/** Arena payouts are separate from the round economy: every match pays for showing up. */
+export const TDM_KILL_CASH = 100;
+export const TDM_MATCH_WIN_CASH = 500;
+export const TDM_MATCH_LOSS_CASH = 150;
 export const TDM_DRAW_CASH = 250;
 /** Player-weapon damage multiplier in TDM. Full damage — bullets must FEEL like
  * they hurt. The 3-headshot floor is enforced by the engine's per-round damage

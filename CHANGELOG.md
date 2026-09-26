@@ -12,11 +12,13 @@ identity split, procedural racks, conveyor detail, roof monitors, hazard/oil mar
 industrial boundary silhouettes (rail, gatehouse, fencing, silo and pallet park). Arena
 callout zones now cover the full playable square. High and Low World Detail share identical
 solids, cover nodes and nav cells; ornament is non-colliding and stays in the flat material
-batch. World dressing and procedural textures are deterministic, and both elevation plates
-are checked in under `docs/screenshots/maps/`.
+batch. World dressing and procedural textures are deterministic, including the Warehouse
+light-shaft motes; cached accent materials keep dressing batchable without uncached draws.
+Both elevation plates are checked in under `docs/screenshots/maps/`.
 
 Added `tests/arena-overhaul.test.js`, new procedural finish materials, map design notes and
-the dependency-free `scripts/world-render.mjs` preview command.
+the dependency-free `scripts/world-render.mjs` preview command. Detailed notes are also in
+`docs/sirocco-overhaul.md` and `docs/warehouse-overhaul.md`.
 
 ## 2026-09-25 — Merge main into the Kits branch (PR #27)
 

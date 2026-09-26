@@ -158,6 +158,11 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     return m;
   };
   const ACC_TURQ = col(0x2C7C8E, 0.7), ACC_TERRA = col(0x9A4A2E), METAL = col(0x2C2C2A, 0.5, 0.7);
+  // Seeded variation keeps offline renders, nav snapshots, and multiplayer builds identical.
+  const seeded = (n: number): number => {
+    const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453;
+    return x - Math.floor(x);
+  };
   const GLOW = col(0xFFE2A8, 0.4, 0, 2.4), FROND = col(0x4E6B34, 0.85, 0, 0, THREE.DoubleSide);
   const FABRIC = [0xB0402E, 0x2E6BA0, 0x3E7B52, 0xC7A24B, 0x8C4E86].map(c => col(c, 0.9, 0, 0, THREE.DoubleSide));
 

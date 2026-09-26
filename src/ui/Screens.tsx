@@ -15,10 +15,10 @@ import { CountUp } from './components';
 import CashCounter from './armory/CashCounter';
 import { gradeFor } from '../game/economy/rewards';
 import { voice } from '../game/voice';
-import mapAlrasul from '../assets/map-alrasul.jpg';
-import mapKasbah from '../assets/map-kasbah.jpg';
-import mapArena from '../assets/map-arena.jpg';
-import mapSirocco from '../assets/map-sirocco.jpg';
+import mapAlrasul from '../assets/map-sandblast-dossier.jpg';
+import mapKasbah from '../assets/map-kasbah-dossier.jpg';
+import mapArena from '../assets/map-warehouse-dossier.jpg';
+import mapSirocco from '../assets/map-sirocco-dossier.jpg';
 import operatorArt from '../assets/operator.jpg';
 import menuCenter from '../assets/menu-center.jpg';
 import { TxBack, TxCoords } from './tactical';
@@ -34,9 +34,9 @@ export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: map
 export interface DefusalMenuOptions { side: 'attack' | 'defend' | 'random'; format: 'short' | 'long' }
 
 /* Theater cards: Town and Sandblast, the two live story operations. */
-const THEATERS: { num: string; code: string; id: MapId; type: string; art: string; lat: string; lon: string }[] = [
-  { num: '01', code: 'TOWN', id: 'kasbah', type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E' },
-  { num: '02', code: 'SANDBLAST', id: 'alrasul', type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E' },
+const THEATERS: { num: string; code: string; id: MapId; type: string; art: string; lat: string; lon: string; story: string }[] = [
+  { num: '01', code: 'TOWN', id: 'kasbah', type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E', story: 'A signal relay has turned the old citadel into a fortress. Cut through the kiln quarter, caravan court and keep before the convoy disappears beyond the west gate.' },
+  { num: '02', code: 'SANDBLAST', id: 'alrasul', type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E', story: 'The wadi is dry, but the crossings are watched. Move from the water tower through the souk and collapse the hostile route before extraction.' },
 ];
 
 export interface Results {
@@ -607,6 +607,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
                   <b>{t.code}</b>
                   <em>{t.type}</em>
                   <span className="map2-obj mono">{`${obj} OBJECTIVES · ${t.code}`}</span>
+                  <small className="map2-story">{t.story}</small>
                 </span>
                 <span className="map2-go"><Arrow /></span>
               </button>

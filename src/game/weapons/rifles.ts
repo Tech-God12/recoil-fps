@@ -229,3 +229,93 @@ export function buildSCARH(): WeaponModel {
     muzzleTip: [0, 0.014, -0.617], arms: { fore: [0, -0.025, -0.319], mag: [0, -0.137, -0.167], fa: [-0.043, 0.030, -0.232] },
   });
 }
+
+/**
+ * MCX-SPEAR: a modern short-stroke piston battle rifle.  The receiver, barrel
+ * extension, slim M-LOK handguard, folding stock and SR-25 magazine are separate
+ * physical assemblies so attachments and the reload rig have real places to live.
+ * The reference silhouette follows SIG's public 16 in / 20 round 7.62 platform;
+ * dimensions below are game-scale, not a manufacturing drawing.
+ */
+export function buildSpear(): WeaponModel {
+  const a = new WeaponAssembly('MCX-SPEAR'), b = a.body;
+  const stock = a.part('stock', 'folding telescopic stock');
+  const barrel = a.part('barrel', 'piston barrel assembly');
+  const mag = a.part('magazine', 'SR-25 polymer magazine');
+  const charging = a.moving('non-reciprocating charging handle');
+
+  // Upper and lower meet along one continuous, pinned seam. A broad monolithic
+  // upper gives the SPEAR its unmistakable silhouette without floating panels.
+  b.name('MCX monolithic upper receiver').profile([
+    [-.018,-.008],[-.354,-.008],[-.370,.002],[-.369,.036],[-.352,.050],[-.041,.050],[-.018,.034],
+  ], .051, WM.fde, 0, .0022).mill([
+    ...[-1,1].flatMap(side => [
+      { x: side*.026, y:.030, z:-.166, w:.006, h:.009, d:.102, radius:.0022 },
+      { x: side*.026, y:.005, z:-.300, w:.006, h:.012, d:.072, radius:.0022 },
+      ...Array.from({ length: 5 }, (_, i) => ({ x:side*.026, y:.041, z:-.253-i*.020, w:.010, h:.005, d:.014, radius:.0022 })),
+    ]),
+  ]);
+  b.name('MCX serialized lower').profile([
+    [-.220,-.010],[-.032,-.010],[-.021,-.018],[-.030,-.034],[-.064,-.036],[-.076,-.049],[-.123,-.046],[-.132,-.056],[-.217,-.052],
+  ], .040, WM.fde, 0, .0020);
+  b.name('MCX flared magwell').profile([
+    [-.219,-.007],[-.123,-.007],[-.123,-.040],[-.134,-.058],[-.215,-.053],
+  ], .047, WM.fde, 0, .0018).mill([{ x:0, y:-.048, z:-.170, w:.035, h:.034, d:.064, radius:.0015 }]);
+  b.name('steel barrel trunnion').tube(.025,.010,.020,WM.midSteel,0,.016,-.358);
+  b.name('free floating barrel core').cyl(.010,.010,.222,WM.darkSteel,0,.016,-.438,HALF_PI);
+  rail(b,-.026,-.356,.052,.036,WM.darkSteel);
+  b.name('M-LOK handguard shell').profile([
+    [-.204,-.008],[-.366,-.008],[-.383,.003],[-.380,.030],[-.364,.040],[-.205,.040],
+  ], .054, WM.fde, 0, .0020).mill([
+    ...[-1,1].flatMap(side => Array.from({length:6}, (_,i) => ({ x:side*.027, y:.011, z:-.234-i*.021, w:.008, h:.010, d:.012, radius:.0038 }))),
+  ]);
+  b.name('M-LOK bottom spine').box(.030,.007,.162,WM.darkSteel,0,-.010,-.286);
+  for (let i=0;i<13;i++) b.name('bottom rail lug').box(.035,.005,.006,WM.darkSteel,0,-.014,-.211-i*.0118);
+  for (const side of [-1,1]) {
+    sideRail(b, side*.028, .011, -.288, .130);
+    b.name('ambi bolt release paddle').box(.005,.012,.026,WM.midSteel,side*.027,-.004,-.101);
+    b.name('ambi magazine button').box(.005,.010,.016,WM.darkSteel,side*.027,-.014,-.138);
+    b.name('selector drum').cyl(.005,.005,.004,WM.midSteel,side*.022,-.020,-.067,0,0,HALF_PI);
+    b.name('selector tab').box(.004,.004,.019,WM.darkSteel,side*.021,-.021,-.058,0,0,-.35);
+    b.name('QD sling cup').tube(.006,.003,.003,WM.steel,side*.026,.002,-.014,0,0,HALF_PI);
+    screw(b,side*.026,-.004,-.041,.003);
+    screw(b,side*.026,.004,-.204,.003);
+    stamp(b, 15, side*.0265, .019, -.084, .084, .010);
+  }
+  b.name('ejection port recess').box(.002,.014,.064,WM.dark, .026, .029, -.147);
+  b.name('ejection port dust cover').profile([[-.181,.032],[-.116,.032],[-.116,.020],[-.181,.020]],.0024,WM.midSteel,.027,.0004);
+  b.name('brass deflector').loft([[-.107,.041,.012,.004],[-.095,.039,.010,.014],[-.086,.031,.011,.004]],WM.darkSteel,.42,.026);
+  triggerGuard(b,-.070,-.132,-.029,-.069,WM.darkSteel,true);
+  pistolGrip(b,-.051,-.025,.090,.034,WM.tanGrip,.021);
+
+  // Non-reciprocating side charger: it belongs to the receiver and only the knob
+  // travels in the reload animation, preventing the old "arm through gun" cheat.
+  charging.b.name('side charging handle stem').box(.010,.006,.040,WM.darkSteel,.031,.030,-.228);
+  charging.b.name('side charging handle tab').box(.012,.014,.020,WM.dark,.042,.030,-.228);
+  charging.b.name('rear charging handle bridge').box(.052,.007,.014,WM.darkSteel,0,.035,.000);
+
+  const s=stock.b;
+  s.name('stock hinge block').box(.049,.050,.022,WM.darkSteel,0,.010,-.010);
+  s.name('stock hinge pin').cyl(.006,.006,.061,WM.steel,0,.010,-.010,0,0,HALF_PI);
+  s.name('folding stock strut top').rod([0,.028,.000],[0,.031,.189],.010,WM.fde);
+  s.name('folding stock strut low').rod([0,-.018,.001],[0,-.042,.180],.009,WM.fde);
+  s.name('adjustable cheek riser').loft([[.080,.043,.022,.027],[.112,.053,.020,.038],[.203,.046,.021,.040],[.221,.031,.019,.028]],WM.poly,.46);
+  s.name('stock butt frame').profile([[.181,.031],[.237,.027],[.245,.008],[.244,-.079],[.227,-.084],[.194,-.061],[.178,-.036]],.045,WM.poly,0,.0025,
+    [[[.196,.016],[.224,.013],[.225,-.045],[.204,-.038]]]);
+  s.name('rubber buttpad').profile([[.236,.026],[.251,.020],[.252,-.079],[.238,-.085]],.047,WM.rubber,0,.0013);
+  s.name('stock release lever').box(.026,.006,.041,WM.darkSteel,0,-.030,.118,-.12);
+  for(const side of [-1,1]) { screw(s,side*.024,-.010,.202,.0035); s.name('rear QD sling cup').tube(.006,.003,.003,WM.steel,side*.024,-.010,.197,0,0,HALF_PI); }
+
+  const r=barrel.b;
+  r.name('SPEAR exposed steel barrel').tube(.011,.0046,.200,WM.darkSteel,0,.016,-.520);
+  r.name('short stroke piston block').tube(.016,.010,.026,WM.darkSteel,0,.016,-.429);
+  r.name('gas valve tower').box(.021,.026,.025,WM.darkSteel,0,.033,-.429);
+  r.name('gas valve selector').cyl(.007,.007,.009,WM.steel,0,.046,-.429,0,0,0,16);
+  flashHider(a,-.620,.016,.048,.013);
+  ironSights(a,-.050,-.431,.053,.045,.085,true);
+  magazine(mag.b,{width:.033,depth:.067,length:.122,bend:.001,material:WM.poly,ribs:3,ribMaterial:WM.darkSteel});
+  mag.group.position.set(0,-.041,-.174);
+  return a.finish({mag:mag.group,handle:charging.group,sightY:.085,
+    sockets:{muzzle:[0,.016,-.620],barrel:[0,.016,-.410],optic:[0,.052,-.140],magazine:[0,-.041,-.174],underbarrel:[0,-.015,-.294],stock:[0,.010,-.016],rail:[-.032,.011,-.288]},
+    muzzleTip:[0,.016,-.668],arms:{fore:[0,-.028,-.292],mag:[0,-.151,-.180],fa:[.042,.031,-.228]}});
+}

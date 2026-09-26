@@ -60,6 +60,11 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <Toggle label="Invert vertical look" value={s.invertY} onChange={v => set({ invertY: v })} />
                   <Toggle label="Hold to aim" value={!s.adsToggle} onChange={v => set({ adsToggle: !v })} hint={s.adsToggle ? 'Click to toggle scope' : 'Hold right mouse to aim'} />
                   <div className="mt-6">
+                    <SectionTitle sub="Small assists, always optional">Flow</SectionTitle>
+                    <Toggle label="Auto reload" value={s.autoReload} onChange={v => set({ autoReload: v })} hint="Refills a dry weapon when you pull the trigger." />
+                    <Toggle label="Quick-swap empty weapon" value={s.autoSwapEmpty} onChange={v => set({ autoSwapEmpty: v })} hint="If a dry weapon cannot reload, swaps only to a usable slot." />
+                  </div>
+                  <div className="mt-6">
                     <SectionTitle sub="Enemy reaction and squad tactics">Difficulty</SectionTitle>
                     <Segmented label="Threat level" value={s.difficulty} options={[{ v: 'Easy', l: 'Recruit' }, { v: 'Normal', l: 'Regular' }, { v: 'Hard', l: 'Veteran' }]} onChange={v => set({ difficulty: v })} />
                   </div>
@@ -109,6 +114,7 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <Slider label="Vignette" value={s.vignette} min={0} max={70} onChange={v => set({ vignette: v })} />
                   <Slider label="Film grain" value={s.filmGrain} min={0} max={100} onChange={v => set({ filmGrain: v })} />
                   <Slider label="Camera shake" value={s.cameraShake} min={0} max={100} unit="%" onChange={v => set({ cameraShake: v })} />
+                  <Toggle label="Reduced motion" value={s.reducedMotion} onChange={v => set({ reducedMotion: v })} hint="Keeps detail and FPS unchanged while substantially reducing camera motion." />
                 </div>
               </div>
             )}
@@ -117,9 +123,10 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
               <div className="anim-fade">
                 <SectionTitle sub="Spatial audio mix">Sound</SectionTitle>
                 <Slider label="Master volume" value={s.masterVolume} min={0} max={100} unit="%" onChange={v => set({ masterVolume: v })} />
+                <Slider label="Footstep detail" value={s.footstepVolume} min={0} max={100} unit="%" onChange={v => set({ footstepVolume: v })} hint="Your surface footsteps mix independently from weapon reports." />
                 <Toggle label="Voice lines" value={s.voices} onChange={v => set({ voices: v })} hint="Announcer and squad chatter" />
                 <div className="mt-6 p-4 audio-block">
-                  <p className="text-[13px] leading-relaxed text-[var(--bone-dim)]">3D audio with HRTF. Gunfire and grenades are positioned in world space.</p>
+                  <p className="text-[13px] leading-relaxed text-[var(--bone-dim)]">Layered heel-and-toe movement audio with distinct sand, concrete, wood, gravel and glass cues. World gunfire and grenades use HRTF positioning.</p>
                 </div>
               </div>
             )}
@@ -134,6 +141,11 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                     <Slider label="Gap" value={s.crosshairGap} min={0} max={26} onChange={v => set({ crosshairGap: v })} />
                     <Slider label="Thickness" value={s.crosshairThickness} min={1} max={6} onChange={v => set({ crosshairThickness: v })} />
                     <Toggle label="Center dot" value={s.crosshairDot} onChange={v => set({ crosshairDot: v })} />
+                    <div className="mt-5">
+                      <SectionTitle sub="Readability without changing gameplay">HUD accessibility</SectionTitle>
+                      <Slider label="Tactical map scale" value={s.minimapScale} min={75} max={125} unit="%" onChange={v => set({ minimapScale: v })} />
+                      <Toggle label="High-contrast HUD" value={s.hudContrast} onChange={v => set({ hudContrast: v })} hint="Boosts field readouts and markers for bright displays." />
+                    </div>
                   </div>
                   <div className="w-60 shrink-0 rounded-[3px] border border-[var(--line)] bg-[var(--ink)] relative overflow-hidden grid place-items-center" style={{ minHeight: 210 }}>
                     <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: 'linear-gradient(rgba(237,228,211,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(237,228,211,0.12) 1px, transparent 1px)', backgroundSize: '16px 16px' }} />

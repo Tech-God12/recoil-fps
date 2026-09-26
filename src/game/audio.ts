@@ -13,6 +13,10 @@ export class SpatialAudioEngine {
   // Volume is stored even before the AudioContext exists: a settings tweak on the main
   // menu must not spin up the context (and the wind bed!) outside a live mission.
   private volume01 = 1;
+  /** Player movement cues have a dedicated mix control so competitive players can
+   * lift footstep detail without making gunfire or radio uncomfortably loud. */
+  private footstepVolume01 = 0.85;
+  private stepIndex = 0;
   private spatialVoices = new Map<PannerNode,{send:GainNode; expires:number}>();
 
   ensure(): AudioContext {
@@ -123,6 +127,10 @@ export class SpatialAudioEngine {
     return panner;
   }
 
+  setFootstepVolume(v: number) {
+    this.footstepVolume01 = Math.max(0, Math.min(1.2, v));
+  }
+
   setMasterVolume(v: number) {
     this.volume01 = Math.max(0, Math.min(1.2, v));
     // Deliberately does NOT call ensure(): adjusting volume from the menu before the
@@ -213,6 +221,15 @@ export class SpatialAudioEngine {
     this.subThump(165, 55, 0.45, 0.08);
     // crisp bolt tick right behind the shot — the HK signature
     this.burstDirect({ dur: 0.030, gain: 0.22, freq: this.rf(5200), q: 2.6, when: 0.035 });
+  }
+
+  // MCX-SPEAR 7.62: a dense piston thump with a compact mechanical return.
+  // It sits between the SCAR and AK in weight: sharp muzzle crack, less loose rattle.
+  fireSpear() {
+    this.burstDirect({ dur: 0.042, gain: 0.92, freq: this.rf(2050), q: 0.75, hp: 520 });
+    this.burstDirect({ dur: 0.135, gain: 0.72, freq: this.rf(620), q: 0.85, toEcho: 0.42 });
+    this.subThump(128, 42, 0.56, 0.105, 'triangle');
+    this.burstDirect({ dur: 0.028, gain: 0.16, freq: this.rf(3900), q: 2.2, when: 0.032 });
   }
 
   firePistol() {
@@ -663,20 +680,28 @@ export class SpatialAudioEngine {
   }
 
   footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085);
+    // Two alternating sole layers keep a run from becoming a metronome. The heel
+    // carries low weight; the toe reads the material. All voices share the player
+    // movement bus gain, so the Footsteps setting is predictable.
+    const foot = (this.stepIndex++ & 1) === 0 ? -1 : 1;
+    const base = (sprint ? 0.16 : crouch ? 0.040 : 0.088) * this.footstepVolume01;
+    const scatter = foot < 0 ? 0.94 : 1.07;
     if (surface === 'sand') {
-      this.burstDirect({ dur: 0.07, gain: g, freq: 850, q: 0.6 });
+      this.burstDirect({ dur: sprint ? 0.115 : 0.085, gain: base * 0.82, freq: 520 * scatter, q: 0.55, type: 'lowpass' });
+      this.burstDirect({ dur: 0.042, gain: base * 0.46, freq: 1450 * scatter, q: 0.7, hp: 520, when: 0.012 });
     } else if (surface === 'concrete') {
-      this.burstDirect({ dur: 0.05, gain: g, freq: 1750, q: 1.4 });
+      this.burstDirect({ dur: 0.045, gain: base * 0.76, freq: 235 * scatter, q: 1.0, type: 'lowpass' });
+      this.burstDirect({ dur: 0.035, gain: base * 0.68, freq: 1880 * scatter, q: 2.0, hp: 850, when: 0.006 });
     } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
+      this.burstDirect({ dur: 0.080, gain: base * 0.78, freq: 310 * scatter, q: 1.15, type: 'lowpass' });
+      this.burstDirect({ dur: 0.055, gain: base * 0.48, freq: 720 * scatter, q: 1.8, when: 0.018 });
     }
   }
 
   /** Sound-trap flooring: 1.8× louder than a normal step, with a distinct crunch.
    * Glass adds a shard tinkle; gravel gets a low scatter rumble. */
   footstepTrap(kind: 'glass' | 'gravel', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * 1.8;
+    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * 1.8 * this.footstepVolume01;
     if (kind === 'gravel') {
       this.burstDirect({ dur: 0.1, gain: g, freq: 640, q: 0.7, type: 'lowpass' });
       this.burstDirect({ dur: 0.045, gain: g * 0.5, freq: 1500, q: 1.4, when: 0.03 });

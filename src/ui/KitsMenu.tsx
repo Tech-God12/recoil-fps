@@ -74,7 +74,7 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
         <button type="button" className="kits-back" onClick={onBack}>
           <span aria-hidden="true">‹</span> Back <span className="keycap">Esc</span>
         </button>
-        <h1 id="kits-title" className="kits-title">Abilities</h1>
+        <h1 id="kits-title" className="kits-title">Kits</h1>
         <span className="kits-sub mono">One ability per game · use it with <span className="keycap">{KIT_KEY}</span></span>
         <div className="kits-wallet" title="Wallet balance">
           <span className="mono">Wallet</span>

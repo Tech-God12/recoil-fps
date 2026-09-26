@@ -98,7 +98,7 @@ const inert: any = new Proxy(function () { /* inert */ }, {
 });
 g.AudioContext = inert;
 g.speechSynthesis = { getVoices: () => [], speak: () => {}, cancel: () => {}, pause: () => {}, resume: () => {}, speaking: false, pending: false };
-g.SpeechSynthesisUtterance = class { constructor(public text: string) {} };
+g.SpeechSynthesisUtterance = class { text: string; constructor(text: string) { this.text = text; } };
 
 
 export const takeRaf = () => { const q = rafQueue; rafQueue = []; return q; };

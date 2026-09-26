@@ -1,3 +1,5 @@
+import '../tests/helpers/register-json.js';
+
 /* Headless Bomb Defusal simulation: builds Sirocco + the DefusalMode under Node
  * (Proxy-stubbed canvas/document) and plays full matches bot-vs-bot with a
  * stand-in player parked at spawn. Uses the engine's real collision code.

@@ -1,3 +1,5 @@
+import '../tests/helpers/register-json.js';
+
 /* Headless smoke test: build the arena world + TDM manager under Node with a
  * Proxy-stubbed canvas/document, then simulate bot ticks. Catches runtime
  * crashes and stuck-bot regressions without a browser. NOT part of the app. */

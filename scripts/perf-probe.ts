@@ -1,3 +1,5 @@
+import '../tests/helpers/register-json.js';
+
 /* Headless PERFORMANCE probe. Boots the real Engine on every map against the stub
  * WebGL2 context from headless-shim.ts and measures what the CPU/driver side of a
  * frame costs: draw calls, triangles, shadow-pass calls, scene-graph size, JS time
@@ -6,7 +8,7 @@
  * re-render frequency are the proxies. NOT part of the app.
  *   node --import ./tests/helpers/register-json.js scripts/perf-probe.ts [frames=600] [json-out] */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { takeRaf, makeCanvas } from './headless-shim';
+import { takeRaf, makeCanvas } from './headless-shim.ts';
 import { writeFileSync } from 'node:fs';
 
 async function main() {

@@ -101,7 +101,7 @@ const inert: any = new Proxy(function () { /* inert */ }, {
 });
 g.AudioContext = inert;
 g.speechSynthesis = { getVoices: () => [], speak: () => {}, cancel: () => {}, pause: () => {}, resume: () => {}, speaking: false, pending: false };
-g.SpeechSynthesisUtterance = class { constructor(public text: string) {} };
+g.SpeechSynthesisUtterance = class { text: string; constructor(text: string) { this.text = text; } };
 
 async function main() {
   const seconds = Number(process.argv[2] ?? 240);

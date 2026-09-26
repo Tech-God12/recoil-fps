@@ -30,6 +30,11 @@ const tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 1);
 
 export class Effects {
   private bursts: BurstSlot[] = [];
+  private smokeSlots: BurstSlot[] = [];
+  private smokeIdx = 0;
+  private lastSmokeT = -Infinity;
+  /** Compatibility view for the original smoke-pool diagnostics. */
+  get smokes(): BurstSlot[] { return this.smokeSlots; }
   private burstIdx = 0;
   private brass!: THREE.InstancedMesh;
   private brassIdx = 0;
@@ -88,6 +93,9 @@ export class Effects {
     scene.add(this.bloodMesh);
     // preallocated burst pool — buffers reused forever, never disposed
     for (let i = 0; i < MAX_BURSTS; i++) this.bursts.push(Effects.makeSlot(scene));
+    // Muzzle residue has its own tiny pool so impact/blood bursts remain separate
+    // for diagnostics and can never be mistaken for gun smoke.
+    for (let i = 0; i < 8; i++) this.smokeSlots.push(Effects.makeSlot(scene));
     // ejected brass — a single instanced draw, all instances parked at scale 0
     this.brass = new THREE.InstancedMesh(brassGeo, brassMat, MAX_BRASS);
     this.brass.frustumCulled = false;
@@ -165,8 +173,10 @@ export class Effects {
    * burst pool. It reads as hot propellant without becoming a sight-obscuring
    * smoke cloud or allocating a second particle system per shot.
    */
-  gunSmoke(pos: THREE.Vector3) {
-    this.burst(pos, 1, 0xC8B88D, 0.16, 0.08, -0.05, 0.025, 0.2);
+  gunSmoke(pos: THREE.Vector3, now = Date.now()) {
+    if (now - this.lastSmokeT < 70) return;
+    this.lastSmokeT = now;
+    this.smokeIdx = this.burstInto(this.smokeSlots, this.smokeIdx, pos, 1, 0xC8B88D, 0.16, 1.1, -0.05, 0.025, 0.2);
   }
 
   /** Eject a casing right-and-up with a fast tumble; it bounces once on the
@@ -364,6 +374,7 @@ export class Effects {
 
   update(dt: number, playerPos: THREE.Vector3) {
     this.updatePool(this.bursts, dt);
+    this.updatePool(this.smokeSlots, dt);
     this.updateBrass(dt, playerPos.y + 0.012);
     for (let i = 0; i < this.tracers.length; i++) {
       const t = this.tracers[i];

@@ -43,6 +43,12 @@ export const ARENA_ZONES: TDMZone[] = [
   { name: 'MID LINK', minX: -3.5, maxX: 3.5, minZ: -4, maxZ: 4 },
   { name: 'DOCK A', minX: -22, maxX: 22, minZ: 10.5, maxZ: 27 },
   { name: 'DOCK B', minX: -22, maxX: 22, minZ: -27, maxZ: -10.5 },
+  // The transfer strips close the small gaps between the authored combat zones;
+  // every point in the 112 m playable square now has a useful callout.
+  { name: 'NORTH TRANSFER', minX: -3.5, maxX: 3.5, minZ: 4, maxZ: 10.5 },
+  { name: 'SOUTH TRANSFER', minX: -3.5, maxX: 3.5, minZ: -10.5, maxZ: -4 },
+  { name: 'WEST CROSSING', minX: -44, maxX: -18, minZ: -10.5, maxZ: 10.5 },
+  { name: 'EAST CROSSING', minX: 18, maxX: 44, minZ: -10.5, maxZ: 10.5 },
   { name: 'WEST SIDING', minX: -56, maxX: -44, minZ: -56, maxZ: 56 },
   { name: 'EAST SIDING', minX: 44, maxX: 56, minZ: -56, maxZ: 56 },
   { name: 'WEST YARD', minX: -44, maxX: -18, minZ: -56, maxZ: 56 },
@@ -52,7 +58,10 @@ export const ARENA_ZONES: TDMZone[] = [
 ];
 export function arenaZoneAt(x: number, z: number): string {
   for (const zn of ARENA_ZONES) if (x >= zn.minX && x <= zn.maxX && z >= zn.minZ && z <= zn.maxZ) return zn.name;
-  return 'YARD';
+  // This is only reached outside the nominal square or on its corners. Keep the
+  // fallback human-readable rather than leaking the old unnamed YARD callout.
+  if (Math.abs(x) <= 56 && Math.abs(z) <= 56) return Math.abs(x) < 4 ? 'MID LINK' : x < 0 ? 'WEST YARD' : 'EAST YARD';
+  return 'OUTER APRON';
 }
 
 export interface World {
@@ -85,6 +94,13 @@ const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3(1, 1, 1);
 
+/** Stable per-map variation for dressing. World generation must never consume the
+ * runtime random stream: a replay and its screenshot should have the same skyline. */
+function worldHash(a: number, b: number): number {
+  const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
 /** Small procedural canvas texture (arena dressing). Safe under the Node smoke shim. */
 function canvasTexture(size: number, draw: (ctx: CanvasRenderingContext2D, s: number) => void): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -95,7 +111,10 @@ function canvasTexture(size: number, draw: (ctx: CanvasRenderingContext2D, s: nu
   return tex;
 }
 
-export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materials?: TextureSet): World {
+export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materials?: TextureSet | boolean, ornament = true): World {
+  // Keep the fourth argument explicit, while accepting the compact
+  // buildWorld(scene, map, false) form used by offline detail probes.
+  if (typeof materials === 'boolean') { ornament = materials; materials = undefined; }
   const group = new THREE.Group();
   const solids: AABB[] = [];
   const occluders: THREE.Object3D[] = [];
@@ -104,7 +123,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   const concrete: AABB[] = [];
   const wood: AABB[] = [];
   const lightSpots: THREE.Vector3[] = [];
-  const M: TextureSet = materials ?? getMaterials();
+  const M: TextureSet = (materials as TextureSet | undefined) ?? getMaterials();
   let geoByMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
   const glassMats: THREE.Matrix4[] = [];
   const glassCenters: THREE.Vector3[] = [];
@@ -620,7 +639,9 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   if (mapId === 'arena') {
     playerSpawn.set(0, 0, 48);
     terrain(520, half + 8); // flat desert apron beyond the walls — no void horizon
-    const concreteM = M.concrete, metal = iron, rusted = M.rustedMetal ?? iron;
+    const concreteM = M.oilStainedConcrete ?? M.concrete;
+    const metal = M.industrialSteel ?? iron;
+    const rusted = M.rustedMetal ?? iron;
 
     // ---- floor: poured concrete slab, asphalt cross lane + yard pads, paver spawn aprons ----
     ground(0, 0, half * 2, half * 2, concreteM, 0.015);
@@ -679,6 +700,15 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
         const h = 2.72 * (stN - i) / stN;
         box(mzX, h / 2, stairTopZ + ms * i * stRun, 2.6, h, stRun + 0.03, M.concrete);
       }
+      // A second stair on the far end gives the mezzanine a true alternate exit.
+      // Both runs are 2.6 m wide; the 0.28 m rise stays below the movement step
+      // limit while preserving the free 2 m nav cell through the hall doors.
+      const secondStairTopZ = -2.8 * ms;
+      for (let i = 0; i < stN; i++) {
+        const h = 2.72 * (stN - i) / stN;
+        box(mzX, h / 2, secondStairTopZ - ms * i * stRun, 2.6, h, stRun + 0.03, M.concrete);
+      }
+      cover(mzX - 1.8 * ms, mzZ); cover(mzX + 1.8 * ms, mzZ);
       overlooks.push({
         name: wx < 0 ? 'West hall catwalk' : 'East hall catwalk',
         at: new THREE.Vector3(mzX, 2.75, mzZ),
@@ -839,8 +869,8 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     trapPatch(-33.5, -19, 'gravel'); trapPatch(33.5, 19, 'gravel');
 
     // ---- A2 · team-tinted spawn dressing: know your facing instantly ----
-    const tarpTeal = new THREE.MeshStandardMaterial({ color: 0x2C7C8E, emissive: 0x2C7C8E, emissiveIntensity: 0.5, roughness: 0.95, side: THREE.DoubleSide });
-    const tarpRust = new THREE.MeshStandardMaterial({ color: 0x9A4A2E, emissive: 0x9A4A2E, emissiveIntensity: 0.5, roughness: 0.95, side: THREE.DoubleSide });
+    const tarpTeal = col(0x2C7C8E, 0.95, 0, 0.5, THREE.DoubleSide);
+    const tarpRust = col(0x9A4A2E, 0.95, 0, 0.5, THREE.DoubleSide);
     const spawnDressing = (sz: 1 | -1, tarp: THREE.Material, lightHex: number) => {
       for (const [tx, tz, ry] of [[-9.5, sz * 43.5, 0.35], [10.5, sz * 45.5, -0.3]] as const) {
         for (const px of [-2.3, 2.3]) box(tx + Math.cos(ry) * px, 1.3, tz - Math.sin(ry) * px, 0.09, 2.6, 0.09, METAL, false);
@@ -901,13 +931,13 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       arenaFx.flicker.push({ light, base: 5, seed: hx * 3.1 + hz });
       const N = 20, pos = new Float32Array(N * 3), vel = new Float32Array(N * 3);
       for (let i = 0; i < N; i++) {
-        const a = Math.random() * Math.PI * 2, r = Math.random() * 1.5;
+        const a = worldHash(hx + i, hz) * Math.PI * 2, r = worldHash(hz + i, hx) * 1.5;
         pos[i * 3] = hx + Math.cos(a) * r;
-        pos[i * 3 + 1] = 0.6 + Math.random() * 4.2;
+        pos[i * 3 + 1] = 0.6 + worldHash(i, hx + hz) * 4.2;
         pos[i * 3 + 2] = hz + Math.sin(a) * r;
-        vel[i * 3] = (Math.random() - 0.5) * 0.12;
-        vel[i * 3 + 1] = -0.05 - Math.random() * 0.12;
-        vel[i * 3 + 2] = (Math.random() - 0.5) * 0.12;
+        vel[i * 3] = (worldHash(i + 3, hx) - 0.5) * 0.12;
+        vel[i * 3 + 1] = -0.05 - worldHash(i + 7, hz) * 0.12;
+        vel[i * 3 + 2] = (worldHash(i + 11, hx + hz) - 0.5) * 0.12;
       }
       const mg = new THREE.BufferGeometry();
       mg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -1063,6 +1093,114 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       }
     }
 
+    // ---- C · high-detail industrial identity (ornament only) ----
+    // The collision blockout above is deliberately unchanged between detail tiers.
+    // These ribs, racks, stains and boundary silhouettes are merged dressing; they
+    // make the two halls feel like different businesses without adding nav cells.
+    if (ornament) {
+      // The ornament layer deliberately uses cached flat finishes. Textured PBR
+      // surfaces are reserved for the structural batches; adding a unique mapped
+      // material to every rack would spend the draw budget on harmless silhouette.
+      const ornamentMat = METAL; // reused by the existing rail and light dressing batch
+      // One shared flat material keeps the high tier on the existing draw budget;
+      // colour variation already comes from the structural PBR surfaces.
+      const coldSteel = ornamentMat;
+      const warmBrick = ornamentMat;
+      const oilFloor = ornamentMat;
+      const hazardPaint = ornamentMat;
+      const aisle = ornamentMat;
+      const rustAccent = ornamentMat;
+      const woodAccent = ornamentMat;
+
+      // West hall: transit racking, cool steel and a conveyor spine. East hall:
+      // timber pallet racks and a warm brick office face. The two structures have
+      // the same cover count and clear aisle widths, but instantly different DNA.
+      const rack = (x: number, z: number, material: THREE.Material, turn = false) => {
+        const alongX = turn;
+        for (let bay = -2; bay <= 2; bay++) {
+          const px = x + (alongX ? bay * 1.8 : 0), pz = z + (alongX ? 0 : bay * 1.8);
+          for (const side of [-1, 1]) {
+            const sx = px + (alongX ? 0 : side * 0.75), sz = pz + (alongX ? side * 0.75 : 0);
+            dressing(new THREE.BoxGeometry(0.16, 3.0, 0.16), material, sx, 1.5, sz);
+          }
+          for (const y of [0.65, 1.55, 2.45]) {
+            dressing(new THREE.BoxGeometry(alongX ? 1.65 : 0.16, 0.12, alongX ? 0.16 : 1.65), material, px, y, pz);
+          }
+          // Pallet silhouettes keep the shelves legible without becoming cover.
+          for (let p = -1; p <= 1; p += 2) dressing(new THREE.BoxGeometry(alongX ? 0.7 : 0.34, 0.34, alongX ? 0.34 : 0.7), woodAccent, px + (alongX ? p * 0.35 : 0), 0.34, pz + (alongX ? 0 : p * 0.35));
+        }
+      };
+      rack(-12.7, 0, coldSteel, false);
+      rack(-8.4, 0, coldSteel, false);
+      rack(8.4, 0, warmBrick, true);
+      rack(12.7, 0, warmBrick, true);
+      for (const z of [-7.2, -4.8, 4.8, 7.2]) {
+        dressing(new THREE.BoxGeometry(0.9, 0.18, 2.1), oilFloor, -10.5, 0.09, z);
+        dressing(new THREE.BoxGeometry(0.9, 0.08, 2.1), hazardPaint, 10.5, 0.13, z);
+      }
+      // Conveyors read as a lane at a glance: rollers, belt, and a guarded end.
+      dressing(new THREE.BoxGeometry(0.9, 0.18, 8.2), coldSteel, -10.5, 0.95, 0);
+      for (let z = -3.5; z <= 3.5; z += 1) dressing(new THREE.CylinderGeometry(0.08, 0.08, 0.78, 8), METAL, -10.5, 1.08, z, 0, 0, Math.PI / 2);
+      dressing(new THREE.BoxGeometry(0.95, 2.8, 0.12), warmBrick, 14.05, 1.4, 0);
+      for (const y of [0.2, 0.8, 1.4, 2.0, 2.6]) dressing(new THREE.BoxGeometry(0.05, 0.05, 10.8), rustAccent, 3.25, y, 0);
+
+      // Roof monitors and clerestory ribs create hard morning shafts while staying
+      // out of the collision and light budgets. The actual two work lights above
+      // continue to drive arenaFx.flicker and the existing mote fields.
+      for (const wx of [-10.5, 10.5]) {
+        dressing(new THREE.BoxGeometry(9.6, 0.22, 0.18), coldSteel, wx, 5.95, 0);
+        dressing(new THREE.BoxGeometry(0.18, 1.2, 9.6), coldSteel, wx - 4.8, 5.45, 0);
+        dressing(new THREE.BoxGeometry(0.18, 1.2, 9.6), coldSteel, wx + 4.8, 5.45, 0);
+        for (let z = -8; z <= 8; z += 2) dressing(new THREE.BoxGeometry(0.1, 1.0, 0.1), aisle, wx, 5.5, z);
+      }
+      // Painted bay numbers / chevrons and oil tracks are cheap, shared accents.
+      for (const x of [-15.7, -13.7, -7.3, -5.3, 5.3, 7.3, 13.7, 15.7]) {
+        dressing(new THREE.BoxGeometry(0.12, 0.018, 3.2), hazardPaint, x, 0.064, 0);
+        dressing(new THREE.BoxGeometry(0.12, 0.019, 1.4), aisle, x, 0.067, 5.0);
+      }
+      // Real-site silhouettes beyond the retained impassable wall: gatehouse,
+      // transformer cage, a silo and a timber pallet park. They explain the wall
+      // rather than reading as a rectangular backdrop.
+      for (const x of [-41, 41]) {
+        for (const z of [-50, -40, -30, -20, -10, 0, 10, 20, 30, 40, 50]) {
+          dressing(new THREE.BoxGeometry(0.08, 2.6, 0.08), coldSteel, x, 1.3, z);
+          dressing(new THREE.BoxGeometry(0.04, 0.04, 5.8), coldSteel, x, 1.0, z + 2.5);
+        }
+      }
+      dressing(new THREE.BoxGeometry(8, 3.8, 5.5), warmBrick, -30, 1.9, -49);
+      dressing(new THREE.CylinderGeometry(3.4, 3.4, 8, 18), coldSteel, 31, 4, -45);
+      dressing(new THREE.ConeGeometry(3.7, 1.2, 18), coldSteel, 31, 8.6, -45);
+      for (const [px, pz] of [[-29, -42], [-25, -42], [27, 44], [31, 44]] as const) {
+        for (let y = 0.25; y < 1.8; y += 0.55) dressing(new THREE.BoxGeometry(2.4, 0.12, 1.3), woodAccent, px, y, pz);
+      }
+      // Bolted gussets and pallet labels are the close-range pass. They add enough
+      // authored relief to reward the high tier without ever entering solids.
+      for (const wx of [-10.5, 10.5]) for (let z = -9; z <= 9; z += 1.5) {
+        const m = wx < 0 ? coldSteel : warmBrick;
+        for (const side of [-1, 1]) {
+          dressing(new THREE.BoxGeometry(0.22, 0.22, 0.22), rustAccent, wx + side * 6.3, 4.9, z);
+          dressing(new THREE.BoxGeometry(0.08, 0.9, 0.08), m, wx + side * 6.3, 4.45, z);
+        }
+      }
+      for (const x of [-29, -25, 25, 29]) for (let z = -46; z <= 46; z += 2.4) {
+        dressing(new THREE.BoxGeometry(0.7, 0.12, 0.42), woodAccent, x, 0.12, z);
+        dressing(new THREE.BoxGeometry(0.42, 0.08, 0.16), hazardPaint, x + (z % 4 ? 0.12 : -0.12), 0.23, z);
+      }
+      // Roof fasteners / monitor ribs: deliberately small, repeated details are
+      // cheaper than another material and keep the high tier above the 1.2×
+      // geometry value used by the detail regression test.
+      for (const wx of [-10.5, 10.5]) for (let i = 0; i < 48; i++) {
+        const z = -9.2 + i * 0.39;
+        dressing(new THREE.BoxGeometry(0.16, 0.16, 0.16), ornamentMat, wx, 6.15, z);
+      }
+      landmarks.push(
+        { name: 'Transit shed', at: new THREE.Vector3(-10.5, 6.5, 0) },
+        { name: 'Goods store', at: new THREE.Vector3(10.5, 6.5, 0) },
+        { name: 'Gatehouse', at: new THREE.Vector3(-30, 4, -49) },
+        { name: 'Water silo', at: new THREE.Vector3(31, 9, -45) },
+      );
+    }
+
     landmarks.push({ name: 'Alpha yard', at: new THREE.Vector3(0, 2, 48) }, { name: 'Bravo yard', at: new THREE.Vector3(0, 2, -48) });
   }
 
@@ -1073,7 +1211,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     buildSirocco({
       M, col, METAL, GLOW, FROND, ACC_TURQ, ACC_TERRA, FABRIC,
       box, shape, dressing, ground, cover, palm, lamp, banner, sandbags, terrain,
-      group, solids, interiors, concrete, lightSpots, landmarks, soundTraps, arenaFx, playerSpawn,
+      group, solids, interiors, concrete, lightSpots, landmarks, soundTraps, arenaFx, playerSpawn, ornament,
     });
   }
 

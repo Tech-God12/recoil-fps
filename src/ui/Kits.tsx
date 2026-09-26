@@ -199,7 +199,7 @@ export function KitEquipButton({ kit, onOpen, compact }: { kit: KitId | null; on
         <em>ABILITY <span className="keycap">{KIT_KEY}</span></em>
         <b>{d ? d.name : 'NONE EQUIPPED'}</b>
       </span>
-      <span className="kit-equip-go mono">{d ? 'CHANGE' : 'GET AN ABILITY'} ›</span>
+      <span className="kit-equip-go mono">{d ? 'CHANGE' : 'GET A KIT / GET AN ABILITY'} ›</span>
     </button>
   );
 }
@@ -213,7 +213,7 @@ export function KitPauseCard({ kit }: { kit?: KitHud }) {
       <div className="pz-kit none">
         <span className="pz-kit-icon"><LockIcon size={18} /></span>
         <div className="pz-kit-body">
-          <b>No ability</b>
+          <b>No ability / No kit</b>
           <p>Buy and equip one from <b>ABILITIES</b> on the main menu. Abilities can only be changed between games.</p>
         </div>
       </div>

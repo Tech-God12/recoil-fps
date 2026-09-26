@@ -12,6 +12,13 @@ export interface TextureSet {
   cobbleLane?: THREE.MeshStandardMaterial;
   wadiBed?: THREE.MeshStandardMaterial;
   dirtPath?: THREE.MeshStandardMaterial;
+  /** District-specific surfaces used by the authored Arena maps. */
+  limestoneCourse?: THREE.MeshStandardMaterial;
+  marketTile?: THREE.MeshStandardMaterial;
+  oilStainedConcrete?: THREE.MeshStandardMaterial;
+  industrialSteel?: THREE.MeshStandardMaterial;
+  warehouseBrick?: THREE.MeshStandardMaterial;
+  hazardPaint?: THREE.MeshStandardMaterial;
 
   sand: THREE.MeshStandardMaterial;
   plaza: THREE.MeshStandardMaterial;
@@ -43,6 +50,16 @@ function tex(c: HTMLCanvasElement, rx: number, ry: number, srgb = true): THREE.C
   return t;
 }
 
+// Texture generation is part of the world build, so it must not make screenshots or
+// map previews vary from one process to the next. Keep this local instead of touching
+// the application's runtime random stream.
+let textureRandomState = 0x6d2b79f5;
+function textureRandom(): number {
+  textureRandomState = Math.imul(textureRandomState ^ (textureRandomState >>> 15), 1 | textureRandomState);
+  textureRandomState ^= textureRandomState + Math.imul(textureRandomState ^ (textureRandomState >>> 7), 61 | textureRandomState);
+  return ((textureRandomState ^ (textureRandomState >>> 14)) >>> 0) / 4294967296;
+}
+
 function mat(diffuse: HTMLCanvasElement, bump: HTMLCanvasElement, rx: number, ry: number, rough: number, metal: number, bumpScale: number): THREE.MeshStandardMaterial {
   const b = tex(bump, rx, ry, false);
   return new THREE.MeshStandardMaterial({
@@ -57,7 +74,7 @@ function mat(diffuse: HTMLCanvasElement, bump: HTMLCanvasElement, rx: number, ry
 // value noise → soft cloudy variation (for baked AO / grime / color drift)
 function valueNoise(ctx: CanvasRenderingContext2D, w: number, h: number, cells: number, alpha: number, dark = true) {
   const grid: number[][] = [];
-  for (let y = 0; y <= cells; y++) { grid[y] = []; for (let x = 0; x <= cells; x++) grid[y][x] = Math.random(); }
+  for (let y = 0; y <= cells; y++) { grid[y] = []; for (let x = 0; x <= cells; x++) grid[y][x] = textureRandom(); }
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
   const lerp = (a: number, b: number, t: number) => a + (b - a) * (t * t * (3 - 2 * t));
@@ -80,10 +97,10 @@ function valueNoise(ctx: CanvasRenderingContext2D, w: number, h: number, cells: 
 
 function speckle(ctx: CanvasRenderingContext2D, w: number, h: number, n: number, cols: [string, number][], sMin = 1, sMax = 3) {
   for (let i = 0; i < n; i++) {
-    const [c, a] = cols[(Math.random() * cols.length) | 0];
+    const [c, a] = cols[(textureRandom() * cols.length) | 0];
     ctx.globalAlpha = a; ctx.fillStyle = c;
-    const s = sMin + Math.random() * (sMax - sMin);
-    ctx.fillRect(Math.random() * w, Math.random() * h, s, s);
+    const s = sMin + textureRandom() * (sMax - sMin);
+    ctx.fillRect(textureRandom() * w, textureRandom() * h, s, s);
   }
   ctx.globalAlpha = 1;
 }
@@ -91,10 +108,10 @@ function speckle(ctx: CanvasRenderingContext2D, w: number, h: number, n: number,
 function cracks(ctx: CanvasRenderingContext2D, w: number, h: number, n: number, col: string, lw = 1.2) {
   ctx.strokeStyle = col; ctx.lineWidth = lw;
   for (let i = 0; i < n; i++) {
-    let x = Math.random() * w, y = Math.random() * h;
+    let x = textureRandom() * w, y = textureRandom() * h;
     ctx.beginPath(); ctx.moveTo(x, y);
-    const seg = 3 + (Math.random() * 5) | 0;
-    for (let s = 0; s < seg; s++) { x += (Math.random() - 0.5) * 70; y += (Math.random() - 0.5) * 70; ctx.lineTo(x, y); }
+    const seg = 3 + (textureRandom() * 5) | 0;
+    for (let s = 0; s < seg; s++) { x += (textureRandom() - 0.5) * 70; y += (textureRandom() - 0.5) * 70; ctx.lineTo(x, y); }
     ctx.stroke();
   }
 }
@@ -102,7 +119,7 @@ function cracks(ctx: CanvasRenderingContext2D, w: number, h: number, n: number, 
 // chips the painted lines so they read as worn, not freshly painted
 function noiseWear(ctx: CanvasRenderingContext2D, S: number) {
   // scatter asphalt-colored flecks over everything so painted lines look chipped/worn
-  for (let i = 0; i < 2600; i++) { ctx.fillStyle = 'rgba(68,64,58,0.7)'; ctx.fillRect(Math.random() * S, Math.random() * S, 2 + Math.random() * 4, 1 + Math.random() * 3); }
+  for (let i = 0; i < 2600; i++) { ctx.fillStyle = 'rgba(68,64,58,0.7)'; ctx.fillRect(textureRandom() * S, textureRandom() * S, 2 + textureRandom() * 4, 1 + textureRandom() * 3); }
 }
 
 const cached: Partial<TextureSet> = {};
@@ -136,9 +153,9 @@ export function getMaterials(): TextureSet {
     speckle(c, S, S, 26000, [['#F0DEB4', 0.35], ['#96763F', 0.4], ['#B8965A', 0.3]], 1, 2);
     // scattered pebbles
     for (let i = 0; i < 260; i++) {
-      const x = Math.random() * S, y = Math.random() * S, r = 1.5 + Math.random() * 3;
-      c.fillStyle = Math.random() > 0.5 ? '#8E7A58' : '#A89370';
-      c.beginPath(); c.ellipse(x, y, r, r * 0.7, Math.random() * 3, 0, 7); c.fill();
+      const x = textureRandom() * S, y = textureRandom() * S, r = 1.5 + textureRandom() * 3;
+      c.fillStyle = textureRandom() > 0.5 ? '#8E7A58' : '#A89370';
+      c.beginPath(); c.ellipse(x, y, r, r * 0.7, textureRandom() * 3, 0, 7); c.fill();
       c.fillStyle = 'rgba(255,255,255,0.35)'; c.beginPath(); c.arc(x - r * 0.3, y - r * 0.3, r * 0.35, 0, 7); c.fill();
     }
     const [b, bc] = cv(S, S); bc.fillStyle = '#808080'; bc.fillRect(0, 0, S, S);
@@ -159,15 +176,15 @@ export function getMaterials(): TextureSet {
     c.fillStyle = '#8F836A'; c.fillRect(0, 0, S, S); // joint/grout
     const n = 6, s = S / n;
     for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++) {
-      const v = 168 + (Math.random() * 34) | 0;
-      const inset = 4 + Math.random() * 3;
+      const v = 168 + (textureRandom() * 34) | 0;
+      const inset = 4 + textureRandom() * 3;
       const x = gx * s + inset, y = gy * s + inset, w = s - inset * 2, h = s - inset * 2;
       c.fillStyle = `rgb(${v},${(v * 0.9) | 0},${(v * 0.73) | 0})`;
       c.fillRect(x, y, w, h);
       // stone grain inside each flag
       c.save(); c.beginPath(); c.rect(x, y, w, h); c.clip();
       speckle(c, S, S, 260, [['#000000', 0.07], ['#ffffff', 0.08]], 1, 3);
-      for (let k = 0; k < 3; k++) { const vx = x + Math.random() * w, vy = y + Math.random() * h; c.strokeStyle = 'rgba(80,70,50,0.18)'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(vx, vy); c.lineTo(vx + (Math.random() - 0.5) * 60, vy + (Math.random() - 0.5) * 60); c.stroke(); }
+      for (let k = 0; k < 3; k++) { const vx = x + textureRandom() * w, vy = y + textureRandom() * h; c.strokeStyle = 'rgba(80,70,50,0.18)'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(vx, vy); c.lineTo(vx + (textureRandom() - 0.5) * 60, vy + (textureRandom() - 0.5) * 60); c.stroke(); }
       c.restore();
       // bevel edges
       c.fillStyle = 'rgba(255,255,255,0.14)'; c.fillRect(x, y, w, 3); c.fillRect(x, y, 3, h);
@@ -210,8 +227,8 @@ export function getMaterials(): TextureSet {
     const rows = 16, bh = S / rows, bw = S / 8;
     for (let r = 0; r < rows; r++) for (let col = -1; col <= 8; col++) {
       const ox = (r % 2) * (bw / 2) + col * bw;
-      const v = 148 + (Math.random() * 46) | 0;
-      const jx = (Math.random() - 0.5) * 3, jy = (Math.random() - 0.5) * 2;
+      const v = 148 + (textureRandom() * 46) | 0;
+      const jx = (textureRandom() - 0.5) * 3, jy = (textureRandom() - 0.5) * 2;
       const x = ox + 4 + jx, y = r * bh + 4 + jy, w = bw - 8, h = bh - 8;
       c.fillStyle = `rgb(${v},${(v * 0.76) | 0},${(v * 0.5) | 0})`;
       c.fillRect(x, y, w, h);
@@ -223,7 +240,7 @@ export function getMaterials(): TextureSet {
       c.fillStyle = 'rgba(255,238,205,0.22)'; c.fillRect(x, y, w, 3); c.fillRect(x, y, 3, h);
       c.fillStyle = 'rgba(30,18,8,0.36)'; c.fillRect(x, y + h - 4, w, 4); c.fillRect(x + w - 4, y, 4, h);
       // occasional chipped corner
-      if (Math.random() < 0.18) { c.fillStyle = '#7E6040'; c.beginPath(); c.moveTo(x + w, y); c.lineTo(x + w - 14, y); c.lineTo(x + w, y + 12); c.fill(); }
+      if (textureRandom() < 0.18) { c.fillStyle = '#7E6040'; c.beginPath(); c.moveTo(x + w, y); c.lineTo(x + w - 14, y); c.lineTo(x + w, y + 12); c.fill(); }
     }
     valueNoise(c, S, S, 5, 0.12);
     const [b, bc] = cv(S, S); bc.fillStyle = '#404040'; bc.fillRect(0, 0, S, S);
@@ -242,10 +259,10 @@ export function getMaterials(): TextureSet {
     c.fillStyle = '#918A7D'; c.fillRect(0, 0, S, S);
     speckle(c, S, S, 22000, [['#ABA396', 0.45], ['#6A645A', 0.45], ['#7E776C', 0.4]], 1, 3);
     // air-bubble pitting
-    for (let i = 0; i < 700; i++) { const x = Math.random() * S, y = Math.random() * S, r = 1 + Math.random() * 2.5; c.fillStyle = 'rgba(50,46,40,0.45)'; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); c.fillStyle = 'rgba(255,255,255,0.18)'; c.beginPath(); c.arc(x + r * 0.5, y + r * 0.5, r * 0.5, 0, 7); c.fill(); }
+    for (let i = 0; i < 700; i++) { const x = textureRandom() * S, y = textureRandom() * S, r = 1 + textureRandom() * 2.5; c.fillStyle = 'rgba(50,46,40,0.45)'; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); c.fillStyle = 'rgba(255,255,255,0.18)'; c.beginPath(); c.arc(x + r * 0.5, y + r * 0.5, r * 0.5, 0, 7); c.fill(); }
     // stains
     for (let i = 0; i < 14; i++) {
-      const x = Math.random() * S, y = Math.random() * S, r = 60 + Math.random() * 120;
+      const x = textureRandom() * S, y = textureRandom() * S, r = 60 + textureRandom() * 120;
       const g = c.createRadialGradient(x, y, 4, x, y, r);
       g.addColorStop(0, 'rgba(60,54,46,0.28)'); g.addColorStop(1, 'rgba(60,54,46,0)');
       c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
@@ -271,9 +288,9 @@ export function getMaterials(): TextureSet {
     // tyre-polished wheel tracks (darker, smoother bands)
     for (const x of [S * 0.3, S * 0.7]) { const g = c.createLinearGradient(x - 70, 0, x + 70, 0); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.5, 'rgba(0,0,0,0.22)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(x - 70, 0, 140, S); }
     // oil stains
-    for (let i = 0; i < 8; i++) { const x = Math.random() * S, y = Math.random() * S, r = 30 + Math.random() * 70; const g = c.createRadialGradient(x, y, 2, x, y, r); g.addColorStop(0, 'rgba(10,8,6,0.4)'); g.addColorStop(1, 'rgba(10,8,6,0)'); c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
+    for (let i = 0; i < 8; i++) { const x = textureRandom() * S, y = textureRandom() * S, r = 30 + textureRandom() * 70; const g = c.createRadialGradient(x, y, 2, x, y, r); g.addColorStop(0, 'rgba(10,8,6,0.4)'); g.addColorStop(1, 'rgba(10,8,6,0)'); c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
     // tar-sealed cracks
-    for (let i = 0; i < 7; i++) { c.strokeStyle = 'rgba(12,10,8,0.85)'; c.lineWidth = 5; let x = Math.random() * S, y = Math.random() * S; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 6; k++) { x += (Math.random() - .5) * 90; y += (Math.random() - .5) * 90; c.lineTo(x, y); } c.stroke(); }
+    for (let i = 0; i < 7; i++) { c.strokeStyle = 'rgba(12,10,8,0.85)'; c.lineWidth = 5; let x = textureRandom() * S, y = textureRandom() * S; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 6; k++) { x += (textureRandom() - .5) * 90; y += (textureRandom() - .5) * 90; c.lineTo(x, y); } c.stroke(); }
     // faded white edge lines + centre dash (worn)
     c.fillStyle = 'rgba(225,220,205,0.5)'; c.fillRect(S * 0.06, 0, 8, S); c.fillRect(S * 0.94 - 8, 0, 8, S);
     for (let y = 0; y < S; y += 200) c.fillRect(S / 2 - 7, y + 20, 14, 110);
@@ -289,9 +306,9 @@ export function getMaterials(): TextureSet {
     const [d, c] = cv(256, 256);
     c.fillStyle = '#795737'; c.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 40; i++) {
-      c.strokeStyle = Math.random() > 0.5 ? 'rgba(40,26,14,0.3)' : 'rgba(160,120,76,0.25)';
-      c.lineWidth = 1 + Math.random() * 2;
-      c.beginPath(); const y = Math.random() * 256; c.moveTo(0, y);
+      c.strokeStyle = textureRandom() > 0.5 ? 'rgba(40,26,14,0.3)' : 'rgba(160,120,76,0.25)';
+      c.lineWidth = 1 + textureRandom() * 2;
+      c.beginPath(); const y = textureRandom() * 256; c.moveTo(0, y);
       for (let x = 0; x <= 256; x += 16) c.lineTo(x, y + Math.sin(x * 0.05) * 3);
       c.stroke();
     }
@@ -401,6 +418,57 @@ export function getMaterials(): TextureSet {
     }
     cached[key] = mat(d,b,mode==='wood'?1:2,2,mode==='metal'?0.63:0.94,mode==='metal'?0.35:0,0.07);
   }
+
+  // Map-specific finish families. These stay in the same procedural cache as the
+  // older surfaces: builders can ask for a limestone plinth or an oil-darkened
+  // warehouse floor without allocating a material for every building.
+  const makeFinish = (base: string, accent: string, mode: 'stone' | 'tile' | 'oil' | 'steel' | 'brick' | 'paint') => {
+    const [d, dc] = cv(256, 256), [b, bc] = cv(256, 256);
+    dc.fillStyle = base; dc.fillRect(0, 0, 256, 256);
+    bc.fillStyle = '#969696'; bc.fillRect(0, 0, 256, 256);
+    if (mode === 'stone' || mode === 'brick') {
+      const row = mode === 'brick' ? 22 : 52, col = mode === 'brick' ? 58 : 92;
+      for (let y = 0, r = 0; y < 256; y += row, r++) for (let x = -(r % 2) * col / 2; x < 256; x += col) {
+        dc.fillStyle = accent; dc.fillRect(x + 3, y + 3, col - 6, row - 6);
+        dc.strokeStyle = 'rgba(40,30,20,.45)'; dc.lineWidth = 3; dc.strokeRect(x, y, col, row);
+        bc.fillStyle = '#d0d0d0'; bc.fillRect(x + 4, y + 4, col - 8, row - 8);
+      }
+    } else if (mode === 'tile') {
+      for (let y = 0; y < 256; y += 32) for (let x = 0; x < 256; x += 32) {
+        dc.fillStyle = ((x / 32 + y / 32) % 2) ? accent : base;
+        dc.fillRect(x + 2, y + 2, 28, 28);
+        dc.strokeStyle = '#594c40'; dc.lineWidth = 2; dc.strokeRect(x + 1, y + 1, 30, 30);
+        bc.fillStyle = '#bdbdbd'; bc.fillRect(x + 3, y + 3, 26, 26);
+      }
+    } else if (mode === 'steel') {
+      for (let x = 0; x < 256; x += 16) {
+        dc.fillStyle = x % 32 ? base : accent; dc.fillRect(x, 0, 11, 256);
+        dc.strokeStyle = 'rgba(20,25,24,.6)'; dc.lineWidth = 2; dc.strokeRect(x + 2, 0, 8, 256);
+        bc.fillStyle = x % 32 ? '#a4a4a4' : '#606060'; bc.fillRect(x + 3, 0, 7, 256);
+      }
+    } else {
+      // Oil is represented by broad stains and tyre-polished tracks in the albedo,
+      // with a low-relief bump so it remains readable under a hard sun.
+      for (let i = 0; i < 9; i++) {
+        const x = (i * 71) % 240, y = (i * 43) % 220, r = 10 + (i % 4) * 8;
+        const g = dc.createRadialGradient(x, y, 1, x, y, r);
+        g.addColorStop(0, 'rgba(20,17,13,.48)'); g.addColorStop(1, 'rgba(20,17,13,0)');
+        dc.fillStyle = g; dc.beginPath(); dc.arc(x, y, r, 0, Math.PI * 2); dc.fill();
+        bc.fillStyle = '#686868'; bc.fillRect(x - r / 2, y - 2, r, 4);
+      }
+    }
+    for (let i = 0; i < 900; i++) {
+      dc.fillStyle = i % 2 ? 'rgba(255,255,255,.08)' : 'rgba(20,18,15,.08)';
+      dc.fillRect((i * 37) % 256, (i * 83) % 256, 1 + i % 2, 1);
+    }
+    return mat(d, b, mode === 'steel' ? 2.5 : 3, 3, mode === 'steel' ? 0.64 : 0.88, mode === 'steel' ? 0.36 : 0, mode === 'tile' ? 0.06 : 0.08);
+  };
+  cached.limestoneCourse = makeFinish('#b9b09b', '#d9d0b8', 'stone');
+  cached.marketTile = makeFinish('#b87d5b', '#6d9ba1', 'tile');
+  cached.oilStainedConcrete = makeFinish('#726e65', '#2d2924', 'oil');
+  cached.industrialSteel = makeFinish('#64716f', '#3f4b4a', 'steel');
+  cached.warehouseBrick = makeFinish('#8b5943', '#a66e50', 'brick');
+  cached.hazardPaint = makeFinish('#c28b29', '#302a20', 'paint');
 
   // Packed earth serves both rendered walls and trampled service paths in one batch.
   cached.dirtPath = cached.packedEarth;

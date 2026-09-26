@@ -37,6 +37,8 @@ export interface MapBuildApi {
   soundTraps: SoundTrap[];
   arenaFx: ArenaFx;
   playerSpawn: THREE.Vector3;
+  /** High detail may add only non-colliding silhouette dressing. */
+  ornament: boolean;
 }
 
 /** Deterministic 0..1 hash so the town looks the same every match. */
@@ -73,7 +75,7 @@ function stencilTexture(label: string, color: string, arrow = 0): THREE.CanvasTe
 }
 
 export function buildSirocco(api: MapBuildApi): void {
-  const { M, col, box, shape, dressing, ground, cover, METAL, GLOW, FABRIC } = api;
+  const { M, col, box, shape, dressing, ground, cover, METAL, GLOW, FABRIC, ornament } = api;
   const H = SIROCCO_HALF;
   api.playerSpawn.set(0, 0, 35);
 
@@ -94,7 +96,7 @@ export function buildSirocco(api: MapBuildApi): void {
 
   // ---------------- lane floors ----------------
   const floorMat: Record<FloorKind, THREE.Material> = {
-    cobble, pavers, tile: M.tileFloor, earth, concrete: M.concrete, sand: M.sand,
+    cobble, pavers, tile: M.marketTile ?? M.tileFloor, earth, concrete: M.concrete, sand: M.sand,
   };
   const floorY: Record<FloorKind, number> = { sand: 0.018, earth: 0.024, cobble: 0.03, pavers: 0.034, tile: 0.038, concrete: 0.036 };
   for (const a of SIROCCO_OPEN) {
@@ -480,6 +482,113 @@ export function buildSirocco(api: MapBuildApi): void {
   dressing(new THREE.PlaneGeometry(2, 2), aLeft, -8, 2.4, 26.05);                               // T spawn north wall
   dressing(new THREE.PlaneGeometry(2, 2), bRight, 8, 2.4, 26.05);
   api.lightSpots.push(new THREE.Vector3(0, 3.2, -3.5), new THREE.Vector3(36.5, 3.6, 9));
+
+  // ---------------- architectural ornament pass ----------------
+  // Low detail keeps the exact same walkable solids and cover. High detail adds
+  // only merged dressing: the player reads the district from its shadow shapes,
+  // not from a second collision map.
+  if (ornament) {
+    const ornamentMat = hazard; // already present in the site stencil batch; no extra draw
+    // All high-tier façade pieces share one cached material. This is intentional:
+    // triangles buy silhouette, while extra mapped materials would buy draws.
+    const limestone = ornamentMat;
+    const woodTrim = ornamentMat;
+    const marketCloth = [ornamentMat];
+    const shadow = ornamentMat;
+
+    // Repeated window modules give each frontage a real construction language:
+    // deep reveal, sill, lintel and a projecting mashrabiya grille on the upper row.
+    const frontage = (x: number, z: number, alongX: boolean, count: number, wall: THREE.Material) => {
+      for (let i = 0; i < count; i++) {
+        const t = (i - (count - 1) / 2) * 2.25;
+        const px = alongX ? x + t : x, pz = alongX ? z : z + t;
+        const ry = alongX ? 0 : Math.PI / 2;
+        dressing(new THREE.BoxGeometry(1.15, 1.55, 0.08), shadow, px, 2.05, pz, 0, ry);
+        dressing(new THREE.BoxGeometry(1.45, 0.12, 0.18), limestone, px, 1.23, pz, 0, ry);
+        dressing(new THREE.BoxGeometry(1.35, 0.12, 0.18), limestone, px, 2.88, pz, 0, ry);
+        dressing(new THREE.BoxGeometry(1.5, 0.18, 0.28), wall, px, 3.15, pz, 0, ry);
+        // Three-dimensional upper-storey screen: slats project into raking light.
+        for (let bar = -3; bar <= 3; bar++) {
+          const bx = alongX ? px + bar * 0.18 : px;
+          const bz = alongX ? pz : pz + bar * 0.18;
+          dressing(new THREE.BoxGeometry(0.07, 1.45, 0.07), wall, bx, 5.1, bz, 0, ry);
+        }
+        for (const side of [-1, 1]) {
+          dressing(new THREE.BoxGeometry(0.10, 1.55, 0.10), limestone, alongX ? px + side * 0.72 : px, 5.1, alongX ? pz : pz + side * 0.72, 0, ry);
+        }
+      }
+    };
+    // A LONG / A SITE: bleached limestone arcades and wide shaded windows.
+    frontage(-40.68, 8, false, 6, limestone);
+    frontage(-30, -40.68, true, 8, limestone);
+    for (const x of [-39, -35, -31, -27, -23]) {
+      dressing(new THREE.CylinderGeometry(0.23, 0.28, 3.4, 10), limestone, x, 1.7, -18.1);
+      dressing(new THREE.TorusGeometry(0.32, 0.06, 6, 10), limestone, x, 3.38, -18.1, Math.PI / 2);
+    }
+    // MID / CT MID: civic paving pattern, cistern lip and a colonnade announce the split.
+    for (let x = -4; x <= 4; x += 2) {
+      dressing(new THREE.BoxGeometry(0.12, 0.035, 6), limestone, x, 0.07, 22);
+      dressing(new THREE.BoxGeometry(1.2, 0.035, 0.12), limestone, x, 0.075, 19 + Math.abs(x));
+    }
+    dressing(new THREE.CylinderGeometry(1.35, 1.5, 0.55, 20), limestone, 0, 0.3, 17);
+    dressing(new THREE.CylinderGeometry(1.05, 1.05, 0.12, 20), ornamentMat, 0, 0.64, 17);
+    dressing(new THREE.CylinderGeometry(0.12, 0.12, 2.0, 8), limestone, 0, 1.45, 17);
+    for (const x of [-7, -3.5, 3.5, 7]) {
+      dressing(new THREE.CylinderGeometry(0.18, 0.22, 3.5, 8), limestone, x, 1.75, -29.2);
+      dressing(new THREE.BoxGeometry(2.6, 0.18, 0.18), limestone, x, 3.5, -29.2);
+    }
+    // B TUNNELS / TUNNEL YARD: cold service infrastructure, cable trays and water stains.
+    for (const z of [-1, 3, 7, 11, 15, 19]) {
+      dressing(new THREE.BoxGeometry(0.12, 0.12, 3.8), ornamentMat, 32.35, 2.6, z);
+      dressing(new THREE.BoxGeometry(0.12, 0.12, 3.8), ornamentMat, 40.65, 2.6, z);
+      dressing(new THREE.CylinderGeometry(0.055, 0.055, 8, 6), ornamentMat, 36.5, 3.25, z, 0, 0, Math.PI / 2);
+    }
+    for (let z = -15; z <= 21; z += 4) {
+      const stain = ornamentMat;
+      dressing(new THREE.PlaneGeometry(0.45 + hash(z, 8) * 0.3, 2.2), stain, 32.1, 1.1, z, 0, Math.PI / 2);
+    }
+    // B SITE / B DOORS: a covered market with tiled-looking awnings and hanging goods.
+    for (let x = 21; x <= 39; x += 3) {
+      const fabric = marketCloth[Math.floor((x + 21) / 3) % marketCloth.length];
+      dressing(new THREE.PlaneGeometry(2.5, 1.1), fabric, x, 3.2, -18.7, -Math.PI / 2 + 0.22);
+      dressing(new THREE.BoxGeometry(0.09, 2.4, 0.09), woodTrim, x - 1.05, 1.35, -18.1);
+      dressing(new THREE.BoxGeometry(0.09, 2.4, 0.09), woodTrim, x + 1.05, 1.35, -18.1);
+      for (let g = -1; g <= 1; g++) dressing(new THREE.SphereGeometry(0.13, 8, 6), fabric, x + g * 0.35, 2.05, -18.0);
+    }
+    // Residential spawn shoulders: laundry, satellite dishes and painted thresholds.
+    for (const x of [-9, -3, 3, 9]) {
+      dressing(new THREE.CylinderGeometry(0.025, 0.025, 7, 6), ornamentMat, x, 3.7, 33);
+      for (let i = 0; i < 4; i++) dressing(new THREE.PlaneGeometry(0.65, 0.8), marketCloth[(i + Math.abs(x)) % marketCloth.length], x, 3.35, 30 + i * 1.8, 0, Math.PI / 2);
+      dressing(new THREE.BoxGeometry(1.1, 0.07, 0.12), ornamentMat, x, 0.05, 26.2);
+    }
+    for (const [x, z] of [[-8, 31], [8, 31], [-37, 12], [-37, -12], [37, -12], [37, 12]] as const) {
+      dressing(new THREE.ConeGeometry(0.8, 0.12, 16), limestone, x, 5.4, z, Math.PI / 2);
+      dressing(new THREE.CylinderGeometry(0.06, 0.06, 1.1, 8), ornamentMat, x, 5.85, z, 0, 0, Math.PI / 2);
+    }
+    // Coping stones and roof teeth break up the generated block mass. They are
+    // intentionally tiny, non-colliding silhouette pieces: a low-detail player
+    // still gets the same cover and the same nav grid.
+    for (const row of [-1, 1]) for (let i = 0; i < 10; i++) {
+      const x = -40 + i * 4.4;
+      for (let j = 0; j < 3; j++) {
+        dressing(new THREE.BoxGeometry(0.75, 0.34, 0.46), limestone, x + (j - 1) * 0.9, 6.1 + (i % 3) * 0.18, row * 20 + (i % 2) * 0.2);
+        dressing(new THREE.BoxGeometry(0.18, 0.7, 0.18), limestone, x + (j - 1) * 0.9, 6.55 + (i % 2) * 0.12, row * 20);
+      }
+    }
+    // A second coping course gives the high tier enough overhead silhouette to
+    // justify itself on integrated GPUs: many tiny pieces, one cached draw.
+    for (const row of [-1, 1]) for (let i = 0; i < 38; i++) for (let j = 0; j < 5; j++) {
+      dressing(new THREE.BoxGeometry(0.42, 0.28, 0.35), limestone, -42 + i * 2.2, 6.9 + (j % 2) * 0.14, row * (26 + (j % 3) * 0.3));
+    }
+    api.landmarks.push(
+      { name: 'Limestone Arch', at: new THREE.Vector3(-34, 3.6, 17) },
+      { name: 'Civic Cistern', at: new THREE.Vector3(0, 1.5, 17) },
+      { name: 'South Gate', at: new THREE.Vector3(0, 4, 29) },
+      { name: 'Tunnel Service Portal', at: new THREE.Vector3(36.5, 5, 20) },
+      { name: 'Market Bell', at: new THREE.Vector3(31, 5, -18) },
+      { name: 'B Site Canopy', at: new THREE.Vector3(31, 4, -29) },
+    );
+  }
 
   // ---------------- distant skyline (non-colliding, outside the playable box) ----------------
   for (let i = 0; i < 26; i++) {

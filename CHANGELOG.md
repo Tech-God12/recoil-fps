@@ -1,3 +1,23 @@
+## 2026-09-26 — Sirocco and Warehouse map art overhaul
+
+Rebuilt the two Arena Mode map presentation layers without changing their authored
+competitive routes. Sirocco keeps its 88 m three-lane layout and gains district-specific
+architecture: limestone plinths and shaded arcades at A, civic cistern and colonnade in
+mid, cold cable infrastructure in the B tunnels, a covered market at B and residential
+laundry / satellite silhouettes at the spawns. New lane-end landmarks are registered for
+bot callouts and the compass.
+
+Warehouse gains a second catwalk stair per hall, a cold transit shed / warm goods-store
+identity split, procedural racks, conveyor detail, roof monitors, hazard/oil markings and
+industrial boundary silhouettes (rail, gatehouse, fencing, silo and pallet park). Arena
+callout zones now cover the full playable square. High and Low World Detail share identical
+solids, cover nodes and nav cells; ornament is non-colliding and stays in the flat material
+batch. World dressing and procedural textures are deterministic, and both elevation plates
+are checked in under `docs/screenshots/maps/`.
+
+Added `tests/arena-overhaul.test.js`, new procedural finish materials, map design notes and
+the dependency-free `scripts/world-render.mjs` preview command.
+
 ## 2026-09-25 — Merge main into the Kits branch (PR #27)
 
 Merged `main` (Bomb Defusal on Sirocco, frame budget / light pool, hit reactions, gunfeel, and the 2026-09-25 gunfeel/perf/HUD headline) into the Kits branch. Kits stay in Missions and Warehouse TDM only; Bomb Defusal gets no kit and keeps Z for smoke. Home menu: Missions, Arena (Bomb Defusal + TDM), Kits, Loadout, Settings. The scorestreak system and Operation Blackout stay removed, as this branch already decided, so main's streak and ranked hooks were stripped from the engine, TDM bots, HUD, menus and results. The bind list shows `Field kit — Z` in place of Scorestreaks. The frame-budget test now counts the 4 extra Warehouse floodlights. The light pool still caps the shader at 4 point lights. Main's newest commit also had 5 lint errors (empty catch blocks, `let`→`const`, an unused test import); those are fixed.

@@ -2,14 +2,34 @@
 // glass, debris, spatial audio — so an engine test needs the audio layer to
 // exist without a browser. Every unknown property resolves to a callable that
 // returns another node, which is enough for a graph-building audio engine.
+/**
+ * AudioParam stand-in that actually remembers what was scheduled on it.
+ *
+ * The original stub swallowed setValueAtTime/ramps and left `.value` at 0,
+ * which meant a test could not tell a carefully shaped envelope from silence —
+ * any assertion about level or pitch was vacuous. Scheduling methods now record
+ * into `.schedule` and update `.value` to the most recent target, so tests can
+ * inspect the envelope a synth voice was built with.
+ */
 function makeParam() {
-  return new Proxy({ value: 0 }, {
-    get(target, key) {
-      if (key in target) return target[key];
+  const target = { value: 0, schedule: [] };
+  const record = name => (value, time) => {
+    if (typeof value === 'number') {
+      target.schedule.push({ name, value, time });
+      target.value = value;
+    }
+    return target;
+  };
+  return new Proxy(target, {
+    get(t, key) {
+      if (key in t) return t[key];
       if (typeof key === 'symbol') return undefined;
-      return target[key] = () => {};
+      if (typeof key === 'string' && /^(setValueAtTime|linearRampToValueAtTime|exponentialRampToValueAtTime|setTargetAtTime)$/.test(key)) {
+        return t[key] = record(key);
+      }
+      return t[key] = () => {};
     },
-    set(target, key, value) { target[key] = value; return true; },
+    set(t, key, value) { t[key] = value; return true; },
   });
 }
 

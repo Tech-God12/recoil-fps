@@ -34,7 +34,7 @@ export class WeaponAssembly {
     sightY: number; sockets: Partial<Record<AttachSlot, Point3>>;
     muzzleTip: Point3; arms: ArmAnchors; pistol?: boolean;
   }): WeaponModel {
-    const ids: Record<string, string> = { M416:'m4a1','AK-47':'ak47','M1911 A1':'m1911',AWM:'awm',MP7:'mp7','SCAR-H':'scar_h','KRISS Vector':'vector','SPAS-12':'spas12','Desert Eagle':'deagle','M249 SAW':'m249' };
+    const ids: Record<string, string> = { M416:'m4a1','AK-47':'ak47','M1911 A1':'m1911',AWM:'awm',MP7:'mp7','SCAR-H':'scar_h','KRISS Vector':'vector','SPAS-12':'spas12','Desert Eagle':'deagle','M249 SAW':'m249','MCX Spear':'mcx_spear' };
     this.group.userData.weaponId = ids[this.group.name];
     this.body.build(this.group);
     for (const { b, group } of this.parts) b.build(group);
@@ -248,7 +248,7 @@ export function telescopicSight(b: GunBuilder, parent: THREE.Group, baseY: numbe
   parent.add(crosshair); adsHidden.push(crosshair);
 }
 
-const MARKS = ['M416  /  5.56 x 45', 'AK-47  /  7.62', 'SCAR-H  /  7.62 x 51', 'AWM  /  .338', 'MP7  /  4.6 x 30', 'KRISS VECTOR  /  .45', 'SPAS 12  /  12 GA', 'M249  /  5.56', 'M1911 A1  /  .45 AUTO', 'DESERT EAGLE  /  .50 AE', 'SAFE     SEMI     AUTO', 'SERIAL  026-4917', '200 RDS  5.56 x 45', 'LINKED  /  LOT 249-06', 'M416   5.56 mm   /   047126', 'SCAR H   7.62 x 51   /   090781'];
+const MARKS = ['M416  /  5.56 x 45', 'AK-47  /  7.62', 'SCAR-H  /  7.62 x 51', 'AWM  /  .338', 'MP7  /  4.6 x 30', 'KRISS VECTOR  /  .45', 'SPAS 12  /  12 GA', 'M249  /  5.56', 'M1911 A1  /  .45 AUTO', 'DESERT EAGLE  /  .50 AE', 'SAFE     SEMI     AUTO', 'SERIAL  026-4917', '200 RDS  5.56 x 45', 'LINKED  /  LOT 249-06', 'M416   5.56 mm   /   047126', 'SCAR H   7.62 x 51   /   090781', 'MCX-SPEAR  /  6.8 x 51', 'SIG SAUER INC   NEWINGTON NH'];
 let markingMat: THREE.MeshStandardMaterial | undefined;
 /** One tiny shared engraving atlas. Node geometry tests do not require a DOM. */
 function markings(): THREE.MeshStandardMaterial {

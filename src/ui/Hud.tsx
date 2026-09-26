@@ -21,6 +21,12 @@ export interface HudFx {
   kitMsg: { id: number; text: string } | null;
   /** Screen-space kit effect (ping sweep, slam dust, decoy glitch...); keyed to replay. */
   kitFx: { id: number; kind: KitFxKind } | null;
+  /**
+   * QoL floating damage numbers. Positions are normalised screen coordinates
+   * captured at the moment of impact — the element then animates upward on its
+   * own, so a burst of hits costs no per-frame work.
+   */
+  dmgNums: { id: number; amount: number; headshot: boolean; kill: boolean; nx: number; ny: number }[];
 }
 
 /* ================================================================
@@ -163,6 +169,20 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
 
       {/* ============ FIELD KIT ============ */}
       {fx.kitFx && <KitFx key={fx.kitFx.id} kind={fx.kitFx.kind} />}
+
+      {/* QoL — floating damage numbers. Pure CSS animation from a position
+          captured at impact; nothing here re-projects per frame. */}
+      {s.damageNumbers && fx.dmgNums.length > 0 && (
+        <div className="dmgnum-layer" aria-hidden="true">
+          {fx.dmgNums.map(n => (
+            <span
+              key={n.id}
+              className={`dmgnum${n.headshot ? ' head' : ''}${n.kill ? ' kill' : ''}`}
+              style={{ left: `${n.nx * 100}%`, top: `${n.ny * 100}%` }}
+            >{n.amount}</span>
+          ))}
+        </div>
+      )}
       {fx.kitMsg && <KitMessage key={fx.kitMsg.id} text={fx.kitMsg.text} />}
       {hud.kit?.hint && active !== false && !hud.tdm?.playerDead && <KitHint kit={hud.kit} />}
 
@@ -255,7 +275,10 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
         ))}
       </div>
       {s.showFps && (
-        <span className="fps-chip hud-chip absolute bottom-3 left-1/2 -translate-x-1/2" style={{ color: fpsColor }}>{hud.fps} FPS{hud.renderScale < 100 ? ` · ${hud.renderScale}%` : ''}</span>
+        <span className="fps-chip hud-chip absolute bottom-3 left-1/2 -translate-x-1/2" style={{ color: fpsColor }}>
+          {hud.fps} FPS{hud.renderScale < 100 ? ` · ${hud.renderScale}%` : ''}
+          {hud.qualityTier && hud.qualityTier !== 'Ultra' ? ` · ${hud.qualityTier}` : ''}
+        </span>
       )}
 
       {/* ============ CENTER STACK ============ */}

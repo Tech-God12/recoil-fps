@@ -39,9 +39,9 @@ const DEFAULT_HUD: HudState = {
   frags: 5, flashes: 2, bearing: 0, kills: 0, score: 0, enemiesLeft: 0, cooking: false, sprinting: false, sprintLock: 0,
   canVault: false, ads: 0, spread: 0, cash: 0, secondaryWeapon: '', heldSlot: 'primary',
   bipodDeployed: false, reticle: 'none', scopePower:1, scopeMinPower:1, scopeMaxPower:1, scopeAdjusting:false, canted:false, zoomFov: 60, lpvoHigh: false, pumping: false, pings: [],
-  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, renderScale: 100, worldHalf: 104, landmark: null,
+  mapImage: '', playerMap: { nx: 0.5, nz: 0.5 }, enemiesMap: [], fps: 60, renderScale: 100, qualityTier: 'Ultra', worldHalf: 104, landmark: null,
 };
-const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null });
+const emptyFx = (): HudFx => ({ hitmark: null, feed: [], dmgArcs: [], scorePops: [], banner: null, callout: null, flashPow: 0, missionBanner: null, kitMsg: null, kitFx: null, dmgNums: [] });
 
 export interface ResultsWallet { before: number; after: number; gradeBonus: number; earned: number }
 
@@ -92,6 +92,17 @@ export default function App() {
     setProfile(next);
     saveProfile(next);
   }, []);
+
+  // QoL — colour-blind palette. Applied to <body> so the three HUD status
+  // variables resolve differently for every element at once, including anything
+  // rendered outside the React tree.
+  useEffect(() => {
+    const mode = settings.colorblind ?? 'off';
+    const classes = ['cb-protanopia', 'cb-deuteranopia', 'cb-tritanopia'];
+    document.body.classList.remove(...classes);
+    if (mode !== 'off') document.body.classList.add(`cb-${mode}`);
+    return () => document.body.classList.remove(...classes);
+  }, [settings.colorblind]);
 
   // The balance grant remains an explicit development-only test affordance.
   useEffect(() => {
@@ -159,6 +170,12 @@ export default function App() {
         // Hitmarkers must never linger: clear after the flash unless a newer one replaced it.
         // Headshot confirms get a slightly longer linger so the diamond reads (G6).
         later(() => setFx(f => f.hitmark?.id === id ? { ...f, hitmark: null } : f), event.headshot ? 520 : event.kill ? 450 : 260);
+        break;
+      case 'dmgnum':
+        // Cap the live list: a shotgun blast or an LMG burst can land eight hits
+        // in a few frames, and stacking every one of them just makes mush.
+        setFx(f => ({ ...f, dmgNums: [...f.dmgNums.slice(-7), { id, ...event }] }));
+        later(() => setFx(f => ({ ...f, dmgNums: f.dmgNums.filter(n => n.id !== id) })), 900);
         break;
       case 'kill':
         setFx(f => ({

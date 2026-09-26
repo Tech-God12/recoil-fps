@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS } from '../game/engine';
 import { MAPS, isMissionMap } from '../game/world';
 import { Panel, SectionTitle, Slider, Toggle, Segmented, ColorPick, CBtn } from './components';
 import { BINDS } from './bindings';
+import { QUALITY_TIERS } from '../game/perf-director';
 
 const PRESETS: { id: string; label: string; hint: string; tag: string; v: Partial<GameSettings> }[] = [
   { id: 'perf', label: 'Performance', hint: 'Max FPS', tag: 'FPS', v: { resolutionScale: 60, shadowQuality: 'off', bloom: false, vignette: 0, filmGrain: 0 } },
@@ -60,6 +61,13 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <Toggle label="Invert vertical look" value={s.invertY} onChange={v => set({ invertY: v })} />
                   <Toggle label="Hold to aim" value={!s.adsToggle} onChange={v => set({ adsToggle: !v })} hint={s.adsToggle ? 'Click to toggle scope' : 'Hold right mouse to aim'} />
                   <div className="mt-6">
+                    <SectionTitle sub="Fewer keys to hold, fewer fights lost to housekeeping">Quality of life</SectionTitle>
+                    <Toggle label="Auto-reload when empty" value={s.autoReload ?? true} onChange={v => set({ autoReload: v })} hint="Starts the reload the moment the last round leaves the gun" />
+                    <Toggle label="Auto-sprint" value={s.autoSprint ?? false} onChange={v => set({ autoSprint: v })} hint="Run at full speed without holding Shift" />
+                    <Toggle label="Hold to crouch" value={s.holdCrouch ?? false} onChange={v => set({ holdCrouch: v })} hint={s.holdCrouch ? 'Release C to stand' : 'C toggles the stance'} />
+                    <Toggle label="Damage numbers" value={s.damageNumbers ?? true} onChange={v => set({ damageNumbers: v })} hint="Floating hit values, brighter on headshots and kills" />
+                  </div>
+                  <div className="mt-6">
                     <SectionTitle sub="Enemy reaction and squad tactics">Difficulty</SectionTitle>
                     <Segmented label="Threat level" value={s.difficulty} options={[{ v: 'Easy', l: 'Recruit' }, { v: 'Normal', l: 'Regular' }, { v: 'Hard', l: 'Veteran' }]} onChange={v => set({ difficulty: v })} />
                   </div>
@@ -98,7 +106,29 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <p className="text-[12px] leading-snug text-[var(--bone-dim)] mb-3">Biggest FPS levers, in order: resolution scale, shadows, then bloom/film grain (either one switches on the extra post-processing passes). Vignette is free.</p>
                   <Slider label="Resolution scale" value={s.resolutionScale} min={50} max={100} unit="%" onChange={v => set({ resolutionScale: v })} />
                   <Segmented label="Shadows" value={s.shadowQuality} options={[{ v: 'off', l: 'Off' }, { v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High' }]} onChange={v => set({ shadowQuality: v })} />
-                  <Toggle label="Adaptive resolution" value={s.adaptiveResolution ?? true} onChange={v => set({ adaptiveResolution: v })} />
+                  <Toggle label="Adaptive quality" value={s.adaptiveResolution ?? true} onChange={v => set({ adaptiveResolution: v })} hint="Holds your frame rate by trading resolution, shadows and effects" />
+                  {(s.adaptiveResolution ?? true) && (
+                    <div className="qual-ladder">
+                      <div className="qual-ladder-head">
+                        <span className="mono">Detail ceiling</span>
+                        <span className="mono dim">{s.graphicsQuality === 'auto' ? 'Automatic' : `Pinned · ${s.graphicsQuality}`}</span>
+                      </div>
+                      <div className="qual-ladder-row">
+                        {['auto', ...QUALITY_TIERS.map(t => t.name)].map(name => (
+                          <button
+                            key={name}
+                            onClick={() => set({ graphicsQuality: name })}
+                            aria-pressed={s.graphicsQuality === name}
+                            className={`qual-pip ${s.graphicsQuality === name ? 'on' : ''}`}
+                          >{name === 'auto' ? 'AUTO' : name}</button>
+                        ))}
+                      </div>
+                      <p className="qual-ladder-note">
+                        Automatic starts from a guess about your machine and then climbs or drops a tier at a
+                        time to hold 60 FPS. Pin a tier if you would rather have a fixed look than a fixed frame rate.
+                      </p>
+                    </div>
+                  )}
                   <Toggle label="Show FPS" value={s.showFps} onChange={v => set({ showFps: v })} />
                 </div>
                 <div>
@@ -108,7 +138,21 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   {s.bloom && <Slider label="Bloom strength" value={s.bloomStrength} min={0} max={100} onChange={v => set({ bloomStrength: v })} />}
                   <Slider label="Vignette" value={s.vignette} min={0} max={70} onChange={v => set({ vignette: v })} />
                   <Slider label="Film grain" value={s.filmGrain} min={0} max={100} onChange={v => set({ filmGrain: v })} />
-                  <Slider label="Camera shake" value={s.cameraShake} min={0} max={100} unit="%" onChange={v => set({ cameraShake: v })} />
+                    <Slider label="Camera shake" value={s.cameraShake} min={0} max={100} unit="%" onChange={v => set({ cameraShake: v })} />
+                  <div className="mt-6">
+                    <SectionTitle sub="Health, hit and objective signalling">Accessibility</SectionTitle>
+                    <Segmented
+                      label="Colour-blind mode"
+                      value={s.colorblind ?? 'off'}
+                      options={[{ v: 'off', l: 'Off' }, { v: 'protanopia', l: 'Prot.' }, { v: 'deuteranopia', l: 'Deut.' }, { v: 'tritanopia', l: 'Trit.' }]}
+                      onChange={v => set({ colorblind: v })}
+                    />
+                    <p className="text-[12px] leading-snug text-[var(--bone-dim)] mt-2">
+                      The default HUD separates good from bad using red and green, which is the exact
+                      pair red-green deficiency collapses. These palettes move the danger signal into
+                      blue and orange so the separation survives.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

@@ -276,50 +276,101 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       }
     }
     ground(cx, cz, w - 0.8, d - 0.8, M.tileFloor, 0.04);
-    // Furnished corners leave the opposing doors and west stairwell clear.
-    for (let f=0;f<floors;f++) {
-      const fy=f ? f*fh+0.24 : 0.05;
-      const bx=x0+w-1.35,bz=z0+1.65;
-      const fabric=FABRIC[Math.abs(Math.round(cx+cz))%FABRIC.length];
-      // Room identity follows the building, not a universal bedroom prefab.
-      // Workshops get a workbench/tool chest; homes retain upholstered divans.
-      if (style === 1 || style === 3) {
-        box(bx,fy+0.85,bz,1.55,0.12,2.2,timber);
-        for(const dx of [-0.6,0.6]) for(const dz of [-0.9,0.9]) box(bx+dx,fy+0.4,bz+dz,0.1,0.8,0.1,METAL,false);
-        box(bx,fy+1.04,bz,0.7,0.25,0.6,style===1?METAL:M.sandbag,false);
-        for(const dz of [-0.65,0.65]) shape(new THREE.CylinderGeometry(0.15,0.2,0.32,8),ACC_TERRA,bx,fy+1.07,bz+dz);
+
+    // ── INTERIOR PROGRAM ──────────────────────────────────────────────────
+    // Previously every floor of every building received the same five pieces:
+    // divan, writing table, bookcase, rug and a ceiling beam with a lamp. That
+    // is what made the town read as cluttered — forty identical rooms, none of
+    // which told you anything about the building you had just breached.
+    //
+    // Each building now gets ONE program, and the program furnishes the ground
+    // floor and the upper floors differently. Crucially, a room is allowed to be
+    // nearly empty: restraint is what makes the furnished rooms read as lived in,
+    // and it is also the cheapest possible performance win.
+    const program = (['home', 'workshop', 'store', 'shop'] as const)[style];
+    for (let f = 0; f < floors; f++) {
+      const fy = f ? f * fh + 0.24 : 0.05;
+      const ground0 = f === 0;
+      const fabric = FABRIC[Math.abs(Math.round(cx + cz)) % FABRIC.length];
+      // Anchor points hugging the walls, so the centre of the room — the part
+      // you actually fight through — stays clear.
+      const backX = x0 + w - 1.35, backZ = z0 + 1.65;
+      const sideX = x0 + w - 1.7, sideZ = z0 + d - 1.4;
+
+      if (program === 'workshop' && ground0) {
+        // Ground floor is the working space: bench, vice, stock rack. Nothing else.
+        box(backX, fy + 0.85, backZ, 1.55, 0.12, 2.2, timber);
+        for (const dx of [-0.6, 0.6]) for (const dz of [-0.9, 0.9]) box(backX + dx, fy + 0.4, backZ + dz, 0.1, 0.8, 0.1, METAL, false);
+        box(backX, fy + 1.04, backZ - 0.7, 0.34, 0.26, 0.3, METAL, false);              // vice
+        for (const dz of [-0.2, 0.3, 0.8]) box(backX - 0.1, fy + 0.94, backZ + dz, 0.9, 0.05, 0.08, METAL, false); // stock bar
+        // Timber leaning in the corner: vertical lines break up a flat wall.
+        for (let i = 0; i < 4; i++) box(x0 + 0.55 + i * 0.16, fy + 1.25, z0 + 0.7, 0.10, 2.4, 0.10, timber, false);
+      } else if (program === 'store' && ground0) {
+        // A storeroom is stacked goods, not furniture. Stacks are staggered so
+        // they read as a wall of crates rather than a grid.
+        for (let i = 0; i < 3; i++) {
+          const gx = x0 + 1.2 + i * 1.3, gh = 1 + (i % 2);
+          for (let k = 0; k < gh; k++) box(gx, fy + 0.34 + k * 0.66, z0 + 1.1 + (i % 2) * 0.25, 1.1, 0.64, 1.0, timber);
+        }
+        for (const dz of [-0.6, 0.35]) shape(new THREE.CylinderGeometry(0.34, 0.34, 0.9, 12), METAL, x0 + w - 1.0, fy + 0.45, cz + dz);
+        shape(new THREE.PlaneGeometry(1.5, 1.0), fabric, x0 + 2.2, fy + 1.52, z0 + 0.62, 0, 0, 0.06); // tarp over the stack
+      } else if (program === 'shop' && ground0) {
+        // Shopfront: a long counter facing the street door, shelving behind it.
+        const cz0 = z0 + d - 2.3;
+        box(cx, fy + 0.52, cz0, w - 3.4, 1.0, 0.72, timber);
+        box(cx, fy + 1.06, cz0, w - 3.2, 0.09, 0.92, M.concrete, false);                 // counter top
+        for (let row = 0; row < 3; row++) {
+          box(x0 + w - 0.5, fy + 0.5 + row * 0.62, cz, 0.42, 0.06, Math.min(3.4, d - 2), timber, false);
+          for (let j = 0; j < 4; j++) {
+            shape(new THREE.CylinderGeometry(0.11, 0.13, 0.26, 8), ACC_TERRA, x0 + w - 0.5, fy + 0.66 + row * 0.62, cz - 1.2 + j * 0.8);
+          }
+        }
+      } else if (ground0) {
+        // A home's ground floor is where the family sits: divan and a low table.
+        box(backX, fy + 0.22, backZ, 1.55, 0.25, 2.2, timber);
+        box(backX, fy + 0.42, backZ, 1.48, 0.18, 2.12, fabric);
+        for (const dz of [-0.72, 0.72]) box(backX, fy + 0.57, backZ + dz, 1.28, 0.18, 0.46, M.sandbag, false);
+        box(sideX, fy + 0.42, sideZ, 1.1, 0.07, 0.7, timber);
+        for (const dx of [-0.45, 0.45]) for (const dz of [-0.25, 0.25]) box(sideX + dx, fy + 0.2, sideZ + dz, 0.07, 0.4, 0.07, timber, false);
       } else {
-      // Divan: raised wooden frame, thick upholstered cushion and pillows.
-      box(bx,fy+0.22,bz,1.55,0.25,2.2,timber);
-      box(bx,fy+0.42,bz,1.48,0.18,2.12,fabric);
-      for (const dz of [-0.72,0.72]) box(bx,fy+0.57,bz+dz,1.28,0.18,0.46,M.sandbag,false);
+        // UPPER FLOORS ARE SPARSE ON PURPOSE. One piece against one wall, and
+        // a shuttered window to look out of. This is the single biggest change
+        // to how the town reads from inside.
+        if ((Math.abs(Math.round(cx * 3 + cz * 5)) + f) % 3 === 0) {
+          // Sleeping mat rolled against the wall.
+          shape(new THREE.CylinderGeometry(0.22, 0.22, 1.7, 10), fabric, backX, fy + 0.22, backZ, 0, 0, Math.PI / 2);
+          box(backX - 0.5, fy + 0.18, backZ, 0.5, 0.36, 0.7, M.sandbag, false);
+        } else if ((Math.abs(Math.round(cx * 3 + cz * 5)) + f) % 3 === 1) {
+          // Open shelf stack with a few pots — vertical interest, low footprint.
+          for (const dz of [-0.74, 0.74]) box(x0 + w - 0.48, fy + 0.95, cz + dz, 0.36, 1.9, 0.08, timber);
+          for (let row = 0; row < 3; row++) {
+            box(x0 + w - 0.48, fy + 0.30 + row * 0.62, cz, 0.38, 0.06, 1.5, timber, false);
+            for (let j = 0; j < 2; j++) {
+              shape(new THREE.CylinderGeometry(0.12, 0.15, 0.3, 8), ACC_TERRA, x0 + w - 0.48, fy + 0.48 + row * 0.62, cz - 0.4 + j * 0.8);
+            }
+          }
+        }
+        // Everything else: deliberately bare floor.
       }
-      // Writing table has open space below it, rather than a waist-high crate.
-      const tx=x0+w-1.7,tz=z0+d-1.4;
-      box(tx,fy+0.8,tz,2.0,0.10,0.9,timber);
-      for (const dx of [-0.85,0.85]) for (const dz of [-0.32,0.32]) box(tx+dx,fy+0.38,tz+dz,0.10,0.76,0.10,timber,false);
-      box(tx,fy+0.87,tz,0.62,0.025,0.42,M.concrete,false); // papers
-      shape(new THREE.CylinderGeometry(0.08,0.07,0.15,10),METAL,tx+0.65,fy+0.92,tz);
-      box(tx-0.3,fy+0.46,tz-0.9,0.55,0.10,0.55,timber);
-      box(tx-0.3,fy+0.73,tz-1.14,0.55,0.52,0.07,timber,false);
-      for (const dx of [-0.5,-0.1]) for (const dz of [-0.7,-1.1]) box(tx+dx,fy+0.21,tz+dz,0.07,0.42,0.07,timber,false);
-      // Open bookcase: shelves, uprights, individually coloured books and clay pots.
-      const sx=x0+w-0.48,sz=cz+((door==='east'||door==='west')?2.1:0);
-      for (const dz of [-0.74,0.74]) box(sx,fy+0.95,sz+dz,0.36,1.9,0.08,timber);
-      for (let row=0;row<4;row++) {
-        box(sx,fy+0.15+row*0.52,sz,0.38,0.06,1.5,timber,false);
-        for(let j=0;j<4;j++) box(sx,fy+0.32+row*0.52,sz-0.52+j*0.25,0.26,0.24+(j%2)*0.05,0.13,[timber,M.sandbag,fabric,METAL][(row+j)%4],false);
+
+      // One rug per building, on the ground floor only. A rug in every upstairs
+      // room was pure noise, and rugs are the most expensive dressing here.
+      if (ground0 && w > 6 && d > 6) {
+        const rw = Math.min(2.6, w - 4), rd = Math.min(3, d - 4);
+        ground(cx + 0.4, cz, rw, rd, fabric, fy + 0.014);
+        for (const sign of [-1, 1]) {
+          shape(new THREE.PlaneGeometry(rw - 0.12, 0.045), M.sandbag, cx + 0.4, fy + 0.018, cz + sign * (rd / 2 - 0.12), -Math.PI / 2);
+          shape(new THREE.PlaneGeometry(0.045, rd - 0.12), M.sandbag, cx + 0.4 + sign * (rw / 2 - 0.12), fy + 0.018, cz, -Math.PI / 2);
+        }
       }
-      ground(cx+0.4,cz,Math.min(2.6,w-4),Math.min(3,d-4),fabric,fy+0.014);
-      const rw=Math.min(2.6,w-4),rd=Math.min(3,d-4);
-      for (const sign of [-1,1]) {
-        shape(new THREE.PlaneGeometry(rw-0.12,0.045),M.sandbag,cx+0.4,fy+0.018,cz+sign*(rd/2-0.12),-Math.PI/2);
-        shape(new THREE.PlaneGeometry(0.045,rd-0.12),M.sandbag,cx+0.4+sign*(rw/2-0.12),fy+0.018,cz,-Math.PI/2);
-      }
-      for(let i=-2;i<=2;i++) shape(new THREE.PlaneGeometry(0.23,0.23),M.sandbag,cx+0.4,fy+0.019,cz+i*0.4,-Math.PI/2,0,Math.PI/4);
-      box(cx,fy+2.72,cz,0.13,0.13,d-0.5,timber,false);
-      shape(new THREE.SphereGeometry(0.13,8,6),GLOW,cx,fy+2.54,cz);
+      // Ceiling beam and lamp: structural, so every floor keeps them. The bulb
+      // is a 13 cm emissive blob seen from three metres below — 8x6 segments on
+      // it cost ~84 triangles per floor across the whole town for a silhouette
+      // that is two pixels wide. 5x4 is indistinguishable and a third the cost.
+      box(cx, fy + 2.72, cz, 0.13, 0.13, d - 0.5, timber, false);
+      shape(new THREE.SphereGeometry(0.13, 5, 4), GLOW, cx, fy + 2.54, cz);
     }
+
     // Architectural families: shaded shopfronts, shuttered homes, roof tanks and
     // brick arcades. Added parts stay outside existing doors and access stairs.
     const front=z0+d+0.34;
@@ -343,6 +394,96 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       box(cx+w*0.22,H+0.3,cz,1.9,0.3,1.9,M.concrete);
     }
     if(style===3) for(let i=0;i<Math.floor(w/1.2);i++) box(x0+0.6+i*1.2,H+0.9,z0,0.6,0.55,0.45,earth);
+
+    // ── EXTERIOR ARTICULATION ─────────────────────────────────────────────
+    // Every building used to be a plain extruded box with a cornice on top,
+    // which is the single clearest "cheap game" tell: real earth architecture
+    // is all reveals, buttresses and shadow lines, and it is those shadows —
+    // not texture resolution — that make a wall read as thick.
+
+    // Corner buttresses: thickened piers that carry the eye up the facade and
+    // give every corner a hard vertical shadow instead of a paper edge.
+    // A tapered pier reads as a battered rammed-earth corner in one primitive;
+    // stacking a separate base flare on top of it doubled the cost for a
+    // silhouette difference nobody can see past about four metres.
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      shape(new THREE.CylinderGeometry(0.50, 0.66, H, 4, 1), wm,
+        cx + sx * (w / 2 - 0.16), H / 2, cz + sz * (d / 2 - 0.16), 0, Math.PI / 4, 0);
+      solids.push({
+        minX: cx + sx * (w / 2 - 0.16) - 0.37, minY: 0, minZ: cz + sz * (d / 2 - 0.16) - 0.37,
+        maxX: cx + sx * (w / 2 - 0.16) + 0.37, maxY: H, maxZ: cz + sz * (d / 2 - 0.16) + 0.37,
+      });
+    }
+
+    // Storey band: a projecting course marking each floor line. Two per facade
+    // costs almost nothing and immediately gives the wall a scale reference.
+    for (let f = 1; f < floors; f++) {
+      const by = f * fh - 0.14;
+      box(cx, by, z0 - 0.10, w + 0.30, 0.26, 0.24, earth, false);
+      box(cx, by, z0 + d + 0.10, w + 0.30, 0.26, 0.24, earth, false);
+      box(x0 - 0.10, by, cz, 0.24, 0.26, d + 0.30, earth, false);
+      box(x0 + w + 0.10, by, cz, 0.24, 0.26, d + 0.30, earth, false);
+    }
+
+    // Deep window reveals. wallRun already leaves a sill; these add the head and
+    // the two jambs so an opening reads as a hole through a thick wall rather
+    // than a texture swap. Dressing-only: no collision, no shadow casting.
+    const revealRow = (len: number, alongX: boolean, atMin: boolean) => {
+      const n = Math.max(1, Math.floor(len / 4)), gap = len / n;
+      for (let f = 0; f < floors; f++) {
+        for (let i = 0; i < n; i++) {
+          const c = gap * (i + 0.5);
+          // Skip the bay the door occupies on the ground floor.
+          if (f === 0 && Math.abs(c - len / 2) <= 2.2) continue;
+          const yb = f * fh;
+          const off = atMin ? -0.30 : 0.30;
+          const px = alongX ? x0 + c : (atMin ? x0 : x0 + w) + off;
+          const pz = alongX ? (atMin ? z0 : z0 + d) + off : z0 + c;
+          const jw = alongX ? 0.16 : 0.26, jd = alongX ? 0.26 : 0.16;
+          // Head lintel on every opening; jambs only at eye level on the ground
+          // floor, where you are close enough to read the wall thickness. Upper
+          // storeys are seen from below and across a street, and there the
+          // lintel's shadow alone carries the depth for a third of the triangles.
+          box(px, yb + 2.36, pz, alongX ? 1.7 : 0.26, 0.16, alongX ? 0.26 : 1.7, timber, false);
+          if (f === 0) for (const sgn of [-1, 1]) {
+            box(px + (alongX ? sgn * 0.78 : 0), yb + 1.72, pz + (alongX ? 0 : sgn * 0.78), jw, 1.22, jd, earth, false);
+          }
+          // Shutter leaves, folded back against the reveal. Angled so they
+          // catch the sun differently from the wall behind them.
+          for (const sgn of [-1, 1]) {
+            const ang = sgn * 0.42;
+            if (alongX) shape(new THREE.PlaneGeometry(0.62, 1.1), ACC_TURQ, px + sgn * 0.62, yb + 1.74, pz + (atMin ? -0.09 : 0.09), 0, ang, 0);
+            else shape(new THREE.PlaneGeometry(0.62, 1.1), ACC_TURQ, px + (atMin ? -0.09 : 0.09), yb + 1.74, pz + sgn * 0.62, 0, Math.PI / 2 + ang, 0);
+          }
+        }
+      }
+    };
+    revealRow(w, true, true); revealRow(w, true, false);
+    revealRow(d, false, true); revealRow(d, false, false);
+
+    // Mashrabiya: a projecting shuttered timber balcony on the street facade of
+    // taller buildings. One per building at most — it is a landmark, and if
+    // every house had one it would be wallpaper again.
+    if (floors >= 2 && w >= 9 && style !== 2) {
+      const by = fh + 1.55, bz = z0 + d + 0.55;
+      box(cx, by - 0.62, bz, 3.3, 0.16, 1.05, timber);                       // floor slab
+      for (const dx of [-1.5, 1.5]) box(cx + dx, by - 0.30, bz, 0.13, 0.52, 1.05, timber, false);
+      for (let i = 0; i < 6; i++) box(cx - 1.35 + i * 0.54, by - 0.18, bz + 0.48, 0.09, 0.78, 0.09, timber, false); // lattice
+      box(cx, by + 0.30, bz, 3.4, 0.14, 1.15, timber, false);                 // canopy
+      for (const dx of [-1.55, 1.55]) box(cx + dx, by - 0.98, bz + 0.3, 0.14, 0.62, 0.14, timber, false); // corbels
+    }
+
+    // Roof drainage spouts: short timber gargoyles through the parapet. They
+    // break the parapet's dead-straight top line, which is the last thing left
+    // on the silhouette that gives the extruded box away. Street facade only —
+    // a spout on the back wall is triangles nobody will ever stand to see.
+    {
+      const bays = Math.max(1, Math.floor(w / 6));
+      for (let i = 0; i < bays; i++) {
+        box(x0 + (w / bays) * (i + 0.5), H + 0.55, z0 + d + 0.55, 0.16, 0.14, 0.7, timber, false);
+      }
+    }
+
     // cornice + parapet + door lintel
     box(cx, H + 0.15, cz, w + 0.5, 0.3, d + 0.5, M.concrete);
     box(cx, H + 0.65, z0, w + 0.5, 0.7, 0.35, earth);

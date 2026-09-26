@@ -7,6 +7,11 @@ export class SpatialAudioEngine {
   echoBus: DelayNode | null = null;
   echoFb: GainNode | null = null;
   echoGain: GainNode | null = null;
+  /** Post-volume ducking stage used for auditory masking after loud reports. */
+  deafen: GainNode | null = null;
+  deafenLp: BiquadFilterNode | null = null;
+  /** When the current masking event is scheduled to have fully recovered. */
+  private deafenUntil = 0;
   indoor = false;
   private windStarted = false;
   private noiseBuf: AudioBuffer | null = null;
@@ -33,7 +38,23 @@ export class SpatialAudioEngine {
       // because the squash happens before this gain stage, not after.
       this.makeup = this.ctx.createGain();
       this.makeup.gain.value = 1.12;
-      this.master.connect(this.comp);
+      // Auditory masking stage. A loud report briefly raises your hearing
+      // threshold, and a shooter that ignores this sounds flat: the mix stays
+      // identically loud whether you have just fired a suppressed PDW or a .338
+      // indoors. This sits AFTER the player's volume control, so ducking never
+      // fights the volume slider, and BEFORE the glue compressor so the
+      // compressor is not chasing the duck.
+      this.deafen = this.ctx.createGain();
+      this.deafen.gain.value = 1;
+      // Hearing loss is not flat: it takes the top end first. A gentle lowpass
+      // rides with the gain duck so a heavy report leaves the world muffled,
+      // not merely quieter.
+      this.deafenLp = this.ctx.createBiquadFilter();
+      this.deafenLp.type = 'lowpass';
+      this.deafenLp.frequency.value = 22000;
+      this.master.connect(this.deafen);
+      this.deafen.connect(this.deafenLp);
+      this.deafenLp.connect(this.comp);
       this.comp.connect(this.makeup);
       this.makeup.connect(this.ctx.destination);
 
@@ -137,6 +158,72 @@ export class SpatialAudioEngine {
 
   resume() {
     if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /**
+   * Temporary threshold shift after a loud report.
+   *
+   * `intensity` is 0..1 against "a .338 fired indoors". The duck deliberately
+   * starts ~35 ms AFTER the trigger pull so the shot's own transient lands at
+   * full level — what gets masked is the tail and everything that follows,
+   * which is exactly how it behaves in the real world.
+   *
+   * Overlapping shots do not stack into silence: a new event only ever deepens
+   * the duck toward its own floor and re-times the recovery, so holding down an
+   * LMG settles at a constant muffled level instead of fading to nothing.
+   */
+  earProtect(intensity: number) {
+    const ctx = this.ensure();
+    if (!this.deafen || !this.deafenLp) return;
+    // Indoors the same round is far louder, and the reflections arrive with it.
+    const amount = Math.max(0, Math.min(1, intensity * (this.indoor ? 1.35 : 1)));
+    if (amount < 0.05) return;
+    const t = ctx.currentTime;
+    const floor = 1 - 0.46 * amount;
+    const cutoff = 20000 - 16200 * amount;
+    const recover = 0.30 + 0.95 * amount;
+
+    // Cancel any in-flight schedule, then re-anchor from where we actually are
+    // so a burst does not click between rounds.
+    for (const param of [this.deafen.gain, this.deafenLp.frequency]) {
+      param.cancelScheduledValues(t);
+      param.setValueAtTime(param.value, t);
+    }
+    this.deafen.gain.setValueAtTime(this.deafen.gain.value, t + 0.035);
+    this.deafen.gain.linearRampToValueAtTime(Math.min(this.deafen.gain.value, floor), t + 0.055);
+    this.deafen.gain.linearRampToValueAtTime(1, t + 0.055 + recover);
+    this.deafenLp.frequency.setValueAtTime(this.deafenLp.frequency.value, t + 0.035);
+    this.deafenLp.frequency.exponentialRampToValueAtTime(Math.max(600, Math.min(this.deafenLp.frequency.value, cutoff)), t + 0.055);
+    this.deafenLp.frequency.exponentialRampToValueAtTime(22000, t + 0.055 + recover);
+    this.deafenUntil = t + 0.055 + recover;
+
+    // Above a threshold, add the ring. Two close tones beat slowly against each
+    // other, which is what makes it read as tinnitus rather than a test tone.
+    if (amount > 0.62) {
+      const ring = (hz: number, gain: number) => {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.value = hz;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t + 0.03);
+        g.gain.linearRampToValueAtTime(gain * (amount - 0.62) / 0.38, t + 0.09);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09 + recover * 1.5);
+        o.connect(g);
+        // Deliberately AFTER the ducking stage: the ring is generated inside
+        // your head, so it must not duck itself.
+        g.connect(this.comp!);
+        o.start(t + 0.03);
+        o.stop(t + 0.12 + recover * 1.5);
+        o.onended = () => { o.disconnect(); g.disconnect(); };
+      };
+      ring(4480, 0.018);
+      ring(4507, 0.014);
+    }
+  }
+
+  /** True while a report is still masking the mix — used by tests and the HUD. */
+  get hearingMasked(): boolean {
+    return !!this.ctx && this.ctx.currentTime < this.deafenUntil;
   }
 
   setIndoor(indoor: boolean) {
@@ -293,6 +380,28 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.26, gain: 0.68, freq: 120, q: 0.6, type: 'lowpass' });
     this.subThump(125, 38, 0.65, 0.13);
     this.burstDirect({ dur: 0.045, gain: 0.2, freq: this.rf(4200), q: 2.0, when: 0.05 });
+  }
+
+  /**
+   * MCX Spear, 6.8x51 at 80,000 psi. It is not a louder 7.62: the far higher
+   * chamber pressure gives it a harder, faster crack than the SCAR with a
+   * tighter tail, and the short barrel and three-prong device push a lot of
+   * energy sideways as a sharp, almost metallic slap. Underneath sits real
+   * full-power low end the 5.56 guns simply do not have.
+   */
+  fireSpear() {
+    // High-pressure crack: brighter and shorter than the SCAR's report.
+    this.burstDirect({ dur: 0.036, gain: 1.0, freq: this.rf(3100), q: 0.65, hp: 700 });
+    // Prong slap: the three-prong device's signature lateral bark.
+    this.burstDirect({ dur: 0.055, gain: 0.52, freq: this.rf(1900), q: 1.5, when: 0.004 });
+    // Body of the report.
+    this.burstDirect({ dur: 0.14, gain: 0.84, freq: this.rf(640), q: 0.7, toEcho: 0.5 });
+    // Full-power pressure tail — shorter than the SCAR's, because the Spear's
+    // gas system vents harder and the muzzle device breaks the wave up.
+    this.burstDirect({ dur: 0.21, gain: 0.62, freq: 115, q: 0.6, type: 'lowpass' });
+    this.subThump(132, 40, 0.62, 0.11);
+    // Short-stroke piston: a single clean mechanical tick, not the AK's rattle.
+    this.burstDirect({ dur: 0.028, gain: 0.20, freq: this.rf(4700), q: 2.4, when: 0.042 });
   }
 
   fireVector() {
@@ -576,27 +685,54 @@ export class SpatialAudioEngine {
     o.start(t); o.stop(t + 0.15);
   }
 
+  /**
+   * Landing. Built from the same layers as a footstep so a drop reads as the
+   * same operator on the same ground, just harder: both boots at once, a much
+   * heavier body thump, and the full kit rattling on the way down.
+   */
   jumpLand(surface: 'sand' | 'concrete' | 'wood') {
+    const v = SpatialAudioEngine.SURFACES[surface];
+    // Both feet, a few milliseconds apart — never perfectly together.
+    this.step(surface, true, false, 1.35);
+    this.burstDirect({
+      dur: v.heelDur * 1.3,
+      gain: 0.22 * v.bright,
+      freq: v.heelHz * 0.88,
+      q: v.heelQ,
+      attack: 0.0012,
+      when: 0.012 + Math.random() * 0.010,
+      toEcho: this.indoor ? 0.3 : 0.1,
+    });
+    // The impact itself: much lower and longer than a step's body layer.
     const ctx = this.ensure();
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
     o.type = 'triangle';
-    o.frequency.setValueAtTime(110, t);
-    o.frequency.exponentialRampToValueAtTime(45, t + 0.15);
+    o.frequency.setValueAtTime(112, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.17);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.4, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.42, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
     o.connect(g); g.connect(this.master!);
-    o.start(t); o.stop(t + 0.17);
-
-    const f = surface === 'concrete' ? 1800 : surface === 'wood' ? 650 : 850;
-    this.burstDirect({ dur: 0.1, gain: 0.35, freq: f, q: 1.2 });
+    o.start(t); o.stop(t + 0.19);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+    this.stepGear(0.11, 0.03);
   }
 
   // Slide sound: cloth/body drag
+  /**
+   * Slide: a sustained scrape rather than a single burst. Two detuned noise
+   * bands with different attacks give it a start, a body and a tail, and the
+   * gear rattles the whole way down.
+   */
   slideDrag(surface: 'sand' | 'concrete' | 'wood') {
-    const f = surface === 'concrete' ? 1400 : surface === 'wood' ? 550 : 750;
-    this.burstDirect({ dur: 0.55, gain: 0.28, freq: f, q: 0.8, attack: 0.05 });
+    const v = SpatialAudioEngine.SURFACES[surface];
+    this.burstDirect({ dur: 0.62, gain: 0.26, freq: v.scuffHz * 0.85, q: 0.55, type: 'lowpass', attack: 0.045, toEcho: this.indoor ? 0.2 : 0.06 });
+    this.burstDirect({ dur: 0.40, gain: 0.13 * v.bright, freq: v.heelHz * 0.75, q: 0.9, attack: 0.020, when: 0.02 });
+    if (v.crunch > 0) this.burstDirect({ dur: 0.30, gain: 0.10 * v.crunch, freq: 2400, q: 1.4, hp: 1400, attack: 0.03, when: 0.05 });
+    this.stepGear(0.075, 0.02);
+    this.stepGear(0.055, 0.22);
   }
 
   // Hit & Kill Confirm (Iconic CoD ding)
@@ -662,38 +798,163 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.12, gain: 0.45, freq: 350, q: 0.8 });
   }
 
-  footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085);
-    if (surface === 'sand') {
-      this.burstDirect({ dur: 0.07, gain: g, freq: 850, q: 0.6 });
-    } else if (surface === 'concrete') {
-      this.burstDirect({ dur: 0.05, gain: g, freq: 1750, q: 1.4 });
-    } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 620, q: 1.1 });
+  // ==================== FOOTSTEPS ====================
+  //
+  // A footstep used to be one filtered noise burst. One burst cannot sound like
+  // a boot, because a boot is not one event: it is a heel strike, the operator's
+  // mass arriving a few milliseconds later, grit displacing under the sole, and
+  // the gear on his body catching up last. Each of those has a different
+  // spectrum and a different envelope, so they are synthesised separately and
+  // layered — which also means surface character lives in the mix between the
+  // layers, not just in one filter frequency.
+
+  /** Per-surface voicing. Frequencies are the centre of each layer's band. */
+  private static readonly SURFACES = {
+    sand:     { heelHz: 1900, heelQ: 0.5,  heelDur: 0.030, body: 92,  bodyDur: 0.075, scuffHz: 720,  scuffQ: 0.45, scuffDur: 0.165, scuffMix: 1.00, crunch: 0,    bright: 0.55 },
+    concrete: { heelHz: 3400, heelQ: 1.9,  heelDur: 0.017, body: 124, bodyDur: 0.055, scuffHz: 1650, scuffQ: 1.30, scuffDur: 0.075, scuffMix: 0.42, crunch: 0.30, bright: 1.00 },
+    wood:     { heelHz: 2400, heelQ: 1.1,  heelDur: 0.024, body: 165, bodyDur: 0.110, scuffHz: 900,  scuffQ: 0.95, scuffDur: 0.090, scuffMix: 0.55, crunch: 0.14, bright: 0.72 },
+    gravel:   { heelHz: 2600, heelQ: 0.6,  heelDur: 0.026, body: 104, bodyDur: 0.070, scuffHz: 1150, scuffQ: 0.40, scuffDur: 0.175, scuffMix: 1.15, crunch: 0.85, bright: 0.85 },
+    glass:    { heelHz: 4200, heelQ: 2.4,  heelDur: 0.014, body: 118, bodyDur: 0.045, scuffHz: 2900, scuffQ: 1.60, scuffDur: 0.120, scuffMix: 0.80, crunch: 0.55, bright: 1.30 },
+  } as const;
+
+  /** Alternating feet, so consecutive steps are never bit-identical. */
+  private stepFoot = 0;
+
+  /**
+   * Low sine thump: the operator's weight arriving. Pitched per surface and
+   * dropped about a fifth over its decay, which is what stops it reading as a
+   * beep and starts it reading as mass.
+   */
+  private stepBody(hz: number, gain: number, dur: number, when: number) {
+    if (gain < 0.0008) return;
+    const ctx = this.ensure();
+    const t = ctx.currentTime + when;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(hz, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(30, hz * 0.62), t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.master!);
+    o.start(t); o.stop(t + dur + 0.02);
+    o.onended = () => { o.disconnect(); g.disconnect(); };
+  }
+
+  /**
+   * Gear: sling swivels, buckles, magazines shifting in a chest rig. Two or
+   * three tiny high ticks scattered 20–70 ms after the strike. This is the layer
+   * that makes the player sound like a loaded soldier rather than a bare foot,
+   * and it is the first thing that gets dropped when crouching.
+   */
+  private stepGear(gain: number, when: number) {
+    if (gain < 0.0015) return;
+    const count = 2 + ((Math.random() * 2) | 0);
+    for (let i = 0; i < count; i++) {
+      this.burstDirect({
+        dur: 0.018 + Math.random() * 0.020,
+        gain: gain * (0.55 + Math.random() * 0.5),
+        freq: 2600 + Math.random() * 3200,
+        q: 2.2 + Math.random() * 2,
+        hp: 1800,
+        when: when + 0.018 + Math.random() * 0.055,
+      });
     }
   }
 
-  /** Sound-trap flooring: 1.8× louder than a normal step, with a distinct crunch.
-   * Glass adds a shard tinkle; gravel gets a low scatter rumble. */
+  /**
+   * One footstep.
+   *
+   * `speed` is 0..1 over the walk→sprint range and drives both level and the
+   * spacing between heel and body, because a fast step is a flatter, harder
+   * landing while a slow one rolls heel-to-toe.
+   */
+  private step(kind: keyof typeof SpatialAudioEngine.SURFACES, sprint: boolean, crouch: boolean, loudness = 1) {
+    const v = SpatialAudioEngine.SURFACES[kind];
+    // Alternating feet get a small, consistent pitch and level offset; the ear
+    // reads the pattern as a gait rather than as a repeating sample.
+    this.stepFoot ^= 1;
+    const footPitch = this.stepFoot ? 1.06 : 0.95;
+    const footGain = this.stepFoot ? 1.0 : 0.93;
+    // Fresh jitter every step so twenty paces down a corridor never phase-lock.
+    const jitter = 0.9 + Math.random() * 0.2;
+
+    const base = (sprint ? 0.155 : crouch ? 0.042 : 0.088) * loudness * footGain * jitter;
+    // Crouching is not just quieter: soft-footing kills the heel transient and
+    // the gear noise far faster than it kills the low body thump.
+    const heelMul = crouch ? 0.35 : sprint ? 1.25 : 1;
+    const gearMul = crouch ? 0.12 : sprint ? 1.35 : 0.7;
+    // A hard landing closes the gap between heel and weight; a soft one opens it.
+    const roll = crouch ? 0.022 : sprint ? 0.006 : 0.013;
+
+    // 1 — heel strike: the click that tells you what you are standing on.
+    this.burstDirect({
+      dur: v.heelDur,
+      gain: base * 0.95 * heelMul * v.bright,
+      freq: v.heelHz * footPitch,
+      q: v.heelQ,
+      attack: 0.0012,
+      toEcho: this.indoor ? 0.22 : 0.07,
+    });
+    // 2 — mass arriving.
+    this.stepBody(v.body * footPitch, base * 0.80, v.bodyDur, roll);
+    // 3 — sole scuff / grit displacing. Long, soft, low-Q: the layer that makes
+    //     sand feel like sand instead of a quieter version of concrete.
+    this.burstDirect({
+      dur: v.scuffDur,
+      gain: base * 0.52 * v.scuffMix,
+      freq: v.scuffHz * (0.92 + Math.random() * 0.16),
+      q: v.scuffQ,
+      type: 'lowpass',
+      attack: 0.010,
+      when: roll * 0.6,
+    });
+    // 4 — crunch: discrete particles under the sole. Only surfaces that have
+    //     loose material on them get this, and it is what separates gravel and
+    //     broken glass from a bare slab.
+    if (v.crunch > 0 && !crouch) {
+      const grains = 2 + ((Math.random() * 3) | 0);
+      for (let i = 0; i < grains; i++) {
+        this.burstDirect({
+          dur: 0.010 + Math.random() * 0.016,
+          gain: base * 0.30 * v.crunch * (0.5 + Math.random()),
+          freq: 1800 + Math.random() * 4200,
+          q: 3 + Math.random() * 3,
+          hp: 1200,
+          when: 0.004 + Math.random() * 0.055,
+        });
+      }
+    }
+    // 5 — kit rattle.
+    this.stepGear(base * 0.34 * gearMul, 0);
+  }
+
+  footstep(surface: 'sand' | 'concrete' | 'wood', sprint: boolean, crouch = false) {
+    this.step(surface, sprint, crouch);
+  }
+
+  /**
+   * Arena sound traps: broken glass and loose gravel. Same layered voice, but
+   * louder and with the crunch layer dominant — stepping in one should be an
+   * audible mistake, not a slightly different texture.
+   */
   footstepTrap(kind: 'glass' | 'gravel', sprint: boolean, crouch = false) {
-    const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * 1.8;
-    if (kind === 'gravel') {
-      this.burstDirect({ dur: 0.1, gain: g, freq: 640, q: 0.7, type: 'lowpass' });
-      this.burstDirect({ dur: 0.045, gain: g * 0.5, freq: 1500, q: 1.4, when: 0.03 });
-    } else {
-      this.burstDirect({ dur: 0.06, gain: g, freq: 2600, q: 1.1, hp: 1400 });
-      // shard tinkle
-      for (let i = 0; i < 2; i++) {
-        const ctx = this.ensure();
-        const t = ctx.currentTime + 0.02 + i * 0.05;
+    this.step(kind, sprint, crouch, 1.85);
+    if (kind === 'glass') {
+      // Shards skittering away after the break: a few decaying sine pings.
+      const g = (sprint ? 0.15 : crouch ? 0.045 : 0.085) * 1.8;
+      const ctx = this.ensure();
+      for (let i = 0; i < 3; i++) {
+        const t = ctx.currentTime + 0.02 + i * 0.045 + Math.random() * 0.03;
         const o = ctx.createOscillator();
         o.type = 'sine';
         o.frequency.setValueAtTime(3200 + Math.random() * 2800, t);
         const og = ctx.createGain();
-        og.gain.setValueAtTime(g * 0.22, t);
-        og.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+        og.gain.setValueAtTime(g * 0.2, t);
+        og.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
         o.connect(og); og.connect(this.master!);
-        o.start(t); o.stop(t + 0.1);
+        o.start(t); o.stop(t + 0.11);
         o.onended = () => { o.disconnect(); og.disconnect(); };
       }
     }

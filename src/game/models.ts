@@ -3,9 +3,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GunBuilder, WM } from './weapons/core';
-export { GunBuilder, WM, applySkin, makeSocket } from './weapons/core';
-export type { WeaponModel, LArmKey } from './weapons/core';
-export { WEAPON_BUILDERS, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, buildSCARH, buildVector, buildSPAS12, buildDeagle, buildM249 } from './weapons/index';
+export { GunBuilder, WM, applySkin, makeSocket, poseArmIK } from './weapons/core';
+export type { WeaponModel, LArmKey, ArmRig } from './weapons/core';
+export { WEAPON_BUILDERS, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, buildSCARH, buildVector, buildSPAS12, buildDeagle, buildM249, buildMCXSpear } from './weapons/index';
 
 type Region = [number, number, number, number]; // u0 v0 u1 v1
 

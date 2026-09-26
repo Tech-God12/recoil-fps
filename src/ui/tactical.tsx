@@ -104,6 +104,7 @@ export const CALIBER: Record<WeaponId, { round: string; note: string }> = {
   spas12: { round: '12 GAUGE', note: 'Eight pellets per trigger pull. Devastating inside a doorway.' },
   scar_h: { round: '7.62×51MM', note: 'Full-power battle rifle round. Two taps solve most problems.' },
   deagle: { round: '.50 AE', note: 'Hand-cannon magnum. Loud, proud, and wrist-breaking.' },
+  mcx_spear: { round: '6.8×51 COMMON', note: 'Next-generation high-pressure round. Defeats modern plate at ranges where 5.56 gives up.' },
   m249: { round: '5.56×45 BELT', note: 'Linked suppression. One hundred rounds before the long reload.' },
 };
 

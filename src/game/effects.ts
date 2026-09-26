@@ -6,6 +6,20 @@ const MAX_PARTICLES = 48;
 const MAX_TRACERS = 20;
   /** Ejected brass: one InstancedMesh, ring-buffered. 12 covers a full auto burst. */
 const MAX_BRASS = 12;
+/** Muzzle smoke: its own pool, so it never competes with impact and blood slots. */
+const MAX_SMOKE = 8;
+const SMOKE_PARTICLES = 7;
+/** Pool slots are sized to the largest puff the density multiplier can request. */
+const MAX_SMOKE_PARTICLES = 8;
+const SMOKE_LIFE = 1.1;
+/** Continuous lift, in m/s^2. Propellant gas is hot and rises; it does not fall. */
+const SMOKE_BUOYANCY = 0.55;
+/**
+ * Minimum gap between puffs. At 900 RPM every round would otherwise stack a
+ * sprite directly over the sight picture sixty times a second — a performance
+ * problem, and more importantly an aim problem.
+ */
+const SMOKE_THROTTLE_MS = 70;
 const brassGeo = new THREE.BoxGeometry(0.012, 0.012, 0.03);
 const brassMat = new THREE.MeshBasicMaterial({ color: 0xD8A83C });
 
@@ -31,6 +45,9 @@ const tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 1);
 export class Effects {
   private bursts: BurstSlot[] = [];
   private burstIdx = 0;
+  private smokes: BurstSlot[] = [];
+  private smokeIdx = 0;
+  private lastSmokeT = -Infinity;
   private brass!: THREE.InstancedMesh;
   private brassIdx = 0;
   private brassPos = new Float32Array(MAX_BRASS * 3);
@@ -88,6 +105,14 @@ export class Effects {
     scene.add(this.bloodMesh);
     // preallocated burst pool — buffers reused forever, never disposed
     for (let i = 0; i < MAX_BURSTS; i++) this.bursts.push(Effects.makeSlot(scene));
+    for (let i = 0; i < MAX_SMOKE; i++) {
+      const slot = Effects.makeSlot(scene, MAX_SMOKE_PARTICLES);
+      // Soft, warm grey propellant haze. Additive would glow; smoke absorbs.
+      slot.mat.color.setHex(0xB8AE9C);
+      slot.mat.depthWrite = false;
+      slot.mat.sizeAttenuation = true;
+      this.smokes.push(slot);
+    }
     // ejected brass — a single instanced draw, all instances parked at scale 0
     this.brass = new THREE.InstancedMesh(brassGeo, brassMat, MAX_BRASS);
     this.brass.frustumCulled = false;
@@ -126,8 +151,8 @@ export class Effects {
     scene.add(this.flashLight);
   }
 
-  private static makeSlot(scene: THREE.Scene): BurstSlot {
-    const pos = new Float32Array(MAX_PARTICLES * 3);
+  private static makeSlot(scene: THREE.Scene, capacity = MAX_PARTICLES): BurstSlot {
+    const pos = new Float32Array(capacity * 3);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setDrawRange(0, 0);
@@ -136,7 +161,7 @@ export class Effects {
     points.frustumCulled = false;
     points.visible = false;
     scene.add(points);
-    return { points, mat, pos, vel: new Float32Array(MAX_PARTICLES * 3), life: 0, maxLife: 1, grav: 0, count: 0, active: false };
+    return { points, mat, pos, vel: new Float32Array(capacity * 3), life: 0, maxLife: 1, grav: 0, count: 0, active: false };
   }
 
   private burstInto(pool: BurstSlot[], idx: number, pos: THREE.Vector3, count: number, color: number, speed: number, life: number, grav: number, size: number, spread: number): number {
@@ -156,17 +181,93 @@ export class Effects {
     return (idx + 1) % pool.length;
   }
 
+  /**
+   * Particle density, 0..1, owned by the adaptive quality director. Every burst
+   * is scaled by it, so dropping a quality tier thins smoke, sparks and debris
+   * without changing a single call site or losing the effect entirely — the
+   * minimum of one particle keeps every impact readable.
+   */
+  private density = 1;
+  setDensity(mul: number): void {
+    this.density = Math.max(0.1, Math.min(1, mul));
+  }
+
   private burst(pos: THREE.Vector3, count: number, color: number, speed: number, life: number, grav: number, size = 0.05, spread = 1) {
-    this.burstIdx = this.burstInto(this.bursts, this.burstIdx, pos, count, color, speed, life, grav, size, spread);
+    const scaled = count <= 1 ? count : Math.max(1, Math.round(count * this.density));
+    this.burstIdx = this.burstInto(this.bursts, this.burstIdx, pos, scaled, color, speed, life, grav, size, spread);
   }
 
   /**
-   * Tiny muzzle residue: one short-lived grey-amber particle using the existing
-   * burst pool. It reads as hot propellant without becoming a sight-obscuring
-   * smoke cloud or allocating a second particle system per shot.
+   * Muzzle smoke.
+   *
+   * Propellant gas does not behave like debris: it is buoyant rather than
+   * ballistic, it expands and thins as it rises, and it lingers long after the
+   * shot. Borrowing the impact/blood burst pool for it — as this used to —
+   * meant smoke competed for the same slots as the hit effects it is supposed
+   * to sit alongside, and inherited gravity and a hard-edged sprite.
+   *
+   * It now has its own small pool with its own integrator, and a throttle: at
+   * 900 RPM an unthrottled puff per round is fifteen overlapping sprites a
+   * second directly over the sight picture, which is both a performance
+   * problem and, worse, an aim problem.
    */
-  gunSmoke(pos: THREE.Vector3) {
-    this.burst(pos, 1, 0xC8B88D, 0.16, 0.08, -0.05, 0.025, 0.2);
+  gunSmoke(at: THREE.Vector3, nowMs = performance.now()) {
+    if (nowMs - this.lastSmokeT < SMOKE_THROTTLE_MS) return;
+    this.lastSmokeT = nowMs;
+    const s = this.smokes[this.smokeIdx];
+    this.smokeIdx = (this.smokeIdx + 1) % this.smokes.length;
+    const n = Math.max(2, Math.round(SMOKE_PARTICLES * this.density));
+    for (let i = 0; i < n; i++) {
+      // Seeded in a small sphere at the muzzle, drifting forward off the barrel.
+      s.pos[i * 3] = at.x + (Math.random() - 0.5) * 0.05;
+      s.pos[i * 3 + 1] = at.y + (Math.random() - 0.5) * 0.05;
+      s.pos[i * 3 + 2] = at.z + (Math.random() - 0.5) * 0.05;
+      s.vel[i * 3] = (Math.random() - 0.5) * 0.30;
+      s.vel[i * 3 + 1] = 0.22 + Math.random() * 0.30;   // buoyant, never falling
+      s.vel[i * 3 + 2] = (Math.random() - 0.5) * 0.30;
+    }
+    s.count = n;
+    s.life = SMOKE_LIFE;
+    s.maxLife = SMOKE_LIFE;
+    s.active = true;
+    s.mat.opacity = 0.30;
+    s.mat.size = 0.045;
+    s.points.geometry.setDrawRange(0, n);
+    s.points.geometry.attributes.position.needsUpdate = true;
+    s.points.visible = true;
+  }
+
+  /**
+   * Smoke integrator. Separate from updatePool because the motion is the whole
+   * point: it rises, drag bleeds the lateral scatter away, the sprite grows as
+   * the cloud expands, and opacity falls off on a curve so it thins out rather
+   * than snapping off at the end of its life.
+   */
+  private updateSmoke(dt: number) {
+    for (const s of this.smokes) {
+      if (!s.active) continue;
+      s.life -= dt;
+      if (s.life <= 0) {
+        s.active = false;
+        s.points.visible = false;
+        s.points.geometry.setDrawRange(0, 0);
+        continue;
+      }
+      const drag = Math.max(0, 1 - dt * 1.7);
+      for (let i = 0; i < s.count; i++) {
+        const i3 = i * 3;
+        s.vel[i3] *= drag;
+        s.vel[i3 + 2] *= drag;
+        s.vel[i3 + 1] = s.vel[i3 + 1] * drag + SMOKE_BUOYANCY * dt;
+        s.pos[i3] += s.vel[i3] * dt;
+        s.pos[i3 + 1] += s.vel[i3 + 1] * dt;
+        s.pos[i3 + 2] += s.vel[i3 + 2] * dt;
+      }
+      const age = 1 - s.life / s.maxLife;
+      s.mat.size = 0.045 + age * 0.085;            // the cloud expands
+      s.mat.opacity = 0.30 * (1 - age) * (1 - age); // and thins on a curve
+      s.points.geometry.attributes.position.needsUpdate = true;
+    }
   }
 
   /** Eject a casing right-and-up with a fast tumble; it bounces once on the
@@ -364,6 +465,7 @@ export class Effects {
 
   update(dt: number, playerPos: THREE.Vector3) {
     this.updatePool(this.bursts, dt);
+    this.updateSmoke(dt);
     this.updateBrass(dt, playerPos.y + 0.012);
     for (let i = 0; i < this.tracers.length; i++) {
       const t = this.tracers[i];

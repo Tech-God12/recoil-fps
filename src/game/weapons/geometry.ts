@@ -403,6 +403,30 @@ export class GunBuilder {
 }
 
 /** Batch a rigid arm without changing its animation pivot or sharing owned geometry. */
+/**
+ * Merge only the meshes rigidly attached to THIS node, leaving child groups
+ * (animated joints) intact. The IK arm needs one draw per bone, not one draw
+ * for the whole limb — merging everything would weld the elbow solid.
+ */
+export function batchRigidSegment(root: THREE.Object3D): void {
+  const own: THREE.Mesh[] = [];
+  for (const child of root.children) {
+    const mesh = child as THREE.Mesh;
+    if (mesh.isMesh && !Array.isArray(mesh.material) && mesh.children.length === 0) own.push(mesh);
+  }
+  if (own.length < 2) return;
+  const b = new GunBuilder();
+  for (const mesh of own) {
+    mesh.updateMatrix();
+    const geo = mesh.geometry.clone();
+    geo.applyMatrix4(mesh.matrix);
+    b.surface(geo, mesh.material as THREE.Material, 0, 0, 0);
+    mesh.geometry.dispose();
+    root.remove(mesh);
+  }
+  b.build(root);
+}
+
 export function batchRigidGroup(root: THREE.Group): void {
   root.updateWorldMatrix(true, true);
   const inverse = root.matrixWorld.clone().invert();

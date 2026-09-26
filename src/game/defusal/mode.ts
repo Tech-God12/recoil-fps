@@ -60,11 +60,12 @@ export const BOT_WEAPONS: Record<WeaponId, BotWeapon> = {
   scar_h: { id: 'scar_h', name: 'SCAR', kind: 'rifle', damage: 40, armorRatio: 0.85, interval: 0.1, burst: [2, 5], pause: [0.35, 0.6], accNear: 0.8, accFar: 0.48, range: 62, headChance: 0.1 },
   awm: { id: 'awm', name: 'AWM', kind: 'sniper', damage: 115, armorRatio: 0.975, interval: 1.45, burst: [1, 1], pause: [0.9, 1.6], accNear: 0.72, accFar: 0.8, range: 80, headChance: 0.18 },
   spas12: { id: 'spas12', name: 'SPAS', kind: 'shotgun', damage: 26, armorRatio: 0.5, interval: 0.85, burst: [1, 2], pause: [0.5, 0.9], accNear: 0.85, accFar: 0.1, range: 16, headChance: 0.06, pellets: 8, falloffStart: 8 },
+  mcx_spear: { id: 'mcx_spear', name: 'MCX Spear', kind: 'rifle', damage: 38, armorRatio: 0.82, interval: 0.086, burst: [3, 6], pause: [0.3, 0.55], accNear: 0.84, accFar: 0.52, range: 65, headChance: 0.11 },
   m249: { id: 'm249', name: 'M249', kind: 'lmg', damage: 32, armorRatio: 0.8, interval: 0.08, burst: [6, 12], pause: [0.3, 0.6], accNear: 0.72, accFar: 0.35, range: 55, headChance: 0.07 },
 };
 const WORLD_KIND: Record<WeaponId, WorldWeaponKind> = {
   m1911: 'pistol', deagle: 'pistol', mp7: 'smg', vector: 'smg', ak47: 'rifle', m4a1: 'rifle',
-  scar_h: 'rifle', awm: 'sniper', spas12: 'shotgun', m249: 'lmg',
+  scar_h: 'rifle', awm: 'sniper', spas12: 'shotgun', m249: 'lmg', mcx_spear: 'rifle',
 };
 
 export interface Combatant {

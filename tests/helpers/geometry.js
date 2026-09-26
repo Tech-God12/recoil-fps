@@ -7,7 +7,9 @@ export function installCanvasStub() {
         get(_target, key) {
           if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => ({ addColorStop() {} });
           if (key === 'measureText') return () => ({ width: 32 });
-          if (key === 'getImageData') return (_x, _y, width, height) => ({ data: new Uint8ClampedArray(width * height * 4) });
+          if (key === 'getImageData') return (_x, _y, width, height) => ({ data: new Uint8ClampedArray(width * height * 4), width, height });
+          // Derived normal / roughness / AO maps are written through ImageData.
+          if (key === 'createImageData') return (width, height) => ({ data: new Uint8ClampedArray(width * height * 4), width, height });
           return () => {};
         },
         set() { return true; },

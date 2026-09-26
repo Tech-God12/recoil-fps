@@ -2975,3 +2975,232 @@ span.arm2-thumb { display: inline-block; }
 .pause-readout span { color:var(--bone-mute); font:10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; }
 .pause-note { margin-top:22px !important; color:var(--bone-mute) !important; font:10px/1 var(--mono) !important; letter-spacing:.12em; text-transform:uppercase; }
 @media (max-width:700px) { .pause-wrap { grid-template-columns:1fr; max-height:92vh; overflow:auto; } .pause-card { padding:18px; } .pause-title { font-size:58px; } }
+
+/* ── Adaptive quality ladder (Settings ▸ Graphics) ───────────────────────────
+   The director can change how the game looks on its own, so the control that
+   governs it has to make the current state obvious at a glance. */
+.qual-ladder {
+  margin-top: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid color-mix(in srgb, var(--bone-dim) 24%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, #000 22%, transparent);
+}
+.qual-ladder-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.qual-ladder-head .dim { color: var(--bone-dim); }
+.qual-ladder-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.qual-pip {
+  flex: 1 1 auto;
+  min-width: 58px;
+  padding: 6px 4px;
+  font-size: 10px;
+  font-family: var(--mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bone-dim);
+  border: 1px solid color-mix(in srgb, var(--bone-dim) 26%, transparent);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+.qual-pip:hover { color: var(--bone); border-color: color-mix(in srgb, var(--bone) 45%, transparent); }
+.qual-pip.on {
+  color: #0b0d0c;
+  background: var(--acc, #c9a15a);
+  border-color: var(--acc, #c9a15a);
+  font-weight: 700;
+}
+.qual-ladder-note {
+  margin-top: 9px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--bone-dim);
+}
+
+/* ── QoL: floating damage numbers ────────────────────────────────────────────
+   Positioned once from the impact's projected screen coordinate, then animated
+   entirely in CSS. A burst of eight hits costs eight elements and zero JS. */
+.dmgnum-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 6;
+}
+.dmgnum {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-family: var(--display, system-ui);
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: #F3EDE0;
+  /* Outline rather than a drop shadow: legible against both the bleached sand
+     of Sirocco and the near-black interiors of the warehouse. */
+  text-shadow:
+    0 0 1px #000, 0 1px 2px rgba(0, 0, 0, 0.9),
+    -1px 0 0 rgba(0, 0, 0, 0.75), 1px 0 0 rgba(0, 0, 0, 0.75),
+    0 -1px 0 rgba(0, 0, 0, 0.75), 0 1px 0 rgba(0, 0, 0, 0.75);
+  animation: dmgnum-rise 900ms cubic-bezier(0.16, 0.9, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+.dmgnum.head { color: var(--cb-warn, #FFC64B); font-size: 24px; }
+.dmgnum.kill { color: var(--cb-bad, #FF6A4B); font-size: 26px; }
+@keyframes dmgnum-rise {
+  0%   { opacity: 0;    transform: translate(-50%, -50%) scale(0.72); }
+  14%  { opacity: 1;    transform: translate(-50%, -62%) scale(1.14); }
+  30%  { opacity: 1;    transform: translate(-50%, -74%) scale(1); }
+  100% { opacity: 0;    transform: translate(-50%, -168%) scale(0.94); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dmgnum { animation-duration: 600ms; }
+  @keyframes dmgnum-rise {
+    0% { opacity: 0; } 20% { opacity: 1; } 100% { opacity: 0; }
+  }
+}
+
+/* ── QoL: colour-blind safe HUD signalling ───────────────────────────────────
+   Every "good / warning / danger" signal in the HUD resolves through these
+   three variables. Red-green deficiency is the common case and the default
+   palette leans on exactly that pair, so the alternatives move the danger
+   signal into blue/orange space where the separation survives. */
+:root {
+  --cb-good: #7FD07F;
+  --cb-warn: #FFC64B;
+  --cb-bad:  #FF6A4B;
+}
+body.cb-protanopia   { --cb-good: #57B6E8; --cb-warn: #F2D24B; --cb-bad: #E8823C; }
+body.cb-deuteranopia { --cb-good: #6FB7F0; --cb-warn: #F5D861; --cb-bad: #F07B2F; }
+body.cb-tritanopia   { --cb-good: #55C9A6; --cb-warn: #F58CA8; --cb-bad: #E0413F; }
+
+/* ============================================================
+   UI REFINEMENT LAYER
+   The design language — warm ink, bone paper, brass, signal orange — was
+   already coherent, so this is a tightening pass rather than a repaint. It
+   fixes the four things that separate a good-looking interface from a polished
+   one: consistent elevation, consistent motion, focus you can actually follow
+   with a keyboard, and enough breathing room that dense panels stay readable.
+   ============================================================ */
+
+:root {
+  /* Elevation. Panels previously each invented their own shadow, so a modal
+     over a card over the HUD had no consistent sense of stacking. Three
+     steps, all warm-tinted rather than neutral black, because a pure-black
+     shadow over warm ink reads as a hole rather than a lift. */
+  --elev-1: 0 1px 2px rgba(6, 5, 3, 0.30), 0 2px 6px rgba(6, 5, 3, 0.22);
+  --elev-2: 0 2px 4px rgba(6, 5, 3, 0.32), 0 10px 26px rgba(6, 5, 3, 0.38);
+  --elev-3: 0 4px 8px rgba(6, 5, 3, 0.34), 0 22px 60px rgba(6, 5, 3, 0.52);
+
+  /* Motion. One curve for entrances, one for exits, one duration scale. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --t-fast: 120ms;
+  --t-base: 190ms;
+  --t-slow: 380ms;
+}
+
+/* ── Elevation applied ───────────────────────────────────────────────────── */
+.panel-solid { box-shadow: var(--elev-2); }
+.settings-panel { box-shadow: var(--elev-3); }
+
+/* ── Focus: visible, branded, and never clipped ──────────────────────────── */
+/* The default outline sat underneath neighbouring panels on several screens,
+   which made keyboard navigation feel broken even though it worked. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--brass-2);
+  outline-offset: 2px;
+  border-radius: 3px;
+  position: relative;
+  z-index: 2;
+}
+/* Pointer users should never see the ring; keyboard users always should. */
+button:focus:not(:focus-visible) { outline: none; }
+
+/* ── Settings: the screen players spend the most menu time in ────────────── */
+/* A sticky section header keeps you oriented once a pane scrolls past its
+   title, which the Graphics and Gameplay panes both now do. */
+.settings-pane { scroll-padding-top: 48px; padding: 20px 22px 26px; }
+.settings-head { box-shadow: 0 1px 0 var(--line); }
+.set-cols { gap: 0 34px; }
+
+/* Rows: a touch more air, and a hover state so the hit target is legible. */
+.setting-row {
+  padding: 11px 8px 11px 0;
+  margin-right: -8px;
+  border-radius: 3px;
+  transition: background var(--t-fast) var(--ease-out);
+}
+.setting-row:hover { background: rgba(237, 228, 211, 0.025); }
+
+/* Rail: the active tab now has a filled marker rather than only a colour
+   shift, so it survives every colour-blind palette. */
+.rail-item {
+  transition:
+    background var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out),
+    padding-left var(--t-fast) var(--ease-out);
+}
+.rail-item:hover { padding-left: 17px; }
+.rail-item.on { padding-left: 17px; border-left-width: 3px; }
+.rail-item.on::after {
+  content: "";
+  margin-left: auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brass);
+  flex: none;
+}
+
+/* ── Sliders: a real track fill, so the value is readable at a glance ────── */
+.tac-range::-webkit-slider-thumb {
+  transition: transform var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out);
+}
+.tac-range:hover::-webkit-slider-thumb { transform: scale(1.16); }
+.tac-range:active::-webkit-slider-thumb { transform: scale(1.04); background: var(--brass-2); }
+
+/* ── HUD chips: quieter, and legible against both sand and shadow ────────── */
+.hud-chip {
+  backdrop-filter: blur(3px) saturate(115%);
+  box-shadow: var(--elev-1);
+}
+.fps-chip {
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+  opacity: 0.88;
+  transition: opacity var(--t-base) var(--ease-out);
+}
+.fps-chip:hover { opacity: 1; }
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+/* The UI leant on entrance animations everywhere and honoured this preference
+   in only three places. Anything purely decorative is now cut globally, while
+   state changes keep a minimal fade so nothing appears to teleport. */
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade, .anim-rise, .anim-slide, .seq {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+  }
+  .rail-item:hover, .rail-item.on { padding-left: 14px; }
+  .tac-range:hover::-webkit-slider-thumb,
+  .tac-range:active::-webkit-slider-thumb { transform: none; }
+  *, *::before, *::after {
+    animation-iteration-count: 1 !important;
+    transition-duration: 60ms !important;
+    scroll-behavior: auto !important;
+  }
+}

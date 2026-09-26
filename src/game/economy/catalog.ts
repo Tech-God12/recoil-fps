@@ -4,14 +4,14 @@ import type { StatMods } from './stats';
 
 export type WeaponId =
   | 'm4a1' | 'ak47' | 'm1911' | 'awm' | 'mp7'
-  | 'scar_h' | 'vector' | 'spas12' | 'deagle' | 'm249';
+  | 'scar_h' | 'vector' | 'spas12' | 'deagle' | 'm249' | 'mcx_spear';
 export type WeaponClass = 'AR' | 'BR' | 'SMG' | 'PDW' | 'SR' | 'SG' | 'LMG' | 'PISTOL';
 export type SlotId = 'primary' | 'secondary';
 export type AttachSlot = 'muzzle' | 'optic' | 'magazine' | 'underbarrel' | 'stock' | 'rail' | 'barrel';
 export type AttachmentId = string;
 export type AudioKind =
   | 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg'
-  | 'scar' | 'vector' | 'shotgun' | 'deagle' | 'lmg';
+  | 'scar' | 'vector' | 'shotgun' | 'deagle' | 'lmg' | 'spear';
 
 export interface BaseWeaponStats {
   auto: boolean; rpm: number; damage: number; headMul: number; limbMul: number;
@@ -156,6 +156,24 @@ export const WEAPON_CATALOG: WeaponCatalogEntry[] = [
     slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
     audio: 'lmg', beltFed: true, bloom: { perShot: 0.0006, max: 0.012, decay: 0.03 },
   },
+  {
+    // MCX Spear (XM7) — the armory's flagship. 6.8×51 hits between the AK and the
+    // SCAR, but the real selling point is handling: a 20-round mag, the fastest
+    // ADS of any full-power rifle, and a recoil pattern that walks straight up
+    // instead of wandering, so it is genuinely controllable at range. Priced
+    // above the SCAR because it is strictly the better shooter once mastered.
+    id: 'mcx_spear', name: 'MCX Spear', short: 'SPEAR', cls: 'AR', slot: 'primary',
+    price: 4800, starter: false,
+    blurb: 'Next-generation 6.8. Monolithic upper, folding stock, ambidextrous everything — the most refined rifle in the cage.',
+    base: base({
+      pattern: [[1.22, 0.06], [1.34, -0.09], [1.44, 0.11], [1.52, -0.08], [1.60, 0.13], [1.66, -0.11], [1.70, 0.09], [1.72, -0.07], [1.74, 0.10], [1.75, -0.06]],
+      auto: true, rpm: 700, damage: 42, headMul: 2.4, limbMul: 0.85, magSize: 20, reserve: 120,
+      hipSpread: 0.009, adsFov: 55, tacReload: 2.15, emptyReload: 2.75, adsTime: 0.21,
+      recoilMul: 1.12, falloffStart: 48, falloffMul: 0.92, noiseRadius: 78, moveSpeedMul: 0.98,
+    }),
+    slots: ['muzzle', 'optic', 'magazine', 'underbarrel', 'stock', 'rail', 'barrel'],
+    audio: 'spear',
+  },
 ];
 
 export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
@@ -168,6 +186,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249"
     ],
     "desc": "Short, open-prong rifle device. Cuts flash without taming the burst.",
@@ -191,7 +210,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
-      "scar_h"
+      "scar_h",
+      "mcx_spear"
     ],
     "desc": "Side-port compensator for the M416 and SCAR. Flatter bursts, louder report.",
     "pros": [
@@ -220,6 +240,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249"
     ],
     "desc": "Slim receiver-matched rifle can. Quieter shots, not a recoil eliminator.",
@@ -280,6 +301,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "awm",
       "scar_h",
+      "mcx_spear",
       "m249"
     ],
     "desc": "Two-chamber brute. Shoves the muzzle back down where it belongs \u2014 and announces it to the whole sector.",
@@ -356,6 +378,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249",
       "mp7",
       "vector",
@@ -386,6 +409,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249",
       "mp7",
       "vector",
@@ -416,6 +440,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "mp7",
       "vector"
     ],
@@ -443,6 +468,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249"
     ],
     "desc": "3\u00d7 prism with a horseshoe/chevron and compact holdover ladder.",
@@ -471,6 +497,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249",
       "awm"
     ],
@@ -501,6 +528,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249",
       "awm"
     ],
@@ -713,6 +741,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "vector"
     ],
     "desc": "Ribbed vertical grip for controlling muzzle climb. Deliberate rather than snap-fast.",
@@ -738,6 +767,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "vector"
     ],
     "desc": "Low angled palm shelf for horizontal tracking and quick shoulder transitions.",
@@ -764,6 +794,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "awm",
       "scar_h",
+      "mcx_spear",
       "m249"
     ],
     "desc": "Hinged legs deploy only when crouched, grounded and still. Strong support, never zero recoil.",
@@ -842,6 +873,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249"
     ],
     "desc": "Host-matched cheek support and buttpad. Retains the actual weapon stock.",
@@ -897,6 +929,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249"
     ],
     "desc": "Compact rifle laser housing with a seated clamp and visible emitter.",
@@ -925,6 +958,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249",
       "spas12",
       "awm"
@@ -953,7 +987,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
-      "scar_h"
+      "scar_h",
+      "mcx_spear"
     ],
     "desc": "Small offset backup sights on a proper side-rail bracket. Hold T to use the 1\u00d7 backup while ADS.",
     "pros": [
@@ -977,6 +1012,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "m249"
     ],
     "desc": "Host-matched precision barrel with a modest extension. Retains the handguard, receiver and stock silhouette.",
@@ -1004,6 +1040,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "vector"
     ],
     "desc": "Short host-matched barrel, not a replacement handguard. The muzzle remains seated ahead of the receiver.",
@@ -1322,7 +1359,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "price": 600,
     "tier": 2,
     "compat": [
-      "scar_h"
+      "scar_h",
+      "mcx_spear"
     ],
     "desc": "Host-specific feed geometry, case finish and floorplate. Not a rifle magazine scaled onto another gun.",
     "pros": [
@@ -1567,6 +1605,7 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "compat": [
       "m4a1",
       "scar_h",
+      "mcx_spear",
       "vector"
     ],
     "desc": "Short open-frame grip with balanced burst control but a less stable hold.",
@@ -1593,7 +1632,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
-      "scar_h"
+      "scar_h",
+      "mcx_spear"
     ],
     "desc": "Small thumb ledge and handstop; prioritises ADS, not spray control.",
     "pros": [
@@ -1619,7 +1659,8 @@ export const ATTACHMENT_CATALOG: AttachmentCatalogEntry[] = [
     "tier": 1,
     "compat": [
       "m4a1",
-      "scar_h"
+      "scar_h",
+      "mcx_spear"
     ],
     "desc": "Skeletonised palm support for steady single shots. Less helpful in long bursts.",
     "pros": [

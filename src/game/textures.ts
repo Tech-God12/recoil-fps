@@ -34,24 +34,195 @@ function cv(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D]
   return [c, c.getContext('2d')!];
 }
 
+/**
+ * Anisotropy is a per-GPU capability. The renderer publishes its real maximum
+ * here at boot; until then we assume a conservative 8 so Node-side texture
+ * construction never touches a GL context.
+ */
+let maxAnisotropy = 8;
+export function setTextureAnisotropy(max: number): void {
+  maxAnisotropy = Math.max(1, Math.min(16, Math.floor(max)));
+}
+
 function tex(c: HTMLCanvasElement, rx: number, ry: number, srgb = true): THREE.CanvasTexture {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(rx, ry);
-  t.anisotropy = 8;
+  t.anisotropy = maxAnisotropy;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
-function mat(diffuse: HTMLCanvasElement, bump: HTMLCanvasElement, rx: number, ry: number, rough: number, metal: number, bumpScale: number): THREE.MeshStandardMaterial {
-  const b = tex(bump, rx, ry, false);
-  return new THREE.MeshStandardMaterial({
+/**
+ * Largest derived (normal / ORM) map we will generate. The source height canvases
+ * go up to 1024², but a Sobel + blur over a full megapixel, ten times at boot, is
+ * a visible hitch on the loading screen for detail nobody can resolve. Derived
+ * maps are low-frequency by nature and downsample essentially for free.
+ */
+const DERIVED_MAX = 512;
+
+/** Read a canvas as a single-channel height field in 0..1, box-downsampled if large. */
+function heightField(bump: HTMLCanvasElement): { h: Float32Array; w: number; hgt: number } {
+  const step = Math.max(1, Math.round(Math.max(bump.width, bump.height) / DERIVED_MAX));
+  const sw = bump.width, sh = bump.height;
+  const data = bump.getContext('2d')!.getImageData(0, 0, sw, sh).data;
+  const w = Math.max(1, Math.floor(sw / step)), hgt = Math.max(1, Math.floor(sh / step));
+  const h = new Float32Array(w * hgt);
+  for (let y = 0; y < hgt; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      for (let oy = 0; oy < step; oy++) {
+        for (let ox = 0; ox < step; ox++) {
+          const p = ((y * step + oy) * sw + (x * step + ox)) * 4;
+          sum += data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114;
+        }
+      }
+      h[y * w + x] = sum / (step * step * 255);
+    }
+  }
+  return { h, w, hgt };
+}
+
+/**
+ * Sobel a height field into a tangent-space normal map.
+ *
+ * This replaces three.js `bumpMap`, which reconstructs a gradient per-pixel from
+ * screen-space derivatives every frame. A real normal map is both better looking
+ * (no derivative aliasing on sloped or distant geometry, correct behaviour under
+ * anisotropic filtering) and cheaper in the fragment shader.
+ */
+function normalMapFrom(field: { h: Float32Array; w: number; hgt: number }, strength: number): HTMLCanvasElement {
+  const { w, hgt } = field;
+  const [c, ctx] = cv(w, hgt);
+  const img = ctx.createImageData(w, hgt);
+  img.data.set(encodeNormals(field, strength));
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/** Exposed so the Sobel can be asserted directly; a no-op generator is invisible. */
+export function buildNormalMapForTest(field: { h: Float32Array; w: number; hgt: number }, strength: number): Uint8ClampedArray {
+  return encodeNormals(field, strength);
+}
+
+function encodeNormals(field: { h: Float32Array; w: number; hgt: number }, strength: number): Uint8ClampedArray {
+  const { h, w, hgt } = field;
+  const d = new Uint8ClampedArray(w * hgt * 4);
+  const at = (x: number, y: number) => h[((y + hgt) % hgt) * w + ((x + w) % w)];
+  for (let y = 0; y < hgt; y++) {
+    for (let x = 0; x < w; x++) {
+      // 3×3 Sobel. Wrapping keeps the map tileable, which matters because every
+      // one of these textures is repeated across a whole building face.
+      const tl = at(x - 1, y - 1), t = at(x, y - 1), tr = at(x + 1, y - 1);
+      const l = at(x - 1, y), r = at(x + 1, y);
+      const bl = at(x - 1, y + 1), b = at(x, y + 1), br = at(x + 1, y + 1);
+      const dx = (tr + 2 * r + br) - (tl + 2 * l + bl);
+      const dy = (bl + 2 * b + br) - (tl + 2 * t + tr);
+      let nx = -dx * strength, ny = -dy * strength, nz = 1;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+      const i = (y * w + x) * 4;
+      d[i] = (nx * 0.5 + 0.5) * 255;
+      d[i + 1] = (ny * 0.5 + 0.5) * 255;
+      d[i + 2] = (nz * 0.5 + 0.5) * 255;
+      d[i + 3] = 255;
+    }
+  }
+  return d;
+}
+
+/** Cheap separable box blur over a float field, used for the cavity term. */
+function blurField(src: Float32Array, w: number, hgt: number, radius: number): Float32Array {
+  const tmp = new Float32Array(src.length), out = new Float32Array(src.length);
+  const span = radius * 2 + 1;
+  for (let y = 0; y < hgt; y++) {
+    let sum = 0;
+    for (let k = -radius; k <= radius; k++) sum += src[y * w + ((k + w) % w)];
+    for (let x = 0; x < w; x++) {
+      tmp[y * w + x] = sum / span;
+      sum -= src[y * w + ((x - radius + w) % w)];
+      sum += src[y * w + ((x + radius + 1) % w)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let k = -radius; k <= radius; k++) sum += tmp[((k + hgt) % hgt) * w + x];
+    for (let y = 0; y < hgt; y++) {
+      out[y * w + x] = sum / span;
+      sum -= tmp[(((y - radius) + hgt) % hgt) * w + x];
+      sum += tmp[(((y + radius + 1) % hgt)) * w + x];
+    }
+  }
+  return out;
+}
+
+/**
+ * Pack two derived maps into one RGB texture and reuse it for both roughness
+ * and AO: three.js samples `roughnessMap.g` and `aoMap.r`, so a single upload
+ * feeds both slots.
+ *
+ *  R — ambient occlusion  (height minus its local average: crevices go dark)
+ *  G — roughness          (recessed, weathered areas are rougher than proud ones)
+ */
+function ormFrom(field: { h: Float32Array; w: number; hgt: number }, roughBase: number, roughVary: number, aoStrength: number): HTMLCanvasElement {
+  const { h, w, hgt } = field;
+  const avg = blurField(h, w, hgt, Math.max(2, Math.round(w / 64)));
+  const [c, ctx] = cv(w, hgt);
+  const img = ctx.createImageData(w, hgt);
+  const d = img.data;
+  for (let i = 0; i < h.length; i++) {
+    // Cavity: how far below its neighbourhood this texel sits.
+    const cavity = Math.max(0, avg[i] - h[i]);
+    const ao = Math.max(0, Math.min(1, 1 - cavity * 2.6 * aoStrength));
+    const rough = Math.max(0.04, Math.min(1, roughBase + cavity * roughVary * 2.2 - (h[i] - avg[i]) * roughVary));
+    const p = i * 4;
+    d[p] = ao * 255;
+    d[p + 1] = rough * 255;
+    d[p + 2] = 255;
+    d[p + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/**
+ * Build a full PBR material from a diffuse + height canvas pair.
+ *
+ * Every world surface used to be diffuse + bumpMap + one constant roughness,
+ * which is why everything read as the same slab of matte plastic under the sun.
+ * Now each surface also gets a derived tangent-space normal map, a varying
+ * roughness map and a cavity AO map, all from the height data the textures were
+ * already drawing.
+ */
+function mat(
+  diffuse: HTMLCanvasElement, bump: HTMLCanvasElement,
+  rx: number, ry: number, rough: number, metal: number, bumpScale: number,
+  opts: { roughVary?: number; ao?: number } = {},
+): THREE.MeshStandardMaterial {
+  const field = heightField(bump);
+  // bumpScale was authored in "three.js bump units"; scale it into gradient
+  // strength so existing per-material tuning carries over unchanged in feel.
+  const normalTex = tex(normalMapFrom(field, bumpScale * 34), rx, ry, false);
+  const ormTex = tex(ormFrom(field, rough, opts.roughVary ?? 0.30, opts.ao ?? 1), rx, ry, false);
+  // aoMap defaults to the second UV set; the world only authors one, so point it
+  // back at channel 0 rather than duplicating every UV buffer.
+  ormTex.channel = 0;
+  const m = new THREE.MeshStandardMaterial({
     map: tex(diffuse, rx, ry),
-    bumpMap: b,
-    bumpScale,
-    roughness: rough,
+    normalMap: normalTex,
+    normalScale: new THREE.Vector2(1, 1),
+    roughnessMap: ormTex,
+    roughness: 1,      // modulated by the map's green channel
+    aoMap: ormTex,
+    aoMapIntensity: 0.85,
     metalness: metal,
   });
+  // Keep the authored scalar available for anything that wants to re-tune later.
+  m.userData.baseRoughness = rough;
+  return m;
 }
 
 // value noise → soft cloudy variation (for baked AO / grime / color drift)

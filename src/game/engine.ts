@@ -8,7 +8,9 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { buildWorld, pointInAABB, type World, type MapId, type AABB } from './world';
-import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, WEAPON_BUILDERS, type WeaponModel } from './models';
+import { setTextureAnisotropy } from './textures';
+import { PerfDirector, QUALITY_TIERS, guessStartTier, type QualityTier } from './perf-director';
+import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, poseArmIK, WEAPON_BUILDERS, type WeaponModel } from './models';
 import { applyBuild } from './attachments';
 import { WEAPON_CATALOG, attachmentById, weaponById, type WeaponId } from './economy/catalog';
 import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
@@ -55,6 +57,17 @@ export interface GameSettings {
   adsSensitivity: number;   // 0.2 - 1.5 multiplier
   invertY: boolean;
   adsToggle: boolean;       // click MMB to keep scoped instead of holding
+  // ---- Quality of life ----
+  /** Start a reload automatically the moment the magazine runs dry. */
+  autoReload: boolean;
+  /** Hold C to stay crouched instead of C toggling the stance. */
+  holdCrouch: boolean;
+  /** Move forward at full speed without holding Shift. */
+  autoSprint: boolean;
+  /** Floating damage numbers on every hit you land. */
+  damageNumbers: boolean;
+  /** Recolours every HUD status signal for the three common colour deficiencies. */
+  colorblind: 'off' | 'protanopia' | 'deuteranopia' | 'tritanopia';
   fov: number;              // 70 - 120
   difficulty: string;
   map: MapId;
@@ -62,6 +75,12 @@ export interface GameSettings {
   adaptiveResolution: boolean;
   resolutionScale: number;  // 50 - 100 (%)
   shadowQuality: 'off' | 'low' | 'medium' | 'high';
+  /**
+   * 'auto' hands the whole quality ladder to the adaptive director. Any tier
+   * name pins it there, for players who would rather have a fixed look than a
+   * fixed frame rate.
+   */
+  graphicsQuality: string;
   bloom: boolean;
   bloomStrength: number;    // 0 - 100
   vignette: number;         // 0 - 70
@@ -85,12 +104,18 @@ export const DEFAULT_SETTINGS: GameSettings = {
   adsSensitivity: 0.7,
   invertY: false,
   adsToggle: false,
+  autoReload: true,
+  holdCrouch: false,
+  autoSprint: false,
+  damageNumbers: true,
+  colorblind: 'off',
   fov: 95,
   difficulty: 'Normal',
   map: 'alrasul',
   adaptiveResolution: true,
   resolutionScale: 100,
   shadowQuality: 'low',
+  graphicsQuality: 'auto',
   bloom: false,
   bloomStrength: 22,
   vignette: 12,
@@ -143,12 +168,18 @@ export function sanitizeSettings(input: unknown): GameSettings {
     adsSensitivity: number('adsSensitivity', DEFAULT_SETTINGS.adsSensitivity, 0.2, 1.5),
     invertY: boolean('invertY', DEFAULT_SETTINGS.invertY),
     adsToggle: boolean('adsToggle', DEFAULT_SETTINGS.adsToggle),
+    autoReload: boolean('autoReload', DEFAULT_SETTINGS.autoReload),
+    holdCrouch: boolean('holdCrouch', DEFAULT_SETTINGS.holdCrouch),
+    autoSprint: boolean('autoSprint', DEFAULT_SETTINGS.autoSprint),
+    damageNumbers: boolean('damageNumbers', DEFAULT_SETTINGS.damageNumbers),
+    colorblind: choice('colorblind', ['off', 'protanopia', 'deuteranopia', 'tritanopia'], DEFAULT_SETTINGS.colorblind),
     fov: number('fov', DEFAULT_SETTINGS.fov, 70, 120),
     difficulty: choice('difficulty', ['Easy', 'Normal', 'Hard'], DEFAULT_SETTINGS.difficulty),
     map: choice('map', ['alrasul', 'kasbah', 'arena', 'sirocco'], DEFAULT_SETTINGS.map),
     adaptiveResolution: boolean('adaptiveResolution', DEFAULT_SETTINGS.adaptiveResolution),
     resolutionScale: number('resolutionScale', DEFAULT_SETTINGS.resolutionScale, 50, 100),
     shadowQuality: choice('shadowQuality', ['off', 'low', 'medium', 'high'], DEFAULT_SETTINGS.shadowQuality),
+    graphicsQuality: choice('graphicsQuality', ['auto', ...QUALITY_TIERS.map(t => t.name)], DEFAULT_SETTINGS.graphicsQuality),
     bloom: boolean('bloom', DEFAULT_SETTINGS.bloom),
     bloomStrength: number('bloomStrength', DEFAULT_SETTINGS.bloomStrength, 0, 100),
     vignette: number('vignette', DEFAULT_SETTINGS.vignette, 0, 70),
@@ -208,6 +239,10 @@ export interface HudState {
   /** Effective render scale in % (resolution slider × adaptive step) — shown next to
    *  FPS so the player can see the adaptive scaler working instead of guessing. */
   renderScale: number;
+  /** Name of the live quality tier, so an automatic drop is never mysterious. */
+  qualityTier: string;
+  /** Set for a few seconds after the director changes tier, to explain why. */
+  qualityNote?: string;
   magSize: number;
   masterkey?: { shells: number; reloading: boolean };
   worldHalf: number;
@@ -261,6 +296,8 @@ export interface TdmRosterEntry {
 export type GameEvent =
   | { type: 'graphics'; text: string }
   | { type: 'hit'; kill: boolean; headshot?: boolean }
+  /** QoL floating damage number: `nx`/`ny` are normalised screen coords (0..1). */
+  | { type: 'dmgnum'; amount: number; headshot: boolean; kill: boolean; nx: number; ny: number }
   | { type: 'kill'; name: string; weapon: string; headshot: boolean }
   | { type: 'damage'; dir: number; amount: number }
   | { type: 'flash'; power: number }
@@ -318,7 +355,7 @@ interface WeaponDef {
   lpvo?: boolean;
   lpvoHigh?: boolean;
   pumpShotgun?: boolean;
-  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'vector' | 'lmg' | 'deagle';
+  audioTag?: 'm4' | 'ak' | 'pistol' | 'sniper' | 'smg' | 'shotgun' | 'scar' | 'vector' | 'lmg' | 'deagle' | 'spear';
   laser?: boolean;
   flashlight?: boolean;
   masterkey?: boolean;
@@ -369,20 +406,31 @@ const AI_CROUCH_HEIGHT = 1.15;
  * few seconds, and because the FPS reading that triggered the next change still
  * contained the cost of the last one, it could only ever ratchet downwards.
  */
-const ADAPT_STEPS = [1, 0.85, 0.72, 0.6];
-const ADAPT_DOWN_FPS = 45;
-const ADAPT_UP_FPS = 57;
-const ADAPT_EVAL_MS = 5000;
-const ADAPT_LOCK_MS = 8000;
-const ADAPT_DOWN_WINDOWS = 2;
-const ADAPT_UP_WINDOWS = 3;
-/** A frame longer than this is a hitch, not sustained throughput; it must not drive scaling. */
-const ADAPT_STALL_SECONDS = 0.25;
 // Maps armory weapon ids to the engine's legacy audio tags for loadout-built guns.
+/**
+ * Muzzle energy per weapon family, 0..1, normalised against a .338 magnum.
+ * Drives the temporary hearing threshold shift after each report.
+ */
+const REPORT_LOUDNESS: Record<NonNullable<WeaponDef['audioTag']>, number> = {
+  sniper: 1.0, deagle: 0.88, shotgun: 0.82, lmg: 0.74, spear: 0.72,
+  scar: 0.70, ak: 0.66, m4: 0.52, pistol: 0.46, vector: 0.34, smg: 0.26,
+};
+
 const LOADOUT_AUDIO: Record<WeaponId, NonNullable<WeaponDef['audioTag']>> = {
   m4a1: 'm4', ak47: 'ak', scar_h: 'scar', m249: 'lmg', vector: 'vector', mp7: 'smg',
-  spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle',
+  spas12: 'shotgun', awm: 'sniper', m1911: 'pistol', deagle: 'deagle', mcx_spear: 'spear',
 };
+
+/** Hermite ease between two times; 0 before `a`, 1 after `b`. */
+function smoothstep(x: number, a: number, b: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / Math.max(1e-6, b - a)));
+  return t * t * (3 - 2 * t);
+}
+/** A single 0→1→0 hump inside [a, b] — used for animation accents. */
+function pulse(x: number, a: number, b: number): number {
+  if (x <= a || x >= b) return 0;
+  return Math.sin(((x - a) / (b - a)) * Math.PI);
+}
 
 /**
  * VIEWMODEL RIG — one source of truth for gun scale, hip pose and ADS depth.
@@ -660,6 +708,10 @@ export class Engine {
       this.frags = 3; this.flashes = 1;
     }
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+    // Publish the real GPU limit before any material is built. Grazing-angle
+    // ground and long walls are where anisotropy earns its keep, and this map is
+    // nothing but grazing-angle ground and long walls.
+    setTextureAnisotropy(this.renderer.capabilities.getMaxAnisotropy());
     // Cap pixel ratio at 1.25 — the single biggest FPS win on high-DPI screens
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     this.renderer.shadowMap.enabled = true;
@@ -1168,6 +1220,7 @@ void main(){
     }
 
     if (e.code === 'KeyR') this.startReload();
+    if (e.code === 'KeyI') { this.startInspect(); return; }
     if (e.code === 'KeyZ' && this.kits) { this.kits.activate(); return; }
     if (e.code === 'Digit1') this.switchWeapon(0);
     if (e.code === 'Digit2') this.switchWeapon(1);
@@ -1201,7 +1254,9 @@ void main(){
         this.startSlide();
       } else {
         if (!this.sliding) {
-          this.crouched = !this.crouched;
+          // QoL — stance mode. Toggle by default; hold-to-crouch for players who
+          // expect the key to behave like every other movement modifier.
+          this.crouched = this.holdCrouch ? true : !this.crouched;
           this.crouchT = 0;
           if (this.crouched) this.sprinting = false;
         }
@@ -1224,6 +1279,10 @@ void main(){
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
+    if (this.holdCrouch && (e.code === 'KeyC' || e.code === 'ControlLeft') && !this.sliding) {
+      this.crouched = false;
+      this.crouchT = 0;
+    }
     // Q is dual-purpose: tap = quick-swap to last weapon, hold = lean left.
     if (e.code === 'KeyQ' && this.qDownT >= 0 && !this.paused && !this.dead && !this.ended) {
       if (performance.now() - this.qDownT < 220 && Math.abs(this.lean) < 0.15) this.switchWeapon(this.lastCur);
@@ -1321,12 +1380,11 @@ void main(){
   private onGraphicsRestored = () => {
     if (this.disposed) return;
     this.graphicsLost=false; this.appliedPR=-1;
-    // Re-uploaded GPU state is expensive for a while: resume one ladder step down,
-    // staying on the ladder so the scaler can climb back without hunting.
-    this.adaptStep = Math.max(this.adaptStep, 1);
-    this.dynPR = this.userPR * ADAPT_STEPS[this.adaptStep];
-    this.adaptLow = 0; this.adaptHigh = 0; this.adaptLockUntil = 0; this.adaptSamples.length = 0;
-    this.syncPixelRatio(); this.createReflections(); this.renderer.shadowMap.needsUpdate=true;
+    // Re-uploaded GPU state is expensive for a while: resume one tier down and
+    // let the director climb back once the driver has settled.
+    this.director.setTier(Math.max(this.director.index, 1));
+    this.applyQualityTier(this.director.tier);
+    this.createReflections(); this.renderer.shadowMap.needsUpdate=true;
     this.onEvent({type:'graphics',text:'Graphics restored. Your mission is preserved; select Resume to continue.'});
   };
 
@@ -1785,6 +1843,59 @@ void main(){
     this.reloadStages = stages;
   }
 
+  /**
+   * True once the magazine is actually seated and the rounds are in the gun.
+   * Before that point cancelling would hand the player ammunition the animation
+   * never delivered, which is the classic reload-cancel exploit.
+   */
+  private canCancelReload(): boolean {
+    if (this.reloadT < 0) return false;
+    if (this.def().pumpShotgun) return this.mags[this.cur] > 0; // tube-fed: any loaded shell is fair game
+    return this.currentReloadStage === 'magIn' || this.currentReloadStage === 'ready';
+  }
+
+  /**
+   * QoL — floating damage numbers. Projects the impact point to screen space
+   * once, at the moment of the hit, so the HUD can animate a plain DOM element
+   * upward instead of re-projecting a world position every frame.
+   */
+  private readonly _dmgProj = new THREE.Vector3();
+  private emitDamageNumber(amount: number, headshot: boolean, kill: boolean, at: THREE.Vector3): void {
+    if (!this.damageNumbers || amount <= 0) return;
+    this._dmgProj.copy(at).project(this.camera);
+    // Behind the camera, or off-screen: nothing useful to show.
+    if (this._dmgProj.z > 1 || Math.abs(this._dmgProj.x) > 1.1 || Math.abs(this._dmgProj.y) > 1.1) return;
+    this.onEvent({
+      type: 'dmgnum',
+      amount: Math.max(1, Math.round(amount)),
+      headshot, kill,
+      nx: this._dmgProj.x * 0.5 + 0.5,
+      ny: -this._dmgProj.y * 0.5 + 0.5,
+    });
+  }
+
+  /** Cut the remaining reload showmanship and hand control straight back. */
+  private finishReloadEarly(): void {
+    // Run any stage that has not fired yet, so ammo and audio state stay honest.
+    for (const stage of this.reloadStages) if (stage.t > this.reloadT) stage.fn();
+    this.reloadStages = [];
+    this.reloadT = -1;
+    this.currentReloadStage = 'ready';
+    this.autoReloadPending = false;
+  }
+
+  /**
+   * Weapon inspect. Purely cosmetic, cancelled by anything that matters, and
+   * the reason the gun models are worth the polygons they cost.
+   */
+  private startInspect(): void {
+    if (this.inspectT >= 0 || this.reloadT >= 0 || this.switchT >= 0) return;
+    if (this.dead || this.ended || this.paused || this.sprinting || this.ads > 0.2 || this.cooking) return;
+    this.inspectT = 0;
+    audio.magOut();
+  }
+
+
   // ==================== SLIDE MECHANIC ====================
   // Trigger: sprint + crouch input simultaneously
   // Start speed: 7.2 m/s. Decelerates to 0 over 0.8s.
@@ -1804,7 +1915,14 @@ void main(){
     if (this.paused || this.dead || this.ended || !this.started || this.scopeAdjusting) return;
     // Competitive rules: no shooting in freeze time, while arming/defusing, or with the buy menu up.
     if (this.defusal && (this.defusal.match.phase === 'freeze' || this.defusal.movementLocked() || this.buyMenuOpen)) return;
-    if (this.fireCD > 0 || this.reloadT >= 0 || this.switchT >= 0 || this.cooking) return;
+    // QoL — reload cancel. Once the fresh magazine is seated the rest of the
+    // reload is showmanship, so pulling the trigger cuts straight to firing
+    // instead of making you watch the bolt release you already have rounds past.
+    if (this.reloadT >= 0) {
+      if (this.canCancelReload()) this.finishReloadEarly();
+      else return;
+    }
+    if (this.fireCD > 0 || this.switchT >= 0 || this.cooking) return;
     if (this.sprinting || this.sprintToFireDelay > 0) return; // Cannot fire during sprint
     if (this.sliding) return; // Cannot fire during slide
     // Firing ends the opening grace window — hostiles are allowed to see you now.
@@ -1820,6 +1938,10 @@ void main(){
     this.mags[this.cur]--;
     this.fireCD = 60 / d.rpm;
     this.shots++;
+    // QoL — auto-reload. Firing the last round starts the reload for you, so a
+    // fight is never lost to a dry click you had no way to anticipate. It is
+    // deferred by the fire cooldown so the shot's own animation plays out first.
+    if (this.autoReload && this.mags[this.cur] === 0) this.autoReloadPending = true;
     // G4: Bolt-actions keep ADS if the player is still holding RMB — the 1.25 s
     // bolt cycle already blocks aim via `wantAds: rmb && boltCycle<=0`, so forcing
     // rmb=false only made the felt TTK ~2 s and hid recoil. Keep the hold.
@@ -1908,7 +2030,9 @@ void main(){
         this.effects.blood(h.point);
         audio.fleshImpact(0);
         if (part === 'head') audio.headshotDink();
-        if (tdmBot.takeDamage(dmg, part === 'head', 'player', false)) {
+        const killedDf = tdmBot.takeDamage(dmg, part === 'head', 'player', false);
+        this.emitDamageNumber(dmg, part === 'head', killedDf, h.point);
+        if (killedDf) {
           this.kills++;
           this.score += part === 'head' ? 150 : 100;
           if (part === 'head') { this.headshots++; voice.headshot(); }
@@ -1938,6 +2062,7 @@ void main(){
         audio.fleshImpact(0);
         if (part === 'head') audio.headshotDink();
         const killed = tdmBot.takeDamage(dmg, part === 'head', 'player');
+        this.emitDamageNumber(dmg, part === 'head', killed, h.point);
         if (killed) {
           if (part === 'head') { this.headshots++; voice.headshot(); }
           this.creditTdmKill(tdmBot, part === 'head', d.name, part === 'head' ? 150 : 100);
@@ -1967,6 +2092,7 @@ void main(){
         // when the target survives (and stacks under the kill confirm when not).
         if (part === 'head') audio.headshotDink();
         const killed = enemy.takeDamage(dmg, part === 'head');
+        this.emitDamageNumber(dmg, part === 'head', killed, h.point);
         if (killed) {
           this.kills++;
           // Matches the HUD score popups exactly: 100 per elimination, 150 for a headshot.
@@ -2046,7 +2172,12 @@ void main(){
       else if (tag === 'vector') audio.fireVector();
       else if (tag === 'lmg') audio.fireLMG();
       else if (tag === 'deagle') audio.fireDeagle();
+      else if (tag === 'spear') audio.fireSpear();
       else audio.fireSMG();
+      // Auditory masking, scaled by how much muzzle energy the round actually
+      // makes. A suppressed can barely shifts your hearing threshold; a .338
+      // fired inside a room leaves you deaf for most of a second.
+      audio.earProtect(d.suppressed ? 0.12 : REPORT_LOUDNESS[tag] ?? 0.55);
     }
     // Every shot ejects: the delayed metallic tink lands ~90 ms after the report,
     // exactly like brass hitting concrete a beat behind the muzzle blast.
@@ -2272,7 +2403,9 @@ void main(){
       this.effects.blood(h.point);
       audio.fleshImpact(0);
       const isHead = part === 'head';
-      if (enemy.takeDamage(dmg, isHead)) {
+      const killedByPellet = enemy.takeDamage(dmg, isHead);
+      this.emitDamageNumber(dmg, isHead, killedByPellet, h.point);
+      if (killedByPellet) {
         this.kills++;
         this.score += 100;
         this.earnCash(isHead ? REWARDS.headshot : REWARDS.kill, isHead ? 'headshot' : 'kill');
@@ -3183,8 +3316,7 @@ void main(){
     this.fpsAcc += frameSeconds; this.fpsFrames++;
     if (this.fpsAcc >= 0.25) { this.fps = this.fpsFrames / this.fpsAcc; this.fpsAcc = 0; this.fpsFrames = 0; }
     // A separate, hitch-immune sample drives resolution scaling only.
-    this.recordFrameForScaling(frameSeconds);
-    this.adaptResolution(t);
+    this.updateQuality(t, frameSeconds);
     if (this.paused) return;
     if (this.ended) {
       this.finishDelay -= dt;
@@ -3280,7 +3412,12 @@ void main(){
     const wasSprinting = this.sprinting;
     // Cannot sprint from crouch without standing first
     // Cannot sprint while aiming down sights or while leaning
-    this.sprinting = k.has('ShiftLeft') && !this.rmb && iz < 0 && !this.crouched && !this.sliding
+    // QoL — auto-sprint. Holding a key to move at normal speed is a hand-cramp
+    // tax, not a decision; with it on, running forward simply IS sprinting, and
+    // every existing restriction (aiming, crouched, leaning, reloading) still
+    // applies exactly as before.
+    const sprintHeld = k.has('ShiftLeft') || (this.autoSprint && !this.triggerHeld);
+    this.sprinting = sprintHeld && !this.rmb && iz < 0 && !this.crouched && !this.sliding
       && this.ads < 0.25 && this.reloadT < 0 && this.switchT < 0 && Math.abs(this.lean) < 0.25 && moving;
 
     if (wasSprinting && !this.sprinting) {
@@ -3472,6 +3609,21 @@ void main(){
       this.reloadT += dt;
       while (this.reloadStages.length && this.reloadT >= this.reloadStages[0].t) {
         this.reloadStages.shift()!.fn();
+      }
+    }
+    // QoL — deferred auto-reload. Fired on the frame after the last round so the
+    // shot, its recoil and its sound are not stepped on by the reload starting.
+    if (this.autoReloadPending && this.reloadT < 0 && this.fireCD <= 0) {
+      this.autoReloadPending = false;
+      if (this.autoReload && !this.sprinting && !this.cooking) this.startReload();
+    }
+    // QoL — weapon inspect. Anything that matters cancels it instantly.
+    if (this.inspectT >= 0) {
+      if (this.reloadT >= 0 || this.switchT >= 0 || this.sprinting || this.rmb || this.triggerHeld || this.cooking || this.dead) {
+        this.inspectT = -1;
+      } else {
+        this.inspectT += dt / this.inspectDur;
+        if (this.inspectT >= 1) this.inspectT = -1;
       }
     }
     if (this.pumpT > 0) this.pumpT = Math.max(0, this.pumpT - dt);
@@ -3702,29 +3854,64 @@ void main(){
         // PDWs: fast, twitchy — sharp cant, quick mag punch, minimal dip.
         py -= dip * 0.055 * S; rx -= dip * 0.30; rz += dip * 0.32; ry += dip * 0.06;
       } else {
-        // AR family (M416/SCAR): controlled tactical reload at chest height.
-        py -= dip * 0.08 * S; rx -= dip * 0.40; rz += dip * 0.24;
+        // AR family (M416/SCAR/MCX): the rifle is brought INTO the workspace —
+        // rolled ~35° ejection-port-up and canted toward the eye line so the
+        // magwell actually faces the support hand. The old pose only dropped the
+        // muzzle 8 cm and came straight back, which read as a stutter, not a reload.
+        const bring = smoothstep(rt, 0.00, 0.20) * (1 - smoothstep(rt, 0.82, 1.00));
+        px += bring * 0.030 * S;
+        py -= bring * 0.062 * S;
+        pz += bring * 0.022 * S;
+        rx -= bring * 0.30;
+        ry += bring * 0.26;
+        rz += bring * 0.58;
+        // Mag-out snatch: a sharp downward tug as the magazine is stripped.
+        const snatch = pulse(rt, 0.36, 0.48);
+        py -= snatch * 0.028 * S; rx -= snatch * 0.12;
+        // Seat slap: the rifle jolts up-and-back when the fresh mag locks in.
+        const seat = pulse(rt, 0.72, 0.80);
+        py += seat * 0.030 * S; pz += seat * 0.018 * S; rx += seat * 0.20; rz -= seat * 0.14;
+        // Bolt release: a crisp settle as the carrier runs forward.
+        const release = pulse(rt, 0.84, 0.90);
+        py -= release * 0.012 * S; rx -= release * 0.10;
       }
-      if (!d.pumpShotgun) {
-        // Mag travel: straight drop for STANAG guns, forward pivot for the AK rock.
-        const out = rt > 0.14 && rt < 0.58 ? Math.sin(((rt - 0.14) / 0.44) * Math.PI) : 0;
-        magObj.position.y = magHomeY - out * 0.17 * S;
-        if (tag === 'ak') {
-          magObj.position.z = magHomeZ - out * 0.05 * S;
-          magObj.rotation.x = out * 0.5;
-        }
-      }
+      if (!d.pumpShotgun) this.animateMagSwap(magObj, magHomeY, magHomeZ, rt, tag, S);
       this.poseLArm(d, rt);
     } else {
+      magObj.visible = true;
       magObj.position.y = magHomeY;
       if (d.audioTag === 'ak') { magObj.position.z = magHomeZ; magObj.rotation.x = 0; }
+      else magObj.rotation.x = 0;
       if (d.audioTag === 'lmg') d.model.chargingHandle.rotation.x *= 1 - Math.min(1, dt * 10);
       if ((d.boltAction ?? this.cur === 3) && this.boltCycle <= 0) d.model.chargingHandle.position.z = (d.model.chargingHandle.userData.homeZ as number | undefined) ?? 0;
-      if (d.model.lArm) {
-        d.model.lArm.position.multiplyScalar(1 - Math.min(1, dt * 14));
-        d.model.lArm.rotation.x *= 1 - Math.min(1, dt * 14);
-        d.model.lArm.rotation.z *= 1 - Math.min(1, dt * 14);
-      }
+      this.relaxLArm(d, dt);
+    }
+
+    // QoL — weapon inspect. Brings the rifle across the body, rolls it to show
+    // the ejection port and receiver markings, tips the muzzle to read the
+    // device, then settles back. The charging handle is racked halfway through
+    // so there is something mechanical to watch, not just a rotating prop.
+    if (this.inspectT >= 0) {
+      const it = this.inspectT;
+      const hold = smoothstep(it, 0.00, 0.16) * (1 - smoothstep(it, 0.80, 1.00));
+      px += hold * 0.055 * S;
+      py -= hold * 0.030 * S;
+      pz += hold * 0.055 * S;
+      ry += hold * 0.95;
+      rz += hold * 0.42;
+      rx -= hold * 0.12;
+      // Turn the gun over to the left side halfway through.
+      const flip = pulse(it, 0.34, 0.68);
+      ry -= flip * 0.85;
+      rz -= flip * 0.95;
+      px -= flip * 0.020 * S;
+      // Tip the muzzle down to read the device, late in the routine.
+      const tip = pulse(it, 0.62, 0.84);
+      rx += tip * 0.40;
+      pz += tip * 0.02 * S;
+      // Rack the charging handle as the gun comes back level.
+      const rack = pulse(it, 0.20, 0.34);
+      d.model.chargingHandle.position.z = (d.model.chargingHandle.userData.homeZ as number ?? 0) + rack * 0.05;
     }
 
     // Switch raise
@@ -3828,7 +4015,74 @@ void main(){
   }
   private sprintPose = 0;
 
-  /** Drives the viewmodel left arm through reload keyframes (mag grab → pull → seat → tap). */
+  /**
+   * A magazine change is a SWAP, not a yo-yo. The seated mag is stripped and
+   * falls out of frame; the well sits visibly empty while the support hand is at
+   * the pouch; then a fresh mag rides back up and locks in.
+   *
+   * Reusing the single mag object keeps this free — no per-reload allocation.
+   */
+  private animateMagSwap(
+    magObj: THREE.Object3D, homeY: number, homeZ: number,
+    rt: number, tag: NonNullable<WeaponDef['audioTag']>, S: number,
+  ): void {
+    const rocking = tag === 'ak';
+    // Phase boundaries line up with the hand keyframes in weapons/core.ts.
+    const STRIP = 0.33, CLEAR = 0.50, RETURN = 0.62, SEAT = 0.755;
+    if (rt < STRIP) {
+      magObj.visible = true;
+      magObj.position.y = homeY;
+      magObj.position.z = homeZ;
+      magObj.rotation.x = 0;
+      return;
+    }
+    if (rt < CLEAR) {
+      // Stripped: accelerating downward fall (and forward rock on the AK).
+      const f = (rt - STRIP) / (CLEAR - STRIP);
+      const drop = f * f;
+      magObj.visible = true;
+      magObj.position.y = homeY - drop * 0.30 * S;
+      magObj.position.z = homeZ - (rocking ? drop * 0.10 * S : 0);
+      magObj.rotation.x = rocking ? drop * 0.85 : drop * 0.30;
+      return;
+    }
+    if (rt < RETURN) {
+      // Out of frame entirely — the magwell reads empty. This beat is what sells
+      // the swap; without it the same magazine appears to bounce and come back.
+      magObj.visible = false;
+      return;
+    }
+    if (rt < SEAT) {
+      // Fresh magazine rides in from below on the support hand.
+      const f = (rt - RETURN) / (SEAT - RETURN);
+      const e = f * f * (3 - 2 * f);
+      magObj.visible = true;
+      magObj.position.y = homeY - (1 - e) * 0.22 * S;
+      magObj.position.z = homeZ - (rocking ? (1 - e) * 0.075 * S : 0);
+      magObj.rotation.x = rocking ? (1 - e) * 0.62 : (1 - e) * 0.22;
+      return;
+    }
+    // Seated: a 2 mm overshoot so the lock-up has a physical click to it.
+    const settle = Math.max(0, 1 - (rt - SEAT) / 0.06);
+    magObj.visible = true;
+    magObj.position.y = homeY + settle * 0.010 * S;
+    magObj.position.z = homeZ;
+    magObj.rotation.x = 0;
+  }
+
+  /** Live hand target (gun space) shared by every weapon's left-arm rig. */
+  private lHand = new THREE.Vector3();
+  private lHandRot = new THREE.Euler();
+  private lHandTarget = new THREE.Vector3();
+  private lHandRotTarget = new THREE.Euler();
+
+  /**
+   * Drives the viewmodel left arm through reload keyframes
+   * (break grip → sweep outboard → strip mag → pouch → seat → bolt release → home).
+   *
+   * Only the HAND target is keyframed; `poseArmIK` solves shoulder and elbow, so
+   * the forearm folds outboard instead of sweeping through the receiver.
+   */
   private poseLArm(d: { model: { lArm: THREE.Object3D | null; lArmKeys: { t: number; p: [number, number, number]; r: [number, number, number] }[] } }, rt: number) {
     const arm = d.model.lArm;
     const keys = d.model.lArmKeys;
@@ -3838,16 +4092,31 @@ void main(){
     const k0 = keys[i], k1 = keys[i + 1];
     const f = Math.max(0, Math.min(1, (rt - k0.t) / Math.max(0.0001, k1.t - k0.t)));
     const s = f * f * (3 - 2 * f); // smoothstep — no snapping between keys
-    arm.position.set(
+    this.lHandTarget.set(
       k0.p[0] + (k1.p[0] - k0.p[0]) * s,
       k0.p[1] + (k1.p[1] - k0.p[1]) * s,
       k0.p[2] + (k1.p[2] - k0.p[2]) * s,
     );
-    arm.rotation.set(
+    this.lHandRotTarget.set(
       k0.r[0] + (k1.r[0] - k0.r[0]) * s,
       k0.r[1] + (k1.r[1] - k0.r[1]) * s,
       k0.r[2] + (k1.r[2] - k0.r[2]) * s,
     );
+    this.lHand.copy(this.lHandTarget);
+    this.lHandRot.copy(this.lHandRotTarget);
+    poseArmIK(arm, this.lHand, this.lHandRot);
+  }
+
+  /** Spring the support hand back onto the handguard after an interrupted reload. */
+  private relaxLArm(d: { model: { lArm: THREE.Object3D | null } }, dt: number) {
+    const arm = d.model.lArm;
+    if (!arm) return;
+    if (this.lHand.lengthSq() < 1e-8 && Math.abs(this.lHandRot.x) + Math.abs(this.lHandRot.y) + Math.abs(this.lHandRot.z) < 1e-4) return;
+    const k = Math.min(1, dt * 13);
+    this.lHand.multiplyScalar(1 - k);
+    this.lHandRot.set(this.lHandRot.x * (1 - k), this.lHandRot.y * (1 - k), this.lHandRot.z * (1 - k));
+    if (this.lHand.lengthSq() < 1e-8) this.lHand.set(0, 0, 0);
+    poseArmIK(arm, this.lHand, this.lHandRot);
   }
 
   private render() {
@@ -3861,7 +4130,7 @@ void main(){
     // sustained fire should never compete with a shadow-map render.
     // Dirty-flag: skip the re-render if the player and every living enemy/bot
     // have been still (±0.5 m player, ±0.8 m enemies) since the last shadow frame.
-    if ((this.frameNo <= 2 || this.frameNo % 30 === 0) && (!this.triggerHeld || this.frameNo <= 2)) {
+    if ((this.frameNo <= 2 || this.frameNo % this.shadowInterval === 0) && (!this.triggerHeld || this.frameNo <= 2)) {
       const q = (v: number) => Math.round(v / 0.8);
       let curHash = `${q(this.pos.x)},${q(this.pos.z)}|`;
       if (this.ai) for (const e of this.ai.enemies) if (!e.dead) curHash += `${e.id}:${q(e.pos.x)},${q(e.pos.z)};`;
@@ -3920,6 +4189,10 @@ void main(){
     this.adsSensMul = s.adsSensitivity;
     this.invertY = s.invertY;
     this.adsToggle = s.adsToggle;
+    this.autoReload = s.autoReload ?? true;
+    this.holdCrouch = s.holdCrouch ?? false;
+    this.autoSprint = s.autoSprint ?? false;
+    this.damageNumbers = s.damageNumbers ?? true;
     this.fovSetting = s.fov;
     voice.setEnabled(s.voices);
     audio.setMasterVolume(s.masterVolume / 100);
@@ -3931,27 +4204,23 @@ void main(){
     const cap = s.resolutionScale / 100;
     this.adaptiveEnabled = s.adaptiveResolution ?? true;
     this.userPR = cap * Math.min(window.devicePixelRatio || 1,1.25);
-    this.adaptStep = 0;
-    this.dynPR = this.userPR * ADAPT_STEPS[0];
-    this.adaptLow = 0; this.adaptHigh = 0; this.adaptLockUntil = 0; this.adaptSamples.length = 0;
-    this.syncPixelRatio();
 
-    // Shadows
-    const shadowSize = s.shadowQuality === 'off' ? 0 : s.shadowQuality === 'low' ? 1024 : s.shadowQuality === 'medium' ? 2048 : 4096;
-    this.renderer.shadowMap.enabled = shadowSize > 0;
-    if (this.sunLight) {
-      this.sunLight.castShadow = shadowSize > 0;
-      if (shadowSize > 0 && this.sunLight.shadow.mapSize.width !== shadowSize) {
-        this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
-        this.sunLight.shadow.map?.dispose();
-        this.sunLight.shadow.map = null as unknown as THREE.WebGLRenderTarget;
-      }
-    }
-    this.renderer.shadowMap.needsUpdate = true;
-
-    // Post FX
-    this.bloom.enabled = s.bloom;
+    // The player's graphics choices are CEILINGS, never exact values: the
+    // director may lower them to defend the frame rate, but it must never raise
+    // them past what was asked for.
+    this.shadowCap = s.shadowQuality === 'off' ? 0 : s.shadowQuality === 'low' ? 1024 : s.shadowQuality === 'medium' ? 2048 : 4096;
+    this.bloomWanted = s.bloom;
+    this.grainWanted = s.filmGrain;
     this.bloom.strength = s.bloomStrength / 100;
+    if (this.adaptiveEnabled) {
+      // A manual quality pick pins the ladder; 'auto' hands it back to the director.
+      const pinned = QUALITY_TIERS.findIndex(t => t.name.toLowerCase() === (s.graphicsQuality ?? 'auto').toLowerCase());
+      if (pinned >= 0) this.director.setBounds(pinned, pinned);
+      else this.director.setBounds(0, QUALITY_TIERS.length - 1);
+    } else {
+      this.director.setTier(0);
+    }
+    this.applyQualityTier(this.director.tier);
     // The vignette is a CSS overlay now (vignetteOverlay() / App.tsx): it used to be
     // the ONLY reason the default settings ran the whole off-screen post chain
     // (full-res render target + 2 fullscreen passes), and that chain renders into a
@@ -3959,8 +4228,6 @@ void main(){
     // world. Post now runs only for effects that genuinely need it.
     this.vignettePass.uniforms.uVignette.value = 0;
     this.vignettePass.uniforms.uGrain.value = s.filmGrain / 100 * 0.06;
-    this.vignettePass.enabled = s.filmGrain > 0;
-    this.postFxOn = usesPostChain(s);
     this.renderer.toneMappingExposure = s.brightness / 100;
     this.motionBlurAmount = s.cameraShake / 100;
   }
@@ -3971,63 +4238,91 @@ void main(){
   // Adaptive resolution: holds FPS by scaling render resolution within the user's cap
   private userPR = 1;
   private dynPR = 1;
-  private lastAdaptT = 0;
-  private adaptStep = 0;
-  private adaptLow = 0;
-  private adaptHigh = 0;
-  private adaptLockUntil = 0;
-  private adaptSamples: number[] = [];
-
-  private adaptResolution(t: number) {
-    if (!this.adaptiveEnabled || this.paused || document.hidden) return;
-    if (t - this.lastAdaptT < ADAPT_EVAL_MS) return;
-    // Do not re-judge on a window that still contains the cost of the last change.
-    if (t < this.adaptLockUntil) { this.lastAdaptT = t; this.adaptSamples.length = 0; return; }
-    this.lastAdaptT = t;
-    const fps = this.stableFps();
-    this.adaptSamples.length = 0;
-    if (fps < 0) return;
-    const maxStep = ADAPT_STEPS.length - 1;
-    if (fps < ADAPT_DOWN_FPS && this.adaptStep < maxStep) {
-      this.adaptHigh = 0;
-      if (++this.adaptLow < ADAPT_DOWN_WINDOWS) return;
-      this.adaptLow = 0;
-      this.applyAdaptStep(this.adaptStep + 1, t);
-    } else if (fps > ADAPT_UP_FPS && this.adaptStep > 0) {
-      this.adaptLow = 0;
-      if (++this.adaptHigh < ADAPT_UP_WINDOWS) return;
-      this.adaptHigh = 0;
-      this.applyAdaptStep(this.adaptStep - 1, t);
-    } else {
-      this.adaptLow = 0; this.adaptHigh = 0;
-    }
-  }
-
-  private applyAdaptStep(step: number, t: number) {
-    this.adaptStep = step;
-    this.dynPR = this.userPR * ADAPT_STEPS[step];
-    this.syncPixelRatio();
-    this.adaptLockUntil = t + ADAPT_LOCK_MS;
-    this.adaptSamples.length = 0;
-  }
+  /** Owns every automatic quality decision; see perf-director.ts. */
+  private director = new PerfDirector(guessStartTier({
+    deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    cores: navigator.hardwareConcurrency,
+    mobile: /android|iphone|ipad|mobile/i.test(navigator.userAgent),
+  }));
+  /** Player's shadow-quality setting, used as a ceiling the tier can lower. */
+  private shadowCap = 2048;
+  // ---- Quality of life ----
+  private autoReload = true;
+  /** Set when the last round leaves the gun; consumed once the shot has played. */
+  private autoReloadPending = false;
+  private holdCrouch = false;
+  private autoSprint = false;
+  private damageNumbers = true;
+  /** Weapon inspect: 0..1 through the inspect routine, −1 when idle. */
+  private inspectT = -1;
+  private inspectDur = 2.6;
+  /** Player's bloom toggle, used as a gate the tier can close. */
+  private bloomWanted = true;
+  /** Player's film-grain amount, used as a gate the tier can close. */
+  private grainWanted = 0;
 
   /**
-   * Median frame rate over the clean frames since the last evaluation. A median is
-   * immune to the odd multi-second hitch, which a mean is not — and a mean is exactly
-   * what used to make one stall look like a permanently slow GPU.
-   * Returns -1 when there is not enough clean data to judge.
+   * One decision per frame, delegated to the pure director in perf-director.ts.
+   * Everything the tier controls is applied here and nowhere else, so quality
+   * can never drift out of sync with what the HUD is reporting.
    */
-  private stableFps(): number {
-    const n = this.adaptSamples.length;
-    if (n < 30) return -1;
-    const sorted = this.adaptSamples.slice().sort((a, b) => a - b);
-    const median = sorted[n >> 1];
-    return median > 0 ? 1 / median : -1;
+  private updateQuality(nowMs: number, frameSeconds: number) {
+    if (!this.adaptiveEnabled) return;
+    const decision = this.director.update(nowMs, frameSeconds, this.paused || document.hidden);
+    if (!decision.changed) return;
+    this.applyQualityTier(this.director.tier);
+    const fps = Math.round(decision.fps);
+    this.qualityNote = decision.reason === 'up'
+      ? `Quality raised to ${this.director.tier.name}`
+      : `${fps} FPS — quality lowered to ${this.director.tier.name}`;
+    this.qualityNoteUntil = nowMs + 4000;
   }
 
-  private recordFrameForScaling(frameSeconds: number) {
-    if (frameSeconds <= 0 || frameSeconds > ADAPT_STALL_SECONDS) return;
-    if (this.adaptSamples.length < 480) this.adaptSamples.push(frameSeconds);
+  private qualityNote = '';
+  private qualityNoteUntil = 0;
+  /** Frames between static shadow-map refreshes; owned by the active tier. */
+  private shadowInterval = 30;
+
+  /**
+   * Apply every lever a tier controls. Called by the director and by
+   * applySettings, which is why it must be idempotent and cheap: the expensive
+   * parts (shadow map reallocation) are guarded on an actual change.
+   */
+  private applyQualityTier(tier: QualityTier) {
+    this.dynPR = this.userPR * tier.renderScale;
+    this.syncPixelRatio();
+
+    this.shadowInterval = tier.shadowInterval;
+    // Respect the player's shadow setting as a ceiling; the tier can only reduce it.
+    const wanted = Math.min(this.shadowCap, tier.shadowMap);
+    this.renderer.shadowMap.enabled = wanted > 0;
+    if (this.sunLight) {
+      this.sunLight.castShadow = wanted > 0;
+      if (wanted > 0 && this.sunLight.shadow.mapSize.width !== wanted) {
+        this.sunLight.shadow.mapSize.set(wanted, wanted);
+        this.sunLight.shadow.map?.dispose();
+        this.sunLight.shadow.map = null as unknown as THREE.WebGLRenderTarget;
+      }
+    }
+    this.renderer.shadowMap.needsUpdate = true;
+
+    // Post-FX: the player asks for it, the tier can veto it. Both passes live in
+    // the same off-screen chain, so postFxOn is simply "is anything left in it".
+    if (this.bloom) this.bloom.enabled = this.bloomWanted && tier.bloom;
+    if (this.vignettePass) this.vignettePass.enabled = this.grainWanted > 0 && tier.finishingPass;
+    this.postFxOn = (this.bloom?.enabled ?? false) || (this.vignettePass?.enabled ?? false);
+    this.effects?.setDensity(tier.particleMul);
+
+    // Draw distance: pull the fog in with the tier so the far plane cull and the
+    // fog fade agree. Fogging geometry out and then still drawing it is the
+    // classic way to get a distance setting that costs performance and image
+    // quality at the same time.
+    if (this.scene.fog instanceof THREE.Fog) {
+      this.scene.fog.near = tier.drawDistance * 0.32;
+      this.scene.fog.far = tier.drawDistance;
+    }
+    this.camera.far = Math.max(tier.drawDistance * 1.05, 60);
+    this.camera.updateProjectionMatrix();
   }
 
   setPaused(p: boolean) {
@@ -4188,6 +4483,8 @@ void main(){
       landmark,
       fps: Math.round(this.fps),
       renderScale: Math.round(this.dynPR / Math.min(window.devicePixelRatio || 1, 1.25) * 100),
+      qualityTier: this.director.tier.name,
+      qualityNote: performance.now() < this.qualityNoteUntil ? this.qualityNote : undefined,
       magSize: this.def().magSize,
       worldHalf: this.world.half,
       canVault: !!this.nearestWindow(),

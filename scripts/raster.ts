@@ -83,6 +83,40 @@ export interface RenderOpts {
    * visible as a shading break instead of hiding it in a dark patch.
    */
   clay?: boolean;
+  /**
+   * Perspective camera. When present the orthographic fit is bypassed entirely and the
+   * scene is rendered from `eye` looking at `target`. This is what map renders use:
+   * an architectural massing view is the only way to judge whether a street reads as
+   * a place or as a pile of boxes, and there is no browser here to take a screenshot.
+   */
+  camera?: { eye: [number, number, number]; target: [number, number, number]; fov?: number };
+  /** Vertical background gradient (top, bottom). Falls back to flat `background`. */
+  sky?: { top: [number, number, number]; bottom: [number, number, number] };
+  /** Fade geometry toward the sky between these view depths, in metres. */
+  haze?: { start: number; end: number };
+  /**
+   * Directional sun instead of the two-sided studio rig. Roofs catch the light, walls
+   * fall off by orientation and shaded faces stay readable on a sky-blue ambient —
+   * which is what makes a massing model legible. Weapon renders keep the studio rig.
+   */
+  sun?: { dir: [number, number, number]; strength?: number; ambient?: number };
+}
+
+interface VView { x: number; y: number; z: number }
+
+/** Sutherland-Hodgman against the single near plane z >= near. */
+function clipNear(poly: VView[], near: number): VView[] {
+  const out: VView[] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const cur = poly[i], prv = poly[(i + poly.length - 1) % poly.length];
+    const curIn = cur.z >= near, prvIn = prv.z >= near;
+    if (curIn !== prvIn) {
+      const t = (near - prv.z) / (cur.z - prv.z);
+      out.push({ x: prv.x + (cur.x - prv.x) * t, y: prv.y + (cur.y - prv.y) * t, z: near });
+    }
+    if (curIn) out.push(cur);
+  }
+  return out;
 }
 
 interface Tri {
@@ -122,7 +156,17 @@ export function render(root: THREE.Object3D, opts: RenderOpts = {}): { rgba: Uin
   const height = opts.height ?? 700;
   const view = opts.view ?? 'elevation';
   const bg = opts.background ?? [26, 28, 33];
-  const { right, up, fwd } = basis(view, opts.flip ?? false);
+  const cam = opts.camera;
+  let right: THREE.Vector3, up: THREE.Vector3, fwd: THREE.Vector3;
+  const eye = cam ? new THREE.Vector3(...cam.eye) : null;
+  if (cam && eye) {
+    fwd = new THREE.Vector3(...cam.target).sub(eye).normalize();
+    right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
+    if (right.lengthSq() < 1e-9) right.set(1, 0, 0); else right.normalize();
+    up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+  } else {
+    ({ right, up, fwd } = basis(view, opts.flip ?? false));
+  }
 
   root.updateWorldMatrix(true, true);
 
@@ -181,6 +225,65 @@ export function render(root: THREE.Object3D, opts: RenderOpts = {}): { rgba: Uin
     out[2] = rel.dot(fwd);
   };
 
+  const sunDir = opts.sun ? new THREE.Vector3(...opts.sun.dir).normalize() : null;
+  const sunPow = opts.sun?.strength ?? 0.78;
+  const sunAmb = opts.sun?.ambient ?? 0.26;
+  const shadeOf = (a: THREE.Vector3, b2: THREE.Vector3, c: THREE.Vector3): number | null => {
+    ab.subVectors(b2, a); ac.subVectors(c, a);
+    nrm.crossVectors(ab, ac);
+    if (nrm.lengthSq() < 1e-18) return null;
+    nrm.normalize();
+    if (sunDir) {
+      // Hemisphere ambient (sky above, warm bounce below) plus a one-sided sun.
+      // Winding is not reliable across the world builders, so the sun term is
+      // absolute — but the hemisphere term uses the real up-facing component, which
+      // is what separates roof from wall from ground.
+      const hemi = sunAmb * (0.62 + 0.38 * (Math.abs(nrm.y) * 0.5 + 0.5));
+      return hemi + sunPow * Math.abs(nrm.dot(sunDir)) * (0.55 + 0.45 * (nrm.y * 0.5 + 0.5));
+    }
+    return 0.30 + 0.62 * Math.abs(nrm.dot(key)) + 0.24 * Math.abs(nrm.dot(fill));
+  };
+  const paint = (tri: Tri, shade: number, col: THREE.Color) => {
+    if (clay) {
+      const v = Math.min(255, 214 * shade);
+      tri.r = v; tri.g = v * 0.985; tri.b = v * 0.95;
+    } else {
+      const gg = (c: number) => Math.min(255, 255 * Math.pow(Math.min(1, c * shade * 1.35), 1 / 1.45));
+      tri.r = gg(col.r); tri.g = gg(col.g); tri.b = gg(col.b);
+    }
+  };
+
+  if (cam && eye) {
+    // ---- perspective path: view-space, near-clip, then divide.
+    // Depth is stored as -1/z, which is linear in screen space, so the existing
+    // "smaller wins" z-test stays perspective-correct without touching the scanline loop.
+    const focal = 1 / Math.tan((cam.fov ?? 62) * Math.PI / 360);
+    const aspect = width / height;
+    const NEAR = 0.08;
+    const rv = new THREE.Vector3();
+    const toView = (p: THREE.Vector3): VView => {
+      rv.copy(p).sub(eye);
+      return { x: rv.dot(right), y: rv.dot(up), z: rv.dot(fwd) };
+    };
+    for (const t of collected) {
+      const shade = shadeOf(t.a, t.b, t.c);
+      if (shade === null) continue;
+      const poly = clipNear([toView(t.a), toView(t.b), toView(t.c)], NEAR);
+      if (poly.length < 3) continue;
+      const sxs: number[] = [], sys: number[] = [], szs: number[] = [];
+      for (const v of poly) {
+        sxs.push((v.x / v.z * focal / aspect * 0.5 + 0.5) * width);
+        sys.push((0.5 - v.y / v.z * focal * 0.5) * height);
+        szs.push(-1 / v.z);
+      }
+      for (let k = 1; k + 1 < poly.length; k++) {
+        const tri: Tri = { sx: [sxs[0], sxs[k], sxs[k + 1]], sy: [sys[0], sys[k], sys[k + 1]], sz: [szs[0], szs[k], szs[k + 1]], r: 0, g: 0, b: 0 };
+        paint(tri, shade, t.col);
+        tris.push(tri);
+      }
+    }
+  } else {
+
   const tmp: [number, number, number] = [0, 0, 0];
   for (const t of collected) {
     ab.subVectors(t.b, t.a); ac.subVectors(t.c, t.a);
@@ -204,12 +307,27 @@ export function render(root: THREE.Object3D, opts: RenderOpts = {}): { rgba: Uin
     tris.push(tri);
   }
 
+  }
+
   // ---- z-buffer scan conversion
   const rgba = new Uint8Array(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    rgba[i * 4] = bg[0]; rgba[i * 4 + 1] = bg[1]; rgba[i * 4 + 2] = bg[2]; rgba[i * 4 + 3] = 255;
+  const skyAt = (y: number): [number, number, number] => {
+    if (!opts.sky) return bg;
+    const f = y / Math.max(1, height - 1);
+    return [
+      opts.sky.top[0] + (opts.sky.bottom[0] - opts.sky.top[0]) * f,
+      opts.sky.top[1] + (opts.sky.bottom[1] - opts.sky.top[1]) * f,
+      opts.sky.top[2] + (opts.sky.bottom[2] - opts.sky.top[2]) * f,
+    ];
+  };
+  for (let y = 0; y < height; y++) {
+    const c = skyAt(y);
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      rgba[i] = c[0]; rgba[i + 1] = c[1]; rgba[i + 2] = c[2]; rgba[i + 3] = 255;
+    }
   }
-  if (opts.gridStep && opts.gridStep > 0) {
+  if (!cam && opts.gridStep && opts.gridStep > 0) {
     const step = opts.gridStep;
     for (let gx = Math.ceil(-halfW / step) * step; gx <= halfW; gx += step) {
       const px = Math.round((gx / halfW * 0.5 + 0.5) * width);
@@ -229,6 +347,7 @@ export function render(root: THREE.Object3D, opts: RenderOpts = {}): { rgba: Uin
     }
   }
 
+  const haze = cam ? opts.haze : undefined;
   const depth = new Float32Array(width * height).fill(Infinity);
   for (const t of tris) {
     const minX = Math.max(0, Math.floor(Math.min(t.sx[0], t.sx[1], t.sx[2])));
@@ -252,7 +371,17 @@ export function render(root: THREE.Object3D, opts: RenderOpts = {}): { rgba: Uin
         const o = y * width + x;
         if (z >= depth[o]) continue;
         depth[o] = z;
-        rgba[o * 4] = t.r; rgba[o * 4 + 1] = t.g; rgba[o * 4 + 2] = t.b; rgba[o * 4 + 3] = 255;
+        let cr = t.r, cg = t.g, cb = t.b;
+        if (haze) {
+          // z is -1/viewZ on the perspective path, so recover metres and fade to sky.
+          const vz = -1 / z;
+          const f = Math.max(0, Math.min(1, (vz - haze.start) / (haze.end - haze.start)));
+          if (f > 0) {
+            const sc = skyAt(y);
+            cr += (sc[0] - cr) * f; cg += (sc[1] - cg) * f; cb += (sc[2] - cb) * f;
+          }
+        }
+        rgba[o * 4] = cr; rgba[o * 4 + 1] = cg; rgba[o * 4 + 2] = cb; rgba[o * 4 + 3] = 255;
       }
     }
   }

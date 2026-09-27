@@ -97,7 +97,11 @@ function canvasTexture(size: number, draw: (ctx: CanvasRenderingContext2D, s: nu
   return tex;
 }
 
-export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materials?: TextureSet): World {
+/** World detail tier. See the two-tier contract on `dressing()` below. */
+export type WorldDetail = 'low' | 'high';
+
+export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materials?: TextureSet, opts: { detail?: WorldDetail } = {}): World {
+  const detail: WorldDetail = opts.detail ?? 'high';
   const group = new THREE.Group();
   const solids: AABB[] = [];
   const occluders: THREE.Object3D[] = [];
@@ -179,8 +183,22 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     geo.applyMatrix4(_m4);
     push(geo, m);
   }
-  /** Decal/dressing geometry: merged into unshadowed meshes that never join the occluders. */
+  /**
+   * Decal/dressing geometry: merged into unshadowed meshes that never join the occluders.
+   *
+   * THE TWO-TIER DETAIL CONTRACT.
+   * This function is the ornament tier, and it is the ONLY ornament tier. Everything
+   * that blocks a bullet, blocks a player, casts a shadow or registers a cover node
+   * goes through box()/shape()/cover() and is built at every detail level.
+   *
+   * That split is enforced by construction rather than by authors remembering to flag
+   * things: dressing() geometry is collected into `dressingGeos`, which never reaches
+   * `solids`, `coverNodes`, `occluders` or the nav grid. So dropping it at low detail
+   * CANNOT change collision, sight-lines or bot pathing — there is no code path by
+   * which it could. tests/world-detail.test.js verifies that claim per map anyway.
+   */
   function dressing(geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) {
+    if (detail === 'low') { geo.dispose(); return; }
     _q.setFromEuler(new THREE.Euler(rx, ry, rz));
     _m4.compose(new THREE.Vector3(x, y, z), _q, _s);
     geo.applyMatrix4(_m4);

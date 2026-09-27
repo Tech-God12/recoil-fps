@@ -7,10 +7,10 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { ATMOSPHERES, DustField, bakeEnvironment, buildSky, type SkyHandle } from './atmosphere';
+import { ATMOSPHERES, CONDITION_ORDER, DustField, bakeEnvironment, buildSky, resolveAtmosphere, visionScale, type SkyHandle, type TimeOfDay } from './atmosphere';
 import { GRADES, GRADE_SHADER, makeComposerTarget } from './postfx';
 import { setTextureQuality } from './textures';
-import { buildWorld, pointInAABB, type World, type MapId, type AABB } from './world';
+import { buildWorld, pointInAABB, type World, type MapId, type AABB, type WorldDetail } from './world';
 import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, WEAPON_BUILDERS, type WeaponModel } from './models';
 import { solveArm } from './weapons/core';
 import { applyBuild } from './attachments';
@@ -68,6 +68,12 @@ export interface GameSettings {
   resolutionScale: number;  // 50 - 100 (%)
   shadowQuality: 'off' | 'low' | 'medium' | 'high';
   textureQuality: 'low' | 'medium' | 'high';
+  /** Forced weather/time, or 'auto' for the map's authored look. Also drives AI sight. */
+  timeOfDay: TimeOfDay;
+  /** Ornament tier. Never affects collision, cover or bot pathing — see world.ts. */
+  worldDetail: WorldDetail;
+  /** Shift behaviour: hold it down, or tap to latch until you stop pushing forward. */
+  sprintMode: 'hold' | 'toggle';
   /** Master switch for the finishing chain (FXAA + clarity + film grade). */
   postProcess: boolean;
   sunShafts: boolean;
@@ -128,6 +134,11 @@ export const GRAPHICS_PRESETS: Record<Exclude<GraphicsPreset, 'custom'>, Partial
   ultra: { resolutionScale: 100, shadowQuality: 'medium', textureQuality: 'high', postProcess: true, sunShafts: false, bloom: false, bloomStrength: 0, sharpness: 24, aberration: 0, filmGrain: 0, adaptiveResolution: true },
 };
 
+/** Chosen weather for the NEXT launch. See Engine.applyTimeOfDay. */
+let launchTimeOfDay: TimeOfDay = 'auto';
+/** Chosen world ornament tier for the NEXT launch. See Engine.applyWorldDetail. */
+let launchWorldDetail: WorldDetail = 'high';
+
 export const DEFAULT_SETTINGS: GameSettings = {
   sensitivity: 2.2,
   adsSensitivity: 0.7,
@@ -141,6 +152,9 @@ export const DEFAULT_SETTINGS: GameSettings = {
   resolutionScale: 100,
   shadowQuality: 'low',
   textureQuality: 'high',
+  timeOfDay: 'auto',
+  worldDetail: 'high',
+  sprintMode: 'hold',
   // Everything below is off by default so usesPostChain() is false and the engine
   // renders straight to the multisampled canvas: no off-screen HDR target, no
   // bloom mips, no finishing pass. That is the fast path and the safe path.
@@ -221,6 +235,9 @@ export function sanitizeSettings(input: unknown): GameSettings {
     resolutionScale: number('resolutionScale', DEFAULT_SETTINGS.resolutionScale, 50, 100),
     shadowQuality: choice('shadowQuality', ['off', 'low', 'medium', 'high'], DEFAULT_SETTINGS.shadowQuality),
     textureQuality: choice('textureQuality', ['low', 'medium', 'high'], DEFAULT_SETTINGS.textureQuality),
+    timeOfDay: choice('timeOfDay', ['auto', ...CONDITION_ORDER], DEFAULT_SETTINGS.timeOfDay),
+    worldDetail: choice('worldDetail', ['low', 'high'], DEFAULT_SETTINGS.worldDetail),
+    sprintMode: choice('sprintMode', ['hold', 'toggle'], DEFAULT_SETTINGS.sprintMode),
     postProcess: boolean('postProcess', DEFAULT_SETTINGS.postProcess),
     sunShafts: boolean('sunShafts', DEFAULT_SETTINGS.sunShafts),
     sharpness: number('sharpness', DEFAULT_SETTINGS.sharpness, 0, 100),
@@ -783,7 +800,7 @@ export class Engine {
     // ==================== ATMOSPHERE ====================
     // One authored preset per map drives the sky shader, the sun, the fog AND the
     // image-based lighting, so indirect light always matches the sky the player sees.
-    const atmos = ATMOSPHERES[mapId] ?? ATMOSPHERES.alrasul;
+    const atmos = resolveAtmosphere(mapId, launchTimeOfDay);
     this.atmos = atmos;
     this.grade = GRADES[mapId] ?? GRADES.alrasul;
     const desert = mapId === 'alrasul' || mapId === 'sirocco';
@@ -824,7 +841,7 @@ export class Engine {
 
     // Heaviest single stage: procedural texture set plus all world geometry.
     await nextFrame();
-    this.world = buildWorld(this.scene, mapId);
+    this.world = buildWorld(this.scene, mapId, undefined, { detail: launchWorldDetail });
     this.buildSolidGrid();
     const maxAniso = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
     this.world.group.traverse(o => {
@@ -1099,6 +1116,8 @@ export class Engine {
       },
       onEliminated: enemy => this.missionRuntime?.recordElimination(enemy),
       canAcquire: () => this.isTDM || this.graceBroken || this.missionRuntime.mission.elapsed >= OPENING_GRACE,
+      // Weather blinds the bots exactly as much as it blinds the player.
+      visionScale: () => visionScale(this.atmos?.fogFar ?? 340),
     };
 
     // Ten pooled soldier models plus the nav grid over the whole sector.
@@ -1273,6 +1292,7 @@ export class Engine {
     }
 
     if (e.code === 'KeyR') this.startReload();
+    if (e.code === 'KeyI') this.startInspect();
     if (e.code === 'KeyZ' && this.kits) { this.kits.activate(); return; }
     if (e.code === 'Digit1') this.switchWeapon(0);
     if (e.code === 'Digit2') this.switchWeapon(1);
@@ -1779,6 +1799,15 @@ export class Engine {
       this.shotIdx = 0; this.shotResetT = 0;
       this.weapons[i].model.group.visible = true;
     }, ms);
+  }
+
+  /** QoL: look the weapon over. Purely cosmetic, cancelled by anything that matters. */
+  private startInspect() {
+    if (this.dead || this.ended) return;
+    if (this.inspectT >= 0 || this.reloadT >= 0 || this.switchT >= 0) return;
+    if (this.sprinting || this.ads > 0.2 || this.cooking) return;
+    this.inspectT = 0;
+    audio.weaponInspect();
   }
 
   private startReload() {
@@ -2947,7 +2976,7 @@ export class Engine {
       this.tdmPlayerDeaths++;
       this.tdmRespawnT = TDM_RESPAWN_SECONDS;
       this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
-      this.sprinting = false; this.sliding = false; this.crouched = false;
+      this.sprinting = false; this.sliding = false; this.crouched = false; this.sprintLatched = false;
       this.endPlayerFire();
       if (this.tdm && killer) this.tdm.handleKill(killer, 'player', isHead, 'RIFLE');
       voice.defeat();
@@ -3051,7 +3080,7 @@ export class Engine {
       this.hp = 0;
       this.dead = true;
       this.triggerHeld = false; this.rmb = false; this.cooking = false; this.keys.clear();
-      this.sprinting = false; this.sliding = false; this.crouched = false;
+      this.sprinting = false; this.sliding = false; this.crouched = false; this.sprintLatched = false;
       this.reloadT = -1; this.reloadStages = []; this.currentReloadStage = 'idle';
       this.dfDeathCamT = 2.2;
       this.dfDeathAt.copy(this.eyePos());
@@ -3362,7 +3391,19 @@ export class Engine {
     // a moment — it never fires mid-ADS, mid-reload or while leaning.
     if (this.autoSprint && iz < 0 && !this.rmb && !this.crouched) this.autoSprintT += dt;
     else this.autoSprintT = 0;
-    const sprintHeld = k.has('ShiftLeft') || (this.autoSprint && this.autoSprintT > 0.45);
+    // Sprint latch: in 'toggle' mode a tap of Shift latches the sprint on and it stays
+    // on until you stop pushing forward (or something else cancels it below), so a long
+    // rotation across the map does not mean holding a key for thirty seconds.
+    const shiftDown = k.has('ShiftLeft');
+    if (this.sprintToggle) {
+      if (shiftDown && !this.shiftWasDown) this.sprintLatched = !this.sprintLatched;
+      if (iz >= 0) this.sprintLatched = false;   // released the moment you stop advancing
+    } else {
+      this.sprintLatched = false;
+    }
+    this.shiftWasDown = shiftDown;
+    const sprintHeld = (this.sprintToggle ? this.sprintLatched : shiftDown)
+      || (this.autoSprint && this.autoSprintT > 0.45);
     this.sprinting = sprintHeld && !this.rmb && iz < 0 && !this.crouched && !this.sliding
       && this.ads < 0.25 && this.reloadT < 0 && this.switchT < 0 && Math.abs(this.lean) < 0.25 && moving;
 
@@ -3557,6 +3598,15 @@ export class Engine {
         this.reloadStages.shift()!.fn();
       }
     }
+    // Inspect clock. Anything that matters cancels it instantly rather than queueing.
+    if (this.inspectT >= 0) {
+      if (this.reloadT >= 0 || this.switchT >= 0 || this.sprinting || this.ads > 0.2 || this.cooking || this.dead) {
+        this.inspectT = -1;
+      } else {
+        this.inspectT += dt;
+        if (this.inspectT >= this.INSPECT_DUR) this.inspectT = -1;
+      }
+    }
     if (this.pumpT > 0) this.pumpT = Math.max(0, this.pumpT - dt);
     // Masterkey tube reload (3 shells, 3.5 s)
     if (this.mkReloadT >= 0) {
@@ -3746,6 +3796,27 @@ export class Engine {
       const cycle=1-this.boltCycle/1.25, lift=Math.sin(cycle*Math.PI);
       py -= lift*0.035; rz += lift*0.12;
       d.model.chargingHandle.position.z = Math.sin(Math.max(0,Math.min(1,(cycle-0.2)/0.6))*Math.PI)*0.055;
+    }
+
+    // ---- INSPECT -------------------------------------------------------
+    // Bring the weapon up and inboard, roll it over to show the left side and the
+    // magazine, hold, then turn it back. Three eased beats, not one sine sweep.
+    if (this.inspectT >= 0) {
+      const it = this.inspectT / this.INSPECT_DUR;
+      const raise = ease01(it / 0.18) * (1 - ease01((it - 0.80) / 0.20));
+      // Roll peaks at ~40% (showing the ejection side), eases back by ~72%.
+      const rollP = it < 0.40 ? ease01(it / 0.40)
+        : it < 0.62 ? 1
+          : 1 - ease01((it - 0.62) / 0.22);
+      // A second, smaller tilt near the end: muzzle dips as the wrist turns back.
+      const tipP = it > 0.60 ? Math.sin(Math.min(1, (it - 0.60) / 0.34) * Math.PI) : 0;
+      px -= raise * 0.045 * S;
+      py += raise * 0.030 * S;
+      pz += raise * 0.055 * S;      // drawn closer to the eye
+      rx += raise * 0.10 + tipP * 0.20;
+      ry += rollP * 0.62;           // turn the left side into view
+      rz -= rollP * 0.85;           // and roll it over
+      py -= tipP * 0.012 * S;
     }
 
     // Reload animation — every weapon family has its own tactical handling.
@@ -4159,6 +4230,8 @@ export class Engine {
     this.damageNumbersOn = s.damageNumbers;
     this.holdToCrouch = s.holdToCrouch;
     this.autoSprint = s.autoSprint;
+    this.sprintToggle = s.sprintMode === 'toggle';
+    if (!this.sprintToggle) this.sprintLatched = false;
     this.showDamageLog = s.showDamageLog;
     this.perfOverlay = s.perfOverlay;
     audio.setMix({
@@ -4174,6 +4247,15 @@ export class Engine {
   static applyTextureQuality(q: GameSettings['textureQuality']) {
     setTextureQuality(q === 'low' ? 0.375 : q === 'medium' ? 0.625 : 1);
   }
+  /**
+   * Weather has to be known BEFORE create(), because the sky shader, the PMREM
+   * environment bake and the fog are all built once during init. Same contract as
+   * applyTextureQuality: set it, then launch.
+   */
+  static applyTimeOfDay(t: TimeOfDay) { launchTimeOfDay = t; }
+  /** World ornament tier for the NEXT launch. Same before-create contract. */
+  static applyWorldDetail(d: WorldDetail) { launchWorldDetail = d; }
+  static currentTimeOfDay() { return launchTimeOfDay; }
   /** QoL: floating combat text. World-anchored so the number stays on the target. */
   private dmgNums: { pos: THREE.Vector3; dmg: number; head: boolean; kill: boolean; born: number }[] = [];
   private dmgLog: { text: string; dmg: number; born: number }[] = [];
@@ -4198,6 +4280,12 @@ export class Engine {
   private holdToCrouch = true;
   private autoSprint = false;
   private autoSprintT = 0;
+  /** Inspect animation clock, -1 when idle. */
+  private inspectT = -1;
+  private readonly INSPECT_DUR = 2.1;
+  private sprintToggle = false;
+  private sprintLatched = false;
+  private shiftWasDown = false;
   private crouchEdge = false;
 
   motionBlurAmount = 1;

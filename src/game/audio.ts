@@ -850,6 +850,19 @@ export class SpatialAudioEngine {
     }
   }
 
+  /**
+   * Inspect: a hand shifting on furniture and the sling swivel swinging. No mechanical
+   * action — nothing is being cycled, so a bolt or a mag click here would be a lie.
+   */
+  weaponInspect() {
+    this.ensure();
+    // cloth/palm on the handguard
+    this.burstDirect({ dur: 0.22, gain: 0.05, freq: 900, q: 0.7, attack: 0.05, bus: 'step' });
+    // sling hardware, a beat later and off to one side of the transient
+    this.gearRattle(0.05, 0.16 + Math.random() * 0.06);
+    this.gearRattle(0.035, 0.95 + Math.random() * 0.1);
+  }
+
   /** Kit noise: two or three short metallic ticks, deliberately irregular. */
   private gearRattle(level: number, delay: number) {
     const ctx = this.ensure();

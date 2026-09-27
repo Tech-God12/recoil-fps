@@ -361,6 +361,8 @@ export default function App() {
       // their canvases once at construction, so changing it later would only affect
       // whatever happens to be created after the fact.
       Engine.applyTextureQuality(settings.textureQuality);
+      Engine.applyTimeOfDay(settings.timeOfDay);
+      Engine.applyWorldDetail(settings.worldDetail);
       const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, PLAYER_TDM_ARMOR, launchOptions);
       engineRef.current = engine;
       engine.applySettings(settings);

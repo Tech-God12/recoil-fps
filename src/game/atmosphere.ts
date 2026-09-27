@@ -95,6 +95,122 @@ export const ATMOSPHERES: Record<MapId, AtmospherePreset> = {
   },
 };
 
+/**
+ * Named weather/time conditions the player can force from the settings screen.
+ *
+ * These are OVERRIDES merged over the map's authored preset above, not replacements:
+ * `ground`, `hemiGround`, `ambientIntensity` and `envIntensity` stay map-specific, so
+ * Sirocco at noon still bounces warm sandstone and the Warehouse still bounces cold
+ * concrete. Only the sky, the sun and the air change.
+ */
+export type TimeOfDay = 'auto' | 'dawn' | 'morning' | 'noon' | 'golden' | 'dusk' | 'overcast' | 'sandstorm';
+export type Condition = Exclude<TimeOfDay, 'auto'>;
+
+export const CONDITION_ORDER: Condition[] = ['dawn', 'morning', 'noon', 'golden', 'dusk', 'overcast', 'sandstorm'];
+
+export const CONDITION_LABEL: Record<Condition, string> = {
+  dawn: 'Dawn', morning: 'Morning', noon: 'Noon', golden: 'Golden hour',
+  dusk: 'Dusk', overcast: 'Overcast', sandstorm: 'Sandstorm',
+};
+
+/** One line each, so the settings screen can say what the player is actually choosing. */
+export const CONDITION_NOTE: Record<Condition, string> = {
+  dawn: 'Low pink sun, long cold shadows, the air still damp.',
+  morning: 'Clear and cool. The most neutral light in the game.',
+  noon: 'Hard overhead sun, short shadows, bleached ground.',
+  golden: 'Low raking sun an hour before sunset. Long shadows, burnt horizon.',
+  dusk: 'Sun on the horizon. Deep blue sky, ember rim light, poor contrast.',
+  overcast: 'Flat white sky, no sun disc, almost no shadow. Easiest to read.',
+  sandstorm: 'Brown-out. You can see about 75 m — and so can they.',
+};
+
+type ConditionOverride = Omit<AtmospherePreset, 'ground' | 'hemiGround' | 'ambientIntensity' | 'envIntensity'>;
+
+export const TIME_OF_DAY: Record<Condition, ConditionOverride> = {
+  dawn: {
+    sun: [-0.75, 0.13, 0.65], sunColor: 0xFFB98A, sunIntensity: 1.35, sunSize: 1.5,
+    zenith: 0x1E3E6E, horizon: 0xE0A488, glow: 0xFF9E6A, glowPower: 3.0,
+    cloudCover: 0.45, cloudColor: 0xFFC9A8, cloudShadow: 0x7A6E7A,
+    haze: 0.5, fogColor: 0xC9A896, fogNear: 40, fogFar: 200,
+    hemiSky: 0xB8C4E0, hemiIntensity: 0.30, ambient: 0x6A6480,
+    exposure: 0.86, dust: 0.30,
+  },
+  morning: {
+    sun: [0.63, 0.52, -0.58], sunColor: 0xFFEEDA, sunIntensity: 1.95, sunSize: 1.0,
+    zenith: 0x27578C, horizon: 0xC8D2D6, glow: 0xFFE4C2, glowPower: 8.0,
+    cloudCover: 0.50, cloudColor: 0xF4F6F4, cloudShadow: 0xA8AFB4,
+    haze: 0.55, fogColor: 0xB8C4C8, fogNear: 60, fogFar: 240,
+    hemiSky: 0xC3D9F0, hemiIntensity: 0.32, ambient: 0x707A78,
+    exposure: 0.92, dust: 0.20,
+  },
+  noon: {
+    sun: [-0.28, 0.90, 0.33], sunColor: 0xFFF6E2, sunIntensity: 2.25, sunSize: 0.95,
+    zenith: 0x2F6EA8, horizon: 0xD9CBA8, glow: 0xFFD9A0, glowPower: 6.5,
+    cloudCover: 0.30, cloudColor: 0xFFF6E6, cloudShadow: 0xB9AF9C,
+    haze: 0.42, fogColor: 0xD3C3A2, fogNear: 80, fogFar: 290,
+    hemiSky: 0xBFD8F2, hemiIntensity: 0.26, ambient: 0x8A7A60,
+    exposure: 0.88, dust: 0.35,
+  },
+  golden: {
+    sun: [-0.86, 0.30, 0.41], sunColor: 0xFFC286, sunIntensity: 2.25, sunSize: 1.35,
+    zenith: 0x2A5A8E, horizon: 0xE9A765, glow: 0xFFB05A, glowPower: 3.4,
+    cloudCover: 0.42, cloudColor: 0xFFD9AE, cloudShadow: 0xA8794E,
+    haze: 0.66, fogColor: 0xD4A878, fogNear: 48, fogFar: 205,
+    hemiSky: 0xD6C0A4, hemiIntensity: 0.28, ambient: 0x8A6E4C,
+    exposure: 0.88, dust: 0.45,
+  },
+  dusk: {
+    sun: [-0.92, 0.09, 0.38], sunColor: 0xFF8E52, sunIntensity: 1.15, sunSize: 1.6,
+    zenith: 0x16294E, horizon: 0xB4653C, glow: 0xFF7A3A, glowPower: 2.6,
+    cloudCover: 0.50, cloudColor: 0xE09A6E, cloudShadow: 0x6A4A40,
+    haze: 0.6, fogColor: 0x8E6A54, fogNear: 35, fogFar: 170,
+    hemiSky: 0x8494BC, hemiIntensity: 0.34, ambient: 0x4E4660,
+    exposure: 0.95, dust: 0.35,
+  },
+  overcast: {
+    sun: [0.38, 0.74, 0.55], sunColor: 0xE8ECF2, sunIntensity: 1.25, sunSize: 0.6,
+    zenith: 0x5A6675, horizon: 0xAEB6BE, glow: 0xD8DEE8, glowPower: 14.0,
+    cloudCover: 0.95, cloudColor: 0xD2D8DE, cloudShadow: 0x8A9098,
+    haze: 0.5, fogColor: 0x9BA5B0, fogNear: 40, fogFar: 175,
+    hemiSky: 0xC4CCD6, hemiIntensity: 0.46, ambient: 0x6E747C,
+    exposure: 0.98, dust: 0.12,
+  },
+  sandstorm: {
+    sun: [-0.60, 0.42, 0.50], sunColor: 0xD9A468, sunIntensity: 1.0, sunSize: 2.0,
+    zenith: 0x8A6A44, horizon: 0xC49A62, glow: 0xD9A066, glowPower: 5.0,
+    cloudCover: 0.85, cloudColor: 0xC9A472, cloudShadow: 0x8A6A46,
+    haze: 1.0, fogColor: 0xBE9660, fogNear: 12, fogFar: 75,
+    hemiSky: 0xC6A272, hemiIntensity: 0.50, ambient: 0x8A6E48,
+    exposure: 1.02, dust: 1.0,
+  },
+};
+
+/** What each map's hand-authored look actually is, for the settings screen to show. */
+export const AUTO_CONDITION: Record<MapId, Condition> = {
+  alrasul: 'noon', kasbah: 'morning', arena: 'overcast', sirocco: 'golden',
+};
+
+/** The map's authored preset, or a forced condition merged over it. */
+export function resolveAtmosphere(mapId: MapId, tod: TimeOfDay = 'auto'): AtmospherePreset {
+  const base = ATMOSPHERES[mapId] ?? ATMOSPHERES.alrasul;
+  if (tod === 'auto') return base;
+  const over = TIME_OF_DAY[tod];
+  if (!over) return base;
+  return { ...base, ...over };
+}
+
+/**
+ * How far the bots can see, as a fraction of their clear-weather perception.
+ *
+ * Tying AI sight to the fog far-plane is what stops weather from being scenery: in a
+ * sandstorm the player cannot see 30 m, so a hostile that still acquires at 48 m is
+ * simply cheating. 340 is the clear-air reference far-plane; the 0.35 floor keeps the
+ * worst case playable rather than turning the map into a knife fight.
+ */
+export function visionScale(fogFar: number): number {
+  return Math.min(1, Math.max(0.35, fogFar / 340));
+}
+
 const SKY_VERT = /* glsl */`
 varying vec3 vDir;
 void main() {

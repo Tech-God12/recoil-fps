@@ -44,6 +44,11 @@ export interface AIContext {
    * at all, so a deployment is never met by squads that are already firing.
    */
   canAcquire?(): boolean;
+  /**
+   * Weather sight multiplier (see atmosphere.visionScale). Absent in headless sims and
+   * older call sites, where it defaults to clear air.
+   */
+  visionScale?(): number;
   /** Death feedback hooks (engine routes them to spatial audio; absent in headless sims). */
   onBodyFall?(at: THREE.Vector3, heavy: boolean): void;
   onWeaponDrop?(at: THREE.Vector3): void;
@@ -186,6 +191,10 @@ let enemyCounter = 0;
  * was anywhere near you.
  */
 export const ENGAGE_RANGE = 30;
+/** Clear-air perception ceilings, before the weather multiplier is applied. */
+export const PERCEPTION_MAX = 70;
+export const PERCEPTION_UNALERTED = 48;
+export const PERCEPTION_PERIPHERAL = 16;
 const NAMES = ['Aslan', 'Verik', 'Dmitri', 'Kolya', 'Rustam', 'Bekzat', 'Timur', 'Marat', 'Oleg', 'Sasha', 'Yuri', 'Anton', 'Farid', 'Nazar', 'Ilya'];
 
 export class Enemy {
@@ -283,9 +292,12 @@ export class Enemy {
   get seesPlayer() { return this.hasLOS; }
   eyePos() { return tmpV2.set(this.pos.x, this.pos.y + 1.62 - (this.crouched ? 0.4 : 0), this.pos.z).clone(); }
 
+  /** Effective rifle range for this bot right now, weather included. */
+  engageRange() { return ENGAGE_RANGE * (this.ctx.visionScale ? this.ctx.visionScale() : 1); }
+
   /** Sight *and* inside effective rifle range. Squads advance before they shoot. */
   private canFire(): boolean {
-    return this.hasLOS && this.pos.distanceTo(this.tFeet()) <= ENGAGE_RANGE;
+    return this.hasLOS && this.pos.distanceTo(this.tFeet()) <= this.engageRange();
   }
 
   resetForInsertion(squad: Squad, role: Enemy['role'], at: Position, focus: Position, zone: string | null) {
@@ -328,13 +340,16 @@ export class Enemy {
     if (this.ctx.canAcquire && !this.ctx.canAcquire()) return false;
     const eye = losEye.set(this.pos.x, this.pos.y + 1.62 - (this.crouched ? 0.4 : 0), this.pos.z); const pp = this.tEye();
     const dist = eye.distanceTo(pp);
-    if (dist > 70) return false;
+    // Weather closes every perception ceiling together. A hostile cannot see you
+    // through a sandstorm any better than you can see it.
+    const vis = this.ctx.visionScale ? this.ctx.visionScale() : 1;
+    if (dist > PERCEPTION_MAX * vis) return false;
     const dir = tmpV.copy(pp).sub(eye).normalize();
     if (this.state === 'PATROL' || this.state === 'ALERT' || this.state === 'SEARCH') {
       const fwd = losFwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       const flat = tmpV2.set(dir.x, 0, dir.z).normalize();
-      if (fwd.dot(flat) < Math.cos(Math.PI / 4) && dist > 16) return false;
-      if (dist > 48) return false;
+      if (fwd.dot(flat) < Math.cos(Math.PI / 4) && dist > PERCEPTION_PERIPHERAL * vis) return false;
+      if (dist > PERCEPTION_UNALERTED * vis) return false;
     }
     ray.set(eye, dir); ray.far = dist - 0.3;
     return ray.intersectObjects(this.ctx.occluders, false).length === 0;
@@ -627,7 +642,7 @@ export class Enemy {
     // Spotted you from across the sector: close the distance instead of spraying from
     // the edge of perception. This is what made a fresh deployment feel like the squad
     // was already firing before it had any business shooting.
-    if (this.hasLOS && range > ENGAGE_RANGE) { this.startAdvance(); return; }
+    if (this.hasLOS && range > this.engageRange()) { this.startAdvance(); return; }
     // A visible nearby threat takes priority over running to a distant cover node.
     if (this.hasLOS && range < 18) {
       this.crouched = false; this.faceTarget(pf);
@@ -670,7 +685,7 @@ export class Enemy {
         this.peekTimer -= dt; this.burstTimer -= dt;
         // Blind suppressive fire still respects effective range — no shots from
         // across the map at a stale last-known position.
-        if (this.burstLeft > 0 && this.burstTimer <= 0 && this.pos.distanceTo(this.lastKnown) <= ENGAGE_RANGE) { this.burstTimer = 0.1 + Math.random() * 0.04; this.burstLeft--; this.fireShot(); }
+        if (this.burstLeft > 0 && this.burstTimer <= 0 && this.pos.distanceTo(this.lastKnown) <= this.engageRange()) { this.burstTimer = 0.1 + Math.random() * 0.04; this.burstLeft--; this.fireShot(); }
         if (this.peekTimer <= 0 || (this.burstLeft <= 0 && Math.random() < 0.02)) { this.peeking = false; this.waitTimer = 0.7 + Math.random() * 1.3 * (1 - this.personality * 0.5); }
       } else {
         this.waitTimer -= dt;

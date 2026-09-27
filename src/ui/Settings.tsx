@@ -6,6 +6,20 @@ import { MAPS, isMissionMap } from '../game/world';
 import { GRAPHICS_PRESETS } from '../game/engine';
 import { Panel, SectionTitle, Slider, Toggle, Segmented, ColorPick, CBtn } from './components';
 import { BINDS } from './bindings';
+import { AUTO_CONDITION, CONDITION_LABEL, CONDITION_NOTE, CONDITION_ORDER } from '../game/atmosphere';
+
+/** One click swaps the whole reticle, instead of hunting four sliders into agreement. */
+const RETICLE_PRESETS: { id: string; label: string; hint: string; v: Partial<GameSettings> }[] = [
+  { id: 'dot', label: 'Dot', hint: 'Minimal, precise', v: { crosshairSize: 3, crosshairGap: 0, crosshairThickness: 2, crosshairDot: true } },
+  { id: 'cross', label: 'Classic', hint: 'Balanced four-line', v: { crosshairSize: 10, crosshairGap: 6, crosshairThickness: 2, crosshairDot: false } },
+  { id: 'precision', label: 'Precision', hint: 'Thin, wide gap, centre dot', v: { crosshairSize: 14, crosshairGap: 10, crosshairThickness: 1, crosshairDot: true } },
+  { id: 'wide', label: 'Wide', hint: 'Heavy, easy to find', v: { crosshairSize: 18, crosshairGap: 14, crosshairThickness: 3, crosshairDot: false } },
+];
+
+/** Does the live reticle currently match this preset exactly? */
+function presetActive(s: GameSettings, v: Partial<GameSettings>) {
+  return (Object.keys(v) as (keyof GameSettings)[]).every(k => s[k] === v[k]);
+}
 
 /** Quality presets, ordered cheapest first. Each maps onto GRAPHICS_PRESETS in
  *  the engine so the menu and the renderer can never disagree about what "High" means. */
@@ -71,6 +85,14 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                       onChange={v => set({ holdToCrouch: v })}
                       hint={s.holdToCrouch ? 'Ctrl stays down only while held' : 'Ctrl toggles crouch on and off'}
                     />
+                    <Segmented
+                      label="Sprint" value={s.sprintMode}
+                      options={[{ v: 'hold', l: 'Hold' }, { v: 'toggle', l: 'Toggle' }]}
+                      onChange={v => set({ sprintMode: v })}
+                      hint={s.sprintMode === 'toggle'
+                        ? 'Tap Shift to latch; releases when you stop pushing forward'
+                        : 'Hold Shift while moving forward'}
+                    />
                     <Toggle
                       label="Auto sprint"
                       value={s.autoSprint}
@@ -127,8 +149,46 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
                   <Slider label="Resolution scale" value={s.resolutionScale} min={50} max={100} unit="%" onChange={v => set({ resolutionScale: v, graphicsPreset: 'custom' })} />
                   <Toggle label="Adaptive resolution" value={s.adaptiveResolution ?? true} onChange={v => set({ adaptiveResolution: v, graphicsPreset: 'custom' })} hint="Automatically trade resolution for a stable frame rate" />
                   <Segmented label="Shadows" value={s.shadowQuality} options={[{ v: 'off', l: 'Off' }, { v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High' }]} onChange={v => set({ shadowQuality: v, graphicsPreset: 'custom' })} />
+                  <Segmented
+                    label="World detail" value={s.worldDetail}
+                    options={[{ v: 'low', l: 'Low' }, { v: 'high', l: 'High' }]}
+                    onChange={v => set({ worldDetail: v, graphicsPreset: 'custom' })}
+                    hint="Drops decals, litter and signage. Never changes cover, sight-lines or where bots can walk."
+                  />
                   <Segmented label="Texture detail" value={s.textureQuality} options={[{ v: 'low', l: 'Low' }, { v: 'medium', l: 'Medium' }, { v: 'high', l: 'High' }]} onChange={v => set({ textureQuality: v, graphicsPreset: 'custom' })} />
                   <p className="text-[11px] leading-snug text-[var(--bone-mute)] -mt-2 mb-4">Texture detail changes on the next deployment.</p>
+
+                  <div className="mt-6">
+                    <SectionTitle sub="Light, weather and how far anyone can see">Conditions</SectionTitle>
+                    <div className="tod-grid" role="radiogroup" aria-label="Time of day">
+                      <button
+                        role="radio" aria-checked={s.timeOfDay === 'auto'}
+                        className={`tod-chip ${s.timeOfDay === 'auto' ? 'tod-on' : ''}`}
+                        onClick={() => set({ timeOfDay: 'auto' })}
+                      >
+                        <span className="tod-name">Auto</span>
+                        <span className="tod-sub">Per map</span>
+                      </button>
+                      {CONDITION_ORDER.map(c => (
+                        <button
+                          key={c} role="radio" aria-checked={s.timeOfDay === c}
+                          className={`tod-chip ${s.timeOfDay === c ? 'tod-on' : ''}`}
+                          onClick={() => set({ timeOfDay: c })}
+                        >
+                          <span className="tod-name">{CONDITION_LABEL[c]}</span>
+                          <span className="tod-sub">{c === 'sandstorm' ? '~75 m' : c === 'overcast' ? '175 m' : ''}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[12px] leading-snug text-[var(--bone-dim)]">
+                      {s.timeOfDay === 'auto'
+                        ? `Each map uses its own authored light — Sandblast ${CONDITION_LABEL[AUTO_CONDITION.alrasul].toLowerCase()}, Town ${CONDITION_LABEL[AUTO_CONDITION.kasbah].toLowerCase()}, Warehouse ${CONDITION_LABEL[AUTO_CONDITION.arena].toLowerCase()}, Sirocco ${CONDITION_LABEL[AUTO_CONDITION.sirocco].toLowerCase()}.`
+                        : CONDITION_NOTE[s.timeOfDay]}
+                    </p>
+                    <p className="mt-1.5 text-[11px] leading-snug text-[var(--bone-mute)]">
+                      Weather cuts hostile sight by the same amount it cuts yours, and applies on the next deployment.
+                    </p>
+                  </div>
                 </div>
 
                 <div>
@@ -228,6 +288,17 @@ export default function Settings({ s, set, onClose }: { s: GameSettings; set: (p
             {tab === 'crosshair' && (
               <div className="anim-fade">
                 <SectionTitle sub="Live preview below">Reticle</SectionTitle>
+                <div className="ret-presets" role="group" aria-label="Reticle presets">
+                  {RETICLE_PRESETS.map(p => (
+                    <button
+                      key={p.id} className={`ret-preset ${presetActive(s, p.v) ? 'ret-on' : ''}`}
+                      aria-pressed={presetActive(s, p.v)} onClick={() => set(p.v)}
+                    >
+                      <span className="ret-preset-name">{p.label}</span>
+                      <span className="ret-preset-hint">{p.hint}</span>
+                    </button>
+                  ))}
+                </div>
                 <div className="flex gap-6 flex-wrap">
                   <div className="flex-1 min-w-[220px]">
                     <ColorPick label="Color" value={s.crosshairColor} onChange={v => set({ crosshairColor: v })} />

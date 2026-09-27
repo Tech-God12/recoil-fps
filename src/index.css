@@ -3199,3 +3199,70 @@ span.arm2-thumb { display: inline-block; }
 .pause-readout span { color:var(--bone-mute); font:10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; }
 .pause-note { margin-top:22px !important; color:var(--bone-mute) !important; font:10px/1 var(--mono) !important; letter-spacing:.12em; text-transform:uppercase; }
 @media (max-width:700px) { .pause-wrap { grid-template-columns:1fr; max-height:92vh; overflow:auto; } .pause-card { padding:18px; } .pause-title { font-size:58px; } }
+
+/* ============================================================
+   CONDITIONS PICKER + RETICLE PRESETS  (B3 / B6)
+   Eight conditions do not fit a segmented control, and four
+   reticle sliders are hard to agree on by hand — both want a
+   grid of self-describing chips instead.
+   ============================================================ */
+.tod-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+@media (max-width: 720px) { .tod-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.tod-chip {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 9px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.16);
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+.tod-chip:hover { border-color: var(--bone-dim); background: rgba(0, 0, 0, 0.28); }
+.tod-chip:active { transform: translateY(1px); }
+.tod-chip .tod-name {
+  font: 600 12px/1.1 var(--display);
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--bone);
+}
+.tod-chip .tod-sub {
+  font: 500 10px/1.1 var(--mono);
+  letter-spacing: 0.08em; color: var(--bone-mute); min-height: 11px;
+}
+.tod-chip.tod-on {
+  border-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+}
+.tod-chip.tod-on .tod-name { color: var(--signal); }
+.tod-chip.tod-on .tod-sub { color: color-mix(in srgb, var(--signal) 70%, var(--bone)); }
+
+.ret-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 14px;
+}
+@media (max-width: 720px) { .ret-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.ret-preset {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 9px; text-align: left;
+  border: 1px solid var(--line); border-radius: 3px;
+  background: rgba(0, 0, 0, 0.16);
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+.ret-preset:hover { border-color: var(--bone-dim); background: rgba(0, 0, 0, 0.28); }
+.ret-preset:active { transform: translateY(1px); }
+.ret-preset-name {
+  font: 600 12px/1.1 var(--display);
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--bone);
+}
+.ret-preset-hint { font: 400 11px/1.2 var(--ui); color: var(--bone-mute); }
+.ret-preset.ret-on {
+  border-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+}
+.ret-preset.ret-on .ret-preset-name { color: var(--signal); }

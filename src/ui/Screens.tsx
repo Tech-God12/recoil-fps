@@ -7,8 +7,8 @@ import type { DefusalHud, DefusalResult } from '../game/defusal/mode';
 import { WEAPON_CATALOG } from '../game/economy/catalog';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
-import type { KitHud } from '../game/kits';
-import { KitPauseCard } from './Kits';
+import type { KitHud, KitId } from '../game/kits';
+import { AbilityCardWide, KitPauseCard } from './Kits';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
@@ -323,23 +323,56 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
      01 WAREHOUSE · Team Deathmatch (respawns, 2:30)
      02 SIROCCO   · Bomb Defusal (CS2-style rounds, economy, plant/defuse)
    ================================================================ */
-const SEG = <T extends string,>({ value, options, onChange, label }: { value: T; options: { id: T; label: string; sub?: string }[]; onChange: (v: T) => void; label: string }) => (
-  <div className="df-opt" role="radiogroup" aria-label={label}>
-    <span className="df-opt-k mono">{label}</span>
-    <div className="df-seg">
+/** A numbered step: badge, heading, and one line telling you what the step is for. */
+const Step = ({ n, title, help, children, wide }: { n: string; title: string; help?: string; children: React.ReactNode; wide?: boolean }) => (
+  <section className={`step${wide ? ' step--wide' : ''}`}>
+    <header className="step-head">
+      <span className="step-num mono">{n}</span>
+      <h2 className="step-title">{title}</h2>
+      {help && <span className="step-help mono">{help}</span>}
+    </header>
+    {children}
+  </section>
+);
+
+/**
+ * One question, one visible label, full-width rows. The row carries the CONSEQUENCE of
+ * choosing it, not just its name — that is what turns five identical chips under two
+ * four-letter labels into something readable.
+ */
+const Question = <T extends string,>({ label, value, options, onChange }: {
+  label: string; value: T; onChange: (v: T) => void;
+  options: { id: T; label: string; sub: string }[];
+}) => (
+  <div className="q">
+    <span className="q-label mono">{label}</span>
+    <div className="q-rows" role="radiogroup" aria-label={label}>
       {options.map(o => (
-        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} className={value === o.id ? 'on' : ''} onClick={() => onChange(o.id)}>
-          <b>{o.label}</b>{o.sub && <em>{o.sub}</em>}
+        <button key={o.id} type="button" role="radio" aria-checked={value === o.id}
+          className={`q-row${value === o.id ? ' on' : ''}`} onClick={() => onChange(o.id)}>
+          <span className="q-tick" aria-hidden="true" />
+          <b>{o.label}</b>
+          <em>{o.sub}</em>
         </button>
       ))}
     </div>
   </div>
 );
 
-function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup, onAbilities, defusal, onDefusal }: {
+/** The four-line brief that replaced the rules band. */
+const Brief = ({ rows, label }: { rows: [string, string][]; label: string }) => (
+  <ul className="brief" aria-label={label}>
+    {rows.map(([k, v]) => (
+      <li key={k}><b className="mono">{k}</b><span>{v}</span></li>
+    ))}
+  </ul>
+);
+
+function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup, onAbilities, equippedKit, defusal, onDefusal }: {
   primaryName: string; secondaryName: string;
   onBack: () => void; onMap: (map: GameSettings['map']) => void;
   onDeploy: (map?: GameSettings['map']) => void; onArenaSetup?: () => void; onAbilities: () => void;
+  equippedKit: KitId | null;
   defusal: DefusalMenuOptions; onDefusal: (o: DefusalMenuOptions) => void;
 }) {
   const [mode, setMode] = useState<'defusal' | 'tdm'>('defusal');
@@ -361,8 +394,16 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
   }, [isDf]);
   const play = () => { const m: MapId = isDf ? 'sirocco' : 'arena'; onMap(m); onDeploy(m); };
   const cards = [
-    { id: 'sirocco' as MapId, mode: 'defusal' as const, num: '01', name: 'SIROCCO', kind: 'BOMB DEFUSAL', meta: `5V5 · FIRST TO ${defusal.format === 'long' ? 13 : 7} · NO RESPAWNS`, fresh: true },
-    { id: 'arena' as MapId, mode: 'tdm' as const, num: '02', name: 'WAREHOUSE', kind: 'TEAM DEATHMATCH', meta: '5V5 · 2:30 MATCH · 5S RESPAWN', fresh: false },
+    {
+      id: 'sirocco' as MapId, mode: 'defusal' as const, num: '01', name: 'SIROCCO', kind: 'BOMB DEFUSAL',
+      line: 'Rounds, no respawns, buy a gun at the start of each one. Plant the bomb — or stop it.',
+      meta: `5V5 · FIRST TO ${defusal.format === 'long' ? 13 : 7} · NO RESPAWNS`,
+    },
+    {
+      id: 'arena' as MapId, mode: 'tdm' as const, num: '02', name: 'WAREHOUSE', kind: 'TEAM DEATHMATCH',
+      line: 'One long fight with respawns. Most eliminations when the clock runs out wins it.',
+      meta: '5V5 · 2:30 MATCH · 5S RESPAWN',
+    },
   ];
   return (
     <main className="tx-root arena2-root">
@@ -391,81 +432,96 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
         </div>
       </header>
 
-      <div className="arena2-cards arena2-cards--two" role="listbox" aria-label="Choose a mode">
-        {cards.map((c, i) => (
-          <button
-            key={c.id}
-            type="button"
-            role="option"
-            aria-selected={mode === c.mode}
-            className={`map2-card seq ${mode === c.mode ? 'sel picked' : ''}`}
-            style={{ animationDelay: `${0.08 + i * 0.06}s` }}
-            onMouseEnter={() => setHovered(c.id)}
-            onMouseLeave={() => setHovered(cur => (cur === c.id ? null : cur))}
-            onFocus={() => setHovered(c.id)}
-            onBlur={() => setHovered(cur => (cur === c.id ? null : cur))}
-            onClick={() => setMode(c.mode)}
-            onDoubleClick={() => { setMode(c.mode); const m = c.id; onMap(m); onDeploy(m); }}
-            aria-label={`${c.name} — ${c.kind}`}
-          >
-            <img src={MAP_ART[c.id]} alt="" draggable={false} className="map2-art" />
-            <span className="map2-shade" aria-hidden="true" />
-            <span className="map2-num mono">{c.num}</span>
-            {c.fresh && <span className="map2-new mono">NEW MODE</span>}
-            <span className="map2-info">
-              <b>{c.name}</b>
-              <em>{c.kind}</em>
-              <span className="map2-obj mono">{c.meta}</span>
-            </span>
-            <span className="map2-go"><Arrow /></span>
-          </button>
-        ))}
-      </div>
-      <p className="map2-hint mono" role="status">
-        HOVER A CARD FOR A LIVE FLYOVER · CLICK TO SELECT · DOUBLE-CLICK TO PLAY
-      </p>
+      <Step n="01" title="PICK A GAME" help="HOVER FOR A LIVE FLYOVER · DOUBLE-CLICK TO PLAY" wide>
+        <div className="arena2-cards arena2-cards--two" role="listbox" aria-label="Choose a mode">
+          {cards.map((c, i) => (
+            <button
+              key={c.id}
+              type="button"
+              role="option"
+              aria-selected={mode === c.mode}
+              className={`map2-card seq ${mode === c.mode ? 'sel picked' : ''}`}
+              style={{ animationDelay: `${0.08 + i * 0.06}s` }}
+              onMouseEnter={() => setHovered(c.id)}
+              onMouseLeave={() => setHovered(cur => (cur === c.id ? null : cur))}
+              onFocus={() => setHovered(c.id)}
+              onBlur={() => setHovered(cur => (cur === c.id ? null : cur))}
+              onClick={() => setMode(c.mode)}
+              onDoubleClick={() => { setMode(c.mode); const m = c.id; onMap(m); onDeploy(m); }}
+              aria-label={`${c.name} — ${c.kind}`}
+            >
+              <img src={MAP_ART[c.id]} alt="" draggable={false} className="map2-art" />
+              <span className="map2-shade" aria-hidden="true" />
+              <span className="map2-num mono">{c.num}</span>
+              {mode === c.mode && <span className="map2-new mono sel">SELECTED</span>}
+              <span className="map2-info">
+                <b>{c.name}</b>
+                <em>{c.kind}</em>
+                <span className="map2-line">{c.line}</span>
+                <span className="map2-obj mono">{c.meta}</span>
+              </span>
+              <span className="map2-go"><Arrow /></span>
+            </button>
+          ))}
+        </div>
+      </Step>
 
-      <div className="arena2-cta seq" style={{ animationDelay: '.2s' }}>
-        {isDf ? (
-          <>
-            <div className="df-options">
-              <SEG label="SIDE" value={defusal.side} onChange={side => onDefusal({ ...defusal, side })}
-                options={[{ id: 'attack', label: 'ATTACK', sub: 'plant the bomb' }, { id: 'defend', label: 'DEFEND', sub: 'hold the sites' }, { id: 'random', label: 'RANDOM', sub: 'coin flip' }]} />
-              <SEG label="MATCH" value={defusal.format} onChange={format => onDefusal({ ...defusal, format })}
-                options={[{ id: 'short', label: 'SHORT', sub: 'first to 7' }, { id: 'long', label: 'FULL', sub: 'first to 13' }]} />
+      {/* Steps 02-04 keep the same frame in both modes, so the eye never has to re-find them. */}
+      <div className="arena2-panel seq" style={{ animationDelay: '.2s' }}>
+        <Step n="02" title={isDf ? 'MATCH SETUP' : 'YOUR LOADOUT'} help={isDf ? undefined : 'CARRIED INTO THE MATCH'}>
+          {isDf ? (
+            <>
+              <Question label="SIDE" value={defusal.side} onChange={side => onDefusal({ ...defusal, side })}
+                options={[
+                  { id: 'attack', label: 'ATTACK', sub: 'Carry the bomb in and plant it' },
+                  { id: 'defend', label: 'DEFEND', sub: 'Hold both sites, defuse if it goes down' },
+                  { id: 'random', label: 'RANDOM', sub: 'Coin flip — you swap at halftime either way' },
+                ]} />
+              <Question label="LENGTH" value={defusal.format} onChange={format => onDefusal({ ...defusal, format })}
+                options={[
+                  { id: 'short', label: 'SHORT', sub: 'First to 7 · around 20 minutes' },
+                  { id: 'long', label: 'FULL', sub: 'First to 13 · around 40 minutes' },
+                ]} />
+            </>
+          ) : (
+            <div className="arena-loadout">
+              <div className="arena-lo-row"><span className="mono">PRIMARY</span><b>{primaryName}</b></div>
+              <div className="arena-lo-row"><span className="mono">SIDEARM</span><b>{secondaryName}</b></div>
+              <button type="button" className="abil-tall-act" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
+                Change loadout ›
+              </button>
             </div>
+          )}
+        </Step>
+
+        <Step n="03" title="YOUR ABILITY">
+          <AbilityCardWide kit={equippedKit} onOpen={onAbilities} />
+        </Step>
+
+        <Step n="04" title="DEPLOY">
+          <div className="step-deploy">
             <button className="deploy-btn" onClick={play}>
               <span>Play</span>
-              <span className="hint">Sirocco · Bomb Defusal</span>
+              <span className="hint">{isDf ? 'Sirocco · Bomb Defusal' : 'Warehouse · 5v5 TDM'}</span>
               <Arrow />
             </button>
-            <button className="menu-secondary-btn" onClick={onAbilities}>Abilities <span>choose your arena ability</span></button>
-          </>
-        ) : (
-          <>
-            <button className="deploy-btn" onClick={play}>
-              <span>Play</span>
-              <span className="hint">Warehouse · 5v5 TDM</span>
-              <Arrow />
-            </button>
-            <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
-              Set up loadout <span>armor + weapon</span>
-            </button>
-            <button className="menu-secondary-btn" onClick={onAbilities}>
-              Abilities <span>choose your arena ability</span>
-            </button>
-          </>
-        )}
+            {isDf ? (
+              <Brief label="How a round works" rows={[
+                ['BUY', '$800 to start, then win, loss and kill bonuses'],
+                ['PLANT', 'Hold X for 3.2s at A or B'],
+                ['DEFUSE', '10s by hand, 5s with a kit · 40s fuse'],
+                ['SURVIVE', 'No respawns · keep your gun if you live'],
+              ]} />
+            ) : (
+              <Brief label="How a match works" rows={[
+                ['RESPAWN', '5 seconds, straight back into it'],
+                ['CLOCK', '2:30 · most eliminations takes it'],
+                ['GROUND', 'One warehouse, three lanes, no buying'],
+              ]} />
+            )}
+          </div>
+        </Step>
       </div>
-      {isDf && (
-        <ul className="df-rules seq" style={{ animationDelay: '.26s' }} aria-label="Bomb defusal rules">
-          <li><b>BUY</b><span>$800 start · CS2 economy · win, loss &amp; kill bonuses</span></li>
-          <li><b>PLANT</b><span>Attackers carry the bomb to A or B · hold X for 3.2s</span></li>
-          <li><b>DEFUSE</b><span>40s fuse · 10s defuse · 5s with an ability</span></li>
-          <li><b>SURVIVE</b><span>No respawns · keep your gun if you live</span></li>
-          <li><b>COMMAND</b><span>6 / 7 call A / B · 8 follow me · 5 drop bomb</span></li>
-        </ul>
-      )}
 
       <footer className="map2-foot mono">
         <span>YOUR SQUAD 5&nbsp;&nbsp;//&nbsp;&nbsp;HOSTILES 5</span>
@@ -651,6 +707,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onDeploy={onDeploy}
         onArenaSetup={onArenaSetup}
         onAbilities={() => onAbilities?.()}
+        equippedKit={prof.equippedKit}
         defusal={defusal ?? { side: 'random', format: 'short' }}
         onDefusal={o => onDefusal?.(o)}
       />
@@ -724,7 +781,7 @@ const BOOT_TIPS = [
   'Lean with Q and E, then return to cover before firing.',
   'Reload before crossing an exposed lane.',
   'Manage the magazine; reserve ammunition is not consumed.',
-  'Buy an ability in ABILITIES, then press Z in game: Radar, Barricade or Decoy.',
+  'Buy an ability in ABILITIES, then press Z in game: Mine, Decoy, Medkit or Barricade.',
 ];
 
 export function BootScreen({ map }: { map?: MapId }) {

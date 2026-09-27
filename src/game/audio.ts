@@ -706,9 +706,11 @@ export class SpatialAudioEngine {
   }
 
   // Slide sound: cloth/body drag
-  slideDrag(surface: 'sand' | 'concrete' | 'wood') {
-    const f = surface === 'concrete' ? 1400 : surface === 'wood' ? 550 : 750;
-    this.burstDirect({ dur: 0.55, gain: 0.28, freq: f, q: 0.8, attack: 0.05 });
+  slideDrag(surface: 'sand' | 'concrete' | 'wood' | 'metal') {
+    // Steel slides bright and rings; sand is the dull end of the range.
+    const f = surface === 'metal' ? 2100 : surface === 'concrete' ? 1400 : surface === 'wood' ? 550 : 750;
+    const q = surface === 'metal' ? 2.4 : 0.8;
+    this.burstDirect({ dur: 0.55, gain: 0.28, freq: f, q, attack: 0.05 });
   }
 
   // Hit & Kill Confirm (Iconic CoD ding)
@@ -1219,18 +1221,7 @@ export class SpatialAudioEngine {
     this.burstDirect({ dur: 0.04, gain: 0.1, freq: 700, q: 3, when: 0.07 });
   }
 
-  /** Dart leaves the hand: short air whip. */
-  dartThrow() {
-    this.burstDirect({ dur: 0.16, gain: 0.16, freq: 1800, q: 0.8, attack: 0.03, hp: 900 });
-  }
-
-  /** Dart bites into a surface: tick + tiny metallic ring. */
-  dartStick(wx: number, wy: number, wz: number) {
-    this.spatialNoise(wx, wy, wz, { dur: 0.05, gain: 0.5, freq: 3200, q: 2 });
-    this.spatialTone(wx, wy, wz, { from: 2400, to: 2200, dur: 0.18, gain: 0.12, type: 'triangle' });
-  }
-
-  /** Sonar pulse: descending sine "ping" with a watery tail; the last ping is doubled. */
+  /** Contacts marked: descending sine "ping" with a watery tail; doubled when emphatic. */
   sonarPing(wx: number, wy: number, wz: number, last = false) {
     this.spatialTone(wx, wy, wz, { from: 1900, to: 1250, dur: 0.55, gain: 0.55 });
     this.spatialTone(wx, wy, wz, { from: 950, to: 620, dur: 0.7, gain: 0.25, type: 'triangle' });

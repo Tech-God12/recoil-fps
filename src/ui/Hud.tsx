@@ -114,13 +114,21 @@ const HudCompass = memo(function HudCompass({ bearing, pings, landmark, missionB
    Projected to screen space by the engine; they rise, fade and scale
    with severity so a headshot reads instantly without stopping to count.
    ================================================================ */
+/**
+ * Reduced motion: the numbers are world-anchored and moved by JS every frame, so the
+ * honest answer is to stop the drift and let them fade in place. Still readable, and
+ * still on the target you hit — which is the whole point of anchoring them.
+ */
+const REDUCED_MOTION = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 const DamageNumbers = memo(function DamageNumbers({ nums }: { nums: NonNullable<HudState['damageNumbers']> }) {
   return (
     <div className="dmg-num-layer" aria-hidden="true">
       {nums.map((n, i) => {
         const life = Math.min(1, n.age / 0.9);
         // Rise fast then ease out; fade only over the last 40%.
-        const rise = (1 - (1 - life) * (1 - life)) * 46;
+        const rise = REDUCED_MOTION ? 0 : (1 - (1 - life) * (1 - life)) * 46;
         const opacity = life > 0.6 ? 1 - (life - 0.6) / 0.4 : 1;
         // Bigger hits read bigger, clamped so a 120 doesn't fill the screen.
         const scale = (n.kill ? 1.5 : n.head ? 1.28 : 1) * (0.86 + Math.min(0.34, n.dmg / 150));
@@ -226,7 +234,7 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
 
   return (
     <div
-      className={`hud-root pointer-events-none select-none${s.colorBlindMode && s.colorBlindMode !== 'off' ? ` cb-${s.colorBlindMode}` : ''}`}
+      className="hud-root pointer-events-none select-none"
       style={rootStyle}
     >
       {hud.damageNumbers && hud.damageNumbers.length > 0 && <DamageNumbers nums={hud.damageNumbers} />}

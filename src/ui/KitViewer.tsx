@@ -1,23 +1,22 @@
 // Recoil FPS — ABILITIES menu 3-D showcase. Renders the real in-game kit hardware
 // (kit-models.ts, so the menu never drifts from what spawns in a match) on a lit
-// pedestal and loops a short demo of what the kit does: the radar unfolds, spins and
-// scans, finding enemy silhouettes; the barricade drops and unfolds; the decoy
-// materialises and patrols. One renderer per mount, 2× DPR cap, paused when hidden.
+// pedestal and loops a short demo of what the kit does: the mine plants and trips; the
+// barricade drops and unfolds; the decoy materialises and patrols; the medkit opens into
+// its field. One renderer per mount, 2× DPR cap, paused when hidden.
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { KitId } from '../game/kits';
 import {
-  buildBarricade, buildDart, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
-  disposeMedkit, disposeMine, type BarricadeModel, type DartModel, type DecoyModel, type MedkitModel, type MineModel, type TagGhost,
+  buildBarricade, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDecoy, disposeKitObject,
+  disposeMedkit, disposeMine, type BarricadeModel, type DecoyModel, type MedkitModel, type MineModel, type TagGhost,
 } from '../game/kit-models';
 
-const ACCENT: Record<KitId, number> = { recon: 0x5fe3ff, bulwark: 0xff8a3d, phantom: 0x7cf5d8, mine: 0xff4a3a, medic: 0x6cff9a };
+const ACCENT: Record<KitId, number> = { bulwark: 0xff8a3d, phantom: 0x7cf5d8, mine: 0xff4a3a, medic: 0x6cff9a };
 /** Demo loop length per kit (s). */
-const LOOP: Record<KitId, number> = { recon: 5, bulwark: 5, phantom: 5, mine: 5.5, medic: 5 };
+const LOOP: Record<KitId, number> = { bulwark: 5, phantom: 5, mine: 5.5, medic: 5 };
 
 type Rig =
-  | { id: 'recon'; m: DartModel; root: THREE.Group; ghosts: TagGhost[] }
   | { id: 'bulwark'; m: BarricadeModel; root: THREE.Group }
   | { id: 'phantom'; m: DecoyModel; root: THREE.Group }
   | { id: 'mine'; m: MineModel; root: THREE.Group; walker: TagGhost; flash: THREE.Mesh }
@@ -32,21 +31,6 @@ const MED_RING = 1.5;
 
 function buildRig(id: KitId): Rig {
   const root = new THREE.Group();
-  if (id === 'recon') {
-    const m = buildDart();
-    // The unit is 45 cm tall: shown at 2.6× so it reads at the same size as the others.
-    m.group.scale.setScalar(2.6);
-    root.add(m.group, m.ring, m.echo);
-    const ghosts = [new THREE.Vector3(-1.5, 0, -1.4), new THREE.Vector3(1.6, 0, -1.7)].map((p, i) => {
-      const g = buildTagGhost(false);
-      g.group.position.copy(p);
-      g.group.rotation.y = i ? 2.4 : -0.6;
-      g.group.scale.setScalar(0.6);
-      root.add(g.group);
-      return g;
-    });
-    return { id, m, root, ghosts };
-  }
   if (id === 'bulwark') {
     const m = buildBarricade(2.4, 1.4, 0.12);
     m.group.rotation.y = Math.PI; // threat face toward the camera
@@ -82,10 +66,7 @@ function buildRig(id: KitId): Rig {
 }
 
 function disposeRig(r: Rig) {
-  if (r.id === 'recon') {
-    disposeDartFx(r.m); disposeKitObject(r.m.group);
-    for (const g of r.ghosts) g.mat.dispose();
-  } else if (r.id === 'bulwark') {
+  if (r.id === 'bulwark') {
     disposeKitObject(r.m.group); r.m.plateMat.dispose(); (r.m.lamp.material as THREE.Material).dispose();
   } else if (r.id === 'mine') {
     disposeMine(r.m); disposeKitObject(r.walker.group); r.walker.mat.dispose();
@@ -100,29 +81,6 @@ const easeBack = (x: number) => { const c = 1.7; const t = clamp01(x) - 1; retur
 
 /** Advance the demo to loop time `t` (0..LOOP). */
 function animate(r: Rig, t: number, dt: number) {
-  if (r.id === 'recon') {
-    const { m } = r;
-    m.setDeploy(t / 0.6);
-    const scanT = t - 0.9;
-    m.dish.rotation.y += dt * (scanT > 0 && scanT % 1.4 < 0.3 ? 14 : 2.5);
-    (m.led.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.2 + (Math.sin(t * 10) > 0 ? 1.6 : 0);
-    const p = scanT > 0 ? (scanT % 1.4) / 1.4 : -1;
-    for (const [o, lag, max, op] of [[m.ring, 0, 2.3, 0.9], [m.echo, 0.1, 2.1, 0.5]] as const) {
-      const q = p - lag;
-      o.visible = q > 0 && q < 1;
-      o.position.y = 0.02;
-      o.scale.setScalar(0.05 + easeOut(q) * max);
-      (o.material as THREE.MeshBasicMaterial).opacity = (1 - q) * op;
-    }
-    // enemies "found" by the first scan, held through the loop, faded at the end
-    const shown = scanT > 0.35 ? Math.min(1, (scanT - 0.35) * 3) * Math.min(1, (LOOP.recon - t) * 2) : 0;
-    for (const g of r.ghosts) {
-      g.group.visible = shown > 0;
-      g.mat.uniforms.uTime.value += dt;
-      g.mat.opacity = shown * (0.55 + (p >= 0 && p < 0.25 ? 0.5 : 0));
-    }
-    return;
-  }
   if (r.id === 'bulwark') {
     // drop in (0–0.45 s), unfold (0.45–1.1 s), hold, fold (4.1–4.5 s)
     const g = r.m.group;
@@ -266,8 +224,7 @@ export function KitViewer({ kit, className, shift = 0 }: { kit: KitId; className
     animate(rig, LOOP[kit] * 0.5, 0);
     rig.root.updateMatrixWorld(true);
     const box = new THREE.Box3();
-    rig.root.traverse(o => { if (o instanceof THREE.Mesh && o.visible && o !== (rig.id === 'recon' ? rig.m.ring : null) && o !== (rig.id === 'recon' ? rig.m.echo : null)) box.expandByObject(o); });
-    if (rig.id === 'recon') box.set(new THREE.Vector3(-1.6, 0, -1.8), new THREE.Vector3(1.6, 1.3, 0.4));
+    rig.root.traverse(o => { if (o instanceof THREE.Mesh && o.visible) box.expandByObject(o); });
     if (rig.id === 'mine') box.set(new THREE.Vector3(-1.5, 0, -1.6), new THREE.Vector3(2.6, 1.4, 1.2));
     const size = box.getSize(new THREE.Vector3());
     const centre = box.getCenter(new THREE.Vector3());

@@ -4,9 +4,6 @@
 // Kits are bought once in the KITS menu and equipped there; the equipped kit is
 // locked for the whole deployment (no mid-match swapping) and arrives HALF charged,
 // so nobody opens a match with a free ability.
-//   RECON   · Sonar Dart  — thrown sensor: three pulses tag hostiles through walls as
-//                           full-body silhouettes; tagged hostiles take +10 % damage.
-//                           The ping is loud — close hostiles come to investigate.
 //   BULWARK · Barricade   — folding steel shield that stops bullets, sight-lines and
 //                           AI pathing both ways. Press Z beside it to recall it and
 //                           bank part of the cooldown back.
@@ -29,9 +26,9 @@ import type { Effects } from './effects';
 import type { AABB } from './world';
 import { audio } from './audio';
 import {
-  buildBarricade, buildDart, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDartFx, disposeDecoy, disposeKitObject,
+  buildBarricade, buildDecoy, buildMedkit, buildMine, buildTagGhost, disposeDecoy, disposeKitObject,
   disposeMedkit, disposeMine, makeSonarMarkerMaterial,
-  type BarricadeModel, type DartModel, type DecoyModel, type MedkitModel, type MineModel, type TagGhost,
+  type BarricadeModel, type DecoyModel, type MedkitModel, type MineModel, type TagGhost,
 } from './kit-models';
 import { KIT_IDS, KIT_PRICES, isKitId, type KitId } from './economy/kit-shop';
 
@@ -47,32 +44,6 @@ export const KIT_KEY = 'Z';
 // feedback on the first pass: kills refunded the kit in a few seconds, so the
 // cooldowns went up by ~50 % and kill refunds went from 20 % to 8 % with a cap.
 export const KIT_TUNING = {
-  recon: {
-    /** 45 s: ~3 darts per 150 s TDM match — intel you plan around, not spam. */
-    cooldown: 45,
-    /** Throw speed m/s: a 25 m flat throw lands in ~1 s, far enough to clear a courtyard. */
-    throwSpeed: 26,
-    /** Fin-stabilised: falls at 55 % of g so the dart flies flatter than a frag. */
-    gravityScale: 0.55,
-    /** Flight time cap before the dart is considered spent where it lies. */
-    maxFlight: 2.5,
-    /** First ping fires shortly after impact so a thrown dart pays off inside one peek. */
-    firstPulse: 0.4,
-    pulses: 3,
-    pulseEvery: 2.5,
-    /** Tag radius: one courtyard / warehouse bay. Larger than the radar's 22 m always-on ring. */
-    radius: 24,
-    /** A tag lasts slightly longer than the pulse gap so coverage is continuous for ~8 s. */
-    revealFor: 3.2,
-    /** The ping is audible: hostiles this close walk over to find the dart (the risk). */
-    hearRadius: 14,
-    /**
-     * Tagged hostiles take +10 % damage from the player. Enough to turn a 5-hit mission
-     * kill into 4 at the margin, never enough to change headshot maths — it rewards
-     * pushing on intel instead of just reading it.
-     */
-    markDamageMul: 1.1,
-  },
   bulwark: {
     /** 60 s: the wall lives 24 s of it, and a recall can bank up to half back. */
     cooldown: 60,
@@ -162,9 +133,15 @@ export const KIT_TUNING = {
     edgeDamage: 40,
     coreRadius: 1.5,
     blastRadius: 5,
-    /** Survivors within 10 m are revealed for 4 s (same silhouette as the Radar). */
+    /** Survivors within 10 m are revealed for 4 s: the blast tells you where they ran. */
     markRadius: 10,
     markFor: 4,
+    /**
+     * Marked hostiles take +10 % from the player. Enough to turn a 5-hit mission kill
+     * into 4 at the margin, never enough to change headshot maths — it rewards pushing
+     * onto a mine hit instead of just hearing it.
+     */
+    markDamageMul: 1.1,
     /** The bang is heard like a frag. */
     noiseRadius: 40,
   },
@@ -207,19 +184,6 @@ export interface KitDef {
 // Player-facing names are plain words: the kit IS the thing it deploys. (`ability`
 // equals `name` so every "… READY" / "… RECHARGING" message reads naturally.)
 export const KIT_DEFS: Record<KitId, KitDef> = {
-  recon: {
-    id: 'recon', name: 'Radar', ability: 'Radar', role: 'Intel',
-    blurb: 'Throw a small radar unit. It sets itself up and shows every enemy within 24 m through walls.',
-    rule: 'Enemies it finds take 10% more damage. It is loud — enemies within 14 m will come to check it out.',
-    steps: ['Throw it into the room before you go in.', 'It scans 3 times and shows enemies through walls.', 'Push while they are marked: +10% damage.'],
-    cooldown: KIT_TUNING.recon.cooldown,
-    price: KIT_PRICES.recon,
-    stats: [
-      { label: 'RANGE', value: '24 m', bar: 0.8 },
-      { label: 'SHOWS', value: '≈8 s', bar: 0.55 },
-      { label: 'COOLDOWN', value: '45 s', bar: 0.45 },
-    ],
-  },
   bulwark: {
     id: 'bulwark', name: 'Barricade', ability: 'Barricade', role: 'Cover',
     blurb: 'Drop a folding steel shield in front of you. It stops bullets and blocks the way.',
@@ -434,7 +398,7 @@ export interface KitContext {
   feedback?(kind: KitFxKind, at?: THREE.Vector3): void;
 }
 
-export interface KitLiveHud { kind: 'dart' | 'barricade' | 'decoy' | 'mine' | 'medkit'; label: string; timeLeft: number; total: number; detail?: string; health?: number }
+export interface KitLiveHud { kind: 'barricade' | 'decoy' | 'mine' | 'medkit'; label: string; timeLeft: number; total: number; detail?: string; health?: number }
 
 export interface KitHud {
   id: KitId;
@@ -463,154 +427,9 @@ export interface KitHud {
 const ray = new THREE.Raycaster();
 const tmpA = new THREE.Vector3();
 const tmpB = new THREE.Vector3();
-const tmpC = new THREE.Vector3();
 const easeOutBack = (k: number) => { const c = 1.70158; return 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2); };
 
-// ---------------------------------------------------------------- dart ----
-class SonarDart {
-  model: DartModel;
-  pos: THREE.Vector3;
-  vel: THREE.Vector3;
-  stuck = false;
-  flight = 0;
-  sinceStick = 0;
-  pulsesFired = 0;
-  private ringT = -1;
-  done = false;
-
-  constructor(private ctx: KitContext, private dir: KitDirector, from: THREE.Vector3, aim: THREE.Vector3) {
-    const T = KIT_TUNING.recon;
-    this.model = buildDart();
-    this.pos = from.clone();
-    this.vel = aim.clone().normalize().multiplyScalar(T.throwSpeed);
-    this.model.group.position.copy(this.pos);
-    this.orient(this.vel);
-    ctx.scene.add(this.model.group, this.model.ring, this.model.echo, this.model.dome, this.model.beam);
-  }
-
-  private spin = 2.2;
-
-  private orient(d: THREE.Vector3) {
-    this.model.group.rotation.set(0, Math.atan2(-d.x, -d.z), 0);
-  }
-
-  static readonly LIFE = KIT_TUNING.recon.firstPulse + KIT_TUNING.recon.pulseEvery * (KIT_TUNING.recon.pulses - 1) + 0.8;
-
-  get timeLeft(): number {
-    if (!this.stuck) return SonarDart.LIFE;
-    return Math.max(0, SonarDart.LIFE - this.sinceStick);
-  }
-
-  update(dt: number) {
-    const T = KIT_TUNING.recon;
-    if (!this.stuck) {
-      this.flight += dt;
-      this.vel.y -= 9.8 * T.gravityScale * dt;
-      const step = tmpB.copy(this.vel).multiplyScalar(dt);
-      const len = step.length();
-      ray.set(this.pos, step.clone().normalize()); ray.far = len + 0.05;
-      const hit = ray.intersectObjects(this.ctx.occluders, false)[0];
-      const n = hit?.face ? tmpC.copy(hit.face.normal).transformDirection(hit.object.matrixWorld) : null;
-      if (hit && n && n.y > 0.6) {
-        // Landed on top of something (crate, roof, barricade): deploy right there.
-        this.pos.copy(hit.point);
-        this.stick();
-      } else if (hit) {
-        // Hit a wall: drop straight down the face and deploy on the ground below.
-        this.pos.copy(hit.point).addScaledVector(step.normalize(), -0.12);
-        this.vel.x = 0; this.vel.z = 0; this.vel.y = Math.min(0, this.vel.y);
-      } else {
-        this.pos.add(step);
-        const g = this.ctx.groundHeight(this.pos.x, this.pos.z);
-        if (this.pos.y <= g) { this.pos.y = g; this.stick(); }
-        else if (this.flight >= T.maxFlight) { this.pos.y = g; this.stick(); }
-      }
-      this.model.group.position.copy(this.pos);
-      // Folded unit tumbles end over end in flight.
-      if (!this.stuck) this.model.group.rotation.set(this.flight * 9, this.model.group.rotation.y, this.flight * 4);
-      return;
-    }
-    this.sinceStick += dt;
-    // Unfold over 0.35 s: legs swing out, mast telescopes up; the dish spins, faster on a pulse.
-    this.model.setDeploy(this.sinceStick / 0.35);
-    this.spin = Math.max(2.2, this.spin - dt * 6);
-    this.model.dish.rotation.y += dt * this.spin;
-    const due = T.firstPulse + this.pulsesFired * T.pulseEvery;
-    if (this.pulsesFired < T.pulses && this.sinceStick >= due) this.pulse();
-    // LED blinks faster as the last pulse approaches
-    const led = this.model.led.material as THREE.MeshStandardMaterial;
-    led.emissiveIntensity = 1.2 + (Math.sin(this.sinceStick * (8 + this.pulsesFired * 4)) > 0 ? 1.6 : 0);
-    // Beacon beam: breathes while the dart is live, fades over its last 0.8 s.
-    const beam = this.model.beam;
-    const fade = Math.min(1, this.timeLeft / 0.8);
-    (beam.material as THREE.MeshBasicMaterial).opacity = (0.16 + 0.1 * Math.sin(this.sinceStick * 6)) * fade;
-    if (this.ringT >= 0) {
-      // One pulse = main ring + echo ring 0.12 s behind + wire dome, all over 0.8 s.
-      this.ringT += dt;
-      const k = Math.min(1, this.ringT / 0.8);
-      const e = 1 - Math.pow(1 - k, 2.2);
-      const r = Math.max(0.05, e * T.radius);
-      this.model.ring.scale.set(r, r, r);
-      (this.model.ring.material as THREE.MeshBasicMaterial).opacity = 0.85 * (1 - k);
-      const ke = Math.max(0, Math.min(1, (this.ringT - 0.12) / 0.8));
-      const re = Math.max(0.05, (1 - Math.pow(1 - ke, 2.2)) * T.radius);
-      this.model.echo.scale.set(re, re, re);
-      (this.model.echo.material as THREE.MeshBasicMaterial).opacity = 0.5 * (1 - ke) * (ke > 0 ? 1 : 0);
-      const dr = Math.max(0.05, e * T.radius);
-      this.model.dome.scale.set(dr, dr * 0.55, dr);
-      (this.model.dome.material as THREE.MeshBasicMaterial).opacity = 0.22 * (1 - k);
-      if (this.ringT >= 0.92) {
-        this.ringT = -1;
-        this.model.ring.visible = this.model.echo.visible = this.model.dome.visible = false;
-      }
-    }
-    // Retire once the last ring has finished expanding.
-    if (this.pulsesFired >= T.pulses && this.timeLeft <= 0) this.done = true;
-  }
-
-  private stick() {
-    this.stuck = true;
-    this.vel.set(0, 0, 0);
-    // Stand upright wherever it came to rest.
-    const g0 = this.model.group;
-    g0.rotation.set(0, g0.rotation.y, 0);
-    g0.position.copy(this.pos);
-    audio.dartStick(this.pos.x, this.pos.y, this.pos.z);
-    this.model.beam.position.set(this.pos.x, this.pos.y + 1.5, this.pos.z);
-    this.model.beam.visible = true;
-  }
-
-  private pulse() {
-    const T = KIT_TUNING.recon;
-    this.pulsesFired++;
-    this.ringT = 0;
-    this.spin = 14;
-    const g = this.pos.y + 0.08;
-    for (const o of [this.model.ring, this.model.echo]) { o.visible = true; o.position.set(this.pos.x, g, this.pos.z); o.scale.setScalar(0.05); }
-    this.model.dome.visible = true;
-    this.model.dome.position.set(this.pos.x, g, this.pos.z);
-    this.model.dome.scale.setScalar(0.05);
-    const alive = this.ctx.hostiles().filter(h => h.alive());
-    const tagged = sonarTagged(this.pos, T.radius, alive);
-    for (const h of tagged) this.dir.tag(h.ref, T.revealFor);
-    this.dir.pulseFlash();
-    audio.sonarPing(this.pos.x, this.pos.y, this.pos.z, this.pulsesFired === T.pulses);
-    this.ctx.effects.sonarPulse(this.pos);
-    this.ctx.feedback?.('ping', this.pos);
-    // The cost of intel: the ping gives the dart's position away.
-    this.ctx.alertAt(this.pos, T.hearRadius);
-    if (this.pulsesFired === 1) this.ctx.announce(tagged.length ? `RADAR — ${tagged.length} ENEM${tagged.length === 1 ? 'Y' : 'IES'} FOUND · +10% DMG` : 'RADAR — NO ENEMIES IN RANGE');
-  }
-
-  dispose() {
-    this.ctx.scene.remove(this.model.group);
-    disposeKitObject(this.model.group);
-    disposeDartFx(this.model);
-  }
-}
-
-// ----------------------------------------------------------- barricade ----
-// Plate tint multiplies the worn-paint texture: white = as painted, dark = scorched.
+// Barricade plate tint: clean white at full integrity, scorched as it takes damage.
 const SAND = new THREE.Color(0xFFFFFF);
 const SCORCHED = new THREE.Color(0x3A3128);
 
@@ -1056,7 +875,13 @@ class ProximityMine {
     // The blast also marks every survivor within 10 m for 4 s: finish them.
     const survivors = sonarTagged(this.pos, T.markRadius, this.ctx.hostiles().filter(h => h.alive()));
     for (const h of survivors) this.dir.tag(h.ref, T.markFor);
-    if (survivors.length) this.dir.pulseFlash();
+    if (survivors.length) {
+      // The mine now owns the reveal cue the Radar used to: flash, world pulse, screen sweep, ping.
+      this.dir.pulseFlash();
+      this.ctx.effects.sonarPulse(c);
+      this.ctx.feedback?.('ping');
+      audio.sonarPing(c.x, c.y, c.z, true);
+    }
     this.kills = kills; this.hurt = hurt; this.marked = survivors.length;
     this.ctx.announce(kills ? `MINE — ${kills} KILL${kills > 1 ? 'S' : ''}` : hurt ? `MINE — ${hurt} HIT` : 'MINE WENT OFF');
   }
@@ -1169,8 +994,7 @@ export class KitDirector {
   uses = 0;
   elapsed = 0;
   /** Lifetime stats for the debrief / tests. */
-  stats = { darts: 0, tags: 0, barricades: 0, barricadeDamage: 0, recalls: 0, decoys: 0, decoyHits: 0, stunned: 0, mines: 0, mineKills: 0, healed: 0, medkits: 0 };
-  private darts: SonarDart[] = [];
+  stats = { tags: 0, barricades: 0, barricadeDamage: 0, recalls: 0, decoys: 0, decoyHits: 0, stunned: 0, mines: 0, mineKills: 0, healed: 0, medkits: 0 };
   private walls: Barricade[] = [];
   private decoys: HoloDecoy[] = [];
   private mines: ProximityMine[] = [];
@@ -1227,8 +1051,7 @@ export class KitDirector {
       return false;
     }
     let ok = false;
-    if (this.kit === 'recon') ok = this.throwDart();
-    else if (this.kit === 'bulwark') ok = this.plantBarricade();
+    if (this.kit === 'bulwark') ok = this.plantBarricade();
     else if (this.kit === 'phantom') ok = this.sendDecoy();
     else if (this.kit === 'mine') ok = this.plantMine();
     else ok = this.dropMedkit();
@@ -1249,19 +1072,6 @@ export class KitDirector {
       if (Math.hypot(w.center.x - feet.x, w.center.z - feet.z) <= KIT_TUNING.bulwark.recallRange) return w;
     }
     return null;
-  }
-
-  private throwDart(): boolean {
-    const eye = this.ctx.playerEye();
-    const dir = this.ctx.playerDir().clone();
-    // A slight loft so a level throw carries; the same trick the frag throw uses.
-    dir.y += 0.06; dir.normalize();
-    const from = eye.clone().addScaledVector(dir, 0.45);
-    for (const d of this.darts) d.done = true; // one dart in the air at a time
-    this.darts.push(new SonarDart(this.ctx, this, from, dir));
-    this.stats.darts++;
-    audio.dartThrow();
-    return true;
   }
 
   private plantBarricade(): boolean {
@@ -1348,8 +1158,8 @@ export class KitDirector {
 
   isRevealed(ref: object): boolean { return (this.tags.get(ref) ?? 0) > 0; }
 
-  /** Player damage multiplier against `ref` (Recon mark). */
-  damageMul(ref: object): number { return this.isRevealed(ref) ? KIT_TUNING.recon.markDamageMul : 1; }
+  /** Player damage multiplier against `ref` (Mine mark). */
+  damageMul(ref: object): number { return this.isRevealed(ref) ? KIT_TUNING.mine.markDamageMul : 1; }
 
   /** Lures active right now (the decoys). */
   lures(): KitLure[] { return this.decoys.filter(d => d.active()); }
@@ -1389,12 +1199,10 @@ export class KitDirector {
       this.ctx.announce(`${this.def.ability.toUpperCase()} READY — PRESS ${KIT_KEY}`);
     }
     this.wasReady = this.charge.ready;
-    for (const d of this.darts) d.update(dt);
     for (const w of this.walls) w.update(dt);
     for (const d of this.decoys) d.update(dt);
     for (const m of this.mines) m.update(dt);
     for (const m of this.meds) m.update(dt);
-    this.darts = this.reap(this.darts);
     this.walls = this.reap(this.walls, w => { this.stats.barricadeDamage += w.damageTaken; });
     this.decoys = this.reap(this.decoys, d => { this.stats.decoyHits += d.hitsTaken; this.stats.stunned += d.stunned; });
     this.mines = this.reap(this.mines, m => { this.stats.mineKills += m.kills; });
@@ -1437,12 +1245,11 @@ export class KitDirector {
   }
 
   /** Number of live kit entities (tests + HUD). */
-  get liveCount(): number { return this.darts.length + this.walls.length + this.decoys.length + this.mines.length + this.meds.length; }
+  get liveCount(): number { return this.walls.length + this.decoys.length + this.mines.length + this.meds.length; }
 
   hud(): KitHud {
     const live: KitLiveHud[] = [];
-    const R = KIT_TUNING.recon, B = KIT_TUNING.bulwark, P = KIT_TUNING.phantom;
-    for (const d of this.darts) live.push({ kind: 'dart', label: 'RADAR', timeLeft: d.timeLeft, total: SonarDart.LIFE, detail: d.stuck ? `SCAN ${d.pulsesFired}/${R.pulses}` : 'THROWN' });
+    const B = KIT_TUNING.bulwark, P = KIT_TUNING.phantom;
     for (const w of this.walls) if (w.active) live.push({ kind: 'barricade', label: 'BARRICADE', timeLeft: Math.max(0, w.life), total: B.life, health: Math.max(0, w.hp / B.hp), detail: `${Math.max(0, Math.ceil(w.hp))} HP` });
     const Mi = KIT_TUNING.mine, Me = KIT_TUNING.medic;
     for (const m of this.mines) if (m.active) live.push({ kind: 'mine', label: 'MINE', timeLeft: Math.max(0, m.life), total: Mi.life, detail: m.armed ? 'ARMED' : 'ARMING' });
@@ -1467,10 +1274,8 @@ export class KitDirector {
   quiet() {
     for (const w of this.walls) w.kill();
     for (const d of this.decoys) d.kill();
-    for (const d of this.darts) d.done = true;
     for (const m of this.mines) m.kill();
     for (const m of this.meds) m.kill();
-    this.darts = this.reap(this.darts);
     this.mines = this.reap(this.mines);
     this.meds = this.reap(this.meds);
     this.walls = this.reap(this.walls);

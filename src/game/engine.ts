@@ -515,7 +515,7 @@ export class Engine {
   private effects!: Effects;
   private ai!: AIManager;
   private missionRuntime!: MissionRuntime;
-  // ---- Kits (Radar / Barricade / Decoy / Mine / Medkit) ----
+  // ---- Kits (Mine / Decoy / Medkit / Barricade) ----
   // Null when no kit was bought/equipped.
   private kits: KitDirector | null = null;
   private kitKillsSeen = 0;
@@ -1753,7 +1753,10 @@ export class Engine {
     return top;
   }
 
-  private surfaceAt(): 'sand' | 'concrete' | 'wood' {
+  private surfaceAt(): 'sand' | 'concrete' | 'wood' | 'metal' {
+    // Steel decks first: a container roof sits above the concrete slab that also
+    // claims this column, so the more specific surface has to win.
+    for (const b of this.world.metalDecks) if (pointInAABB(this.pos.x, this.pos.y + 0.5, this.pos.z, b)) return 'metal';
     for (const b of this.world.wood) if (pointInAABB(this.pos.x, this.pos.y + 0.5, this.pos.z, b)) return 'wood';
     for (const b of this.world.interiors) if (pointInAABB(this.pos.x, this.pos.y + 0.5, this.pos.z, b)) return 'concrete';
     for (const b of this.world.concrete) if (pointInAABB(this.pos.x, this.pos.y + 0.5, this.pos.z, b)) return 'concrete';

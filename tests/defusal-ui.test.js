@@ -83,14 +83,44 @@ test('buy menu lists prices, locks the enemy rifle, and auto-buy picks a sane pa
   assert.deepEqual(autoBuyPlan(freshInventory(800), 'attack'), ['kevlar'], 'pistol round: armor only');
 });
 
-test('Arena Mode offers Sirocco Bomb Defusal next to Warehouse TDM', () => {
+test('Arena Mode asks four numbered questions, and every option states its consequence', () => {
   const html = renderToStaticMarkup(React.createElement(MainMenu, {
     s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {}, initialView: 'arena',
     defusal: { side: 'defend', format: 'long' }, onDefusal() {},
   }));
-  for (const text of ['SIROCCO', 'BOMB DEFUSAL', 'WAREHOUSE', 'TEAM DEATHMATCH', 'NEW MODE', 'ATTACK', 'DEFEND', 'FIRST TO 13', 'Play']) {
+  for (const text of ['SIROCCO', 'BOMB DEFUSAL', 'WAREHOUSE', 'TEAM DEATHMATCH', 'ATTACK', 'DEFEND', 'FIRST TO 13', 'Play']) {
     assert.ok(html.includes(text), `arena screen shows ${text}`);
   }
+  // The four steps, in order.
+  for (const [n, title] of [['01', 'PICK A GAME'], ['02', 'MATCH SETUP'], ['03', 'YOUR ABILITY'], ['04', 'DEPLOY']]) {
+    assert.ok(html.includes(`>${n}<`) && html.includes(title), `step ${n} ${title}`);
+  }
+  assert.ok(html.indexOf('PICK A GAME') < html.indexOf('MATCH SETUP'), 'steps run in order');
+  assert.ok(html.indexOf('MATCH SETUP') < html.indexOf('YOUR ABILITY'));
+  assert.ok(html.indexOf('YOUR ABILITY') < html.indexOf('DEPLOY'));
+  // Every option carries the CONSEQUENCE of choosing it, not just its name. This is the
+  // whole point of the rebuild: five identical chips under two four-letter labels told
+  // you nothing about what you were choosing.
+  for (const sub of [
+    'Carry the bomb in and plant it',
+    'Hold both sites, defuse if it goes down',
+    'Coin flip — you swap at halftime either way',
+    'First to 7 · around 20 minutes',
+    'First to 13 · around 40 minutes',
+  ]) assert.ok(html.includes(sub), `consequence line: ${sub}`);
+  // Each question is its own labelled radiogroup.
+  assert.ok(html.includes('role="radiogroup" aria-label="SIDE"'), 'SIDE is a radiogroup');
+  assert.ok(html.includes('role="radiogroup" aria-label="LENGTH"'), 'LENGTH is a radiogroup');
+  assert.equal((html.match(/role="radio"/g) ?? []).length, 5, 'three sides + two lengths');
+  // Plain-English sentence per mode card, and an unambiguous selection badge.
+  assert.ok(html.includes('Plant the bomb — or stop it.'), 'sirocco says what it is');
+  assert.ok(html.includes('Most eliminations when the clock runs out wins it.'), 'warehouse says what it is');
+  assert.ok(html.includes('SELECTED'), 'the picked card is badged');
+  assert.ok(!html.includes('NEW MODE'), 'and SELECTED replaced the NEW MODE badge');
+  // The rules band became a four-line brief beside Play.
+  assert.ok(html.includes('How a round works'), 'the brief is labelled');
+  assert.ok(!html.includes('df-rules'), 'the six-band rules list is gone');
+  assert.equal((html.match(/deploy-btn/g) ?? []).length, 1, 'exactly one Play button');
 });
 
 test('the debrief tells the defusal story: score, round strip and standings', () => {

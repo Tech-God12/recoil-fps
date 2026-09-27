@@ -2,6 +2,18 @@
 import * as THREE from 'three';
 
 const MAX_BURSTS = 28;
+/**
+ * Muzzle smoke gets its OWN six-slot ring, recycling the oldest puff rather than
+ * allocating geometry per shot. Under sustained automatic fire that is the difference
+ * between a steady frame time and a sawtooth from garbage collection — and keeping it
+ * off the impact/blood pool means a firefight cannot starve smoke of slots (or smoke
+ * starve the blood spray).
+ */
+const MAX_SMOKE = 6;
+/** Hot propellant hangs about this long before it has thinned out of sight. */
+const SMOKE_LIFE = 1.1;
+/** ~750 rpm is 80 ms between rounds: one puff per round, never one per frame. */
+const SMOKE_THROTTLE_MS = 80;
 const MAX_PARTICLES = 48;
 const MAX_TRACERS = 20;
   /** Ejected brass: one InstancedMesh, ring-buffered. 12 covers a full auto burst. */
@@ -31,6 +43,9 @@ const tracerGeo = new THREE.BoxGeometry(0.02, 0.02, 1);
 export class Effects {
   private bursts: BurstSlot[] = [];
   private burstIdx = 0;
+  private smokes: BurstSlot[] = [];
+  private smokeIdx = 0;
+  private lastSmokeMs = -Infinity;
   private brass!: THREE.InstancedMesh;
   private brassIdx = 0;
   private brassPos = new Float32Array(MAX_BRASS * 3);
@@ -88,6 +103,7 @@ export class Effects {
     scene.add(this.bloodMesh);
     // preallocated burst pool — buffers reused forever, never disposed
     for (let i = 0; i < MAX_BURSTS; i++) this.bursts.push(Effects.makeSlot(scene));
+    for (let i = 0; i < MAX_SMOKE; i++) this.smokes.push(Effects.makeSlot(scene));
     // ejected brass — a single instanced draw, all instances parked at scale 0
     this.brass = new THREE.InstancedMesh(brassGeo, brassMat, MAX_BRASS);
     this.brass.frustumCulled = false;
@@ -161,12 +177,52 @@ export class Effects {
   }
 
   /**
-   * Tiny muzzle residue: one short-lived grey-amber particle using the existing
-   * burst pool. It reads as hot propellant without becoming a sight-obscuring
-   * smoke cloud or allocating a second particle system per shot.
+   * Muzzle smoke: a small puff of hot propellant that rises, spreads and thins.
+   * Throttled so a 900 rpm PDW does not paint the muzzle solid, and pooled so a long
+   * burst allocates nothing. `nowMs` is injectable for tests.
    */
-  gunSmoke(pos: THREE.Vector3) {
-    this.burst(pos, 1, 0xC8B88D, 0.16, 0.08, -0.05, 0.025, 0.2);
+  gunSmoke(pos: THREE.Vector3, nowMs: number = performance.now()) {
+    if (nowMs - this.lastSmokeMs < SMOKE_THROTTLE_MS) return;
+    this.lastSmokeMs = nowMs;
+    const s = this.smokes[this.smokeIdx];
+    this.smokeIdx = (this.smokeIdx + 1) % MAX_SMOKE;
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      s.pos[i * 3] = pos.x + (Math.random() - 0.5) * 0.03;
+      s.pos[i * 3 + 1] = pos.y + (Math.random() - 0.5) * 0.03;
+      s.pos[i * 3 + 2] = pos.z + (Math.random() - 0.5) * 0.03;
+      // Always buoyant: hot gas goes up. The lateral term only spreads the puff.
+      s.vel[i * 3] = (Math.random() - 0.5) * 0.22;
+      s.vel[i * 3 + 1] = 0.16 + Math.random() * 0.18;
+      s.vel[i * 3 + 2] = (Math.random() - 0.5) * 0.22;
+    }
+    s.count = n; s.life = SMOKE_LIFE; s.maxLife = SMOKE_LIFE; s.grav = 0; s.active = true;
+    s.mat.color.setHex(0xB9AE99); s.mat.size = 0.045; s.mat.opacity = 0.34;
+    s.points.geometry.setDrawRange(0, n);
+    s.points.geometry.attributes.position.needsUpdate = true;
+    s.points.visible = true;
+  }
+
+  /** Smoke drifts rather than falls: drag on the lateral axes, a steady lift on Y. */
+  private updateSmoke(dt: number) {
+    for (let i = 0; i < this.smokes.length; i++) {
+      const s = this.smokes[i];
+      if (!s.active) continue;
+      s.life -= dt;
+      if (s.life <= 0) { s.active = false; s.points.visible = false; continue; }
+      const k = s.life / s.maxLife;
+      for (let j = 0; j < s.count * 3; j += 3) {
+        s.pos[j] += s.vel[j] * dt;
+        s.pos[j + 1] += s.vel[j + 1] * dt;
+        s.pos[j + 2] += s.vel[j + 2] * dt;
+        s.vel[j] *= 1 - 1.6 * dt;
+        s.vel[j + 2] *= 1 - 1.6 * dt;
+        s.vel[j + 1] = s.vel[j + 1] * (1 - 0.9 * dt) + 0.11 * dt;
+      }
+      s.points.geometry.attributes.position.needsUpdate = true;
+      s.mat.size = 0.045 + (1 - k) * 0.05;  // the puff expands as it cools
+      s.mat.opacity = 0.34 * k * k;         // and thins out fast at the end
+    }
   }
 
   /** Eject a casing right-and-up with a fast tumble; it bounces once on the
@@ -189,6 +245,14 @@ export class Effects {
     this.brass.dispose();
     this.holesMesh.dispose();
     this.bloodMesh.dispose();
+    // Both particle rings own geometry + a material each; neither was being released.
+    for (const pool of [this.bursts, this.smokes]) {
+      for (const slot of pool) {
+        slot.points.removeFromParent();
+        slot.points.geometry.dispose();
+        slot.mat.dispose();
+      }
+    }
   }
 
   impact(pos: THREE.Vector3, normal: THREE.Vector3) {
@@ -364,6 +428,7 @@ export class Effects {
 
   update(dt: number, playerPos: THREE.Vector3) {
     this.updatePool(this.bursts, dt);
+    this.updateSmoke(dt);
     this.updateBrass(dt, playerPos.y + 0.012);
     for (let i = 0; i < this.tracers.length; i++) {
       const t = this.tracers[i];

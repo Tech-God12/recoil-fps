@@ -15,20 +15,20 @@ const kits = await import('../src/game/kits.ts');
 const { KitCharge, KitDirector, KIT_TUNING, KIT_DEFS, KIT_IDS, KIT_PRICES, KIT_LURE_BREAK_CHANCE, snapCardinal, barricadePlacement, sonarTagged, chooseLure, isKitId, recallRefundSeconds, burstVictims } = kits;
 const { buyKit, equipKit, readKits } = await import('../src/game/economy/kit-shop.ts');
 const { DEFAULT_PROFILE, migrateProfile } = await import('../src/game/economy/profile.ts');
-const { buildDart, buildBarricade, buildDecoy, buildMine, buildMedkit } = await import('../src/game/kit-models.ts');
+const { buildBarricade, buildDecoy, buildMine, buildMedkit } = await import('../src/game/kit-models.ts');
+const { audio } = await import('../src/game/audio.ts');
 const { Enemy, NavGrid, Squad } = await import('../src/game/ai.ts');
 const { TDMManager } = await import('../src/game/tdm.ts');
 const { sanitizeSettings, DEFAULT_SETTINGS } = await import('../src/game/engine.ts');
-const { KitSlot, KitEquipButton, KitPauseCard, KitHint, KitFx } = await import('../src/ui/Kits.tsx');
+const { KitSlot, AbilityCardWide, AbilityCardTall, KitPauseCard, KitHint, KitFx } = await import('../src/ui/Kits.tsx');
 const { default: KitsMenu } = await import('../src/ui/KitsMenu.tsx');
 const { PauseMenu } = await import('../src/ui/Screens.tsx');
 
 // ------------------------------------------------------------------ pure ----
 
-test('exactly five kits, each with a named ability, price, steps, stats and a cooldown that matches the tuning table', () => {
-  assert.deepEqual([...KIT_IDS], ['recon', 'bulwark', 'phantom', 'mine', 'medic']);
-  assert.equal(Object.keys(KIT_DEFS).length, 5);
-  assert.equal(KIT_DEFS.recon.cooldown, 45);
+test('exactly four kits, each with a named ability, price, steps, stats and a cooldown that matches the tuning table', () => {
+  assert.deepEqual([...KIT_IDS], ['medic', 'mine', 'phantom', 'bulwark'], 'menu order is cheapest first');
+  assert.equal(Object.keys(KIT_DEFS).length, 4);
   assert.equal(KIT_DEFS.bulwark.cooldown, 60);
   assert.equal(KIT_DEFS.phantom.cooldown, 50);
   assert.equal(KIT_DEFS.mine.cooldown, 40);
@@ -49,6 +49,26 @@ test('exactly five kits, each with a named ability, price, steps, stats and a co
   assert.ok(isKitId('phantom'));
   assert.ok(!isKitId('nuke'));
   assert.ok(!isKitId(3));
+});
+
+test('the Radar is gone: no id, no def, no price, and old saves resolve to no ability', () => {
+  // The minimap already answers "where are they" in the same place at the same time; two
+  // systems answering one question is worse than one. This test is what stops it returning.
+  assert.equal(KIT_DEFS.recon, undefined, 'no Radar definition');
+  assert.equal(KIT_PRICES.recon, undefined, 'no Radar price');
+  assert.ok(!KIT_IDS.includes('recon'), 'not in the roster');
+  assert.ok(!isKitId('recon'), 'not a valid id');
+  assert.equal(KIT_TUNING.recon, undefined, 'no Radar tuning block');
+  assert.equal(typeof audio.dartThrow, 'undefined', 'no throw sound');
+  assert.equal(typeof audio.dartStick, 'undefined', 'no stick sound');
+  // A stored `recon` must degrade to "no ability", never crash or resolve to something else.
+  assert.deepEqual(readKits(['recon'], 'recon'), { ownedKits: [], equippedKit: null });
+  assert.deepEqual(readKits(['recon', 'medic'], 'recon'), { ownedKits: ['medic'], equippedKit: null });
+  // What the Radar shared with the Mine has to survive it.
+  assert.equal(typeof sonarTagged, 'function', 'the reveal query stays');
+  assert.equal(KIT_TUNING.mine.markDamageMul, 1.1, 'the +10 % mark moved to the Mine');
+  assert.equal(KIT_TUNING.mine.markRadius, 10);
+  assert.equal(KIT_TUNING.mine.markFor, 4);
 });
 
 test('kit charge: spend gates on ready, ticks down, kill refunds are small and capped per charge', () => {
@@ -102,7 +122,7 @@ test('barricade placement snaps to a cardinal axis, sits ahead of the feet and f
   assert.ok(T.height > 1.22 && T.height < 1.62);
 });
 
-test('sonar tags by true distance (through walls) and the lure picker wants sight and range', () => {
+test('marks tag by true distance (through walls) and the lure picker wants sight and range', () => {
   const pts = [{ pos: new THREE.Vector3(10, 0, 0) }, { pos: new THREE.Vector3(0, 0, 23.9) }, { pos: new THREE.Vector3(0, 0, 24.5) }, { pos: new THREE.Vector3(16, 18, 0) }];
   assert.deepEqual(sonarTagged(new THREE.Vector3(), 24, pts).map(p => pts.indexOf(p)), [0, 1], 'z=24.5 and the 24.1 m rooftop are outside');
   const mk = (x, active = true) => ({ eye: new THREE.Vector3(x, 1.5, 0), feet: new THREE.Vector3(x, 0, 0), active: () => active, hit() {} });
@@ -120,9 +140,9 @@ test('kits are bought, not given: shop rules, equip rules and save migration', (
   assert.ok(!('fieldKit' in DEFAULT_SETTINGS), 'the old free settings kit is gone');
   assert.ok(!('fieldKit' in sanitizeSettings('{"fieldKit":"phantom"}')));
   const broke = { ...DEFAULT_PROFILE, cash: 1000 };
-  assert.deepEqual(buyKit(broke, 'recon'), { ok: false, error: 'INSUFFICIENT_FUNDS' });
+  assert.deepEqual(buyKit(broke, 'medic'), { ok: false, error: 'INSUFFICIENT_FUNDS' });
   assert.deepEqual(buyKit(broke, 'nuke'), { ok: false, error: 'UNKNOWN' });
-  assert.deepEqual(equipKit(broke, 'recon'), { ok: false, error: 'NOT_OWNED' });
+  assert.deepEqual(equipKit(broke, 'medic'), { ok: false, error: 'NOT_OWNED' });
   const rich = { ...DEFAULT_PROFILE, cash: 20000 };
   const a = buyKit(rich, 'bulwark');
   assert.ok(a.ok);
@@ -130,17 +150,17 @@ test('kits are bought, not given: shop rules, equip rules and save migration', (
   assert.deepEqual(a.value.ownedKits, ['bulwark']);
   assert.equal(a.value.equippedKit, 'bulwark', 'the first kit bought is equipped');
   assert.deepEqual(buyKit(a.value, 'bulwark'), { ok: false, error: 'ALREADY_OWNED' });
-  const b = buyKit(a.value, 'recon');
+  const b = buyKit(a.value, 'medic');
   assert.ok(b.ok);
   assert.equal(b.value.equippedKit, 'bulwark', 'buying a second kit keeps the current one equipped');
-  const c = equipKit(b.value, 'recon');
-  assert.ok(c.ok && c.value.equippedKit === 'recon');
+  const c = equipKit(b.value, 'medic');
+  assert.ok(c.ok && c.value.equippedKit === 'medic');
   const none = equipKit(c.value, null);
   assert.ok(none.ok && none.value.equippedKit === null, 'players can deploy with no kit');
   assert.equal(rich.cash, 20000, 'shop calls never mutate the input profile');
   // forged / legacy saves
-  assert.deepEqual(readKits(['recon', 'nuke', 'recon', 7], 'phantom'), { ownedKits: ['recon'], equippedKit: null });
-  assert.deepEqual(readKits(undefined, 'recon'), { ownedKits: [], equippedKit: null });
+  assert.deepEqual(readKits(['medic', 'nuke', 'medic', 7], 'phantom'), { ownedKits: ['medic'], equippedKit: null });
+  assert.deepEqual(readKits(undefined, 'medic'), { ownedKits: [], equippedKit: null });
   const m = migrateProfile(JSON.stringify({ ...DEFAULT_PROFILE, ownedKits: ['phantom'], equippedKit: 'phantom' }));
   assert.deepEqual([m.ownedKits, m.equippedKit], [['phantom'], 'phantom']);
 });
@@ -168,7 +188,7 @@ test('kit hardware stays inside a small geometry budget', () => {
   // Detailed menu-grade models (bevels, bolts, cylinders) but still a few thousand triangles
   // and well under 100 draws each, so several live gadgets cost nothing next to the map.
   for (const [name, group, maxTris, maxDraws] of [
-    ['radar', buildDart().group, 6000, 60], ['barricade', buildBarricade(2.4, 1.4, 0.12).group, 4000, 80], ['decoy', buildDecoy().group, 16000, 60],
+    ['barricade', buildBarricade(2.4, 1.4, 0.12).group, 4000, 80], ['decoy', buildDecoy().group, 16000, 60],
     ['mine', buildMine().group, 4000, 40], ['medkit', buildMedkit().group, 5000, 50], // decoy counts twice: depth pre-pass re-draws the same geometry
   ]) {
     const b = geometryBudget(group);
@@ -223,41 +243,6 @@ function fakeWorld() {
 }
 
 const step = (d, seconds, dt = 1 / 60) => { for (let i = 0; i < Math.round(seconds / dt); i++) d.update(dt); };
-
-test('Radar: flies, drops down the wall, sets up, pings three times, tags only what is in range, alerts, and cleans up', () => {
-  const w = fakeWorld();
-  const d = new KitDirector(w.ctx, 'recon', 1);
-  const baseline = w.scene.children.length;
-  assert.ok(d.activate());
-  assert.ok(!d.charge.ready, 'cooldown started');
-  assert.equal(d.liveCount, 1);
-  step(d, 1.8); // ≈0.47 s to the wall + ≈0.76 s drop down its face + 0.4 s to the first scan
-  const hud = d.hud();
-  assert.equal(hud.live[0].kind, 'dart');
-  assert.match(hud.live[0].detail, /SCAN 1\/3/);
-  // stuck at the wall face (z ≈ -11.75), not through it
-  const dart = w.scene.children.slice(baseline).find(o => o.type === 'Group');
-  assert.ok(dart.position.z > -12 && dart.position.z < -11.4, `dart z ${dart.position.z}`);
-  // three hostiles within 24 m of the dart are tagged through the wall; the others are not
-  const tagged = w.hostiles.filter(h => d.isRevealed(h)).map(h => h.id).sort();
-  assert.deepEqual(tagged, [0, 1, 4]);
-  assert.ok(w.messages.some(m => m === 'RADAR — 3 ENEMIES FOUND · +10% DMG'));
-  assert.equal(hud.tagged, 3);
-  // tagged hostiles take +10 % from the player; untagged ones don't
-  assert.equal(d.damageMul(w.hostiles[0]), KIT_TUNING.recon.markDamageMul);
-  assert.equal(d.damageMul(w.hostiles[2]), 1);
-  assert.ok(w.feedback.includes('ping') && w.fxCalls.includes('sonarPulse'), 'ping drives the screen sweep and the world pulse');
-  step(d, 5.8);
-  assert.equal(w.alerts.length, 3, 'every ping is audible');
-  assert.ok(w.alerts.every(a => a.radius === KIT_TUNING.recon.hearRadius));
-  assert.equal(d.liveCount, 0, 'dart retired after the last ping');
-  step(d, 4);
-  assert.ok(w.hostiles.every(h => !d.isRevealed(h)), 'tags fade');
-  assert.equal(w.scene.children.length, baseline, 'scene back to the baseline (markers are pooled)');
-  assert.equal(d.stats.darts, 1);
-  d.dispose();
-  assert.equal(w.scene.children.length, baseline - 32, 'marker + silhouette pools removed on dispose');
-});
 
 test('Barricade: the wall registers as an occluder + blocker, soaks 450 HP of hostile fire, and is removed when broken', () => {
   const w = fakeWorld();
@@ -384,12 +369,12 @@ test("Decoy: the decoy's death burst stuns hostiles within 6 m, even on timeout"
 
 test('deploys half charged, locked kit, slow refunds, ready chime and onboarding hint', () => {
   const w = fakeWorld();
-  const d = new KitDirector(w.ctx, 'recon');
+  const d = new KitDirector(w.ctx, 'medic');
   assert.ok(!d.charge.ready, 'no free ability at the spawn');
   assert.equal(d.charge.left, 22.5);
   assert.ok(d.hud().hint, 'fresh deployment shows the kit prompt');
   assert.equal(d.activate(), false);
-  assert.ok(w.messages.some(m => m.startsWith('RADAR RECHARGING')));
+  assert.ok(w.messages.some(m => m.startsWith('MEDKIT RECHARGING')));
   assert.equal(typeof d.setKit, 'undefined', 'no mid-match swapping');
   d.onKill(2);
   assert.ok(Math.abs(d.charge.left - (22.5 - 7.2)) < 1e-6, `two kills take 7.2 s off (left ${d.charge.left})`);
@@ -400,7 +385,7 @@ test('deploys half charged, locked kit, slow refunds, ready chime and onboarding
   assert.ok(d.charge.ready);
   assert.equal(d.hud().readyEpoch, epoch + 1, 'HUD burst fires once');
   assert.ok(w.feedback.includes('ready'));
-  assert.ok(w.messages.includes('RADAR READY — PRESS Z'));
+  assert.ok(w.messages.includes('MEDKIT READY — PRESS Z'));
   assert.ok(d.activate());
   assert.ok(!d.hud().hint, 'prompt gone after first use');
   assert.equal(d.hud().useEpoch, 1);
@@ -524,11 +509,26 @@ test('HUD slot, prompt, fx, equipped-kit button, read-only pause card and KITS m
   for (const kind of ['ping', 'slam', 'burst', 'break', 'recall', 'decoy', 'ready']) {
     assert.match(renderToStaticMarkup(React.createElement(KitFx, { kind })), new RegExp(`kit-fx-${kind}`));
   }
-  const none = renderToStaticMarkup(React.createElement(KitEquipButton, { kit: null, onOpen() {} }));
-  assert.match(none, /NONE EQUIPPED/);
-  assert.match(none, /GET AN ABILITY/);
-  const eq = renderToStaticMarkup(React.createElement(KitEquipButton, { kit: 'phantom', onOpen() {} }));
-  assert.match(eq, /Decoy/);
+  // Ability cards answer three questions before you click: what do I have, how do I use
+  // it, and what does this button do. The old text button answered none of them.
+  const wideNone = renderToStaticMarkup(React.createElement(AbilityCardWide, { kit: null, onOpen() {} }));
+  assert.match(wideNone, /NO ABILITY YET/);
+  assert.match(wideNone, /CHOOSE ONE/);
+  const wide = renderToStaticMarkup(React.createElement(AbilityCardWide, { kit: 'phantom', onOpen() {} }));
+  assert.match(wide, /Decoy/, 'what do I have');
+  assert.match(wide, /PRESS Z IN GAME/, 'how do I use it');
+  assert.match(wide, /50S COOLDOWN/, 'and what it costs');
+  assert.match(wide, /DISTRACTION/, 'and what it is for');
+  assert.match(wide, /CHANGE/, 'what this button does');
+  assert.match(wide, /kit-phantom/, 'carries its own accent');
+  const tall = renderToStaticMarkup(React.createElement(AbilityCardTall, { kit: 'mine', onOpen() {} }));
+  assert.match(tall, /Mine/);
+  assert.match(tall, /TRAP · 40S COOLDOWN/);
+  assert.match(tall, /Change ability/);
+  const tallNone = renderToStaticMarkup(React.createElement(AbilityCardTall, { kit: null, onOpen() {} }));
+  assert.match(tallNone, /NOTHING SELECTED/);
+  assert.match(tallNone, /Choose an ability/);
+  assert.doesNotMatch(tallNone, /PRESS/, 'no key prompt when there is nothing to press');
   d.activate();
   const pause = renderToStaticMarkup(React.createElement(KitPauseCard, { kit: d.hud() }));
   assert.match(pause, /LOCKED FOR THIS DEPLOYMENT/);
@@ -539,16 +539,17 @@ test('HUD slot, prompt, fx, equipped-kit button, read-only pause card and KITS m
   for (const label of ['Resume', 'Settings', 'Restart', 'Quit to menu', 'KIT']) assert.match(menu, new RegExp(label));
   assert.doesNotMatch(menu, /SWAP/);
   d.dispose();
-  // KITS menu: three cards, the price on the buy button, the wallet on screen
+  // ABILITIES menu: four cards, the price on the buy button, the wallet on screen
   const shop = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, cash: 5000 }, onProfile: noop, onBack: noop }));
   assert.match(shop, />Abilities</);
-  assert.equal((shop.match(/role="tab"/g) ?? []).length, 5);
-  assert.match(shop, /Buy · \$4,500/, 'recon is affordable at $5,000');
+  assert.equal((shop.match(/role="tab"/g) ?? []).length, 4);
+  assert.doesNotMatch(shop, /Radar/, 'the Radar is not on the shelf');
+  assert.match(shop, /Buy · \$5,000/, 'the default selection is the cheapest ability');
   assert.match(shop, /\$5,000/);
-  const owned = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, ownedKits: ['recon'], equippedKit: 'recon' }, onProfile: noop, onBack: noop }));
+  const owned = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, ownedKits: ['medic'], equippedKit: 'medic' }, onProfile: noop, onBack: noop }));
   assert.match(owned, /Equipped/);
   const poor = renderToStaticMarkup(React.createElement(KitsMenu, { profile: { ...DEFAULT_PROFILE, cash: 100 }, onProfile: noop, onBack: noop }));
-  assert.match(poor, /Need \$4,400 more/);
+  assert.match(poor, /Need \$4,900 more/);
 });
 
 // ------------------------------------------------ engine wiring, real map ----

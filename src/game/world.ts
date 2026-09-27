@@ -64,6 +64,8 @@ export interface World {
   interiors: AABB[];
   concrete: AABB[];
   wood: AABB[];
+  /** Walk-on steel: container roofs and mezzanine catwalks. Drives footstep audio. */
+  metalDecks: AABB[];
   half: number;
   lightSpots: THREE.Vector3[];
   windows: WindowHole[];
@@ -103,6 +105,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   const interiors: AABB[] = [];
   const concrete: AABB[] = [];
   const wood: AABB[] = [];
+  const metalDecks: AABB[] = [];
   const lightSpots: THREE.Vector3[] = [];
   const M: TextureSet = materials ?? getMaterials();
   let geoByMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
@@ -912,6 +915,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       const mzX = wx < 0 ? x0 + 2.0 : x0 + w - 2.0;
       const mzZ = -3 * ms;
       box(mzX, 2.6, mzZ, 3.0, 0.25, 11, metal);
+      metalDecks.push({ minX: mzX - 1.5, maxX: mzX + 1.5, minY: 2.65, maxY: 4.95, minZ: mzZ - 5.5, maxZ: mzZ + 5.5 });
       box(mzX + 1.45 * ms, 3.15, mzZ, 0.08, 0.9, 11, METAL, false); // rail
       for (const pz of [mzZ - 4.5 * ms, mzZ + 4.5 * ms]) box(mzX, 1.25, pz, 0.3, 2.5, 0.3, METAL); // legs
       // stair top lands at the catwalk end nearest that team's own yard
@@ -967,7 +971,15 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       const w = alongX ? 6.2 : 2.5, d = alongX ? 2.5 : 6.2;
       box(x, 1.3, z, w, 2.6, d, m);
       for (const sx of [-1, 1]) box(x + sx * (w / 2 - 0.06), 1.3, z, 0.14, 2.65, alongX ? d + 0.06 : 0.2, METAL, false);
-      if (stack) box(x + (alongX ? 0.4 : 0), 3.9, z + (alongX ? 0 : 0.4), w, 2.6, d, rusted);
+      // Standing on a corrugated roof rings; standing beside it does not. Only the
+      // TOP roof of a stack is walkable — the lower one has a container sitting on it.
+      if (stack) {
+        const sxo = alongX ? 0.4 : 0, szo = alongX ? 0 : 0.4;
+        box(x + sxo, 3.9, z + szo, w, 2.6, d, rusted);
+        metalDecks.push({ minX: x + sxo - w / 2, maxX: x + sxo + w / 2, minY: 5.1, maxY: 7.4, minZ: z + szo - d / 2, maxZ: z + szo + d / 2 });
+      } else {
+        metalDecks.push({ minX: x - w / 2, maxX: x + w / 2, minY: 2.5, maxY: 4.8, minZ: z - d / 2, maxZ: z + d / 2 });
+      }
       cover(x + (alongX ? w / 2 + 1 : 0), z + (alongX ? 0 : d / 2 + 1));
       cover(x - (alongX ? w / 2 + 1 : 0), z - (alongX ? 0 : d / 2 + 1));
     };
@@ -1658,7 +1670,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   for (let i = 0; i < Math.min(40, validCover.length); i++) coverNodes.push(validCover[Math.floor(i * validCover.length / Math.min(40, validCover.length))]);
   scene.add(group);
   group.updateMatrixWorld(true);
-  return { groundHeight, navigationHeight, detonate, get changed() { return changed; }, landmarks, overlooks, group, solids, occluders, coverNodes, playerSpawn, interiors, concrete, wood, half, lightSpots, windows, glass, breakGlass, soundTraps, arenaFx };
+  return { groundHeight, navigationHeight, detonate, get changed() { return changed; }, landmarks, overlooks, group, solids, occluders, coverNodes, playerSpawn, interiors, concrete, wood, metalDecks, half, lightSpots, windows, glass, breakGlass, soundTraps, arenaFx };
 }
 
 export function pointInAABB(x: number, y: number, z: number, b: AABB): boolean {

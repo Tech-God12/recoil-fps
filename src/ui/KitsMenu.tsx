@@ -1,5 +1,5 @@
 // Recoil FPS — ABILITIES: buy and equip the kit you carry into a game. Full-screen 3-D
-// showcase of the selected kit, its details on the left, the three abilities as cards
+// showcase of the selected kit, its details on the left, the four abilities as cards
 // along the bottom, and the buy/equip action bottom-right. The equipped ability is
 // locked in when a game starts; this screen is the only place to change it.
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -17,7 +17,7 @@ type Toast = { id: number; kind: 'bought' | 'equipped' | 'error'; text: string }
 export default function KitsMenu({ profile, onProfile, onBack }: {
   profile: PlayerProfile; onProfile: (p: PlayerProfile) => void; onBack: () => void;
 }) {
-  const [sel, setSel] = useState<KitId>(profile.equippedKit ?? 'recon');
+  const [sel, setSel] = useState<KitId>(profile.equippedKit ?? KIT_IDS[0]);
   const [toast, setToast] = useState<Toast | null>(null);
   const toastId = useRef(0);
   const def = KIT_DEFS[sel];

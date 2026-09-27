@@ -2,11 +2,31 @@
  * Render every weapon (or one named weapon) to PNG elevations, with no GPU.
  *
  *   node --import ./tests/helpers/register-json.js scripts/render-gun.ts [id|all] [outDir]
+ *   node --import ./tests/helpers/register-json.js scripts/render-gun.ts aug_a3 /tmp/out
  *
- * The side elevation is the view that finds modelling errors: gaps where a magazine
- * meets its well, an optic floating above its rail, a stock that does not touch the
- * receiver. Perspective and specular hide all three, which is why this is orthographic
- * and flat-shaded.
+ * Output lands in docs/renders/weapons/<id>-<view>.png by default.
+ *
+ * WHY THIS EXISTS AND WHY IT LOOKS THE WAY IT DOES
+ *
+ * There is no browser and no GPU in the build sandbox, so geometry cannot be checked by
+ * looking at it in the game. Without this, "the magazine has no gap where it meets the
+ * well" can only be asserted, never seen. Every choice here serves gap-hunting:
+ *
+ *  - Orthographic, not perspective. Perspective hides the thing you are looking for: a
+ *    magazine that stops 3 mm short of its well looks seated from any angle that has a
+ *    vanishing point in it.
+ *  - Side elevation is the useful view. Top and iso are rendered too, but nearly every
+ *    modelling error worth finding shows in the elevation and nowhere else.
+ *  - Clay shading by default. The finishes are near-black OD green and gunmetal; in
+ *    their own colours the models render as dark blobs. A uniform neutral clay turns a
+ *    2 mm step into a visible shading break. Pass `clay: false` to check the finish.
+ *  - Flat shading, no specular. A highlight will happily paper over a crack.
+ *  - Backfaces kept. A missing backface is itself a bug worth seeing.
+ *  - A 5 cm grid behind the model, so gaps can be estimated by eye.
+ *  - The support arm is hidden; it covers the joints being inspected.
+ *
+ * This is a verification tool, not a preview: no textures, shadows, transparency or
+ * anti-aliasing. It answers where the geometry is, which is all it was built for.
  */
 import fs from 'node:fs';
 import path from 'node:path';

@@ -78,7 +78,7 @@ export function buildM4(): WeaponModel {
   mag.group.position.set(0,-.033,-.165);
   return a.finish({mag:mag.group,handle:charging.group,sightY:.078,
     sockets:{muzzle:[0,.013,-.568],barrel:[0,.013,-.416],optic:[0,.045,-.110],magazine:[0,-.033,-.165],underbarrel:[0,-.013,-.335],stock:[0,.017,-.013],rail:[-.030,.004,-.320]},
-    muzzleTip:[0,.013,-.615],arms:{fore:[0,-.025,-.332],mag:[0,-.147,-.183],fa:[0,.030,0]}});
+    muzzleTip:[0,.013,-.615],arms:{fore:[0,-.025,-.332],mag:[0,-.147,-.183],fa:[0,.030,0],style:'ar'}});
 }
 
 /** Stamped AK with a rounded dust cover, a true banana magazine and shaped walnut furniture. */
@@ -149,7 +149,7 @@ export function buildAK47(): WeaponModel {
   mag.group.position.set(0, -0.025, -0.178);
   return a.finish({ mag: mag.group, handle: charging.group, sightY: 0.064,
     sockets: { muzzle: [0, 0.011, -0.619], barrel: [0, 0.011, -0.391], optic: [0, 0.054, -0.120], magazine: [0, -0.025, -0.178], underbarrel: [0, -0.024, -0.319], stock: [0, 0.003, -0.012], rail: [-0.023, -0.001, -0.300] },
-    muzzleTip: [0, 0.011, -0.663], arms: { fore: [-0.008, -0.030, -0.314], mag: [0, -0.140, -0.210], fa: [0.041, 0.029, -0.087] },
+    muzzleTip: [0, 0.011, -0.663], arms: { fore: [-0.008, -0.030, -0.314], mag: [0, -0.140, -0.210], fa: [0.041, 0.029, -0.087], style: 'ak' },
   });
 }
 
@@ -226,6 +226,6 @@ export function buildSCARH(): WeaponModel {
   mag.group.position.set(0, -0.036, -0.163);
   return a.finish({ mag: mag.group, handle: charging.group, sightY: 0.075,
     sockets: { muzzle: [0, 0.014, -0.564], barrel: [0, 0.014, -0.385], optic: [0, 0.050, -0.134], magazine: [0, -0.036, -0.163], underbarrel: [0, -0.018, -0.321], stock: [0, 0.009, -0.014], rail: [-0.030, -0.002, -0.327] },
-    muzzleTip: [0, 0.014, -0.617], arms: { fore: [0, -0.025, -0.319], mag: [0, -0.137, -0.167], fa: [-0.043, 0.030, -0.232] },
+    muzzleTip: [0, 0.014, -0.617], arms: { fore: [0, -0.025, -0.319], mag: [0, -0.137, -0.167], fa: [-0.043, 0.030, -0.232], style: 'ar' },
   });
 }

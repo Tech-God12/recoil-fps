@@ -100,7 +100,10 @@ test('clearance audit detects the Vector drum displaced forward through its fore
   const model = WEAPON_BUILDERS.vector();
   attach(model, attachmentById('mag_drum'), 'vector');
   attach(model, attachmentById('ub_vert_grip'), 'vector');
-  model.mag.position.z -= 0.065;
+  // Seated correctly the grip-fed drum sits back at the pistol grip, well clear of the foregrip.
+  assert.equal(assembliesInterfere(model.mag, model.attached.underbarrel), false);
+  // Drive it forward far enough to reach the foregrip and the audit must catch it.
+  model.mag.position.z -= 0.26;
   assert.equal(assembliesInterfere(model.mag, model.attached.underbarrel), true);
   disposeWeapon(model);
 });

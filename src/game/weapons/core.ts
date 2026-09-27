@@ -123,7 +123,32 @@ function gloveBox(parent: THREE.Object3D, w: number, h: number, d: number, x: nu
   m.position.set(x, y, z); m.rotation.set(rx, ry, rz); parent.add(m); return m;
 }
 
-export interface ArmAnchors { fore: [number, number, number]; mag: [number, number, number]; fa: [number, number, number]; grip?: [number, number, number] }
+/**
+ * How this weapon is actually fed. Drives the support-hand path during a reload.
+ *
+ * One universal magwell-exchange animation used to play for every gun, which meant a
+ * belt-fed SAW, a tube-fed pump and a bolt rifle all "reloaded" by miming a magazine
+ * change that none of them has. These are the real mechanisms:
+ *
+ *  ar      box magazine, drops free straight down, bolt release on the way back
+ *  ak      box magazine, rocks forward off a front catch, raked out by the fresh one
+ *  smg     box magazine in a short receiver; charging handle, no bolt release
+ *  pistol  box magazine, palm-seated, slide release
+ *  gripfed magazine enters through the pistol grip (Vector), not a separate well
+ *  tube    shells loaded one at a time into an underside tube (SPAS)
+ *  belt    feed cover lifts, belt is laid in, cover closes (M249). No magazine at all.
+ *  bolt    the support hand NEVER leaves the forend; the firing hand runs the bolt
+ */
+export type ReloadStyle = 'ar' | 'ak' | 'smg' | 'pistol' | 'gripfed' | 'tube' | 'belt' | 'bolt';
+
+export interface ArmAnchors {
+  fore: [number, number, number];
+  mag: [number, number, number];
+  fa: [number, number, number];
+  grip?: [number, number, number];
+  /** Feed mechanism. Defaults to 'ar'. */
+  style?: ReloadStyle;
+}
 
 /** Two-bone chain state hung off the animated arm group. */
 export interface ArmRig {
@@ -276,35 +301,129 @@ export function attachArms(gun: THREE.Group, a: ArmAnchors): { lArm: THREE.Group
     (fw.z + mg.z) * 0.5,
   ];
   const wellLip: [number, number, number] = [mg.x, mg.y + 0.055, mg.z];
-  const keys: LArmKey[] = [
+  const style: ReloadStyle = a.style ?? 'ar';
+  // Shared opening: the hand is still driving the foregrip as the gun rolls up into
+  // the workspace, then drops BELOW the bore line before travelling aft. A straight
+  // foregrip-to-magwell line cuts the corner and buries the wrist in the handguard.
+  const lead: LArmKey[] = [
     { t: 0.00, p: [fw.x, fw.y, fw.z], r: [0, 0, 0] },
-    // Index: hand still driving the foregrip while the gun rolls into the workspace.
     { t: 0.10, p: [fw.x, fw.y - 0.004, fw.z + 0.010], r: [0.05, 0, 0] },
-    // Travel UNDER the receiver, not through it. A straight foregrip-to-magwell
-    // line cuts the corner and buries the wrist in the handguard on deep-bodied
-    // guns (the SAW especially); dropping below the bore line first is also how
-    // the motion actually looks on a real reload.
     { t: 0.17, p: [under[0], under[1], under[2]], r: [0.22, 0.06, 0.10] },
-    // Strip: thumb finds the release, hand cups the base of the magazine.
-    { t: 0.25, p: [mg.x - 0.012, mg.y + 0.030, mg.z + 0.008], r: [0.35, 0.10, 0.18] },
-    // Pull the empty clear and sweep down to the pouch.
-    { t: 0.38, p: [mg.x - 0.030, mg.y - 0.060, mg.z + 0.060], r: [0.55, 0.16, 0.26] },
-    { t: 0.50, p: pouch, r: [0.72, 0.22, 0.30] },
-    // Fresh magazine comes up on the same arc and indexes on the well lip.
-    { t: 0.64, p: [wellLip[0] - 0.010, wellLip[1] - 0.030, wellLip[2] + 0.030], r: [0.50, 0.12, 0.22] },
-    { t: 0.74, p: [mg.x, mg.y + 0.018, mg.z], r: [0.30, 0.05, 0.14] },
-    // Seat tap: a short firm push straight up into the well.
-    { t: 0.80, p: [mg.x, mg.y + 0.040, mg.z], r: [0.22, 0.02, 0.10] },
-    // Charging handle: the hand swings OUTBOARD of the receiver and comes down on
-    // the handle from the side, never across the top — a straight-line reach drags
-    // the forearm through the upper receiver, which was the last clipping case left.
-    { t: 0.85, p: [fa.x - standoff, fa.y + 0.030, fa.z + 0.030], r: [-0.18, -0.16, -0.10] },
-    { t: 0.90, p: [fa.x - standoff * 0.55, fa.y + 0.014, fa.z], r: [-0.30, -0.12, -0.16] },
-    { t: 0.94, p: [fa.x - standoff * 0.66, fa.y + 0.010, fa.z + 0.042], r: [-0.26, -0.12, -0.14] },
+  ];
+  // Shared close: back under the receiver and onto the foregrip.
+  const tail: LArmKey[] = [
     { t: 0.97, p: [under[0] - 0.010, under[1] + 0.020, under[2] - 0.030], r: [-0.10, -0.04, 0] },
     { t: 0.99, p: [fw.x - 0.004, fw.y + 0.006, fw.z - 0.004], r: [-0.03, 0, 0] },
     { t: 1.00, p: [fw.x, fw.y, fw.z], r: [0, 0, 0] },
   ];
+  // The charging-handle approach: OUTBOARD of the receiver and down onto the handle
+  // from the side, never across the top — a straight reach drags the forearm through
+  // the upper receiver, which was the last clipping case left.
+  const runCharging = (t0: number): LArmKey[] => [
+    { t: t0, p: [fa.x - standoff, fa.y + 0.030, fa.z + 0.030], r: [-0.18, -0.16, -0.10] },
+    { t: t0 + 0.05, p: [fa.x - standoff * 0.55, fa.y + 0.014, fa.z], r: [-0.30, -0.12, -0.16] },
+    { t: t0 + 0.09, p: [fa.x - standoff * 0.66, fa.y + 0.010, fa.z + 0.042], r: [-0.26, -0.12, -0.14] },
+  ];
+
+  let keys: LArmKey[];
+  if (style === 'bolt') {
+    // The support hand stays on the forend for the whole cycle — this is how a bolt
+    // gun is actually run, and it is the only way the scope stays on target between
+    // shots. The firing hand works the bolt (driven separately in animateViewmodel).
+    // Everything here is a small settle under recoil and the shooter's grip shifting.
+    keys = [
+      { t: 0.00, p: [fw.x, fw.y, fw.z], r: [0, 0, 0] },
+      { t: 0.18, p: [fw.x + 0.004, fw.y - 0.006, fw.z + 0.012], r: [0.06, 0.02, 0.03] },
+      { t: 0.42, p: [fw.x + 0.006, fw.y - 0.009, fw.z + 0.018], r: [0.09, 0.03, 0.05] },
+      { t: 0.62, p: [fw.x + 0.003, fw.y - 0.007, fw.z + 0.014], r: [0.07, 0.02, 0.04] },
+      { t: 0.84, p: [fw.x, fw.y - 0.003, fw.z + 0.006], r: [0.03, 0.01, 0.02] },
+      { t: 1.00, p: [fw.x, fw.y, fw.z], r: [0, 0, 0] },
+    ];
+  } else if (style === 'belt') {
+    // No magazine exists. The hand lifts the feed cover, lays the belt into the tray,
+    // presses it down and closes the cover. All of that happens ON TOP of the
+    // receiver, so the hand must arc outboard and come down from the side.
+    const tray: [number, number, number] = [fa.x - standoff * 0.5, fa.y + 0.020, fa.z - 0.030];
+    keys = [
+      ...lead,
+      { t: 0.24, p: [fa.x - standoff, fa.y + 0.055, fa.z + 0.050], r: [-0.10, -0.18, -0.06] },
+      { t: 0.32, p: [fa.x - standoff * 0.6, fa.y + 0.046, fa.z + 0.010], r: [-0.22, -0.14, -0.12] },
+      { t: 0.46, p: [pouch[0], pouch[1] + 0.020, pouch[2]], r: [0.62, 0.20, 0.26] },
+      { t: 0.60, p: [tray[0], tray[1] + 0.045, tray[2] + 0.040], r: [-0.12, -0.16, -0.08] },
+      { t: 0.70, p: [tray[0], tray[1], tray[2]], r: [-0.26, -0.12, -0.14] },
+      { t: 0.80, p: [tray[0], tray[1] + 0.008, tray[2] - 0.020], r: [-0.24, -0.10, -0.12] },
+      { t: 0.90, p: [fa.x - standoff * 0.7, fa.y + 0.034, fa.z + 0.026], r: [-0.18, -0.14, -0.10] },
+      ...tail,
+    ];
+  } else if (style === 'tube') {
+    // Four shells, one at a time, into the loading gate under the receiver. The hand
+    // shuttles pouch -> gate four times; the rhythm is the whole character of it.
+    const gate: [number, number, number] = [mg.x - 0.010, mg.y + 0.040, mg.z + 0.020];
+    keys = [...lead];
+    for (let i = 0; i < 4; i++) {
+      const t0 = 0.20 + i * 0.175;
+      keys.push(
+        { t: t0, p: [pouch[0], pouch[1], pouch[2]], r: [0.70, 0.22, 0.30] },
+        { t: t0 + 0.070, p: [gate[0] - 0.016, gate[1] - 0.026, gate[2] + 0.030], r: [0.42, 0.14, 0.22] },
+        { t: t0 + 0.115, p: [gate[0], gate[1], gate[2]], r: [0.30, 0.08, 0.16] },
+      );
+    }
+    keys.push(...tail);
+  } else if (style === 'gripfed') {
+    // The magazine goes up through the pistol grip, so the hand approaches from below
+    // and behind the grip rather than from in front of a separate well.
+    keys = [
+      ...lead,
+      { t: 0.26, p: [mg.x - 0.014, mg.y - 0.010, mg.z + 0.026], r: [0.40, 0.12, 0.20] },
+      { t: 0.38, p: [mg.x - 0.030, mg.y - 0.070, mg.z + 0.070], r: [0.58, 0.18, 0.28] },
+      { t: 0.50, p: pouch, r: [0.72, 0.22, 0.30] },
+      { t: 0.66, p: [mg.x - 0.012, mg.y - 0.050, mg.z + 0.040], r: [0.52, 0.14, 0.24] },
+      { t: 0.76, p: [mg.x, mg.y + 0.012, mg.z + 0.004], r: [0.32, 0.06, 0.15] },
+      { t: 0.82, p: [mg.x, mg.y + 0.034, mg.z], r: [0.24, 0.03, 0.11] },
+      ...runCharging(0.86),
+      ...tail,
+    ];
+  } else if (style === 'ak') {
+    // Rock-and-lock. The empty pivots FORWARD off the front catch (so the hand sweeps
+    // toward the muzzle as it strips, not straight down), and the fresh magazine is
+    // hooked in front-first and raked back until the rear catch bites.
+    keys = [
+      ...lead,
+      { t: 0.25, p: [mg.x - 0.012, mg.y + 0.030, mg.z + 0.006], r: [0.35, 0.10, 0.18] },
+      // forward-and-down: the empty rotating out around its front lug
+      { t: 0.34, p: [mg.x - 0.024, mg.y - 0.014, mg.z - 0.052], r: [0.50, 0.16, 0.26] },
+      { t: 0.42, p: [mg.x - 0.034, mg.y - 0.080, mg.z + 0.010], r: [0.62, 0.18, 0.28] },
+      { t: 0.52, p: pouch, r: [0.72, 0.22, 0.30] },
+      // fresh mag indexes its FRONT lug first, ahead of the well
+      { t: 0.66, p: [mg.x - 0.012, mg.y - 0.026, mg.z - 0.048], r: [0.48, 0.12, 0.22] },
+      { t: 0.76, p: [mg.x, mg.y + 0.006, mg.z - 0.020], r: [0.34, 0.07, 0.16] },
+      // then rocks BACK to lock
+      { t: 0.82, p: [mg.x, mg.y + 0.034, mg.z + 0.014], r: [0.22, 0.02, 0.10] },
+      ...runCharging(0.86),
+      ...tail,
+    ];
+  } else {
+    // ar / smg / pistol — a straight drop-free exchange. The differences between these
+    // three are in the body motion and the timings, not the hand path.
+    const boltRelease: [number, number, number] = [mg.x - 0.040, mg.y + 0.086, mg.z - 0.010];
+    keys = [
+      ...lead,
+      { t: 0.25, p: [mg.x - 0.012, mg.y + 0.030, mg.z + 0.008], r: [0.35, 0.10, 0.18] },
+      { t: 0.38, p: [mg.x - 0.030, mg.y - 0.060, mg.z + 0.060], r: [0.55, 0.16, 0.26] },
+      { t: 0.50, p: pouch, r: [0.72, 0.22, 0.30] },
+      { t: 0.64, p: [wellLip[0] - 0.010, wellLip[1] - 0.030, wellLip[2] + 0.030], r: [0.50, 0.12, 0.22] },
+      { t: 0.74, p: [mg.x, mg.y + 0.018, mg.z], r: [0.30, 0.05, 0.14] },
+      { t: 0.80, p: [mg.x, mg.y + 0.040, mg.z], r: [0.22, 0.02, 0.10] },
+      // The thumb comes off the magazine straight onto the bolt release, which sits
+      // above and inboard of the well. Only 'ar' and 'pistol' actually have one.
+      ...(style === 'ar' || style === 'pistol'
+        ? [{ t: 0.845, p: boltRelease, r: [0.10, -0.02, 0.06] } as LArmKey]
+        : []),
+      ...runCharging(style === 'ar' || style === 'pistol' ? 0.875 : 0.85),
+      ...tail,
+    ];
+  }
+  keys.sort((x, y) => x.t - y.t);
   batchRigidGroup(r);
   // NOTE: do NOT batch lArm — its three bones must stay separate transforms for
   // the IK solver. Each bone is already batched individually above (3 draws).

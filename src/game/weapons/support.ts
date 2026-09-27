@@ -58,7 +58,7 @@ export function buildAWM(): WeaponModel {
   mag.group.position.set(0, -0.026, -0.158);
   return a.finish({ mag: mag.group, handle: bolt.group, optic: optic.group, sightY: 0.097,
     sockets: { muzzle: [0, 0.035, -0.726], optic: [0, 0.060, -0.120], magazine: [0, -0.026, -0.158], underbarrel: [0, -0.028, -0.431], rail: [-0.022, -0.009, -0.329] },
-    muzzleTip: [0, 0.035, -0.800], arms: { fore: [0, -0.030, -0.339], grip: [0.004, -0.064, 0.006], mag: [0, -0.071, -0.158], fa: [0.045, 0.010, -0.018] },
+    muzzleTip: [0, 0.035, -0.800], arms: { fore: [0, -0.030, -0.339], grip: [0.004, -0.064, 0.006], mag: [0, -0.071, -0.158], fa: [0.045, 0.010, -0.018], style: 'bolt' },
   });
 }
 
@@ -122,7 +122,7 @@ export function buildSPAS12(): WeaponModel {
   ironSights(a, 0.020, -0.531, 0.048, 0.040, 0.073);
   const model = a.finish({ mag: pump.group, sightY: 0.073,
     sockets: { muzzle: [0, 0.017, -0.620], optic: [0, 0.048, -0.074], magazine: [0, -0.015, -0.589], underbarrel: [0, -0.053, -0.366], stock: [0, 0.022, 0.078], rail: [-0.023, 0.023, -0.482] },
-    muzzleTip: [0, 0.017, -0.639], arms: { fore: [0, -0.041, -0.360], grip: [0.004, -0.082, 0.040], mag: [0, -0.028, -0.082], fa: [0.042, 0.009, -0.090] },
+    muzzleTip: [0, 0.017, -0.639], arms: { fore: [0, -0.041, -0.360], grip: [0.004, -0.082, 0.040], mag: [0, -0.028, -0.082], fa: [0.042, 0.009, -0.090], style: 'tube' },
   });
   pump.group.add(model.sockets.underbarrel!);
   return model;
@@ -241,7 +241,7 @@ export function buildM249(): WeaponModel {
   s.name('stock sling socket').tube(0.0058, 0.0036, 0.004, WM.darkSteel, -0.0240, -0.042, 0.201, 0, 0, HALF_PI);
   const model = a.finish({ mag: mag.group, handle: cover.group, sightY: 0.087,
     sockets: { muzzle: [0, 0.016, -0.624], barrel: [0, 0.016, -0.282], optic: [0, 0.064, -0.141], magazine: [0, -0.037, -0.160], underbarrel: [0, -0.041, -0.424], stock: [0, 0.003, 0.045], rail: [-0.030, -0.017, -0.367] },
-    muzzleTip: [0, 0.016, -0.672], arms: { fore: [0, -0.048, -0.352], grip: [0.004, -0.080, 0.033], mag: [0, -0.111, -0.160], fa: [0, 0.052, -0.080] },
+    muzzleTip: [0, 0.016, -0.672], arms: { fore: [0, -0.048, -0.352], grip: [0.004, -0.080, 0.033], mag: [0, -0.111, -0.160], fa: [0, 0.052, -0.080], style: 'belt' },
   });
   model.group.updateMatrixWorld(true);
   cover.group.attach(model.sockets.optic!);

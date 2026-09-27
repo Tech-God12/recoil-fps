@@ -273,7 +273,7 @@ export function buildAUG(): WeaponModel {
       rail: [-0.0265, BORE + 0.006, -0.150],
     },
     muzzleTip: [0, BORE, MUZ - 0.004],
-    arms: { fore: [0, BORE - 0.062, -0.228], mag: [0, -0.150, 0.042], fa: [0, BORE + 0.030, -0.104] },
+    arms: { fore: [0, BORE - 0.062, -0.228], mag: [0, -0.150, 0.042], fa: [0, BORE + 0.030, -0.104], style: 'ar' },
   });
 }
 

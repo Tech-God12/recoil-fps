@@ -3266,3 +3266,90 @@ span.arm2-thumb { display: inline-block; }
   background: color-mix(in srgb, var(--signal) 14%, transparent);
 }
 .ret-preset.ret-on .ret-preset-name { color: var(--signal); }
+
+/* ============================================================
+   ARENA — rebuilt minimal. No numbered steps, no badge soup, no
+   shouting micro-labels: two cards, two rows of choices, one Play.
+   ============================================================ */
+.ar-root { display: flex; flex-direction: column; align-items: center; }
+.ar-head {
+  position: relative; z-index: 5; width: 100%; max-width: 1080px;
+  display: flex; align-items: center; gap: 20px; padding: 26px 24px 0;
+}
+.ar-title {
+  font-family: var(--display); font-weight: 700; font-size: 26px;
+  letter-spacing: 0.01em; color: var(--bone); margin: 0;
+}
+
+.ar-cards {
+  position: relative; z-index: 5; width: 100%; max-width: 1080px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 22px 24px 0;
+}
+.ar-card {
+  position: relative; overflow: hidden; height: 232px; padding: 0;
+  border: 1px solid var(--line); border-radius: 6px; background: #101014;
+  cursor: pointer; text-align: left; color: var(--bone);
+  transition: border-color 200ms, transform 220ms cubic-bezier(.22,1,.36,1), box-shadow 220ms;
+}
+.ar-card:hover { transform: translateY(-2px); border-color: var(--line-strong); }
+.ar-card.on { border-color: var(--signal); box-shadow: 0 0 0 1px var(--signal) inset, 0 14px 34px rgba(0,0,0,0.45); }
+.ar-card-art {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  filter: saturate(0.82) brightness(0.72); transition: filter 260ms, transform 420ms cubic-bezier(.22,1,.36,1);
+}
+.ar-card:hover .ar-card-art, .ar-card.on .ar-card-art { filter: saturate(0.95) brightness(0.86); transform: scale(1.03); }
+.ar-card-veil {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(10,10,13,0) 30%, rgba(10,10,13,0.86) 100%);
+}
+.ar-card-text { position: absolute; left: 20px; right: 20px; bottom: 16px; display: block; }
+.ar-card-text b {
+  display: block; font-family: var(--display); font-weight: 700; font-size: 25px; letter-spacing: 0.01em;
+}
+.ar-card-text em {
+  display: block; margin-top: 1px; font-style: normal; font-size: 13px; color: var(--signal);
+}
+.ar-card-line {
+  display: block; margin-top: 7px; font-size: 13px; line-height: 1.45;
+  color: var(--bone-mute); max-width: 42ch;
+}
+
+.ar-setup {
+  position: relative; z-index: 5; width: 100%; max-width: 1080px;
+  padding: 24px 24px 0; display: flex; flex-direction: column; gap: 2px;
+}
+.ar-row {
+  display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 18px;
+  padding: 13px 0; border-bottom: 1px solid rgba(237,228,211,0.07);
+}
+.ar-row:last-child { border-bottom: 0; }
+.ar-row-label { font-size: 14px; color: var(--bone-mute); }
+.ar-row-body { display: flex; align-items: center; gap: 14px; min-width: 0; }
+
+.ar-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.ar-seg-btn {
+  padding: 9px 20px; background: transparent; border: 0; cursor: pointer;
+  font-family: var(--display); font-weight: 600; font-size: 14px; color: var(--bone-mute);
+  border-right: 1px solid var(--line); transition: background 150ms, color 150ms;
+}
+.ar-seg-btn:last-child { border-right: 0; }
+.ar-seg-btn:hover { background: rgba(237,228,211,0.05); color: var(--bone); }
+.ar-seg-btn.on { background: var(--signal); color: #1A0A00; }
+
+.ar-loadline { font-size: 15px; color: var(--bone); }
+.ar-loadline i { font-style: normal; color: var(--bone-mute); margin: 0 4px; }
+.ar-link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font-size: 13px; color: var(--signal); text-decoration: underline; text-underline-offset: 3px;
+}
+
+.ar-go {
+  position: relative; z-index: 5; width: 100%; max-width: 1080px;
+  padding: 26px 24px 30px; display: flex; justify-content: flex-end;
+}
+.ar-go .deploy-btn { max-width: 220px; margin-top: 0; justify-content: center; gap: 12px; }
+
+@media (max-width: 900px) {
+  .ar-cards { grid-template-columns: 1fr; }
+  .ar-card { height: 180px; }
+}

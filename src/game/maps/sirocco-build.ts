@@ -21,6 +21,8 @@ export interface MapBuildApi {
   box(cx: number, cy: number, cz: number, w: number, h: number, d: number, m: THREE.Material, collide?: boolean): void;
   shape(geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx?: number, ry?: number, rz?: number): void;
   dressing(geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx?: number, ry?: number, rz?: number): void;
+  /** Objective paint and signage. Same batch as dressing, but never culled by detail. */
+  wayfinding(geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx?: number, ry?: number, rz?: number): void;
   ground(x: number, z: number, w: number, d: number, m: THREE.Material, y?: number): void;
   cover(x: number, z: number): void;
   palm(x: number, z: number, s?: number): void;
@@ -73,7 +75,7 @@ function stencilTexture(label: string, color: string, arrow = 0): THREE.CanvasTe
 }
 
 export function buildSirocco(api: MapBuildApi): void {
-  const { M, col, box, shape, dressing, ground, cover, METAL, GLOW, FABRIC } = api;
+  const { M, col, box, shape, dressing, wayfinding, ground, cover, METAL, GLOW, FABRIC } = api;
   const H = SIROCCO_HALF;
   api.playerSpawn.set(0, 0, 35);
 
@@ -456,29 +458,59 @@ export function buildSirocco(api: MapBuildApi): void {
     api.landmarks.push({ name: 'Minaret', at: new THREE.Vector3(mx, 23, mz) });
   }
 
-  // ---------------- bomb sites: painted zones + stencils ----------------
+  // ---------------- bomb sites: make them impossible to miss ----------------
+  // Everything here is wayfinding(), NOT dressing(): the objective must survive every
+  // graphics preset. Four cues, at four different distances:
+  //   1. a tinted wash over the whole plantable zone  (you are standing in it)
+  //   2. a thick hazard border with corner ticks      (where it ends)
+  //   3. a 9 m letter on the deck                     (which site, from a rooftop)
+  //   4. lit corner pylons + hanging banners          (which site, from across the map)
+  const siteTint = { A: 0xE8672B, B: 0x2FA3C7 } as const;
   for (const id of ['A', 'B'] as const) {
-    const s = SITES[id], z = s.zone;
+    const s2 = SITES[id], z = s2.zone;
     const w = z.x1 - z.x0, d = z.z1 - z.z0, cx = (z.x0 + z.x1) / 2, cz = (z.z0 + z.z1) / 2;
-    for (const [x, zz, lw, ld] of [[cx, z.z0, w, 0.16], [cx, z.z1, w, 0.16], [z.x0, cz, 0.16, d], [z.x1, cz, 0.16, d]] as const) {
-      dressing(new THREE.PlaneGeometry(lw, ld), hazard, x, 0.07, zz, -Math.PI / 2);
+    const tint = siteTint[id];
+
+    // 1. border: thick painted edge + heavier corner ticks
+    for (const [x, zz, lw, ld] of [[cx, z.z0, w, 0.34], [cx, z.z1, w, 0.34], [z.x0, cz, 0.34, d], [z.x1, cz, 0.34, d]] as const) {
+      wayfinding(new THREE.PlaneGeometry(lw, ld), hazard, x, 0.07, zz, -Math.PI / 2);
     }
-    const tex = stencilTexture(id, '#E8672B');
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.8, depthWrite: false });
-    dressing(new THREE.PlaneGeometry(4.2, 4.2), mat, s.center[0], 0.075, s.center[1], -Math.PI / 2);
-    const wallMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.92, depthWrite: false });
-    if (id === 'A') dressing(new THREE.PlaneGeometry(3.6, 3.6), wallMat, -30, 3.1, -40.93);
-    else dressing(new THREE.PlaneGeometry(3.6, 3.6), wallMat, 40.93, 3.1, -28.5, 0, -Math.PI / 2);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      wayfinding(new THREE.PlaneGeometry(2.6, 0.5), hazard, cx + sx * (w / 2 - 1.3), 0.072, cz + sz * (d / 2), -Math.PI / 2);
+      wayfinding(new THREE.PlaneGeometry(0.5, 2.6), hazard, cx + sx * (w / 2), 0.072, cz + sz * (d / 2 - 1.3), -Math.PI / 2);
+    }
+
+    // 2. the letter, on the deck and on both back walls. ONE material per site does
+    // all three — every extra material here is a permanent draw call on both tiers.
+    const mat = new THREE.MeshBasicMaterial({ map: stencilTexture(id, '#F2E4C8'), transparent: true, opacity: 0.62, depthWrite: false });
+    wayfinding(new THREE.PlaneGeometry(9, 9), mat, s2.center[0], 0.075, s2.center[1], -Math.PI / 2);
+    if (id === 'A') {
+      wayfinding(new THREE.PlaneGeometry(5, 5), mat, -30, 3.4, -40.93);
+      wayfinding(new THREE.PlaneGeometry(5, 5), mat, -40.93, 3.4, -30, 0, Math.PI / 2);
+    } else {
+      wayfinding(new THREE.PlaneGeometry(5, 5), mat, 40.93, 3.4, -28.5, 0, -Math.PI / 2);
+      wayfinding(new THREE.PlaneGeometry(5, 5), mat, 30, 3.4, -40.93);
+    }
+
+    // 3. corner pylons: banded posts with a lit head, readable over any cover.
+    // Posts reuse METAL so they cost nothing; only the glowing cap is site-coloured.
+    const capMat = col(tint, 0.4, 0, 1.6);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const px = cx + sx * (w / 2 - 0.5), pz = cz + sz * (d / 2 - 0.5);
+      shape(new THREE.CylinderGeometry(0.07, 0.09, 3.4, 8), METAL, px, 1.7, pz);
+      shape(new THREE.SphereGeometry(0.16, 10, 8), capMat, px, 3.5, pz);
+      api.lightSpots.push(new THREE.Vector3(px, 3.5, pz));
+    }
   }
   // directional stencils at the lane splits
   const arrowMat = (label: string, dir: number) => new THREE.MeshBasicMaterial({ map: stencilTexture(label, '#D9CBB0', dir), transparent: true, opacity: 0.85, depthWrite: false });
   // Plane +x maps to world −z on a west wall (ry=+π/2) and to +z on an east wall
   // (ry=−π/2), so "towards north" is arrow +1 on the west wall and −1 on the east.
   const aLeft = arrowMat('A', -1), bRight = arrowMat('B', 1);
-  dressing(new THREE.PlaneGeometry(2, 2), arrowMat('A', 1), -4.95, 2.4, -14, 0, Math.PI / 2);   // mid → short (north)
-  dressing(new THREE.PlaneGeometry(2, 2), arrowMat('B', -1), 4.95, 2.4, -5.5, 0, -Math.PI / 2); // mid → B window (north)
-  dressing(new THREE.PlaneGeometry(2, 2), aLeft, -8, 2.4, 26.05);                               // T spawn north wall
-  dressing(new THREE.PlaneGeometry(2, 2), bRight, 8, 2.4, 26.05);
+  wayfinding(new THREE.PlaneGeometry(2.4, 2.4), arrowMat('A', 1), -4.95, 2.4, -14, 0, Math.PI / 2);   // mid → short (north)
+  wayfinding(new THREE.PlaneGeometry(2.4, 2.4), arrowMat('B', -1), 4.95, 2.4, -5.5, 0, -Math.PI / 2); // mid → B window (north)
+  wayfinding(new THREE.PlaneGeometry(2.4, 2.4), aLeft, -8, 2.4, 26.05);                               // T spawn north wall
+  wayfinding(new THREE.PlaneGeometry(2.4, 2.4), bRight, 8, 2.4, 26.05);
   api.lightSpots.push(new THREE.Vector3(0, 3.2, -3.5), new THREE.Vector3(36.5, 3.6, 9));
 
   // ---------------- distant skyline (non-colliding, outside the playable box) ----------------

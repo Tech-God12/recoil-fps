@@ -70,8 +70,15 @@ test('low detail actually buys something on the maps that use ornament', () => {
     const h = budget(hi.group), l = budget(lo.group);
     // Ornament is merged per material into its own unshadowed mesh, so the saving shows
     // up as DRAW CALLS rather than triangles — which is the number that actually costs
-    // frame time. Anything less than a quarter off is not worth a settings entry.
-    assert.ok(l.draws <= h.draws * 0.75,
+    // frame time.
+    //
+    // The bar is per map because Sirocco has a hard floor the Warehouse does not:
+    // bomb-site paint, the site letters and the lane arrows are wayfinding, not
+    // ornament, so they are drawn at every tier. Culling them once made the sites
+    // completely unmarked at low detail. Seven objective materials therefore survive
+    // into the low build and cap the achievable saving at roughly a fifth.
+    const bar = id === 'sirocco' ? 0.85 : 0.75;
+    assert.ok(l.draws <= h.draws * bar,
       `${id}: low detail only cut draws ${h.draws} -> ${l.draws}; the setting is not earning its place`);
     assert.ok(l.tris <= h.tris, `${id}: low detail must never add triangles`);
     dispose(hi); dispose(lo);

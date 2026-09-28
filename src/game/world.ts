@@ -206,6 +206,24 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     if (!arr) { arr = []; dressingGeos.set(m, arr); }
     arr.push(geo);
   }
+  /**
+   * WAYFINDING tier — decal geometry that is NEVER culled.
+   *
+   * dressing() is ornament and gets dropped at low detail. Bomb-site paint, site
+   * letters and lane arrows are not ornament: they are how the player finds the
+   * objective. Routing them through dressing() meant that turning graphics down
+   * deleted every marking on Sirocco and left the sites completely unlabelled.
+   * Same batching and the same "never touches collision/nav" guarantee, minus the
+   * detail gate.
+   */
+  function wayfinding(geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) {
+    _q.setFromEuler(new THREE.Euler(rx, ry, rz));
+    _m4.compose(new THREE.Vector3(x, y, z), _q, _s);
+    geo.applyMatrix4(_m4);
+    let arr = dressingGeos.get(m);
+    if (!arr) { arr = []; dressingGeos.set(m, arr); }
+    arr.push(geo);
+  }
   type GroundPatch = { x0:number; x1:number; z0:number; z1:number; y:number; m:THREE.Material; batch:typeof geoByMat };
   let groundPatches: GroundPatch[] = [];
   function ground(x: number, z: number, w: number, d: number, m: THREE.Material, y = 0.02, ry = 0) {
@@ -1344,7 +1362,7 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   if (mapId === 'sirocco') {
     buildSirocco({
       M, col, METAL, GLOW, FROND, ACC_TURQ, ACC_TERRA, FABRIC,
-      box, shape, dressing, ground, cover, palm, lamp, banner, sandbags, terrain,
+      box, shape, dressing, wayfinding, ground, cover, palm, lamp, banner, sandbags, terrain,
       group, solids, interiors, concrete, lightSpots, landmarks, soundTraps, arenaFx, playerSpawn,
     });
   }

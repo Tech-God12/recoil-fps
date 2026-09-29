@@ -1029,6 +1029,24 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     // yards mirror each other exactly: double stack north, single south (and vice versa)
     container(-30, -13, 0, containerMat(-30, -13), true); container(-30, 13, 0, containerMat(-30, 13));
     container(30, 13, 0, containerMat(30, 13), true); container(30, -13, 0, containerMat(30, -13));
+    // The first pass left the deep yards as empty rectangles around the twin
+    // halls. These are intentional logistics rows: two short container spines
+    // create readable flank choices without turning the yard into rubble soup.
+    for (const z of [-35, 35]) {
+      container(-30, z, 0, containerMat(-30, z));
+      container(30, z, 0, containerMat(30, z));
+    }
+    for (const x of [-22, 22]) {
+      container(x, -43, Math.PI / 2, containerMat(x, -43));
+      container(x, 43, Math.PI / 2, containerMat(x, 43));
+    }
+    // Four loading canopies give the outer yards a vertical rhythm while keeping
+    // the main approach lanes open and the draw-call budget merged by material.
+    for (const x of [-31, 31]) for (const z of [-48, 48]) {
+      box(x, 3.2, z, 9, 0.24, 5.2, metal, false);
+      for (const px of [-3.8, 3.8]) for (const pz of [-2, 2]) box(x + px, 1.6, z + pz, 0.14, 3.2, 0.14, METAL, false);
+      lightSpots.push(new THREE.Vector3(x, 3.0, z));
+    }
     // climbable container at each yard's outer edge — stairs land level with the
     // top. dir=+1 climbs from the south (alpha), dir=-1 from the north (bravo),
     // keeping the 180-degree symmetry honest.
@@ -1575,6 +1593,12 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     marketRows(16,-86,3,5,6);
     house(-15,-87,12,12,{roofAccess:true,wallMat:earth,door:'south'});
     for(const x of [4,16,28]) banner(x,-91,2,FABRIC[1]);
+    // A second, compact trading court fills the long east switchback. It is a
+    // deliberate market spine with air between stalls, not a wall of filler
+    // buildings; the lane stays wide enough for a clean sprint and a flank.
+    paved(52,-7,30,9,cobble);
+    marketRows(51,-7,2,2,6);
+    courtyardShelter(74,18);
     // NE / tannery: open dye vats, plum drying cloth, low cover and long exposed lanes.
     paved(68,-53,38,34,pavers);
     for(const x of [58,70,82]) for(const z of [-62,-49]) {

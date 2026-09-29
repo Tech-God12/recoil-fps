@@ -558,7 +558,15 @@ export class Engine {
   private dfDeathAt = new THREE.Vector3();
   private dfKiller: TDMBot | null = null;
   private dfCamPos = new THREE.Vector3();
+  private dfCamVel = new THREE.Vector3();
   private dfCamLook = new THREE.Vector3();
+  private dfCamQuat = new THREE.Quaternion();
+  private dfCamWantQuat = new THREE.Quaternion();
+  private dfCamTargetKey = '';
+  private dfCamBlend = 1;
+  private dfLastWantPos = new THREE.Vector3();
+  private dfLastWantLook = new THREE.Vector3();
+  private dfWallPos = new THREE.Vector3();
   private dfCamInit = false;
   private buyMenuOpen = false;
   // ---- momentum "ON FIRE" ----
@@ -1197,7 +1205,7 @@ export class Engine {
         onMoney: (amount, reason, total) => this.onEvent({ type: 'cash', amount, reason, total }),
         earnWallet: (amount, reason) => this.earnCash(amount, reason, true),
         onMatchEnd: () => this.endDefusalMatch(),
-      }, { side: defusalLaunch?.side ?? 'random', format: defusalLaunch?.format ?? 'short', difficulty });
+      }, { side: defusalLaunch?.side ?? 'random', format: defusalLaunch?.format ?? 'short', difficulty, builds: this.dfBuilds });
       // Pre-build every buyable gun (with the player's armory build) behind the boot
       // screen so the first purchase of each never hitches and its shaders compile below.
       for (const w of WEAPON_CATALOG) { this.dfWeapon(w.id); if (w.id === 'awm' || w.id === 'scar_h') await nextFrame(); }
@@ -3086,6 +3094,7 @@ export class Engine {
       this.dfDeathAt.copy(this.eyePos());
       this.dfKiller = killer;
       this.dfCamInit = false;
+      this.dfCamVel.set(0, 0, 0); this.dfCamTargetKey = '';
       this.dfSpectate = 0;
       this.defusal.playerKilled(killer, !!hit?.head, hit?.weapon ?? 'RIFLE');
     }
@@ -3102,6 +3111,7 @@ export class Engine {
     this.lean = 0; this.leanTarget = 0; this.ads = 0; this.rmb = false; this.triggerHeld = false;
     this.lastDamageT = 99; this.shake = 0;
     this.dfDeathCamT = 0; this.dfKiller = null; this.dfCamInit = false;
+    this.dfCamVel.set(0, 0, 0); this.dfCamTargetKey = '';
     for (const g of this.grenades) { this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
     this.grenades = [];
     this.dfMagMemory.clear();
@@ -3113,8 +3123,29 @@ export class Engine {
   /** Field whatever the inventory holds; guns you keep hold their magazine count. */
   private dfEquip(inv: Inventory, focus?: 'primary' | 'secondary') {
     this.frags = inv.frags; this.flashes = inv.flashes;
+    let buildChanged = false;
+    for (const [id, build] of Object.entries(inv.builds ?? {})) {
+      if (!build) continue;
+      const weapon = id as WeaponId;
+      const before = this.dfBuilds[weapon];
+      if (JSON.stringify(before ?? null) === JSON.stringify(build)) continue;
+      this.dfBuilds[weapon] = build;
+      const cached = this.dfWeaponCache.get(weapon);
+      if (cached) {
+        cached.model.group.removeFromParent();
+        cached.model.group.traverse(o => {
+          if (o instanceof THREE.Mesh) {
+            o.geometry.dispose();
+            const material = o.material;
+            if (Array.isArray(material)) material.forEach(m => m.dispose()); else material.dispose();
+          }
+        });
+        this.dfWeaponCache.delete(weapon);
+      }
+      buildChanged = true;
+    }
     const key = `${inv.primary ?? '-'}|${inv.secondary}`;
-    if (key !== this.dfLoadoutKey) {
+    if (key !== this.dfLoadoutKey || buildChanged) {
       this.weapons.forEach((w, i) => this.dfMagMemory.set(w, this.mags[i]));
       const prim = inv.primary ? this.dfWeapon(inv.primary) : null;
       const sec = this.dfWeapon(inv.secondary);
@@ -3170,7 +3201,9 @@ export class Engine {
     if (!list.length) return;
     this.dfDeathCamT = 0;
     this.dfSpectate = (this.dfSpectate + dir + list.length * 4) % list.length;
-    this.dfCamInit = false;
+    // Keep the current camera state. composeSpectatorCamera eases from the
+    // previous subject's desired pose instead of teleporting to the new one.
+    this.dfCamBlend = 0;
   }
 
   private dfSpectateTarget(): TDMBot | null {
@@ -3179,14 +3212,20 @@ export class Engine {
     return list.length ? list[this.dfSpectate % list.length] : null;
   }
 
-  /** Dead in a round: a short death cam on your killer, then an over-the-shoulder chase cam. */
+  /**
+   * Dead in a round: a short death cam on your killer, then an over-the-shoulder
+   * chase cam. Position uses an analytic critically-damped spring, orientation
+   * uses a separate quaternion slerp, and wall clearance has its own spring so a
+   * raycast hit cannot pop the camera sideways.
+   */
   private composeSpectatorCamera(dt: number) {
     const target = this.dfSpectateTarget();
-    let wantPos: THREE.Vector3, wantLook: THREE.Vector3;
+    const key = target ? `bot:${target.id}` : 'death';
+    let rawPos: THREE.Vector3, rawLook: THREE.Vector3;
     if (!target) {
       const rise = Math.min(1, 1 - Math.max(0, this.dfDeathCamT) / 2.2);
-      wantPos = this.dfDeathAt.clone().add(new THREE.Vector3(0, 0.3 + rise * 1.8, 0));
-      wantLook = this.dfKiller && !this.dfKiller.dead
+      rawPos = this.dfDeathAt.clone().add(new THREE.Vector3(0, 0.3 + rise * 1.8, 0));
+      rawLook = this.dfKiller && !this.dfKiller.dead
         ? this.dfKiller.eyePos()
         : this.dfDeathAt.clone().add(new THREE.Vector3(-Math.sin(this.yaw) * 4, -1.2, -Math.cos(this.yaw) * 4));
     } else {
@@ -3201,16 +3240,67 @@ export class Engine {
       this.raycaster.far = len;
       const hit = this.raycaster.intersectObjects(this.world.occluders, false)[0];
       this.raycaster.far = 300;
-      wantPos = hit ? eye.clone().addScaledVector(dir, Math.max(0.25, hit.distance - 0.25)) : back;
-      wantLook = eye.clone().add(new THREE.Vector3(fx * 7, -0.25, fz * 7));
+      rawPos = hit ? eye.clone().addScaledVector(dir, Math.max(0.25, hit.distance - 0.25)) : back;
+      rawLook = eye.clone().add(new THREE.Vector3(fx * 7, -0.25, fz * 7));
     }
-    if (!this.dfCamInit) { this.dfCamPos.copy(wantPos); this.dfCamLook.copy(wantLook); this.dfCamInit = true; }
-    const k = 1 - Math.exp(-dt * 8);
-    this.dfCamPos.lerp(wantPos, k);
-    this.dfCamLook.lerp(wantLook, k);
+
+    // Subject changes are a real transition, not a reset of the camera state.
+    // Blend the desired anchors for 240 ms; the spring below continues from the
+    // current pose, so a fast 30 fps frame cannot turn the blend into a snap.
+    if (!this.dfCamInit) {
+      this.dfCamPos.copy(rawPos); this.dfCamLook.copy(rawLook); this.dfWallPos.copy(rawPos);
+      this.dfCamQuat.copy(this.camera.quaternion);
+      this.dfCamTargetKey = key; this.dfCamBlend = 1; this.dfCamInit = true;
+    } else if (key !== this.dfCamTargetKey) {
+      this.dfLastWantPos.copy(this.dfLastWantPos.lengthSq() ? this.dfLastWantPos : this.dfCamPos);
+      this.dfLastWantLook.copy(this.dfLastWantLook.lengthSq() ? this.dfLastWantLook : this.dfCamLook);
+      this.dfCamTargetKey = key; this.dfCamBlend = 0;
+    }
+    this.dfCamBlend = Math.min(1, this.dfCamBlend + Math.min(0.12, dt / 0.24));
+    const blend = this.dfCamBlend * this.dfCamBlend * (3 - 2 * this.dfCamBlend);
+    const wantPos = this.dfLastWantPos.clone().lerp(rawPos, this.dfCamBlend < 1 ? blend : 1);
+    const wantLook = this.dfLastWantLook.clone().lerp(rawLook, this.dfCamBlend < 1 ? blend : 1);
+    this.dfLastWantPos.copy(rawPos); this.dfLastWantLook.copy(rawLook);
+
+    // Wall clipping is eased separately from subject motion. This spring is
+    // intentionally quicker than the body spring, but never a hard assignment.
+    const wallK = 1 - Math.exp(-Math.min(0.1, dt) * 18);
+    if (!this.dfWallPos.lengthSq()) this.dfWallPos.copy(wantPos);
+    this.dfWallPos.lerp(wantPos, wallK);
+    const wallTarget = this.dfWallPos.clone();
+    const wallDir = wallTarget.clone().sub(wantLook);
+    const wallLen = wallDir.length();
+    if (wallLen > 0.01) {
+      wallDir.multiplyScalar(1 / wallLen);
+      this.raycaster.set(wantLook, wallDir); this.raycaster.far = wallLen;
+      const wallHit = this.raycaster.intersectObjects(this.world.occluders, false)[0];
+      this.raycaster.far = 300;
+      if (wallHit) wallTarget.copy(wantLook).addScaledVector(wallDir, Math.max(0.28, wallHit.distance - 0.24));
+    }
+    const wallBlend = 1 - Math.exp(-Math.min(0.1, dt) * 22);
+    this.dfWallPos.lerp(wallTarget, wallBlend);
+
+    // Exact critically-damped spring. Unlike a frame-dependent lerp, this
+    // reaches the same trajectory at 30, 60 and 144 Hz.
+    const step = Math.min(0.1, Math.max(0, dt));
+    const omega = 9.5;
+    const decay = Math.exp(-omega * step);
+    const offset = this.dfCamPos.clone().sub(this.dfWallPos);
+    const temp = this.dfCamVel.clone().addScaledVector(offset, omega).multiplyScalar(step);
+    this.dfCamPos.copy(this.dfWallPos).add(offset.add(temp).multiplyScalar(decay));
+    this.dfCamVel.sub(temp.multiplyScalar(omega)).multiplyScalar(decay);
+
+    const lookDir = wantLook.clone().sub(this.dfCamPos);
+    if (lookDir.lengthSq() > 0.0001) {
+      const lookMat = new THREE.Matrix4().lookAt(this.dfCamPos, wantLook, THREE.Object3D.DEFAULT_UP);
+      this.dfCamWantQuat.setFromRotationMatrix(lookMat);
+      const orientationK = 1 - Math.exp(-step * 13);
+      this.dfCamQuat.slerp(this.dfCamWantQuat, orientationK);
+    }
     this.camera.position.copy(this.dfCamPos);
-    this.camera.lookAt(this.dfCamLook);
-    this.camera.fov += (this.fovSetting - this.camera.fov) * k;
+    this.camera.quaternion.copy(this.dfCamQuat);
+    const fovK = 1 - Math.exp(-step * 5.5);
+    this.camera.fov += (this.fovSetting - this.camera.fov) * fovK;
     this.camera.updateProjectionMatrix();
   }
 

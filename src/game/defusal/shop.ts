@@ -2,26 +2,41 @@
 // Prices follow the CS2 price bands mapped onto RECOIL's ten armory guns. A gun the
 // player owns in the Armory is fielded with their own build (attachments + finish);
 // everything here is build-agnostic.
-import { weaponById, type WeaponId } from '../economy/catalog';
+import {
+  ATTACHMENT_CATALOG, attachmentsFor, weaponById,
+  type AttachSlot, type AttachmentCatalogEntry, type AttachmentId, type WeaponId,
+} from '../economy/catalog';
+import type { WeaponBuild } from '../economy/loadout';
 import { ECONOMY, KILL_REWARD, clampMoney, type KillClass, type Side } from './rules';
 
-export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'gear' | 'grenades';
+export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'gear' | 'grenades' | 'attachments';
 export type GrenadeKind = 'frag' | 'flash' | 'smoke';
 /** 0 = none, 1 = kevlar vest, 2 = kevlar + helmet. */
 export type ArmorTier = 0 | 1 | 2;
+/** Attachment purchases are round-local and use a stable, non-catalog id. */
+export const attachmentShopId = (weapon: WeaponId, attachment: AttachmentId): string => `attachment:${weapon}:${attachment}`;
+export function parseAttachmentShopId(id: string): { weapon: WeaponId; attachment: AttachmentId } | null {
+  const match = id.match(/^attachment:([^:]+):(.+)$/);
+  if (!match || !weaponById(match[1])) return null;
+  const item = ATTACHMENT_SHOP.find(candidate => candidate.id === id);
+  return item?.weapon && item.attachment ? { weapon: item.weapon, attachment: item.attachment.id } : null;
+}
 export type ShopItemId =
   | WeaponId
   | 'kevlar' | 'helmet' | 'kit'
-  | 'frag' | 'flash' | 'smoke';
+  | 'frag' | 'flash' | 'smoke'
+  | string;
 
 export interface ShopItem {
   id: ShopItemId;
   name: string;
   category: ShopCategory;
   price: number;
-  kind: 'primary' | 'secondary' | 'armor' | 'helmet' | 'kit' | 'grenade';
+  kind: 'primary' | 'secondary' | 'armor' | 'helmet' | 'kit' | 'grenade' | 'attachment';
   weapon?: WeaponId;
   grenade?: GrenadeKind;
+  attachment?: AttachmentCatalogEntry;
+  slot?: AttachSlot;
   /** Purchase restriction. */
   side?: Side;
   killClass?: KillClass;
@@ -35,6 +50,7 @@ export const SHOP_CATEGORIES: { id: ShopCategory; label: string }[] = [
   { id: 'heavy', label: 'Heavy' },
   { id: 'gear', label: 'Gear' },
   { id: 'grenades', label: 'Grenades' },
+  { id: 'attachments', label: 'Build' },
 ];
 
 export const SHOP: ShopItem[] = [
@@ -57,11 +73,33 @@ export const SHOP: ShopItem[] = [
   { id: 'smoke', name: 'Smoke Grenade', category: 'grenades', price: 300, kind: 'grenade', grenade: 'smoke', tag: 'Blocks sight for 18s · Z' },
 ];
 
+/**
+ * The in-round catalogue is generated from the same compatibility table as the
+ * Armory. Every compatible slot is purchasable; nothing is fabricated or silently
+ * omitted just because a weapon has an uncommon rail, barrel, or stock socket.
+ */
+const WEAPON_IDS_FOR_SHOP = SHOP.filter(item => item.weapon).map(item => item.weapon!);
+export const ATTACHMENT_SHOP: ShopItem[] = WEAPON_IDS_FOR_SHOP.flatMap(weapon =>
+  (weaponById(weapon)?.slots ?? []).flatMap(slot => attachmentsFor(weapon, slot).map(attachment => ({
+    id: attachmentShopId(weapon, attachment.id), name: attachment.name, category: 'attachments' as const,
+    price: attachment.price, kind: 'attachment' as const, weapon, attachment, slot,
+    tag: `${weaponById(weapon)?.name ?? weapon} · ${slot === 'underbarrel' ? 'Grip' : slot[0].toUpperCase() + slot.slice(1)} · ${attachment.desc}`,
+  }))),
+);
+
+/** Every compatible in-round attachment for one carried weapon. */
+export function attachmentItemsFor(weapon: WeaponId | null): ShopItem[] {
+  if (!weapon) return [];
+  return ATTACHMENT_SHOP.filter(item => item.weapon === weapon);
+}
+
 export const GRENADE_LIMITS: Record<GrenadeKind, number> & { total: number } = { frag: 1, flash: 2, smoke: 1, total: 4 };
 /** Upgrading an existing vest to vest + helmet. */
 export const HELMET_UPGRADE_PRICE = 350;
 
-export function shopItem(id: string): ShopItem | undefined { return SHOP.find(i => i.id === id); }
+export function shopItem(id: string): ShopItem | undefined {
+  return SHOP.find(i => i.id === id) ?? ATTACHMENT_SHOP.find(i => i.id === id);
+}
 
 export interface Inventory {
   money: number;
@@ -72,10 +110,12 @@ export interface Inventory {
   frags: number;
   flashes: number;
   smokes: number;
+  /** Round-local builds. Armory builds are injected by the engine; bought upgrades live here. */
+  builds?: Partial<Record<WeaponId, WeaponBuild>>;
 }
 
 export function freshInventory(money: number = ECONOMY.start): Inventory {
-  return { money: clampMoney(money), primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0 };
+  return { money: clampMoney(money), primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0, builds: {} };
 }
 
 /** Dead players lose their kit; money carries over. */
@@ -90,8 +130,8 @@ export function grantMoney(inv: Inventory, amount: number): Inventory {
 const grenadeKey = (g: GrenadeKind): 'frags' | 'flashes' | 'smokes' => (g === 'frag' ? 'frags' : g === 'flash' ? 'flashes' : 'smokes');
 export const grenadeCount = (inv: Inventory) => inv.frags + inv.flashes + inv.smokes;
 
-export function itemPrice(item: ShopItem, inv: Inventory): number {
-  if (item.kind === 'helmet' && inv.armor === 1) return HELMET_UPGRADE_PRICE;
+export function itemPrice(item: ShopItem, _inv: Inventory): number {
+  if (item.kind === 'helmet' && _inv.armor === 1) return HELMET_UPGRADE_PRICE;
   return item.price;
 }
 
@@ -101,6 +141,11 @@ export function canBuy(inv: Inventory, id: string, side: Side): BuyCheck {
   const item = shopItem(id);
   if (!item) return { ok: false, reason: 'Unknown item' };
   if (item.side && item.side !== side) return { ok: false, reason: item.side === 'defend' ? 'Defenders only' : 'Attackers only' };
+  if (item.kind === 'attachment') {
+    if (!item.weapon || !item.attachment || (inv.primary !== item.weapon && inv.secondary !== item.weapon)) return { ok: false, reason: 'Buy the weapon first' };
+    const build = inv.builds?.[item.weapon];
+    if (build?.attachments?.[item.slot!] === item.attachment.id) return { ok: false, reason: 'Equipped' };
+  }
   if (item.kind === 'primary' && inv.primary === item.weapon) return { ok: false, reason: 'Equipped' };
   if (item.kind === 'secondary' && inv.secondary === item.weapon) return { ok: false, reason: 'Equipped' };
   if (item.kind === 'armor' && inv.armor >= 1) return { ok: false, reason: 'Equipped' };
@@ -123,12 +168,25 @@ export function buy(inv: Inventory, id: string, side: Side): { ok: boolean; inv:
   const next: Inventory = { ...inv, money: inv.money - check.price };
   let replaced: WeaponId | null | undefined;
   switch (item.kind) {
-    case 'primary': replaced = inv.primary; next.primary = item.weapon!; break;
+    case 'primary':
+      replaced = inv.primary;
+      next.primary = item.weapon!;
+      next.builds = { ...(inv.builds ?? {}), [item.weapon!]: { weapon: item.weapon!, attachments: {} } };
+      break;
     case 'secondary': replaced = inv.secondary; next.secondary = item.weapon!; break;
     case 'armor': next.armor = 1; break;
     case 'helmet': next.armor = 2; break;
     case 'kit': next.kit = true; break;
     case 'grenade': { const k = grenadeKey(item.grenade!); next[k] = inv[k] + 1; break; }
+    case 'attachment': {
+      const weapon = item.weapon!;
+      const current = inv.builds?.[weapon] ?? { weapon, attachments: {} };
+      next.builds = { ...(inv.builds ?? {}), [weapon]: {
+        ...current,
+        attachments: { ...current.attachments, [item.slot!]: item.attachment!.id },
+      } };
+      break;
+    }
   }
   return { ok: true, inv: next, replaced };
 }
@@ -141,6 +199,9 @@ export function inventoryValue(inv: Inventory): number {
   v += inv.armor === 2 ? 1000 : inv.armor === 1 ? 650 : 0;
   if (inv.kit) v += 400;
   v += inv.frags * 300 + inv.flashes * 200 + inv.smokes * 300;
+  for (const build of Object.values(inv.builds ?? {})) {
+    for (const id of Object.values(build?.attachments ?? {})) v += ATTACHMENT_CATALOG.find(a => a.id === id)?.price ?? 0;
+  }
   return v;
 }
 

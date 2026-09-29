@@ -22,12 +22,18 @@ cost stop scaling with map dressing and removes work that bought nothing.
 frames at 60 fps per map (RNG reseeded per map) and counts renderer calls. Stub GL
 means ms numbers are CPU-side only; draw calls, triangles and light counts are exact.
 
-| map | draw calls med/max | tris max | frame ms mean/p99 | lights |
+| map | draw calls median/max | triangles median/max | frame ms mean/p99 | lights |
 | --- | --- | --- | --- | --- |
-| alrasul | 57/76 → 55/73 | 267k → 231k | 1.35/6.90 → 1.20/8.15 | 7 → 7 |
-| kasbah | 78/129 → 74/113 | 193.8k → 188.5k | 1.11/4.45 → 1.08/4.05 | 7 → 7 |
-| arena | 203/228 → 165/193 | 142.8k → 105.1k | 2.20/3.98 → 1.90/3.84 | 12 → 8 |
-| sirocco | 82/103 → 74/114 | 138.6k → 102.6k | 1.44/2.49 → 1.39/2.32 | 10 → 8 |
+| alrasul | 54/72 | 224,487/364,719 | 1.206/7.320 | 7 |
+| kasbah | 67/103 | 163,381/273,319 | 1.043/3.821 | 7 |
+| arena | 165/194 | 103,293/110,415 | 1.707/2.763 | 8 |
+| sirocco | 115/130 | 86,706/110,774 | 1.346/2.864 | 8 |
+
+Final rerun after the Warehouse/Kasbah and Arena container-yard polish on 2026-09-29:
+600 frames per map at 60 fps with the headless WebGL2 probe, RNG reseeded per map.
+The stub reports CPU-side timing; draw calls, triangles, and light counts are the
+useful repeatable budgets. Peak CPU frame time was 9.976 ms on alrasul and 6.106 ms
+on sirocco; no map exceeded the 16.67 ms 60-fps frame interval in this probe.
 
 Per-pixel point lights on Arena: 8 → 4. With default settings the two fullscreen
 post passes and the full-resolution render target are gone entirely — the biggest

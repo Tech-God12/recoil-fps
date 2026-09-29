@@ -3,9 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const S = await import('../src/game/defusal/shop.ts');
-const { WEAPON_CATALOG } = await import('../src/game/economy/catalog.ts');
+const { WEAPON_CATALOG, ATTACHMENT_CATALOG, attachmentsFor } = await import('../src/game/economy/catalog.ts');
 const B = await import('../src/game/defusal/botplan.ts');
-const { SHOP, GRENADE_LIMITS, freshInventory, canBuy, buy, afterDeath, grantMoney, itemPrice, shopItem, killRewardFor, inventoryValue, hitDamage, modScaleFor, BALLISTICS } = S;
+const { SHOP, ATTACHMENT_SHOP, attachmentItemsFor, attachmentShopId, GRENADE_LIMITS, freshInventory, canBuy, buy, afterDeath, grantMoney, itemPrice, shopItem, killRewardFor, inventoryValue, hitDamage, modScaleFor, BALLISTICS } = S;
 
 test('the shop sells every armory gun at CS2 price bands, with class kill rewards', () => {
   const guns = SHOP.filter(i => i.weapon).map(i => i.weapon).sort();
@@ -23,6 +23,28 @@ test('the shop sells every armory gun at CS2 price bands, with class kill reward
   assert.equal(killRewardFor('awm'), 100);
   assert.equal(killRewardFor('ak47'), 300);
   assert.equal(killRewardFor('FRAG'), 300);
+});
+
+test('the round shop exposes every compatible attachment and keeps each purchase in the carried build', () => {
+  assert.equal(ATTACHMENT_SHOP.length, 138, 'all supported weapon/attachment pairs are purchasable');
+  for (const entry of ATTACHMENT_CATALOG) {
+    for (const weapon of entry.compat) {
+      if (!attachmentsFor(weapon, entry.slot).some(candidate => candidate.id === entry.id)) continue;
+      const item = shopItem(attachmentShopId(weapon, entry.id));
+      assert.equal(item?.attachment?.id, entry.id, `${weapon} exposes ${entry.id}`);
+    }
+  }
+  let inv = { ...freshInventory(16000), money: 100000, primary: 'm4a1', secondary: 'm1911' };
+  const m4Parts = attachmentItemsFor('m4a1');
+  assert.ok(m4Parts.length > 20, 'rifle exposes all of its compatible slots');
+  for (const item of m4Parts) {
+    const result = buy(inv, item.id, 'defend');
+    assert.equal(result.ok, true, `buy ${item.id}`);
+    inv = result.inv;
+  }
+  assert.equal(Object.keys(inv.builds.m4a1.attachments).length, 7, 'one selected part is retained per compatible slot');
+  const finalPart = [...m4Parts].reverse().find(item => item.slot === m4Parts[0].slot);
+  assert.equal(canBuy(inv, finalPart.id, 'defend').reason, 'Equipped');
 });
 
 test('buy rules: money, side locks, duplicates, helmet upgrade and grenade limits', () => {

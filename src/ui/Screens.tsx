@@ -21,7 +21,7 @@ import mapArena from '../assets/map-arena.jpg';
 import mapSirocco from '../assets/map-sirocco.jpg';
 import operatorArt from '../assets/operator.jpg';
 import menuCenter from '../assets/menu-center.jpg';
-import { TxBack, TxCoords } from './tactical';
+import { TxBack } from './tactical';
 import { menuStep } from './bindings';
 import MapFlyover from './MapFlyover';
 import { gunThumbnail } from './armory/GunViewer';
@@ -33,11 +33,11 @@ export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: map
 /** Arena Mode → Bomb Defusal launch options (persisted by App). */
 export interface DefusalMenuOptions { side: 'attack' | 'defend' | 'random'; format: 'short' | 'long' }
 
-/* Theater cards: Town and Sandblast, the two live story operations. */
-const THEATERS: { num: string; code: string; id: MapId; type: string; art: string; lat: string; lon: string }[] = [
-  { num: '01', code: 'TOWN', id: 'kasbah', type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E' },
-  { num: '02', code: 'SANDBLAST', id: 'alrasul', type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E' },
-];
+const MISSION_ART: Record<'alrasul' | 'kasbah', string> = { alrasul: mapAlrasul, kasbah: mapKasbah };
+const MISSION_TONE: Record<'alrasul' | 'kasbah', string> = {
+  kasbah: 'A stone town of workshops, terraces and tight lanes.',
+  alrasul: 'A dry river valley threaded by bridges and a covered market.',
+};
 
 export interface Results {
   win: boolean; kills: number; score: number; shots: number; hits: number; headshots: number; timeSec: number;
@@ -440,11 +440,11 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'ArrowRight' || e.code === 'KeyD') {
         e.preventDefault();
-        focusIdxRef.current = (focusIdxRef.current + 1) % THEATERS.length;
+        focusIdxRef.current = (focusIdxRef.current + 1) % mapOrder.length;
         cardRefs.current[focusIdxRef.current]?.focus();
       } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
         e.preventDefault();
-        focusIdxRef.current = (focusIdxRef.current + THEATERS.length - 1) % THEATERS.length;
+        focusIdxRef.current = (focusIdxRef.current + mapOrder.length - 1) % mapOrder.length;
         cardRefs.current[focusIdxRef.current]?.focus();
       }
     };
@@ -468,112 +468,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
     );
   }
 
-  /* ---------------- MAPS — THEATER SELECT ---------------- */
-  if (view === 'maps') {
-    const activateTheater = (index: number) => {
-      const t = THEATERS[index];
-      onMap(t.id);
-      setHovered(null);
-      setView('missions');
-    };
-    const preview = (index: number, on: boolean) => {
-      const t = THEATERS[index];
-      setHovered(on ? t.id : cur => (cur === t.id ? null : cur));
-    };
-    return (
-      <main className="tx-root map2-root">
-        <div className="map2-base" aria-hidden="true" />
-        {/* Hovering a live theater takes over the screen with a 3D orbit. */}
-        <div className={`map2-flyover ${hovered ? 'live' : ''}`} aria-hidden="true">
-          {mapOrder.map(map => (
-            <div key={map.id} className="map2-flyover-slot" style={{ opacity: hovered === map.id ? 1 : 0 }}>
-              <MapFlyover mapId={map.id} active={hovered === map.id} />
-            </div>
-          ))}
-        </div>
-        <div className="tx-grain" aria-hidden="true" />
-
-        <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
-          <TxBack onClick={() => setView('home')} />
-          <div className="map2-titleblock">
-            <span className="map2-kicker">OPERATIONS COMMAND<br />THEATER SELECT</span>
-            <h1 className="map2-title">SELECT AREA OF OPERATIONS</h1>
-            <span className="map2-sub">DEPLOY TO A THEATER.</span>
-            <i className="tx-rule" aria-hidden="true" />
-          </div>
-          <TxCoords lat="33.7731° N" lon="44.4208° E" />
-          <div className="map2-brand">
-            <b>RECOIL</b>
-            <em>DESERT OPERATIONS&nbsp;&nbsp;//&nbsp;&nbsp;GLOBAL REACH</em>
-            <div className="map2-intel" aria-hidden="true">
-              <span>PEOPLE</span><span>TERRAIN</span><span>OBJECTIVES</span><span>RESULTS</span>
-            </div>
-          </div>
-        </header>
-
-        <div className="map2-cards" role="listbox" aria-label="Choose a theater">
-          {THEATERS.map((t, i) => {
-            const obj = getMission(t.id).phases.length;
-            const isLive = hovered === t.id;
-            return (
-              <button
-                key={t.code}
-                ref={node => { cardRefs.current[i] = node; }}
-                type="button"
-                role="option"
-                aria-selected={isLive}
-                disabled={false}
-                onClick={() => activateTheater(i)}
-                onMouseEnter={() => preview(i, true)}
-                onMouseLeave={() => preview(i, false)}
-                onFocus={() => { focusIdxRef.current = i; preview(i, true); }}
-                onBlur={() => preview(i, false)}
-                className={`map2-card seq ${isLive ? 'sel' : ''}`}
-                style={{ animationDelay: `${0.08 + i * 0.06}s` }}
-                aria-label={`${t.code} theater, ${obj} objectives`}
-              >
-                <img src={t.art} alt="" draggable={false} className="map2-art" />
-                <span className="map2-shade" aria-hidden="true" />
-                <span className="map2-num mono">{t.num}</span>
-                <span className="map2-cardcoords mono">{t.lat}<br />{t.lon}</span>
-                <span className="map2-info">
-                  <b>{t.code}</b>
-                  <em>{t.type}</em>
-                  <span className="map2-obj mono">{`${obj} OBJECTIVES · ${t.code}`}</span>
-                </span>
-                <span className="map2-go"><Arrow /></span>
-              </button>
-            );
-          })}
-        </div>
-        <p className="map2-hint mono" role="status">
-          HOVER A THEATER FOR A LIVE OVERVIEW · CLICK TO VIEW ITS OPERATION
-        </p>
-
-        <div className="map2-features seq" style={{ animationDelay: '.26s' }}>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c-5.5 5-5.5 12 0 17M12 3.5c5.5 5 5.5 12 0 17" /></svg>
-            <span><b>TWO THEATERS</b><em>UNIQUE ENVIRONMENTS</em></span>
-          </div>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="8.5" cy="8" r="3" /><circle cx="16" cy="9.5" r="2.4" /><path d="M3 20c0-3.3 2.5-5.5 5.5-5.5S14 16.7 14 20M15 14.7c2.8.2 5 2.2 5 5.3" /></svg>
-            <span><b>DIFFERENT THREATS</b><em>REAL OPERATIONS</em></span>
-          </div>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" strokeLinejoin="round"><path d="M3 19L10 6l4 7 2.5-4L21 19z" /><path d="M10 6l-2 3.5M12.5 13L11 15.5" /></svg>
-            <span><b>PROVE YOURSELF</b><em>COMPLETE ALL OBJECTIVES</em></span>
-          </div>
-        </div>
-
-        <footer className="map2-foot mono">
-          <span>RECOIL&nbsp;&nbsp;//&nbsp;&nbsp;FIELD NOTES&nbsp;&nbsp;//&nbsp;&nbsp;SURVIVE ADAPT WIN</span>
-          <span className="map2-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
-        </footer>
-      </main>
-    );
-  }
-
-  /* ---------------- ARENA MODE ---------------- */
+  /* ---------------- ARENA ---------------- */
   if (view === 'arena') {
     return (
       <ArenaView
@@ -591,55 +486,116 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
     );
   }
 
+  /* ---------------- MISSIONS — PLACE SELECT ---------------- */
+  if (view === 'maps') {
+    const activateMission = (map: MapId) => {
+      onMap(map);
+      setHovered(null);
+      setView('missions');
+    };
+    return (
+      <main className="mission-select-root">
+        <div className="mission-select-backdrop" aria-hidden="true" />
+        <div className="paper-grain" aria-hidden="true" />
+        <header className="mission-select-head">
+          <button className="cmd-back" onClick={() => setView('home')}><span aria-hidden="true">‹</span> Back</button>
+          <div>
+            <span className="mission-select-kicker">Missions</span>
+            <h1>Choose a place to deploy</h1>
+            <p>Read the ground. Pick the operation that fits your mood.</p>
+          </div>
+          <span className="mission-select-mark">Recoil</span>
+        </header>
+        <section className="mission-theater-grid" role="listbox" aria-label="Choose a mission">
+          {mapOrder.map((map, i) => {
+            const id = map.id as 'alrasul' | 'kasbah';
+            const report = getMission(id);
+            const active = hovered === id;
+            return (
+              <button
+                key={id}
+                ref={node => { cardRefs.current[i] = node; }}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={`mission-theater-card ${active ? 'active' : ''}`}
+                onClick={() => activateMission(id)}
+                onMouseEnter={() => { focusIdxRef.current = i; setHovered(id); }}
+                onMouseLeave={() => setHovered(cur => cur === id ? null : cur)}
+                onFocus={() => { focusIdxRef.current = i; setHovered(id); }}
+                onBlur={() => setHovered(cur => cur === id ? null : cur)}
+              >
+                <img src={MISSION_ART[id]} alt="" draggable={false} />
+                <span className="mission-theater-shade" aria-hidden="true" />
+                <span className="mission-theater-copy">
+                  <span className="mission-theater-name">{map.name}</span>
+                  <span className="mission-theater-tone">{MISSION_TONE[id]}</span>
+                  <span className="mission-theater-detail">{report.phases.length} objectives · {report.phases[0]?.location}</span>
+                </span>
+                <span className="mission-theater-arrow" aria-hidden="true"><Arrow /></span>
+              </button>
+            );
+          })}
+        </section>
+        <footer className="mission-select-foot">
+          <span>Two operations · different ground · your call</span>
+          <span className="mono">Arrow keys to browse · Enter to open</span>
+        </footer>
+      </main>
+    );
+  }
+
   /* ---------------- MISSIONS ---------------- */
   const mapName = MAPS.find(m => m.id === s.map)?.name ?? '';
   const mission = getMission(isMissionMap(s.map) ? s.map : 'alrasul');
   return (
-    <main className="menu-root msn-root">
-      <div className="menu-bg" aria-hidden="true" />
-      <div className="msn-art" aria-hidden="true" style={{ backgroundImage: `url(${MAP_ART[s.map]})` }} />
-      <div className="msn-art-fade" aria-hidden="true" />
+    <main className="mission-brief-root">
+      <div className="mission-brief-art" aria-hidden="true" style={{ backgroundImage: `url(${MAP_ART[s.map]})` }} />
+      <div className="mission-brief-shade" aria-hidden="true" />
       <div className="paper-grain" aria-hidden="true" />
-
-      <header className="menu-header">
-        <button className="cmd-back" onClick={() => setView('maps')}><span aria-hidden="true">‹</span> Back</button>
-        <span className="pick-heading">
-          <span className="menu-eyebrow">{mapName}</span>
-          <b>Operation {mission.name}</b>
-        </span>
-        <span className="menu-loadout" aria-label="Equipped loadout">
-          <span><b>1</b> {primaryName}</span>
-          <span><b>2</b> {secondaryName}</span>
-        </span>
-      </header>
-
-      <div className="msn-wrap">
-        <div className="msn-brief seq" style={{ animationDelay: '.05s' }}>
-          <p>{mission.brief}</p>
+      <header className="mission-brief-head">
+        <button className="cmd-back" onClick={() => setView('maps')}><span aria-hidden="true">‹</span> Missions</button>
+        <div className="mission-brief-title">
+          <span>Operation</span>
+          <h1>{mission.name}</h1>
+          <p>{mapName} · {MISSION_TONE[s.map as 'alrasul' | 'kasbah']}</p>
         </div>
-        <ol className="msn-list" aria-label="Mission list">
-          {mission.phases.map((p, i) => (
-            <li key={p.id} className="msn-card seq" style={{ animationDelay: `${0.1 + i * 0.05}s` }}>
-              <span className="msn-idx mono">0{i + 1}</span>
-              <span className="msn-verb">{PHASE_VERB[p.type] ?? 'Secure'}</span>
-              <span className="msn-body">
-                <b>{p.title}</b>
-                <em>{p.location}</em>
-              </span>
-              <span className="msn-status mono">{i === 0 ? 'START' : 'LOCKED'}</span>
-            </li>
-          ))}
-        </ol>
-        <div className="msn-cta seq" style={{ animationDelay: `${0.15 + mission.phases.length * 0.05}s` }}>
+        <button className="mission-loadout-link" onClick={onArmory}>
+          <span>Loadout</span>
+          <b>{primaryName} <i>·</i> {secondaryName}</b>
+        </button>
+      </header>
+      <div className="mission-brief-layout">
+        <section className="mission-brief-intro">
+          <p className="mission-brief-copy">{mission.brief}</p>
+          <div className="mission-brief-rule" aria-hidden="true" />
+          <p className="mission-brief-note">Move with the team, make space, and leave when the work is done.</p>
+        </section>
+        <section className="mission-route" aria-label="Mission objectives">
+          <header>
+            <h2>Your route</h2>
+            <span>{mission.phases.length} objectives</span>
+          </header>
+          <div className="mission-route-list">
+            {mission.phases.map((phase, i) => (
+              <article key={phase.id} className={`mission-route-item ${i === 0 ? 'first' : ''}`}>
+                <span className="mission-route-dot" aria-hidden="true" />
+                <div>
+                  <span className="mission-route-action">{PHASE_VERB[phase.type] ?? 'Secure'}</span>
+                  <h3>{phase.title}</h3>
+                  <p>{phase.location}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+        <section className="mission-brief-actions">
           <button className="deploy-btn" onClick={() => onDeploy()}>
             <span>Deploy</span>
-            <span className="hint">{mapName} · {mission.phases.length} objectives</span>
             <Arrow />
           </button>
-          <button className="menu-secondary-btn" onClick={onArmory}>
-            Loadout <span>{primaryName} + {secondaryName}</span>
-          </button>
-        </div>
+          <button className="mission-back-link" onClick={() => setView('maps')}>Choose another place</button>
+        </section>
       </div>
     </main>
   );

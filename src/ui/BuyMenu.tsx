@@ -1,10 +1,10 @@
 // Recoil FPS — Bomb Defusal buy menu (B during the buy window, inside your buy zone).
-// CS-style number flow (1–6 picks a category, 1–9 buys inside it), real 3D gun
+// CS-style number flow (1–7 picks a category, 1–9 buys inside it), real 3D gun
 // thumbnails, kill-reward chips, and your armory build fielded when you own the gun.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DefusalHud } from '../game/defusal/mode';
 import {
-  SHOP, SHOP_CATEGORIES, buy as simulateBuy, canBuy, inventoryValue, itemPrice, shopItem,
+  SHOP, SHOP_CATEGORIES, attachmentItemsFor, buy as simulateBuy, canBuy, inventoryValue, itemPrice, shopItem,
   type Inventory, type ShopCategory, type ShopItem,
 } from '../game/defusal/shop';
 import { KILL_REWARD, type Side } from '../game/defusal/rules';
@@ -74,7 +74,9 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const items = useMemo(() => SHOP.filter(i => i.category === cat), [cat]);
+  const items = useMemo(() => cat === 'attachments'
+    ? [...attachmentItemsFor(inv.primary), ...attachmentItemsFor(inv.secondary)]
+    : SHOP.filter(i => i.category === cat), [cat, inv.primary, inv.secondary]);
   const doBuy = useCallback((item: ShopItem) => {
     const r = onBuy(item.id);
     setToast({ text: r.ok ? `${item.name} purchased` : r.reason ?? 'Cannot buy', bad: !r.ok, key: Date.now() + Math.random() });
@@ -130,12 +132,18 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
             ))}
           </nav>
           <div className="buy-grid" aria-label={`${cat} items`}>
+            {!items.length && cat === 'attachments' && (
+              <div className="buy-empty">
+                <b>Buy a weapon first</b>
+                <span>Compatible optics, barrels, magazines, rails, stocks and grips appear here for the guns you carry.</span>
+              </div>
+            )}
             {items.map((item, i) => {
               const check = canBuy(inv, item.id, side);
               const equipped = !check.ok && check.reason === 'Equipped';
               const price = itemPrice(item, inv);
               const reward = item.killClass ? KILL_REWARD[item.killClass] : 0;
-              const yours = !!item.weapon && owned.includes(item.weapon);
+              const yours = item.kind !== 'attachment' && !!item.weapon && owned.includes(item.weapon);
               return (
                 <button
                   key={item.id}
@@ -147,7 +155,11 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
                 >
                   <span className="buy-key mono">{step === 'item' ? i + 1 : ''}</span>
                   <span className="buy-art">
-                    {item.weapon
+                    {item.kind === 'attachment' ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+                        <path d="M4 12h16M7 8v8M17 8v8M10 5v3M14 16v3M4 9h3M17 15h3" />
+                      </svg>
+                    ) : item.weapon
                       ? (thumbs[item.weapon] ? <img src={thumbs[item.weapon]} alt="" draggable={false} /> : <i className="buy-art-wait" />)
                       : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={GEAR_ICON[item.id] ?? GEAR_ICON.kevlar} /></svg>}
                   </span>
@@ -176,7 +188,7 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
         </div>
         <footer className="buy-foot-keys mono">
           <span><b className="keycap">B</b> CLOSE</span>
-          <span><b className="keycap">1-6</b> CATEGORY</span>
+          <span><b className="keycap">1-7</b> CATEGORY</span>
           <span><b className="keycap">1-9</b> BUY</span>
           <span><b className="keycap">⌫</b> BACK</span>
           <span><b className="keycap">A</b> AUTO-BUY</span>

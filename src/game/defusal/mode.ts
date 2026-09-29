@@ -22,6 +22,7 @@ import {
   type MatchFormatId, type MatchTransition, type RoundEndReason, type RoundPhase, type RoundRecord, type Side, type TeamId,
 } from './rules';
 import { SHOP, afterDeath, freshInventory, grantMoney, inventoryValue, killRewardFor, shopItem, buy as shopBuy, type ArmorTier, type Inventory, type ShopItem } from './shop';
+import type { WeaponBuild } from '../economy/loadout';
 import { ROLE_SHEET, pickAttackPlan, pickDefenseSetup, planPurchases, teamBuyCall, type AttackPlan, type AttackStyle, type BotRole, type BuyCall, type DefenseSetup } from './botplan';
 import {
   ATTACK_ROUTES, BUY_ZONES, CONTROL_SPOTS, DEFENSE_POSTS, DEFENSE_SETUPS, SITES, SPAWNS, SIROCCO_HALF,
@@ -36,6 +37,8 @@ export interface DefusalOptions {
   side: Side | 'random';
   format: MatchFormatId;
   difficulty: string;
+  /** Armory builds remain available when a player buys that weapon in-round. */
+  builds?: Partial<Record<WeaponId, WeaponBuild>>;
 }
 
 export const SIDE_LABEL: Record<Side, string> = { attack: 'ATTACKERS', defend: 'DEFENDERS' };
@@ -276,6 +279,7 @@ export class DefusalMode implements BotSquad {
   private lastSite: SiteId | undefined;
   private lastLossSite: SiteId | undefined;
   private buyCalls: Record<TeamId, BuyCall> = { alpha: 'pistol', bravo: 'pistol' };
+  private readonly playerBuilds: Partial<Record<WeaponId, WeaponBuild>>;
   private followPlayer = false;
   private reportCooldown = new Map<string, number>();
   private announcedTen = false;
@@ -286,6 +290,7 @@ export class DefusalMode implements BotSquad {
   constructor(ctx: DefusalCtx, opts: DefusalOptions, rng: () => number = Math.random) {
     this.ctx = ctx;
     this.rng = rng;
+    this.playerBuilds = opts.builds ?? {};
     this.startSide = opts.side === 'random' ? (rng() < 0.5 ? 'attack' : 'defend') : opts.side;
     this.match = new MatchState(opts.format, this.startSide);
     this.skill = SKILLS[opts.difficulty] ?? SKILLS.Normal;
@@ -724,10 +729,31 @@ export class DefusalMode implements BotSquad {
   canBuyNow(): boolean { return this.player.alive && this.match.buyOpen && this.inBuyZone; }
   buy(id: string): { ok: boolean; reason?: string } {
     if (!this.canBuyNow()) return { ok: false, reason: this.match.buyOpen ? 'Leave the buy zone? You are outside it' : 'Buy time is over' };
+    const item = shopItem(id);
+    if (!item) return { ok: false, reason: 'Unknown item' };
+    // Start an attachment purchase from the player's Armory build when the gun is
+    // owned. A newly bought gun with no saved build starts with an empty build.
+    if (item.kind === 'attachment' && item.weapon && !this.player.inv.builds?.[item.weapon]) {
+      const saved = this.playerBuilds[item.weapon];
+      this.player.inv = {
+        ...this.player.inv,
+        builds: { ...(this.player.inv.builds ?? {}), [item.weapon]: saved
+          ? { weapon: saved.weapon, attachments: { ...saved.attachments }, ...(saved.skin ? { skin: saved.skin } : {}) }
+          : { weapon: item.weapon, attachments: {} } },
+      };
+    }
     const r = shopBuy(this.player.inv, id, this.playerSide);
     if (!r.ok) return { ok: false, reason: r.reason };
-    const item = shopItem(id)!;
-    this.player.inv = r.inv;
+    let next = r.inv;
+    // The fielded build for an Armory-owned gun survives the buy; the in-round
+    // attachment path can then replace individual slots without touching the save.
+    if (item.kind === 'primary' && item.weapon && this.playerBuilds[item.weapon]) {
+      const saved = this.playerBuilds[item.weapon]!;
+      next = { ...next, builds: { ...(next.builds ?? {}), [item.weapon]: {
+        weapon: item.weapon, attachments: { ...saved.attachments }, ...(saved.skin ? { skin: saved.skin } : {}),
+      } } };
+    }
+    this.player.inv = next;
     // A replaced gun drops at your feet, exactly like CS.
     if (r.replaced && r.replaced !== 'm1911' && (item.kind === 'primary' || item.kind === 'secondary')) this.spawnDrop(r.replaced, this.ctx.playerFeet());
     this.ctx.equipPlayer(this.player.inv, item.kind === 'secondary' ? 'secondary' : item.kind === 'primary' ? 'primary' : undefined);
@@ -796,8 +822,14 @@ export class DefusalMode implements BotSquad {
 
   /** Spectator candidates: living teammates first, then anyone alive. */
   spectateList(): TDMBot[] {
-    const allies = this.teamBots('alpha');
-    return allies.length ? allies : this.teamBots('bravo');
+    // `players` is the round-roster order and never changes. Sort explicitly by
+    // that stable order rather than by distance, kills, or insertion side effects;
+    // cycling therefore remains predictable when a body dies between frames.
+    const order = new Map(this.players.map((c, i) => [c.id, i]));
+    const stable = (team: TeamId) => this.teamBots(team).sort((a, b) =>
+      (order.get(this.byBot(a).id) ?? 0) - (order.get(this.byBot(b).id) ?? 0));
+    const allies = stable('alpha');
+    return allies.length ? allies : stable('bravo');
   }
   combatantOf(bot: TDMBot): Combatant { return this.byBot(bot); }
 
@@ -810,8 +842,10 @@ export class DefusalMode implements BotSquad {
   /** Bot gunfire: enemies holding an angle within earshot turn to face the fight. */
   private hearGunfire(p: THREE.Vector3, team: TDMTeam) {
     for (const c of this.players) {
-      if (!c.bot || !c.alive || c.team === team || c.bot.seesEnemy()) continue;
+      if (!c.bot || !c.alive || c.team === team) continue;
       if (c.bot.pos.distanceTo(p) > 26) continue;
+      c.bot.hearShot(p);
+      if (c.bot.seesEnemy()) continue;
       const plan = this.plans.get(c.bot);
       if (plan && (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'retakeStage')) { plan.lookAt = p.clone(); plan.lookT = this.roundTime + 1.6; }
     }
@@ -1171,7 +1205,6 @@ export class DefusalMode implements BotSquad {
     const spots = [...s.postPlant];
     for (const bot of this.botsOn('attack')) {
       const plan = this.plans.get(bot) ?? this.newPlan('hold');
-      if (this.followPlayer && bot.team === 'alpha') continue;
       let bi = 0, bd = Infinity;
       spots.forEach((sp, k) => { const dd = d2(bot.pos, sp.at[0], sp.at[1]); if (dd < bd) { bd = dd; bi = k; } });
       const sp = spots.splice(bi, 1)[0] ?? s.postPlant[0];
@@ -1182,7 +1215,6 @@ export class DefusalMode implements BotSquad {
     this.retakeGoT = this.roundTime + 7;
     for (const bot of this.botsOn('defend')) {
       const plan = this.plans.get(bot) ?? this.newPlan('hold');
-      if (this.followPlayer && bot.team === 'alpha') continue;
       const stage = s.retakeStage.reduce((a, b) => (d2(bot.pos, a[0], a[1]) < d2(bot.pos, b[0], b[1]) ? a : b));
       plan.task = 'retakeStage'; plan.hold = { at: stage, face: s.center }; plan.anchor = false; plan.speed = 5.2;
       plan.route = [...s.retakeClear].sort((a, b) => d2(V(stage[0], stage[1]), a[0], a[1]) - d2(V(stage[0], stage[1]), b[0], b[1]));
@@ -1475,6 +1507,22 @@ export class DefusalMode implements BotSquad {
         return { at: bot.lastKnownEnemy?.clone() ?? V(0, 0), speed: 4.6 };
     }
     return null;
+  }
+
+  /**
+   * Deterministic strategy telemetry for headless simulations. This is deliberately
+   * read-only: it exposes the movement contract without coupling tests to private
+   * plan-map storage or to Three.js scene traversal.
+   */
+  debugAttackPlan(): { site: SiteId; style: AttackStyle; lanes: Lane[]; speeds: number[]; executing: boolean } {
+    const bots = this.botsOn('attack');
+    return {
+      site: this.attack.site,
+      style: this.attack.style,
+      lanes: bots.map(bot => this.plans.get(bot)?.lane ?? null).filter((lane): lane is Lane => lane !== null),
+      speeds: bots.map(bot => this.plans.get(bot)?.speed ?? 0),
+      executing: this.executing,
+    };
   }
 
   /** Debug: the director's current task for a bot (sim/diagnostics). */

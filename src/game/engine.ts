@@ -14,7 +14,7 @@ import { buildWorld, pointInAABB, type World, type MapId, type AABB, type WorldD
 import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, WEAPON_BUILDERS, type WeaponModel } from './models';
 import { solveArm } from './weapons/core';
 import { applyBuild } from './attachments';
-import { WEAPON_CATALOG, attachmentById, weaponById, type WeaponId } from './economy/catalog';
+import { WEAPON_CATALOG, attachmentById, weaponById, type AttachSlot, type AttachmentId, type WeaponId } from './economy/catalog';
 import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
 import { REWARDS, difficultyMultiplier, streakAward } from './economy/rewards';
 import { skinById } from './economy/skins';
@@ -487,6 +487,15 @@ const ADAPT_EVAL_MS = 5000;
 const ADAPT_LOCK_MS = 8000;
 /** Clamped smoothstep. Used everywhere an animation beat needs an eased 0..1. */
 const ease01 = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
+
+/** Frame-rate invariant critically damped spring step. Returns [value, velocity]. */
+export function criticallyDampedSpringStep(value: number, velocity: number, target: number, omega: number, dt: number): [number, number] {
+  const x = value - target;
+  const j = velocity + omega * x;
+  const e = Math.exp(-omega * Math.max(0, dt));
+  return [target + (x + j * dt) * e, (velocity - omega * j * dt) * e];
+}
+
 const ADAPT_DOWN_WINDOWS = 2;
 const ADAPT_UP_WINDOWS = 3;
 /** A frame longer than this is a hitch, not sustained throughput; it must not drive scaling. */
@@ -549,7 +558,7 @@ export class Engine {
   private isDefusal = false;
   private defusal: DefusalMode | null = null;
   private dfBuilds: Partial<Record<WeaponId, WeaponBuild>> = {};
-  private dfWeaponCache = new Map<WeaponId, WeaponDef>();
+  private dfWeaponCache = new Map<string, WeaponDef>();
   private dfMagMemory = new Map<WeaponDef, number>();
   private dfLoadoutKey = '';
   private dfRosterVersion = -1;
@@ -558,8 +567,17 @@ export class Engine {
   private dfDeathAt = new THREE.Vector3();
   private dfKiller: TDMBot | null = null;
   private dfCamPos = new THREE.Vector3();
-  private dfCamLook = new THREE.Vector3();
+  private dfCamVel = new THREE.Vector3();
+  private dfClipPos = new THREE.Vector3();
+  private dfClipVel = new THREE.Vector3();
+  private dfCamQuat = new THREE.Quaternion();
+  private dfWantQuat = new THREE.Quaternion();
+  private dfBlendFromPos = new THREE.Vector3();
+  private dfBlendFromQuat = new THREE.Quaternion();
+  private dfLookMat = new THREE.Matrix4();
   private dfCamInit = false;
+  private dfSpectateKey = 'death';
+  private dfSpectateBlendT = 1;
   private buyMenuOpen = false;
   // ---- momentum "ON FIRE" ----
   private killTimes: number[] = [];
@@ -1200,7 +1218,8 @@ export class Engine {
       }, { side: defusalLaunch?.side ?? 'random', format: defusalLaunch?.format ?? 'short', difficulty });
       // Pre-build every buyable gun (with the player's armory build) behind the boot
       // screen so the first purchase of each never hitches and its shaders compile below.
-      for (const w of WEAPON_CATALOG) { this.dfWeapon(w.id); if (w.id === 'awm' || w.id === 'scar_h') await nextFrame(); }
+      const warmInv: Inventory = { money: 0, primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0, builds: {} };
+      for (const w of WEAPON_CATALOG) { this.dfWeapon(w.id, warmInv); if (w.id === 'awm' || w.id === 'scar_h') await nextFrame(); }
       this.buildSolidGrid();
       this.renderer.shadowMap.needsUpdate = true;
       this.rebuildHittables();
@@ -3086,6 +3105,8 @@ export class Engine {
       this.dfDeathAt.copy(this.eyePos());
       this.dfKiller = killer;
       this.dfCamInit = false;
+      this.dfSpectateKey = 'death';
+      this.dfSpectateBlendT = 1;
       this.dfSpectate = 0;
       this.defusal.playerKilled(killer, !!hit?.head, hit?.weapon ?? 'RIFLE');
     }
@@ -3101,7 +3122,7 @@ export class Engine {
     this.crouched = false; this.sliding = false; this.sprinting = false; this.cooking = false;
     this.lean = 0; this.leanTarget = 0; this.ads = 0; this.rmb = false; this.triggerHeld = false;
     this.lastDamageT = 99; this.shake = 0;
-    this.dfDeathCamT = 0; this.dfKiller = null; this.dfCamInit = false;
+    this.dfDeathCamT = 0; this.dfKiller = null; this.dfCamInit = false; this.dfSpectateKey = 'death'; this.dfSpectateBlendT = 1;
     for (const g of this.grenades) { this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
     this.grenades = [];
     this.dfMagMemory.clear();
@@ -3110,14 +3131,34 @@ export class Engine {
     for (let i = 0; i < this.weapons.length; i++) this.mags[i] = this.weapons[i].magSize;
   }
 
+  private dfBuildFor(id: WeaponId, inv: Inventory): WeaponBuild {
+    const base = this.dfBuilds[id] ?? { weapon: id, attachments: {}, skin: 'factory' };
+    const field = inv.builds?.[id] ?? {};
+    return sanitizeBuild({
+      weapon: id,
+      attachments: { ...base.attachments, ...field } as Partial<Record<AttachSlot, AttachmentId>>,
+      skin: base.skin ?? 'factory',
+    });
+  }
+
+  private dfBuildKey(inv: Inventory): string {
+    const part = (id: WeaponId | null | undefined) => {
+      if (!id) return '-';
+      const b = this.dfBuildFor(id, inv);
+      const atts = Object.entries(b.attachments).sort(([a], [b2]) => a.localeCompare(b2)).map(([slot, aid]) => `${slot}:${aid}`).join(',');
+      return `${id}[${atts}]@${b.skin ?? 'factory'}`;
+    };
+    return `${part(inv.primary)}|${part(inv.secondary)}`;
+  }
+
   /** Field whatever the inventory holds; guns you keep hold their magazine count. */
   private dfEquip(inv: Inventory, focus?: 'primary' | 'secondary') {
     this.frags = inv.frags; this.flashes = inv.flashes;
-    const key = `${inv.primary ?? '-'}|${inv.secondary}`;
+    const key = this.dfBuildKey(inv);
     if (key !== this.dfLoadoutKey) {
       this.weapons.forEach((w, i) => this.dfMagMemory.set(w, this.mags[i]));
-      const prim = inv.primary ? this.dfWeapon(inv.primary) : null;
-      const sec = this.dfWeapon(inv.secondary);
+      const prim = inv.primary ? this.dfWeapon(inv.primary, inv) : null;
+      const sec = this.dfWeapon(inv.secondary, inv);
       for (const w of this.weapons) w.model.group.visible = false;
       this.weapons = prim ? [prim, sec] : [sec];
       this.mags = this.weapons.map(w => this.dfMagMemory.get(w) ?? w.magSize);
@@ -3136,14 +3177,17 @@ export class Engine {
     this.weapons.forEach((w, i) => { w.model.group.visible = i === this.cur; });
   }
 
-  /** One cached viewmodel per gun — your armory build when you own it, factory otherwise. */
-  private dfWeapon(id: WeaponId): WeaponDef {
-    const cached = this.dfWeaponCache.get(id);
+  /** One cached viewmodel per exact defusal build — armory finish plus any in-round upgrades. */
+  private dfWeapon(id: WeaponId, inv: Inventory): WeaponDef {
+    const build = this.dfBuildFor(id, inv);
+    const atts = Object.entries(build.attachments).sort(([a], [b]) => a.localeCompare(b)).map(([slot, aid]) => `${slot}:${aid}`).join(',');
+    const key = `${id}|${build.skin ?? 'factory'}|${atts}`;
+    const cached = this.dfWeaponCache.get(key);
     if (cached) return cached;
-    const def = this.buildLoadoutWeapon(this.dfBuilds[id] ?? { weapon: id, attachments: {}, skin: 'factory' });
+    const def = this.buildLoadoutWeapon(build);
     def.model.group.visible = false;
     this.vmScene.add(def.model.group);
-    this.dfWeaponCache.set(id, def);
+    this.dfWeaponCache.set(key, def);
     return def;
   }
 
@@ -3170,7 +3214,11 @@ export class Engine {
     if (!list.length) return;
     this.dfDeathCamT = 0;
     this.dfSpectate = (this.dfSpectate + dir + list.length * 4) % list.length;
-    this.dfCamInit = false;
+    if (this.dfCamInit) {
+      this.dfBlendFromPos.copy(this.camera.position);
+      this.dfBlendFromQuat.copy(this.camera.quaternion);
+      this.dfSpectateBlendT = 0;
+    }
   }
 
   private dfSpectateTarget(): TDMBot | null {
@@ -3179,13 +3227,20 @@ export class Engine {
     return list.length ? list[this.dfSpectate % list.length] : null;
   }
 
+  private springVec(pos: THREE.Vector3, vel: THREE.Vector3, target: THREE.Vector3, omega: number, dt: number) {
+    let r = criticallyDampedSpringStep(pos.x, vel.x, target.x, omega, dt); pos.x = r[0]; vel.x = r[1];
+    r = criticallyDampedSpringStep(pos.y, vel.y, target.y, omega, dt); pos.y = r[0]; vel.y = r[1];
+    r = criticallyDampedSpringStep(pos.z, vel.z, target.z, omega, dt); pos.z = r[0]; vel.z = r[1];
+  }
+
   /** Dead in a round: a short death cam on your killer, then an over-the-shoulder chase cam. */
   private composeSpectatorCamera(dt: number) {
     const target = this.dfSpectateTarget();
-    let wantPos: THREE.Vector3, wantLook: THREE.Vector3;
+    let wantLook: THREE.Vector3, rawPos: THREE.Vector3;
+    const targetKey = target ? `bot:${target.id}` : 'death';
     if (!target) {
       const rise = Math.min(1, 1 - Math.max(0, this.dfDeathCamT) / 2.2);
-      wantPos = this.dfDeathAt.clone().add(new THREE.Vector3(0, 0.3 + rise * 1.8, 0));
+      rawPos = this.dfDeathAt.clone().add(new THREE.Vector3(0, 0.3 + rise * 1.8, 0));
       wantLook = this.dfKiller && !this.dfKiller.dead
         ? this.dfKiller.eyePos()
         : this.dfDeathAt.clone().add(new THREE.Vector3(-Math.sin(this.yaw) * 4, -1.2, -Math.cos(this.yaw) * 4));
@@ -3201,16 +3256,39 @@ export class Engine {
       this.raycaster.far = len;
       const hit = this.raycaster.intersectObjects(this.world.occluders, false)[0];
       this.raycaster.far = 300;
-      wantPos = hit ? eye.clone().addScaledVector(dir, Math.max(0.25, hit.distance - 0.25)) : back;
+      rawPos = hit ? eye.clone().addScaledVector(dir, Math.max(0.25, hit.distance - 0.25)) : back;
       wantLook = eye.clone().add(new THREE.Vector3(fx * 7, -0.25, fz * 7));
     }
-    if (!this.dfCamInit) { this.dfCamPos.copy(wantPos); this.dfCamLook.copy(wantLook); this.dfCamInit = true; }
-    const k = 1 - Math.exp(-dt * 8);
-    this.dfCamPos.lerp(wantPos, k);
-    this.dfCamLook.lerp(wantLook, k);
-    this.camera.position.copy(this.dfCamPos);
-    this.camera.lookAt(this.dfCamLook);
-    this.camera.fov += (this.fovSetting - this.camera.fov) * k;
+    if (targetKey !== this.dfSpectateKey && this.dfCamInit) {
+      this.dfBlendFromPos.copy(this.camera.position);
+      this.dfBlendFromQuat.copy(this.camera.quaternion);
+      this.dfSpectateBlendT = 0;
+      this.dfSpectateKey = targetKey;
+    } else this.dfSpectateKey = targetKey;
+    if (!this.dfCamInit) { this.dfClipPos.copy(rawPos); this.dfClipVel.set(0, 0, 0); }
+
+    this.springVec(this.dfClipPos, this.dfClipVel, rawPos, 22, dt);
+    const wantPos = this.dfClipPos;
+    this.dfLookMat.lookAt(wantPos, wantLook, this.camera.up);
+    this.dfWantQuat.setFromRotationMatrix(this.dfLookMat);
+    if (!this.dfCamInit) {
+      this.dfCamPos.copy(wantPos); this.dfCamVel.set(0, 0, 0); this.dfClipPos.copy(rawPos); this.dfClipVel.set(0, 0, 0);
+      this.dfCamQuat.copy(this.dfWantQuat); this.dfBlendFromPos.copy(wantPos); this.dfBlendFromQuat.copy(this.dfWantQuat);
+      this.dfSpectateBlendT = 1; this.dfCamInit = true;
+    }
+    this.springVec(this.dfCamPos, this.dfCamVel, wantPos, 11, dt);
+    this.dfCamQuat.slerp(this.dfWantQuat, 1 - Math.exp(-dt * 13));
+
+    if (this.dfSpectateBlendT < 1) {
+      this.dfSpectateBlendT = Math.min(1, this.dfSpectateBlendT + dt / 0.38);
+      const a = ease01(this.dfSpectateBlendT);
+      this.camera.position.lerpVectors(this.dfBlendFromPos, this.dfCamPos, a);
+      this.camera.quaternion.slerpQuaternions(this.dfBlendFromQuat, this.dfCamQuat, a);
+    } else {
+      this.camera.position.copy(this.dfCamPos);
+      this.camera.quaternion.copy(this.dfCamQuat);
+    }
+    this.camera.fov += (this.fovSetting - this.camera.fov) * (1 - Math.exp(-dt * 5.5));
     this.camera.updateProjectionMatrix();
   }
 

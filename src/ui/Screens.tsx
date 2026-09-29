@@ -21,7 +21,7 @@ import mapArena from '../assets/map-arena.jpg';
 import mapSirocco from '../assets/map-sirocco.jpg';
 import operatorArt from '../assets/operator.jpg';
 import menuCenter from '../assets/menu-center.jpg';
-import { TxBack, TxCoords } from './tactical';
+import { TxBack } from './tactical';
 import { menuStep } from './bindings';
 import MapFlyover from './MapFlyover';
 import { gunThumbnail } from './armory/GunViewer';
@@ -33,10 +33,10 @@ export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: map
 /** Arena Mode → Bomb Defusal launch options (persisted by App). */
 export interface DefusalMenuOptions { side: 'attack' | 'defend' | 'random'; format: 'short' | 'long' }
 
-/* Theater cards: Town and Sandblast, the two live story operations. */
-const THEATERS: { num: string; code: string; id: MapId; type: string; art: string; lat: string; lon: string }[] = [
-  { num: '01', code: 'TOWN', id: 'kasbah', type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E' },
-  { num: '02', code: 'SANDBLAST', id: 'alrasul', type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E' },
+/* Story operations, named like places instead of coded theater cards. */
+const THEATERS: { id: Extract<MapId, 'kasbah' | 'alrasul'>; name: string; terrain: string; line: string; art: string }[] = [
+  { id: 'kasbah', name: 'Town', terrain: 'Fortified market town', art: mapKasbah, line: 'Break the signal keep, move through the trades, and leave through the west gate.' },
+  { id: 'alrasul', name: 'Sandblast', terrain: 'Desert river valley', art: mapAlrasul, line: 'Cross the wadi, clear the old town, and hold long enough for extraction.' },
 ];
 
 export interface Results {
@@ -423,7 +423,7 @@ const PHASE_VERB: Record<string, string> = {
 
 export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, onAbilities, initialView, profile, defusal, onDefusal }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; onArenaSetup?: () => void; onAbilities?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
+  onArmory?: () => void; onArenaSetup?: () => void; onAbilities?: () => void; initialView?: 'home' | 'maps' | 'arena'; profile?: PlayerProfile;
   defusal?: DefusalMenuOptions; onDefusal?: (o: DefusalMenuOptions) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
@@ -468,8 +468,9 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
     );
   }
 
-  /* ---------------- MAPS — THEATER SELECT ---------------- */
+  /* ---------------- MAPS — MISSIONS ---------------- */
   if (view === 'maps') {
+    const selected = THEATERS.find(t => t.id === hovered) ?? THEATERS[focusIdxRef.current] ?? THEATERS[0];
     const activateTheater = (index: number) => {
       const t = THEATERS[index];
       onMap(t.id);
@@ -481,9 +482,8 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
       setHovered(on ? t.id : cur => (cur === t.id ? null : cur));
     };
     return (
-      <main className="tx-root map2-root">
+      <main className="tx-root msel-root">
         <div className="map2-base" aria-hidden="true" />
-        {/* Hovering a live theater takes over the screen with a 3D orbit. */}
         <div className={`map2-flyover ${hovered ? 'live' : ''}`} aria-hidden="true">
           {mapOrder.map(map => (
             <div key={map.id} className="map2-flyover-slot" style={{ opacity: hovered === map.id ? 1 : 0 }}>
@@ -493,82 +493,58 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         </div>
         <div className="tx-grain" aria-hidden="true" />
 
-        <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
+        <header className="msel-head seq" style={{ animationDelay: '.02s' }}>
           <TxBack onClick={() => setView('home')} />
-          <div className="map2-titleblock">
-            <span className="map2-kicker">OPERATIONS COMMAND<br />THEATER SELECT</span>
-            <h1 className="map2-title">SELECT AREA OF OPERATIONS</h1>
-            <span className="map2-sub">DEPLOY TO A THEATER.</span>
-            <i className="tx-rule" aria-hidden="true" />
-          </div>
-          <TxCoords lat="33.7731° N" lon="44.4208° E" />
-          <div className="map2-brand">
-            <b>RECOIL</b>
-            <em>DESERT OPERATIONS&nbsp;&nbsp;//&nbsp;&nbsp;GLOBAL REACH</em>
-            <div className="map2-intel" aria-hidden="true">
-              <span>PEOPLE</span><span>TERRAIN</span><span>OBJECTIVES</span><span>RESULTS</span>
-            </div>
+          <div>
+            <h1>Missions</h1>
+            <p>Choose a place. Read the objective flow. Deploy when it feels right.</p>
           </div>
         </header>
 
-        <div className="map2-cards" role="listbox" aria-label="Choose a theater">
+        <section className="msel-stage seq" style={{ animationDelay: '.08s' }} aria-label="Mission preview">
+          <div className="msel-image">
+            <img src={selected.art} alt="" draggable={false} />
+            <span aria-hidden="true" />
+          </div>
+          <div className="msel-copy">
+            <h2>{selected.name}</h2>
+            <p>{selected.line}</p>
+            <div className="msel-flow" aria-label={`${selected.name} objective flow`}>
+              {getMission(selected.id).phases.map(phase => (
+                <span key={phase.id}>{PHASE_VERB[phase.type] ?? 'Secure'}</span>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <div className="msel-list seq" style={{ animationDelay: '.14s' }} role="listbox" aria-label="Choose a mission">
           {THEATERS.map((t, i) => {
-            const obj = getMission(t.id).phases.length;
-            const isLive = hovered === t.id;
+            const mission = getMission(t.id);
+            const isLive = selected.id === t.id;
             return (
               <button
-                key={t.code}
+                key={t.id}
                 ref={node => { cardRefs.current[i] = node; }}
                 type="button"
                 role="option"
                 aria-selected={isLive}
-                disabled={false}
                 onClick={() => activateTheater(i)}
                 onMouseEnter={() => preview(i, true)}
                 onMouseLeave={() => preview(i, false)}
                 onFocus={() => { focusIdxRef.current = i; preview(i, true); }}
                 onBlur={() => preview(i, false)}
-                className={`map2-card seq ${isLive ? 'sel' : ''}`}
-                style={{ animationDelay: `${0.08 + i * 0.06}s` }}
-                aria-label={`${t.code} theater, ${obj} objectives`}
+                className={`msel-card${isLive ? ' on' : ''}`}
               >
-                <img src={t.art} alt="" draggable={false} className="map2-art" />
-                <span className="map2-shade" aria-hidden="true" />
-                <span className="map2-num mono">{t.num}</span>
-                <span className="map2-cardcoords mono">{t.lat}<br />{t.lon}</span>
-                <span className="map2-info">
-                  <b>{t.code}</b>
-                  <em>{t.type}</em>
-                  <span className="map2-obj mono">{`${obj} OBJECTIVES · ${t.code}`}</span>
+                <span>
+                  <b>{t.name}</b>
+                  <em>{t.terrain}</em>
                 </span>
-                <span className="map2-go"><Arrow /></span>
+                <i>{mission.phases.length} objectives</i>
+                <Arrow />
               </button>
             );
           })}
         </div>
-        <p className="map2-hint mono" role="status">
-          HOVER A THEATER FOR A LIVE OVERVIEW · CLICK TO VIEW ITS OPERATION
-        </p>
-
-        <div className="map2-features seq" style={{ animationDelay: '.26s' }}>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c-5.5 5-5.5 12 0 17M12 3.5c5.5 5 5.5 12 0 17" /></svg>
-            <span><b>TWO THEATERS</b><em>UNIQUE ENVIRONMENTS</em></span>
-          </div>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="8.5" cy="8" r="3" /><circle cx="16" cy="9.5" r="2.4" /><path d="M3 20c0-3.3 2.5-5.5 5.5-5.5S14 16.7 14 20M15 14.7c2.8.2 5 2.2 5 5.3" /></svg>
-            <span><b>DIFFERENT THREATS</b><em>REAL OPERATIONS</em></span>
-          </div>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" strokeLinejoin="round"><path d="M3 19L10 6l4 7 2.5-4L21 19z" /><path d="M10 6l-2 3.5M12.5 13L11 15.5" /></svg>
-            <span><b>PROVE YOURSELF</b><em>COMPLETE ALL OBJECTIVES</em></span>
-          </div>
-        </div>
-
-        <footer className="map2-foot mono">
-          <span>RECOIL&nbsp;&nbsp;//&nbsp;&nbsp;FIELD NOTES&nbsp;&nbsp;//&nbsp;&nbsp;SURVIVE ADAPT WIN</span>
-          <span className="map2-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
-        </footer>
       </main>
     );
   }

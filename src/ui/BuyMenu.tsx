@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DefusalHud } from '../game/defusal/mode';
 import {
-  SHOP, SHOP_CATEGORIES, buy as simulateBuy, canBuy, inventoryValue, itemPrice, shopItem,
+  SHOP, SHOP_CATEGORIES, buy as simulateBuy, canBuy, fieldAttachmentOffers, inventoryValue, itemPrice, shopItem,
   type Inventory, type ShopCategory, type ShopItem,
 } from '../game/defusal/shop';
 import { KILL_REWARD, type Side } from '../game/defusal/rules';
@@ -19,6 +19,10 @@ const GEAR_ICON: Record<string, string> = {
   frag: 'M9 2.5h6v3.4H9zM7 9.5h10V15a5 5 0 0 1-10 0z',
   flash: 'M8 3h8v4H8zM7 8h10v12H7zM10 11h4',
   smoke: 'M8 3h8v3H8zM7 7h10v13H7zM4 12c-2 0-2 3 0 3M20 12c2 0 2 3 0 3',
+  optic: 'M4 12h5M15 12h5M12 4v5M12 15v5M8 8h8v8H8z',
+  muzzle: 'M4 9h9v6H4zM13 7h5v10h-5',
+  magazine: 'M8 4h7l1 14H7zM10 7h4M9 11h6',
+  underbarrel: 'M6 7h12M8 10h8l-1 8H9z',
 };
 
 /** Best package for the bank: rifle, armor, kit, utility — the CS "rebuy" in one key. */
@@ -48,7 +52,7 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
 }) {
   const side = df.side;
   const inv = df.inv;
-  const [cat, setCat] = useState<ShopCategory>(() => (inv.primary ? 'grenades' : inv.money >= 3350 ? 'rifles' : inv.money >= 1250 ? 'smgs' : 'pistols'));
+  const [cat, setCat] = useState<ShopCategory>(() => (inv.primary ? 'attachments' : inv.money >= 3350 ? 'rifles' : inv.money >= 1250 ? 'smgs' : 'pistols'));
   const [step, setStep] = useState<'cat' | 'item'>('cat');
   const [toast, setToast] = useState<{ text: string; bad: boolean; key: number } | null>(null);
   const [thumbs, setThumbs] = useState<Partial<Record<WeaponId, string>>>({});
@@ -74,9 +78,10 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const items = useMemo(() => SHOP.filter(i => i.category === cat), [cat]);
+  const items = useMemo(() => (cat === 'attachments' ? fieldAttachmentOffers(inv) : SHOP.filter(i => i.category === cat)), [cat, inv]);
   const doBuy = useCallback((item: ShopItem) => {
     const r = onBuy(item.id);
+    if (r.ok && item.kind === 'primary') setCat('attachments');
     setToast({ text: r.ok ? `${item.name} purchased` : r.reason ?? 'Cannot buy', bad: !r.ok, key: Date.now() + Math.random() });
   }, [onBuy]);
   const autoBuy = useCallback(() => {
@@ -110,13 +115,13 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
     return () => window.removeEventListener('keydown', onKey);
   }, [df.buyOpen, step, items, doBuy, autoBuy, onClose]);
 
-  const nades = [inv.frags && `FRAG ×${inv.frags}`, inv.flashes && `FLASH ×${inv.flashes}`, inv.smokes && `SMOKE ×${inv.smokes}`].filter(Boolean).join(' · ') || '—';
+  const nades = [inv.frags && `Frag ×${inv.frags}`, inv.flashes && `Flash ×${inv.flashes}`, inv.smokes && `Smoke ×${inv.smokes}`].filter(Boolean).join(' · ') || '—';
   return (
     <div className="buy-root" role="dialog" aria-modal="true" aria-label="Buy menu" onContextMenu={e => e.preventDefault()}>
       <div className="buy-panel anim-rise">
         <header className="buy-head">
-          <span className="buy-title">BUY MENU</span>
-          <span className={`buy-side ${side}`}>{side === 'attack' ? 'ATTACK' : 'DEFEND'} · ROUND {df.round}</span>
+          <span className="buy-title">Buy menu</span>
+          <span className={`buy-side ${side}`}>{side === 'attack' ? 'Attack' : 'Defend'} · Round {df.round}</span>
           <span className="buy-money mono tabular">${df.money.toLocaleString('en-US')}</span>
           <span className="buy-time mono tabular" title="Buy time left">◷ {Math.ceil(df.buyTimeLeft)}s</span>
           <button type="button" className="buy-close" onClick={() => onClose(true)} aria-label="Close buy menu">✕</button>
@@ -149,13 +154,13 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
                   <span className="buy-art">
                     {item.weapon
                       ? (thumbs[item.weapon] ? <img src={thumbs[item.weapon]} alt="" draggable={false} /> : <i className="buy-art-wait" />)
-                      : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={GEAR_ICON[item.id] ?? GEAR_ICON.kevlar} /></svg>}
+                      : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={GEAR_ICON[item.id] ?? (item.slot ? GEAR_ICON[item.slot] : undefined) ?? GEAR_ICON.kevlar} /></svg>}
                   </span>
-                  <span className="buy-name">{item.name}{yours && <em className="buy-yours">YOUR BUILD</em>}</span>
+                  <span className="buy-name">{item.name}{yours && <em className="buy-yours">Your build</em>}</span>
                   <span className="buy-tag">{item.tag}</span>
                   <span className="buy-foot">
                     <b className="mono tabular">${price.toLocaleString('en-US')}</b>
-                    {reward > 0 && <i className="mono">${reward} / KILL</i>}
+                    {reward > 0 && <i className="mono">${reward} / kill</i>}
                     {!check.ok && <u>{check.reason}</u>}
                   </span>
                 </button>
@@ -163,29 +168,29 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
             })}
           </div>
           <aside className="buy-loadout">
-            <span className="buy-k">YOUR ROUND LOADOUT</span>
-            <div><span>PRIMARY</span><b>{inv.primary ? shopItem(inv.primary)?.name : '—'}</b></div>
-            <div><span>SIDEARM</span><b>{shopItem(inv.secondary)?.name ?? inv.secondary}</b></div>
-            <div><span>ARMOR</span><b>{inv.armor === 2 ? 'Kevlar + helmet' : inv.armor ? 'Kevlar' : 'None'}</b></div>
-            {side === 'defend' && <div><span>DEFUSE KIT</span><b>{inv.kit ? 'Yes · 5s defuse' : 'No · 10s defuse'}</b></div>}
-            <div><span>UTILITY</span><b>{nades}</b></div>
-            <div className="buy-value"><span>EQUIPMENT VALUE</span><b className="mono tabular">${inventoryValue(inv).toLocaleString('en-US')}</b></div>
-            <button type="button" className="buy-auto" onClick={autoBuy} disabled={!df.buyOpen}><b className="mono">A</b> AUTO-BUY <em>rifle · armor · {side === 'defend' ? 'kit · ' : ''}utility</em></button>
+            <span className="buy-k">Your round loadout</span>
+            <div><span>Primary</span><b>{inv.primary ? shopItem(inv.primary)?.name : '—'}</b></div>
+            <div><span>Sidearm</span><b>{shopItem(inv.secondary)?.name ?? inv.secondary}</b></div>
+            <div><span>Armor</span><b>{inv.armor === 2 ? 'Kevlar + helmet' : inv.armor ? 'Kevlar' : 'None'}</b></div>
+            {side === 'defend' && <div><span>Defuse kit</span><b>{inv.kit ? 'Yes · 5s defuse' : 'No · 10s defuse'}</b></div>}
+            <div><span>Utility</span><b>{nades}</b></div>
+            <div className="buy-value"><span>Equipment value</span><b className="mono tabular">${inventoryValue(inv).toLocaleString('en-US')}</b></div>
+            <button type="button" className="buy-auto" onClick={autoBuy} disabled={!df.buyOpen}><b className="mono">A</b> Auto-buy <em>rifle · armor · {side === 'defend' ? 'kit · ' : ''}utility</em></button>
             <p className="buy-note">Survive the round and you keep everything. Die and you respawn with a 1911.</p>
           </aside>
         </div>
         <footer className="buy-foot-keys mono">
-          <span><b className="keycap">B</b> CLOSE</span>
-          <span><b className="keycap">1-6</b> CATEGORY</span>
-          <span><b className="keycap">1-9</b> BUY</span>
-          <span><b className="keycap">⌫</b> BACK</span>
-          <span><b className="keycap">A</b> AUTO-BUY</span>
-          <span><b className="keycap">ESC</b> PAUSE</span>
+          <span><b className="keycap">B</b> Close</span>
+          <span><b className="keycap">1-7</b> Category</span>
+          <span><b className="keycap">1-9</b> Buy</span>
+          <span><b className="keycap">⌫</b> Back</span>
+          <span><b className="keycap">A</b> Auto-buy</span>
+          <span><b className="keycap">Esc</b> Pause</span>
         </footer>
         {toast && <div key={toast.key} className={`buy-toast ${toast.bad ? 'bad' : ''}`}>{toast.text}</div>}
         {!df.buyOpen && (
           <div className="buy-over">
-            <b>BUY TIME IS OVER</b>
+            <b>Buy time is over</b>
             <button type="button" className="deploy-btn" onClick={() => onClose(true)}><span>Back to the fight</span></button>
           </div>
         )}

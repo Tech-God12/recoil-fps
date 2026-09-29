@@ -1220,6 +1220,25 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for (const [px2, pz2] of [[-8, 24], [9, -23], [-30, 24.5], [30, -24.5]] as const)
       dressing(new THREE.BoxGeometry(1.3, 0.13, 0.9), timber, px2, 0.075, pz2, 0, (px2 + pz2) % 1.2);
 
+    // A6 · readable yard silhouettes. These are deliberately larger than litter
+    // so the yards no longer read as blank slabs from above, but they sit off the
+    // main lanes and mirror 180° for competitive fairness.
+    const palletStack = (x: number, z: number, hot: boolean) => {
+      const mat = hot ? ACC_TERRA : ACC_TURQ;
+      box(x, 0.32, z, 2.4, 0.64, 1.5, timber);
+      box(x + 0.15, 0.92, z - 0.08, 2.1, 0.52, 1.25, mat);
+      dressing(new THREE.BoxGeometry(2.5, 0.06, 1.58), METAL, x, 1.2, z);
+      cover(x + 1.8, z); cover(x - 1.8, z);
+    };
+    const pipeRack = (x: number, z: number, rz: number) => {
+      dressing(new THREE.BoxGeometry(4.5, 0.12, 0.18), METAL, x, 1.05, z, 0, 0, rz);
+      dressing(new THREE.BoxGeometry(4.5, 0.12, 0.18), METAL, x, 1.55, z, 0, 0, rz);
+      for (const off of [-1.7, 0, 1.7]) dressing(new THREE.CylinderGeometry(0.09, 0.09, 4.0, 8), rusted, x + Math.cos(rz) * off, 0.64, z + Math.sin(rz) * off, Math.PI / 2, 0, rz);
+    };
+    palletStack(-33, 25, false); palletStack(33, -25, true);
+    palletStack(-18, -6, true); palletStack(18, 6, false);
+    pipeRack(-43, 10, Math.PI / 2); pipeRack(43, -10, Math.PI / 2);
+
     // ---- A7 · faded forklift arrows into mid + tire skids at the corners ----
     const arrowTex = canvasTexture(128, (ctx, s) => {
       ctx.clearRect(0, 0, s, s);
@@ -1495,6 +1514,30 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     for(const [x,z,w,d] of [[-95,85,12,12],[-73,91,11,10],[-93,52,11,13],[-95,-70,12,12],[-77,-88,12,12],[-49,-91,13,11],[45,-96,10,12],[93,-83,12,13],[99,-5,10,14],[85,18,12,10],[62,94,13,10],[20,80,10,10],[-18,57,10,12]] as const) {
       house(x,z,w,d,{wallMat: z < 0 ? earth : brick,door: x < 0 ? 'east' : 'west'});
     }
+    // The Kasbah needed density, not another pile of crammed houses. Add open
+    // worked courtyards and gardens: broad readable shapes from the air, low cover
+    // at eye level, and clear walkable gaps on every road.
+    const lowWall = (x: number, z: number, w: number, d: number) => { box(x, 0.42, z, w, 0.84, d, stone); cover(x, z); };
+    const orchard = (cx: number, cz: number, w: number, d: number) => {
+      ground(cx, cz, w, d, M.dirtPath ?? earth, 0.031);
+      // Broken knee walls suggest a courtyard without sealing nav cells or
+      // boxing in insertion points.
+      lowWall(cx - w * 0.28, cz - d / 2, w * 0.34, 0.45); lowWall(cx + w * 0.28, cz - d / 2, w * 0.34, 0.45);
+      lowWall(cx - w * 0.28, cz + d / 2, w * 0.34, 0.45); lowWall(cx + w * 0.28, cz + d / 2, w * 0.34, 0.45);
+      for (let ix = -1; ix <= 1; ix++) for (let iz = -1; iz <= 1; iz++) palm(cx + ix * w * 0.24, cz + iz * d * 0.22, 0.75);
+    };
+    orchard(36, 68, 18, 12);
+    orchard(-31, 82, 22, 14);
+    const reedYard = (cx: number, cz: number) => {
+      ground(cx, cz, 26, 14, M.dirtPath ?? earth, 0.028);
+      for (const x of [-9, -3, 3, 9]) {
+        box(cx + x, 0.62, cz, 0.12, 1.2, 11, timber, false);
+        shape(new THREE.PlaneGeometry(3.2, 1.25), FABRIC[(Math.abs(x) / 3) % FABRIC.length | 0], cx + x, 1.55, cz, 0.15, 0.05, 0);
+      }
+      sandbags(cx - 13, cz + 6); sandbags(cx + 13, cz - 6);
+    };
+    reedYard(-16, -64);
+    reedYard(48, -74);
     box(-14.7,0.98,61.6,0.58,0.16,0.38,METAL,false);
     box(-14.7,1.065,61.6,0.4,0.015,0.25,ACC_TURQ,false);
     // Roads are authored switchbacks, not concentric circular decals with square radar bounds.

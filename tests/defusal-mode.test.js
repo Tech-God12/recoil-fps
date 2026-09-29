@@ -25,13 +25,14 @@ const { buildWorld } = await import('../src/game/world.ts');
 const { Engine } = await import('../src/game/engine.ts');
 const { DefusalMode } = await import('../src/game/defusal/mode.ts');
 const { TIMING, roundPayout } = await import('../src/game/defusal/rules.ts');
+const { SITES } = await import('../src/game/maps/sirocco.ts');
 const keys = ['sand', 'plaza', 'adobeWall', 'adobeWall2', 'adobeBrick', 'concrete', 'asphalt', 'wood', 'rustedMetal', 'sandbag', 'tileFloor', 'plaster', 'whitewash', 'stoneBlock', 'firedBrick', 'packedEarth', 'corrugatedMetal', 'roughTimber', 'terracePavers', 'cobbleLane', 'wadiBed', 'signage'];
 const world = buildWorld(new THREE.Scene(), 'sirocco', Object.fromEntries(keys.map(k => [k, new THREE.MeshStandardMaterial()])));
 const phys = { world, solidGrid: new Map(), scratch: [], GRID_CELL: 4 };
 phys.nearSolids = Engine.prototype.nearSolids.bind(phys);
 Engine.prototype.buildSolidGrid.call(phys);
 
-function makeMode(side, seed = 11) {
+function makeMode(side, seed = 11, difficulty = 'Normal') {
   let s = seed;
   const rng = () => { s = (s * 1664525 + 1013904223) % 4294967296; return s / 4294967296; };
   const player = { pos: new THREE.Vector3(0, 0, 35), alive: true, hp: 100 };
@@ -51,7 +52,7 @@ function makeMode(side, seed = 11) {
     equipPlayer: () => {}, bombDetonated: () => {},
     onFeed: (k, w, v) => feed.push(`${k}>${w}>${v}`), onRadio: () => {}, onCallout: () => {}, announce: () => {},
     onMoney: () => {}, earnWallet: () => {}, onMatchEnd: () => {},
-  }, { side, format: 'short', difficulty: 'Normal' }, rng);
+  }, { side, format: 'short', difficulty }, rng);
   /** Simulate ~`sec` seconds in fixed 1/30 s ticks; returns the time actually simulated. */
   const step = (sec, dt = 1 / 30) => {
     const n = Math.max(1, Math.round(sec / dt));
@@ -145,4 +146,109 @@ test('halftime: sides swap, everyone restarts on $800 with a 1911, and bots chan
     if (c.bot) assert.equal(c.modelSide, mode.sideOf(c), `${c.name} wears the new side colours`);
   }
   assert.equal(mode.match.score.alpha, 6);
+});
+
+test('attack plans create measurably different lane goals and execute utility', () => {
+  const { mode, step } = makeMode('defend', 41);
+  step(TIMING.freeze + 0.1);
+  const attackers = mode.players.filter(c => c.bot && mode.sideOf(c) === 'attack').map(c => c.bot);
+  assert.ok(attackers.length >= 5);
+
+  mode.attack = { site: 'A', style: 'rush' };
+  mode.assignAttack(false);
+  const rush = attackers.map(b => mode.plans.get(b));
+  assert.equal(new Set(rush.map(p => p.lane)).size, 1, 'rush sends the team through one lane');
+  assert.ok(rush.every(p => p.speed > 5 && p.stageLeft < 0), 'rush skips staging and runs faster');
+
+  mode.attack = { site: 'A', style: 'split' };
+  mode.assignAttack(false);
+  const split = attackers.map(b => mode.plans.get(b));
+  assert.ok(new Set(split.map(p => p.lane)).size >= 2, 'split uses at least two lanes');
+  const stageXs = split.map(p => (p.route[Math.max(0, p.stageLeft)] ?? p.route.at(-1))[0]);
+  assert.ok(Math.max(...stageXs) - Math.min(...stageXs) > 20, 'split staging points are spatially separated');
+
+  const thrown = [];
+  const oldThrow = mode.ctx.throwGrenade;
+  mode.ctx.throwGrenade = (from, target, owner, kind) => { thrown.push({ from, target, owner, kind }); oldThrow.call(mode.ctx, from, target, owner, kind); };
+  for (const c of mode.players.filter(c => c.bot && mode.sideOf(c) === 'attack')) c.inv = { ...c.inv, smokes: 1 };
+  mode.attack = { site: 'A', style: 'exec' };
+  mode.assignAttack(false);
+  mode.startExecute();
+  assert.ok(thrown.some(g => g.kind === 'smoke'), 'execute plans spend authored smoke grenades');
+});
+
+
+test('post-plant attackers hold authored angles while defenders group before retaking', () => {
+  const { mode, step } = makeMode('defend', 57);
+  step(TIMING.freeze + 0.1);
+  const planter = aliveOn(mode, 'attack').find(c => c.bot);
+  mode.giveBomb(planter);
+  mode.plantBomb(planter, new THREE.Vector3(-29, 0, -32.6));
+
+  const postKeys = new Set(SITES.A.postPlant.map(p => p.at.join(',')));
+  const attackerPlans = mode.players.filter(c => c.bot && mode.sideOf(c) === 'attack' && c.alive).map(c => mode.plans.get(c.bot));
+  assert.ok(attackerPlans.length > 0);
+  assert.ok(attackerPlans.every(p => p.task === 'hold' && p.anchor && p.hold && postKeys.has(p.hold.at.join(','))), 'attackers take post-plant posts instead of re-peeking site centre');
+
+  const defenders = mode.players.filter(c => c.bot && mode.sideOf(c) === 'defend' && c.alive).map(c => c.bot);
+  const defenderPlans = defenders.map(b => mode.plans.get(b));
+  assert.ok(defenderPlans.every(p => p.task === 'retakeStage'), 'defenders first stage outside the site');
+  assert.ok(defenderPlans.every(p => p.task !== 'retake'), 'nobody trickles into the retake before the group is ready');
+
+  const need = Math.min(defenders.length, Math.max(2, Math.ceil(defenders.length * 0.75)));
+  defenders.slice(0, need - 1).forEach(b => {
+    const p = mode.plans.get(b);
+    b.pos.set(p.hold.at[0], 0, p.hold.at[1]);
+  });
+  mode.updatePlans();
+  assert.equal(defenders.filter(b => mode.plans.get(b).task === 'retake').length, 0, 'one short of the group still waits');
+  const thrown = [];
+  const oldThrow = mode.ctx.throwGrenade;
+  mode.ctx.throwGrenade = (from, target, owner, kind) => { thrown.push({ from, target, owner, kind }); oldThrow.call(mode.ctx, from, target, owner, kind); };
+  mode.players.filter(c => c.bot && mode.sideOf(c) === 'defend').forEach(c => { c.inv = { ...c.inv, smokes: 1 }; });
+  const p = mode.plans.get(defenders[need - 1]);
+  defenders[need - 1].pos.set(p.hold.at[0], 0, p.hold.at[1]);
+  mode.updatePlans();
+  assert.equal(defenders.filter(b => ['retake', 'defuse'].includes(mode.plans.get(b).task)).length, defenders.length, 'the retake starts for the whole group together');
+  assert.ok(thrown.some(g => g.kind === 'smoke' && g.target.distanceTo(new THREE.Vector3(SITES.A.retakeSmoke[0], 0, SITES.A.retakeSmoke[1])) < 0.01), 'retakes spend the authored site smoke');
+});
+
+test('defusal bots turn toward heard shots and footsteps instead of ignoring sound', () => {
+  const { mode, step } = makeMode('attack', 61);
+  step(TIMING.freeze + 0.1);
+  const defender = mode.players.find(c => c.bot && mode.sideOf(c) === 'defend' && c.alive);
+  const plan = mode.plans.get(defender.bot);
+  assert.ok(plan && plan.task === 'hold');
+  defender.bot.pos.set(plan.hold.at[0], 0, plan.hold.at[1]);
+  const sound = new THREE.Vector3(plan.hold.at[0] + 8, 0, plan.hold.at[1] + 4);
+  mode.notifyGunshot(sound, 20);
+  assert.ok(plan.lookAt && plan.lookAt.distanceTo(sound) < 0.01, 'gunfire/footstep noise becomes a temporary look target');
+  assert.ok(plan.lookT > mode.roundTime, 'the sound reaction has a real hold time');
+});
+
+
+test('bot target acquisition has a human delay and harder bots react faster', () => {
+  const oldRandom = Math.random;
+  Math.random = () => 0;
+  try {
+    const easy = makeMode('attack', 71, 'Easy');
+    const hard = makeMode('attack', 71, 'Hard');
+    const measure = ({ mode, step }) => {
+      step(TIMING.freeze + 0.1);
+      const defender = mode.players.find(c => c.bot && mode.sideOf(c) === 'defend' && c.alive).bot;
+      const attacker = mode.players.find(c => c.bot && mode.sideOf(c) === 'attack' && c.alive).bot;
+      defender.pos.set(0, 0, -10); defender.yaw = Math.PI; defender.model.group.rotation.y = Math.PI;
+      attacker.pos.set(0, 0, 0); attacker.model.group.position.copy(attacker.pos);
+      defender.losTimer = 0; defender.hadLOS = false; defender.reactionT = 0; defender.state = 'PATROL';
+      defender.updateLogic(0.1);
+      return defender.reactionT;
+    };
+    const easyT = measure(easy);
+    const hardT = measure(hard);
+    assert.ok(easyT > 0.3, `easy reaction ${easyT}`);
+    assert.ok(hardT > 0.15, `hard reaction ${hardT}`);
+    assert.ok(hardT < easyT, `hard ${hardT} should be faster than easy ${easyT}`);
+  } finally {
+    Math.random = oldRandom;
+  }
 });

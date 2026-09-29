@@ -3353,3 +3353,32 @@ span.arm2-thumb { display: inline-block; }
   .ar-cards { grid-template-columns: 1fr; }
   .ar-card { height: 180px; }
 }
+
+/* Missions — rebuilt as a calm operation picker. No numbers, coordinates or badges. */
+.msel-root { position: relative; overflow: hidden; display: grid; grid-template-rows: auto minmax(0,1fr) auto; gap: clamp(16px,2.4vw,28px); padding: clamp(22px,4vw,48px); color: var(--bone); }
+.msel-root .map2-base { opacity: 0.7; }
+.msel-head { position: relative; z-index: 2; display: flex; align-items: flex-start; gap: 18px; max-width: 920px; }
+.msel-head h1 { margin: 0; font: 800 clamp(42px,7vw,86px)/0.9 var(--display); letter-spacing: -0.035em; text-transform: none; }
+.msel-head p { margin: 12px 0 0; max-width: 48ch; color: var(--bone-dim); font: 400 clamp(14px,1.3vw,18px)/1.55 var(--body); }
+.msel-stage { position: relative; z-index: 2; min-height: 0; display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr); align-items: stretch; gap: clamp(18px,3vw,34px); }
+.msel-image { position: relative; min-height: 320px; border-radius: 28px; overflow: hidden; border: 1px solid rgba(237,228,211,0.12); background: rgba(14,12,10,0.38); box-shadow: 0 28px 80px rgba(0,0,0,0.42); }
+.msel-image img { width: 100%; height: 100%; object-fit: cover; filter: saturate(0.86) contrast(1.04); transform: scale(1.015); }
+.msel-image span { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(11,10,8,0.02), rgba(11,10,8,0.58)); }
+.msel-copy { align-self: center; max-width: 660px; padding: clamp(18px,2.8vw,34px); border-radius: 28px; background: linear-gradient(135deg, rgba(17,15,12,0.72), rgba(17,15,12,0.36)); border: 1px solid rgba(237,228,211,0.11); backdrop-filter: blur(14px); }
+.msel-copy h2 { margin: 0; font: 800 clamp(44px,8vw,96px)/0.86 var(--display); letter-spacing: -0.045em; text-transform: none; }
+.msel-copy p { margin: 18px 0 0; max-width: 46ch; color: var(--bone); font: 400 clamp(16px,1.5vw,20px)/1.5 var(--body); }
+.msel-flow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.msel-flow span { padding: 8px 12px; border-radius: 999px; color: var(--bone-dim); background: rgba(237,228,211,0.07); border: 1px solid rgba(237,228,211,0.1); font: 500 13px/1 var(--body); }
+.msel-list { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.msel-card { min-height: 96px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; border-radius: 20px; border: 1px solid rgba(237,228,211,0.12); background: rgba(18,16,13,0.62); color: var(--bone); text-align: left; transition: transform .22s cubic-bezier(.2,.8,.2,1), border-color .22s, background .22s; }
+.msel-card:hover,.msel-card:focus-visible,.msel-card.on { transform: translateY(-2px); border-color: rgba(255,77,0,0.58); background: rgba(38,24,17,0.72); outline: none; }
+.msel-card span { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.msel-card b { font: 800 28px/1 var(--display); letter-spacing: -0.015em; text-transform: none; }
+.msel-card em,.msel-card i { font-style: normal; color: var(--bone-dim); font: 400 13px/1.35 var(--body); }
+.msel-card svg { flex: none; color: var(--signal); }
+@media (max-width: 860px) {
+  .msel-root { overflow-y: auto; }
+  .msel-stage { grid-template-columns: 1fr; }
+  .msel-image { min-height: 220px; }
+  .msel-list { grid-template-columns: 1fr; }
+}

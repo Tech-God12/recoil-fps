@@ -109,6 +109,22 @@ test('the Arena screen is minimal: two cards, two choices, one Play', () => {
   assert.equal((html.match(/deploy-btn/g) ?? []).length, 1, 'exactly one Play button');
 });
 
+test('missions use a quiet operation selector, not the retired theater-card page', () => {
+  const html = renderToStaticMarkup(React.createElement(MainMenu, {
+    s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {}, initialView: 'maps',
+    defusal: { side: 'defend', format: 'long' }, onDefusal() {},
+  }));
+  for (const text of ['Operations', 'Choose where to deploy.', 'Kasbah', 'Sandblast', 'Fortified market town', 'Desert river valley', 'Continue']) {
+    assert.ok(html.includes(text), `operation selector shows ${text}`);
+  }
+  assert.match(html, /role="listbox" aria-label="Choose an operation"/);
+  assert.equal((html.match(/role="option"/g) ?? []).length, 2, 'one option per operation');
+  // Keep the old visual-information hierarchy from leaking back in under new paint.
+  for (const gone of ['THEATER SELECT', 'SELECT AREA OF OPERATIONS', 'FIELD BUILD', '32.4567° N', 'OPERATIONS COMMAND']) {
+    assert.ok(!html.includes(gone), `${gone} is absent from missions`);
+  }
+});
+
 test('the main menu no longer carries a Current Loadout panel', () => {
   const html = renderToStaticMarkup(React.createElement(MainMenu, {
     s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {},

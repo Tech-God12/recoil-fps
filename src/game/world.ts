@@ -1010,7 +1010,10 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       // Standing on a corrugated roof rings; standing beside it does not. Only the
       // TOP roof of a stack is walkable — the lower one has a container sitting on it.
       if (stack) {
-        const sxo = alongX ? 0.4 : 0, szo = alongX ? 0 : 0.4;
+        // Nudge a top box away from the aisle in a direction that survives the
+        // arena's 180-degree mirror, rather than offsetting every stack north.
+        const sxo = alongX ? (x >= 0 ? 0.4 : -0.4) : 0;
+        const szo = alongX ? 0 : (z >= 0 ? 0.4 : -0.4);
         box(x + sxo, 3.9, z + szo, w, 2.6, d, rusted);
         metalDecks.push({ minX: x + sxo - w / 2, maxX: x + sxo + w / 2, minY: 5.1, maxY: 7.4, minZ: z + szo - d / 2, maxZ: z + szo + d / 2 });
       } else {
@@ -1029,6 +1032,14 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     // yards mirror each other exactly: double stack north, single south (and vice versa)
     container(-30, -13, 0, containerMat(-30, -13), true); container(-30, 13, 0, containerMat(-30, 13));
     container(30, 13, 0, containerMat(30, 13), true); container(30, -13, 0, containerMat(30, -13));
+    // A short perimeter row finishes both yards without turning either flank into
+    // a maze. The pair is rotated together so every long sightline has a fair twin.
+    container(-42, -24, Math.PI / 2, containerMat(-42, -24)); container(42, 24, Math.PI / 2, containerMat(42, 24));
+    container(-42, 24, Math.PI / 2, containerMat(-42, 24)); container(42, -24, Math.PI / 2, containerMat(42, -24));
+    // A second row turns the exterior into a credible container yard, with a
+    // stacked anchor on opposite corners and generous walk-through lanes between.
+    container(-40, -13, 0, containerMat(-40, -13), true); container(40, 13, 0, containerMat(40, 13), true);
+    container(-40, 13, 0, containerMat(-40, 13)); container(40, -13, 0, containerMat(40, -13));
     // climbable container at each yard's outer edge — stairs land level with the
     // top. dir=+1 climbs from the south (alpha), dir=-1 from the north (bravo),
     // keeping the 180-degree symmetry honest.
@@ -1594,6 +1605,13 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       }
     }
     kiln(77,77); overlook('Potters terrace',40,75,2.5,16,12,brick);
+    // The east road ends at a real pottery hamlet rather than an empty boundary
+    // apron: two homes and a paved forecourt make the distant aerial silhouette
+    // legible while keeping the combat core open and the insertion lanes clear.
+    paved(103,78,38,27,pavers);
+    house(96,71,10,12,{wallMat:brick,door:'south'});
+    house(112,84,12,11,{floors:2,wallMat:brick,door:'west'});
+    sandbags(102,91); palm(119,70,0.8);
     // Extraction tunnel, 25m of overhead cover, gate towers and open wooden leaves.
     box(-96,2.6,-5.5,27,5.2,1.4,stone);box(-96,2.6,5.5,27,5.2,1.4,stone);
     box(-96,5.3,0,27,0.5,12,stone);

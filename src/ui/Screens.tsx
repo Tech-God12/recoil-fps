@@ -21,7 +21,7 @@ import mapArena from '../assets/map-arena.jpg';
 import mapSirocco from '../assets/map-sirocco.jpg';
 import operatorArt from '../assets/operator.jpg';
 import menuCenter from '../assets/menu-center.jpg';
-import { TxBack, TxCoords } from './tactical';
+import { TxBack } from './tactical';
 import { menuStep } from './bindings';
 import MapFlyover from './MapFlyover';
 import { gunThumbnail } from './armory/GunViewer';
@@ -33,10 +33,10 @@ export const MAP_ART: Record<MapId, string> = { alrasul: mapAlrasul, kasbah: map
 /** Arena Mode → Bomb Defusal launch options (persisted by App). */
 export interface DefusalMenuOptions { side: 'attack' | 'defend' | 'random'; format: 'short' | 'long' }
 
-/* Theater cards: Town and Sandblast, the two live story operations. */
-const THEATERS: { num: string; code: string; id: MapId; type: string; art: string; lat: string; lon: string }[] = [
-  { num: '01', code: 'TOWN', id: 'kasbah', type: 'FORTIFIED MARKET TOWN', art: mapKasbah, lat: '32.4567° N', lon: '44.8335° E' },
-  { num: '02', code: 'SANDBLAST', id: 'alrasul', type: 'DESERT RIVER VALLEY', art: mapAlrasul, lat: '34.1975° N', lon: '41.4215° E' },
+/** Story operations. The select screen intentionally says enough without a dossier wall. */
+const OPERATIONS: { id: MapId; name: string; setting: string; line: string; art: string }[] = [
+  { id: 'kasbah', name: 'Kasbah', setting: 'Fortified market town', line: 'Thread the alleys, break the blockade and get your team out.', art: mapKasbah },
+  { id: 'alrasul', name: 'Sandblast', setting: 'Desert river valley', line: 'Push through the wadi and hold the crossing before the convoy arrives.', art: mapAlrasul },
 ];
 
 export interface Results {
@@ -264,9 +264,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
 
 /* ================================================================
    ARENA MODE — two 5v5 modes. Hovering a card turns the whole screen into a
-   live 3D orbit of that arena (same MapFlyover tech as theater select).
-     01 WAREHOUSE · Team Deathmatch (respawns, 2:30)
-     02 SIROCCO   · Bomb Defusal (CS2-style rounds, economy, plant/defuse)
+   live 3D orbit of that arena.
    ================================================================ */
 /** A labelled row. One word on the left, the control on the right. */
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -409,13 +407,7 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
 }
 
 /* ================================================================
-   MAIN MENU — three screens:
-   HOME     · title left, stacked menu (Missions / Arena / Loadout / Settings),
-              operator character art on the right.
-   MAPS     · pick the AO — hovering a tile turns the WHOLE screen into a
-              live 3D orbit of that arena.
-   MISSIONS · the selected map's operation with its objective card list,
-              then Deploy → loading screen → straight into the game.
+   MAIN MENU — home, operation selection, operation briefing and arena setup.
    ================================================================ */
 const PHASE_VERB: Record<string, string> = {
   advance: 'Advance', clear: 'Clear', destroy: 'Destroy', hold: 'Hold', defend: 'Defend', extract: 'Extract',
@@ -423,36 +415,34 @@ const PHASE_VERB: Record<string, string> = {
 
 export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetup, onAbilities, initialView, profile, defusal, onDefusal }: {
   s: GameSettings; onDeploy: (map?: GameSettings['map']) => void; onSettings: () => void; onMap: (map: GameSettings['map']) => void;
-  onArmory?: () => void; onArenaSetup?: () => void; onAbilities?: () => void; initialView?: 'home' | 'arena'; profile?: PlayerProfile;
+  onArmory?: () => void; onArenaSetup?: () => void; onAbilities?: () => void; initialView?: 'home' | 'maps' | 'arena'; profile?: PlayerProfile;
   defusal?: DefusalMenuOptions; onDefusal?: (o: DefusalMenuOptions) => void;
 }) {
   const prof = profile ?? DEFAULT_PROFILE;
   const primaryName = weaponById(prof.loadout.primary.weapon)?.short ?? '—';
   const secondaryName = weaponById(prof.loadout.secondary.weapon)?.short ?? '—';
   const [view, setView] = useState<'home' | 'maps' | 'missions' | 'arena'>(initialView ?? 'home');
-  const [hovered, setHovered] = useState<MapId | null>(null);
-  const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [selectedOperation, setSelectedOperation] = useState<MapId>(() => isMissionMap(s.map) ? s.map : 'kasbah');
+  const operationRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const focusIdxRef = useRef(0);
-  // Theater keyboard: arrows/A-D hop between cards (focus drives the live
-  // overview), native Enter/Space on the focused card deploys to its operation.
+  // Arrow keys mirror the calm segmented controls used elsewhere: choose an
+  // operation, then activate the one clear continuation action.
   useEffect(() => {
     if (view !== 'maps') return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      if (e.code === 'ArrowRight' || e.code === 'ArrowDown' || e.code === 'KeyD') {
         e.preventDefault();
-        focusIdxRef.current = (focusIdxRef.current + 1) % THEATERS.length;
-        cardRefs.current[focusIdxRef.current]?.focus();
-      } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        focusIdxRef.current = (focusIdxRef.current + 1) % OPERATIONS.length;
+        operationRefs.current[focusIdxRef.current]?.focus();
+      } else if (e.code === 'ArrowLeft' || e.code === 'ArrowUp' || e.code === 'KeyA') {
         e.preventDefault();
-        focusIdxRef.current = (focusIdxRef.current + THEATERS.length - 1) % THEATERS.length;
-        cardRefs.current[focusIdxRef.current]?.focus();
+        focusIdxRef.current = (focusIdxRef.current + OPERATIONS.length - 1) % OPERATIONS.length;
+        operationRefs.current[focusIdxRef.current]?.focus();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [view]);
-  // Missions cover the story maps only — the arena lives under Arena Mode.
-  const mapOrder = MAPS.filter(m => isMissionMap(m.id)).sort(a => (a.id === 'kasbah' ? -1 : 1));
 
   /* ---------------- HOME ---------------- */
   if (view === 'home') {
@@ -468,106 +458,70 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
     );
   }
 
-  /* ---------------- MAPS — THEATER SELECT ---------------- */
+  /* ---------------- MISSIONS — OPERATION SELECT ---------------- */
   if (view === 'maps') {
-    const activateTheater = (index: number) => {
-      const t = THEATERS[index];
-      onMap(t.id);
-      setHovered(null);
-      setView('missions');
-    };
-    const preview = (index: number, on: boolean) => {
-      const t = THEATERS[index];
-      setHovered(on ? t.id : cur => (cur === t.id ? null : cur));
-    };
+    const selected = OPERATIONS.find(operation => operation.id === selectedOperation) ?? OPERATIONS[0];
+    const selectedMission = getMission(selected.id);
+    const continueToBrief = () => { onMap(selected.id); setView('missions'); };
     return (
-      <main className="tx-root map2-root">
-        <div className="map2-base" aria-hidden="true" />
-        {/* Hovering a live theater takes over the screen with a 3D orbit. */}
-        <div className={`map2-flyover ${hovered ? 'live' : ''}`} aria-hidden="true">
-          {mapOrder.map(map => (
-            <div key={map.id} className="map2-flyover-slot" style={{ opacity: hovered === map.id ? 1 : 0 }}>
-              <MapFlyover mapId={map.id} active={hovered === map.id} />
-            </div>
-          ))}
-        </div>
-        <div className="tx-grain" aria-hidden="true" />
-
-        <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
+      <main className="op-root">
+        <div className="op-wash" aria-hidden="true" />
+        <div className="op-grain" aria-hidden="true" />
+        <header className="op-head seq" style={{ animationDelay: '.02s' }}>
           <TxBack onClick={() => setView('home')} />
-          <div className="map2-titleblock">
-            <span className="map2-kicker">OPERATIONS COMMAND<br />THEATER SELECT</span>
-            <h1 className="map2-title">SELECT AREA OF OPERATIONS</h1>
-            <span className="map2-sub">DEPLOY TO A THEATER.</span>
-            <i className="tx-rule" aria-hidden="true" />
-          </div>
-          <TxCoords lat="33.7731° N" lon="44.4208° E" />
-          <div className="map2-brand">
-            <b>RECOIL</b>
-            <em>DESERT OPERATIONS&nbsp;&nbsp;//&nbsp;&nbsp;GLOBAL REACH</em>
-            <div className="map2-intel" aria-hidden="true">
-              <span>PEOPLE</span><span>TERRAIN</span><span>OBJECTIVES</span><span>RESULTS</span>
-            </div>
+          <div>
+            <h1>Operations</h1>
+            <p>Choose where to deploy.</p>
           </div>
         </header>
 
-        <div className="map2-cards" role="listbox" aria-label="Choose a theater">
-          {THEATERS.map((t, i) => {
-            const obj = getMission(t.id).phases.length;
-            const isLive = hovered === t.id;
-            return (
-              <button
-                key={t.code}
-                ref={node => { cardRefs.current[i] = node; }}
-                type="button"
-                role="option"
-                aria-selected={isLive}
-                disabled={false}
-                onClick={() => activateTheater(i)}
-                onMouseEnter={() => preview(i, true)}
-                onMouseLeave={() => preview(i, false)}
-                onFocus={() => { focusIdxRef.current = i; preview(i, true); }}
-                onBlur={() => preview(i, false)}
-                className={`map2-card seq ${isLive ? 'sel' : ''}`}
-                style={{ animationDelay: `${0.08 + i * 0.06}s` }}
-                aria-label={`${t.code} theater, ${obj} objectives`}
-              >
-                <img src={t.art} alt="" draggable={false} className="map2-art" />
-                <span className="map2-shade" aria-hidden="true" />
-                <span className="map2-num mono">{t.num}</span>
-                <span className="map2-cardcoords mono">{t.lat}<br />{t.lon}</span>
-                <span className="map2-info">
-                  <b>{t.code}</b>
-                  <em>{t.type}</em>
-                  <span className="map2-obj mono">{`${obj} OBJECTIVES · ${t.code}`}</span>
-                </span>
-                <span className="map2-go"><Arrow /></span>
-              </button>
-            );
-          })}
-        </div>
-        <p className="map2-hint mono" role="status">
-          HOVER A THEATER FOR A LIVE OVERVIEW · CLICK TO VIEW ITS OPERATION
-        </p>
+        <section className="op-layout">
+          <div className="op-list seq" style={{ animationDelay: '.07s' }} role="listbox" aria-label="Choose an operation">
+            {OPERATIONS.map((operation, i) => {
+              const active = operation.id === selected.id;
+              return (
+                <button
+                  key={operation.id}
+                  ref={node => { operationRefs.current[i] = node; }}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  className={`op-row${active ? ' on' : ''}`}
+                  onClick={() => setSelectedOperation(operation.id)}
+                  onDoubleClick={continueToBrief}
+                  onFocus={() => { focusIdxRef.current = i; setSelectedOperation(operation.id); }}
+                >
+                  <img src={operation.art} alt="" draggable={false} />
+                  <span>
+                    <b>{operation.name}</b>
+                    <em>{operation.setting}</em>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-        <div className="map2-features seq" style={{ animationDelay: '.26s' }}>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c-5.5 5-5.5 12 0 17M12 3.5c5.5 5 5.5 12 0 17" /></svg>
-            <span><b>TWO THEATERS</b><em>UNIQUE ENVIRONMENTS</em></span>
-          </div>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="8.5" cy="8" r="3" /><circle cx="16" cy="9.5" r="2.4" /><path d="M3 20c0-3.3 2.5-5.5 5.5-5.5S14 16.7 14 20M15 14.7c2.8.2 5 2.2 5 5.3" /></svg>
-            <span><b>DIFFERENT THREATS</b><em>REAL OPERATIONS</em></span>
-          </div>
-          <div className="map2-feat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" strokeLinejoin="round"><path d="M3 19L10 6l4 7 2.5-4L21 19z" /><path d="M10 6l-2 3.5M12.5 13L11 15.5" /></svg>
-            <span><b>PROVE YOURSELF</b><em>COMPLETE ALL OBJECTIVES</em></span>
-          </div>
-        </div>
+          <article className="op-feature seq" style={{ animationDelay: '.12s' }}>
+            <img src={selected.art} alt="" draggable={false} className="op-feature-art" />
+            <div className="op-feature-shade" aria-hidden="true" />
+            <div className="op-feature-copy">
+              <p>{selected.setting}</p>
+              <h2>{selected.name}</h2>
+              <span>{selected.line}</span>
+            </div>
+            <div className="op-objectives">
+              {selectedMission.phases.map(phase => (
+                <span key={phase.id}>{phase.title}</span>
+              ))}
+            </div>
+          </article>
+        </section>
 
-        <footer className="map2-foot mono">
-          <span>RECOIL&nbsp;&nbsp;//&nbsp;&nbsp;FIELD NOTES&nbsp;&nbsp;//&nbsp;&nbsp;SURVIVE ADAPT WIN</span>
-          <span className="map2-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
+        <footer className="op-foot seq" style={{ animationDelay: '.18s' }}>
+          <span>{selectedMission.phases.length} objectives</span>
+          <button type="button" className="deploy-btn" onClick={continueToBrief}>
+            <span>Continue</span><Arrow />
+          </button>
         </footer>
       </main>
     );

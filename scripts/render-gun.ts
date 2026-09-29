@@ -3,6 +3,7 @@
  *
  *   node --import ./tests/helpers/register-json.js scripts/render-gun.ts [id|all] [outDir]
  *   node --import ./tests/helpers/register-json.js scripts/render-gun.ts aug_a3 /tmp/out
+ *   node --import ./tests/helpers/register-json.js scripts/render-gun.ts m4a1 /tmp/out opt_reddot muz_suppressor
  *
  * Output lands in docs/renders/weapons/<id>-<view>.png by default.
  *
@@ -33,9 +34,13 @@ import path from 'node:path';
 import * as THREE from 'three';
 import { encodePNG, render, type ViewName } from './raster';
 import { WEAPON_BUILDERS } from '../src/game/models';
+import { applyBuild } from '../src/game/attachments';
+import { attachmentById, isCompatible, type AttachmentId, type AttachSlot, type WeaponId } from '../src/game/economy/catalog';
 
 const arg = process.argv[2] ?? 'all';
 const outDir = process.argv[3] ?? 'docs/renders/weapons';
+/** Optional attachment ids make the in-round buy build inspectable too. */
+const attachmentIds = process.argv.slice(4);
 fs.mkdirSync(outDir, { recursive: true });
 
 const ids = arg === 'all' ? Object.keys(WEAPON_BUILDERS) : [arg];
@@ -49,16 +54,36 @@ for (const id of ids) {
   const builder = (WEAPON_BUILDERS as Record<string, () => { group: THREE.Object3D; lArm?: THREE.Object3D }>)[id];
   if (!builder) { console.error(`unknown weapon: ${id}`); process.exitCode = 1; continue; }
   const model = builder();
+  const weapon = id as WeaponId;
+  const attachments: Partial<Record<AttachSlot, AttachmentId>> = {};
+  let invalidAttachment = false;
+  for (const attachmentId of attachmentIds) {
+    const attachment = attachmentById(attachmentId);
+    if (!attachment || !isCompatible(attachment, weapon) || attachments[attachment.slot]) {
+      invalidAttachment = true;
+      break;
+    }
+    attachments[attachment.slot] = attachment.id;
+  }
+  if (attachmentIds.length) {
+    if (invalidAttachment) {
+      console.error(`unknown, duplicate-slot, or incompatible attachment in: ${attachmentIds.join(', ')}`);
+      process.exitCode = 1;
+      continue;
+    }
+    applyBuild(model, { weapon, attachments });
+  }
 
   // The support arm is not part of the weapon and covers the very joints we want to
   // inspect, so it is hidden for these renders.
   model.group.traverse(o => { if (o.userData.arm) o.visible = false; });
 
+  const suffix = attachmentIds.length ? `-${attachmentIds.join('-')}` : '';
   for (const v of VIEWS) {
     const { rgba, width, height } = render(model.group, {
       width: 1400, height: 620, view: v.view, flip: v.flip, gridStep: 0.05,
     });
-    const file = path.join(outDir, `${id}-${v.name}.png`);
+    const file = path.join(outDir, `${id}${suffix}-${v.name}.png`);
     fs.writeFileSync(file, encodePNG(width, height, rgba));
     console.log(`${file}`);
   }

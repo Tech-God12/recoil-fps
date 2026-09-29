@@ -1,11 +1,10 @@
 // Recoil FPS — Bomb Defusal buy menu, inventory and ballistics (PURE DATA + logic).
-// Prices follow the CS2 price bands mapped onto RECOIL's ten armory guns. A gun the
-// player owns in the Armory is fielded with their own build (attachments + finish);
-// everything here is build-agnostic.
-import { weaponById, type WeaponId } from '../economy/catalog';
+// Prices follow the CS2 price bands mapped onto RECOIL's ten armory guns. Armory
+// builds remain intact, while field-bought attachments are a round-only overlay.
+import { attachmentById, attachmentsFor, isCompatible, weaponById, type AttachmentCatalogEntry, type AttachmentId, type AttachSlot, type WeaponId } from '../economy/catalog';
 import { ECONOMY, KILL_REWARD, clampMoney, type KillClass, type Side } from './rules';
 
-export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'gear' | 'grenades';
+export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'gear' | 'grenades' | 'upgrades';
 export type GrenadeKind = 'frag' | 'flash' | 'smoke';
 /** 0 = none, 1 = kevlar vest, 2 = kevlar + helmet. */
 export type ArmorTier = 0 | 1 | 2;
@@ -35,6 +34,7 @@ export const SHOP_CATEGORIES: { id: ShopCategory; label: string }[] = [
   { id: 'heavy', label: 'Heavy' },
   { id: 'gear', label: 'Gear' },
   { id: 'grenades', label: 'Grenades' },
+  { id: 'upgrades', label: 'Upgrades' },
 ];
 
 export const SHOP: ShopItem[] = [
@@ -63,10 +63,69 @@ export const HELMET_UPGRADE_PRICE = 350;
 
 export function shopItem(id: string): ShopItem | undefined { return SHOP.find(i => i.id === id); }
 
+/** A compact field counter: one sensible option for each practical primary slot. */
+export const FIELD_ATTACHMENT_SLOTS: AttachSlot[] = ['optic', 'muzzle', 'magazine', 'underbarrel'];
+const FIELD_SLOT_LABEL: Partial<Record<AttachSlot, string>> = {
+  optic: 'Optic', muzzle: 'Muzzle', magazine: 'Magazine', underbarrel: 'Grip',
+};
+export interface AttachmentOffer {
+  id: AttachmentId;
+  attachment: AttachmentCatalogEntry;
+  name: string;
+  slotLabel: string;
+  price: number;
+  tag: string;
+}
+
+/**
+ * The round shop intentionally exposes four choices, not the whole Armory wall.
+ * Every entry is selected from the canonical compatibility table, so an offer can
+ * always mount on the gun that is currently in the player's hands.
+ */
+export function attachmentOffers(inv: Inventory): AttachmentOffer[] {
+  if (!inv.primary) return [];
+  return FIELD_ATTACHMENT_SLOTS.flatMap(slot => {
+    const attachment = attachmentsFor(inv.primary!, slot)[0];
+    if (!attachment) return [];
+    return [{
+      id: attachment.id, attachment, name: attachment.name, price: attachment.price,
+      slotLabel: FIELD_SLOT_LABEL[slot] ?? slot,
+      tag: `${FIELD_SLOT_LABEL[slot] ?? slot} · ${attachment.desc}`,
+    }];
+  });
+}
+
+export function canBuyAttachment(inv: Inventory, id: string): BuyCheck {
+  const attachment = attachmentById(id);
+  if (!attachment || !inv.primary || !FIELD_ATTACHMENT_SLOTS.includes(attachment.slot) || !isCompatible(attachment, inv.primary)) {
+    return { ok: false, reason: 'Not compatible with this primary' };
+  }
+  if (inv.primaryAttachments[attachment.slot] === attachment.id) return { ok: false, reason: 'Equipped' };
+  if (inv.money < attachment.price) return { ok: false, reason: `Need $${attachment.price.toLocaleString('en-US')}` };
+  return { ok: true, price: attachment.price };
+}
+
+/** Replace one field slot at a time; the previous part is consumed for this round. */
+export function buyAttachment(inv: Inventory, id: string): { ok: boolean; inv: Inventory; reason?: string } {
+  const check = canBuyAttachment(inv, id);
+  if (!check.ok) return { ok: false, inv, reason: check.reason };
+  const attachment = attachmentById(id)!;
+  return {
+    ok: true,
+    inv: {
+      ...inv,
+      money: inv.money - check.price,
+      primaryAttachments: { ...inv.primaryAttachments, [attachment.slot]: attachment.id },
+    },
+  };
+}
+
 export interface Inventory {
   money: number;
   primary: WeaponId | null;
   secondary: WeaponId;
+  /** Round-only attachment choices. They overlay (rather than erase) an Armory build. */
+  primaryAttachments: Partial<Record<AttachSlot, AttachmentId>>;
   armor: ArmorTier;
   kit: boolean;
   frags: number;
@@ -75,7 +134,7 @@ export interface Inventory {
 }
 
 export function freshInventory(money: number = ECONOMY.start): Inventory {
-  return { money: clampMoney(money), primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0 };
+  return { money: clampMoney(money), primary: null, secondary: 'm1911', primaryAttachments: {}, armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0 };
 }
 
 /** Dead players lose their kit; money carries over. */
@@ -123,7 +182,11 @@ export function buy(inv: Inventory, id: string, side: Side): { ok: boolean; inv:
   const next: Inventory = { ...inv, money: inv.money - check.price };
   let replaced: WeaponId | null | undefined;
   switch (item.kind) {
-    case 'primary': replaced = inv.primary; next.primary = item.weapon!; break;
+    case 'primary':
+      replaced = inv.primary;
+      next.primary = item.weapon!;
+      next.primaryAttachments = {};
+      break;
     case 'secondary': replaced = inv.secondary; next.secondary = item.weapon!; break;
     case 'armor': next.armor = 1; break;
     case 'helmet': next.armor = 2; break;
@@ -137,6 +200,7 @@ export function buy(inv: Inventory, id: string, side: Side): { ok: boolean; inv:
 export function inventoryValue(inv: Inventory): number {
   let v = 0;
   if (inv.primary) v += shopItem(inv.primary)?.price ?? 0;
+  for (const id of Object.values(inv.primaryAttachments)) v += attachmentById(id)?.price ?? 0;
   if (inv.secondary !== 'm1911') v += shopItem(inv.secondary)?.price ?? 0;
   v += inv.armor === 2 ? 1000 : inv.armor === 1 ? 650 : 0;
   if (inv.kit) v += 400;

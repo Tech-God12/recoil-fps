@@ -143,6 +143,26 @@ test('arena: every steel deck sits on geometry the player can actually stand on'
   dispose(world);
 });
 
+test('arena: exterior container yards have mirrored, navigable cover density', () => {
+  const world = fixture('arena');
+  // Catwalks sit near the warehouse centre. Every remaining metal deck is a
+  // container roof, so this catches a return to the empty-yard blockout while
+  // proving both teams receive the same elevated choices.
+  const yardDecks = world.metalDecks.filter(deck => Math.abs((deck.minX + deck.maxX) / 2) > 20);
+  assert.ok(yardDecks.length >= 14, `expected a full pair of exterior container rows, got ${yardDecks.length} decks`);
+  for (const deck of yardDecks) {
+    const cx = (deck.minX + deck.maxX) / 2, cz = (deck.minZ + deck.maxZ) / 2;
+    const mirror = yardDecks.find(other => {
+      const ox = (other.minX + other.maxX) / 2, oz = (other.minZ + other.maxZ) / 2;
+      return Math.abs(ox + cx) < 0.05 && Math.abs(oz + cz) < 0.05 &&
+        Math.abs((other.maxX - other.minX) - (deck.maxX - deck.minX)) < 0.05 &&
+        Math.abs((other.maxZ - other.minZ) - (deck.maxZ - deck.minZ)) < 0.05;
+    });
+    assert.ok(mirror, `container deck at (${cx.toFixed(1)}, ${cz.toFixed(1)}) has no fair opposite-yard match`);
+  }
+  dispose(world);
+});
+
 test('arena: ground level is not steel', () => {
   const world = fixture('arena');
   const inside = (x, y, z, b) => x >= b.minX && x <= b.maxX && y >= b.minY && y <= b.maxY && z >= b.minZ && z <= b.maxZ;

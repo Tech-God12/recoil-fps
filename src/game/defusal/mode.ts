@@ -21,7 +21,7 @@ import {
   MatchState, TIMING, ECONOMY, roundPayout, pickMvp, combatScore, other,
   type MatchFormatId, type MatchTransition, type RoundEndReason, type RoundPhase, type RoundRecord, type Side, type TeamId,
 } from './rules';
-import { SHOP, afterDeath, freshInventory, grantMoney, inventoryValue, killRewardFor, shopItem, buy as shopBuy, type ArmorTier, type Inventory, type ShopItem } from './shop';
+import { SHOP, afterDeath, buyAttachment, freshInventory, grantMoney, inventoryValue, killRewardFor, shopItem, buy as shopBuy, type ArmorTier, type Inventory, type ShopItem } from './shop';
 import { ROLE_SHEET, pickAttackPlan, pickDefenseSetup, planPurchases, teamBuyCall, type AttackPlan, type AttackStyle, type BotRole, type BuyCall, type DefenseSetup } from './botplan';
 import {
   ATTACK_ROUTES, BUY_ZONES, CONTROL_SPOTS, DEFENSE_POSTS, DEFENSE_SETUPS, SITES, SPAWNS, SIROCCO_HALF,
@@ -724,6 +724,15 @@ export class DefusalMode implements BotSquad {
   canBuyNow(): boolean { return this.player.alive && this.match.buyOpen && this.inBuyZone; }
   buy(id: string): { ok: boolean; reason?: string } {
     if (!this.canBuyNow()) return { ok: false, reason: this.match.buyOpen ? 'Leave the buy zone? You are outside it' : 'Buy time is over' };
+    // Attachment ids intentionally share this one route with normal shop ids.
+    // They are a round-only overlay on the primary, never a persistent Armory buy.
+    if (!shopItem(id)) {
+      const upgrade = buyAttachment(this.player.inv, id);
+      if (!upgrade.ok) return { ok: false, reason: upgrade.reason };
+      this.player.inv = upgrade.inv;
+      this.ctx.equipPlayer(this.player.inv, 'primary');
+      return { ok: true };
+    }
     const r = shopBuy(this.player.inv, id, this.playerSide);
     if (!r.ok) return { ok: false, reason: r.reason };
     const item = shopItem(id)!;
@@ -794,10 +803,15 @@ export class DefusalMode implements BotSquad {
   }
   private teamBots(team: TeamId): TDMBot[] { return this.players.filter(c => c.team === team && c.bot && c.alive).map(c => c.bot!); }
 
-  /** Spectator candidates: living teammates first, then anyone alive. */
+  /**
+   * Spectator candidates: living teammates first, then anyone alive. `players`
+   * is the roster order, not a spatial sort, so target cycling never changes
+   * because two operators crossed paths or one updated a frame earlier.
+   */
   spectateList(): TDMBot[] {
-    const allies = this.teamBots('alpha');
-    return allies.length ? allies : this.teamBots('bravo');
+    const team = this.teamBots('alpha');
+    const list = team.length ? team : this.teamBots('bravo');
+    return [...list].sort((a, b) => this.players.indexOf(this.byBot(a)) - this.players.indexOf(this.byBot(b)));
   }
   combatantOf(bot: TDMBot): Combatant { return this.byBot(bot); }
 
@@ -807,27 +821,46 @@ export class DefusalMode implements BotSquad {
     return out;
   }
 
-  /** Bot gunfire: enemies holding an angle within earshot turn to face the fight. */
-  private hearGunfire(p: THREE.Vector3, team: TDMTeam) {
+  /**
+   * Share a sound with the opposing side without turning it into wall-hacks.
+   * A sound is soft intel: free bots investigate it, while planted defenders and
+   * anchors simply turn to cover its direction instead of abandoning their job.
+   */
+  private hearSound(pos: THREE.Vector3, source: TeamId, radius: number, linger: number) {
     for (const c of this.players) {
-      if (!c.bot || !c.alive || c.team === team || c.bot.seesEnemy()) continue;
-      if (c.bot.pos.distanceTo(p) > 26) continue;
+      if (!c.bot || !c.alive || c.team === source || c.bot.seesEnemy()) continue;
+      if (c.bot.pos.distanceTo(pos) > radius) continue;
+      c.bot.hearShot(pos);
       const plan = this.plans.get(c.bot);
-      if (plan && (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'retakeStage')) { plan.lookAt = p.clone(); plan.lookT = this.roundTime + 1.6; }
+      if (plan && (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'rotate' || plan.task === 'retakeStage' || plan.task === 'retake')) {
+        plan.lookAt = pos.clone();
+        plan.lookT = Math.max(plan.lookT, this.roundTime + linger);
+      }
     }
+  }
+
+  /** Bot gunfire is loud enough to be shared with nearby enemies. */
+  private hearGunfire(p: THREE.Vector3, team: TDMTeam) {
+    this.hearSound(p, team, 30, 1.6);
   }
 
   /** Player gunfire is heard by the hostile team. */
   notifyGunshot(pos: THREE.Vector3, radius: number) {
-    for (const c of this.players) {
-      if (!c.bot || !c.alive || c.team !== 'bravo') continue;
-      if (c.bot.pos.distanceTo(pos) <= radius) c.bot.hearShot(pos);
-    }
+    this.hearSound(pos, this.player.team, radius, 1.6);
     if (this.playerSide === 'attack') { const s = this.siteNear(pos, true); if (s) this.threat[s] += 0.35; }
-    for (const c of this.players) {
-      if (!c.bot || !c.alive || c.team !== 'bravo' || c.bot.seesEnemy() || c.bot.pos.distanceTo(pos) > Math.min(radius, 30)) continue;
-      const plan = this.plans.get(c.bot);
-      if (plan && (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'retakeStage')) { plan.lookAt = pos.clone(); plan.lookT = this.roundTime + 1.6; }
+  }
+
+  /**
+   * Footsteps carry less information than a gunshot but still matter: defenders
+   * close to a runner turn toward the sound and gain a small rotation read. A
+   * crouching player intentionally makes no reportable noise.
+   */
+  notifyFootstep(pos: THREE.Vector3, sprint: boolean) {
+    const radius = sprint ? 16 : 10;
+    this.hearSound(pos, this.player.team, radius, sprint ? 1.15 : 0.72);
+    if (this.playerSide === 'attack') {
+      const site = this.siteNear(pos, true);
+      if (site) this.threat[site] += sprint ? 0.12 : 0.055;
     }
   }
 
@@ -1481,6 +1514,25 @@ export class DefusalMode implements BotSquad {
   debugTask(bot: TDMBot): string {
     const p = this.plans.get(bot);
     return p ? `${p.task}${p.hold ? `→${p.hold.at[0].toFixed(0)},${p.hold.at[1].toFixed(0)}` : p.route[0] ? `→${p.route[0][0].toFixed(0)},${p.route[0][1].toFixed(0)}` : ''}` : 'none';
+  }
+
+  /** Snapshot used by the deterministic simulation tests and in-game diagnostics. */
+  debugAttackPlan(): Readonly<AttackPlan> { return { ...this.attack }; }
+  debugPlans(side: Side) {
+    return this.botsOn(side).map(bot => {
+      const plan = this.plans.get(bot);
+      return {
+        name: bot.name,
+        task: plan?.task ?? 'none',
+        lane: plan?.lane ?? null,
+        stageLeft: plan?.stageLeft ?? 0,
+        anchor: !!plan?.anchor,
+        position: [bot.pos.x, bot.pos.z] as Vec2,
+        route: plan?.route.map(p => [...p] as Vec2) ?? [],
+        hold: plan?.hold ? { at: [...plan.hold.at] as Vec2, face: [...plan.hold.face] as Vec2 } : null,
+        lookAt: plan?.lookAt ? [plan.lookAt.x, plan.lookAt.z] as Vec2 : null,
+      };
+    });
   }
 
   private mayChase(bot: TDMBot): boolean {

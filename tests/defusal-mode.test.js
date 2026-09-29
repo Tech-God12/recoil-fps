@@ -24,6 +24,7 @@ globalThis.AudioContext = inert;
 const { buildWorld } = await import('../src/game/world.ts');
 const { Engine } = await import('../src/game/engine.ts');
 const { DefusalMode } = await import('../src/game/defusal/mode.ts');
+const { SITES } = await import('../src/game/maps/sirocco.ts');
 const { TIMING, roundPayout } = await import('../src/game/defusal/rules.ts');
 const keys = ['sand', 'plaza', 'adobeWall', 'adobeWall2', 'adobeBrick', 'concrete', 'asphalt', 'wood', 'rustedMetal', 'sandbag', 'tileFloor', 'plaster', 'whitewash', 'stoneBlock', 'firedBrick', 'packedEarth', 'corrugatedMetal', 'roughTimber', 'terracePavers', 'cobbleLane', 'wadiBed', 'signage'];
 const world = buildWorld(new THREE.Scene(), 'sirocco', Object.fromEntries(keys.map(k => [k, new THREE.MeshStandardMaterial()])));
@@ -37,6 +38,7 @@ function makeMode(side, seed = 11) {
   const player = { pos: new THREE.Vector3(0, 0, 35), alive: true, hp: 100 };
   const feed = [];
   const pending = [];
+  const thrown = [];
   let mode = null;
   mode = new DefusalMode({
     scene: new THREE.Scene(), occluders: world.occluders, coverNodes: world.coverNodes, solids: world.solids, half: world.half,
@@ -45,7 +47,10 @@ function makeMode(side, seed = 11) {
     playerPos: () => new THREE.Vector3(player.pos.x, 1.62, player.pos.z), playerFeet: () => player.pos.clone(),
     playerAlive: () => player.alive, playerHp: () => player.hp, playerCanSee: () => false,
     damagePlayer: () => {},
-    throwGrenade: (_f, target, owner, kind) => pending.push({ kind, at: target.clone(), owner }),
+    throwGrenade: (_f, target, owner, kind) => {
+      const g = { kind, at: target.clone(), owner };
+      pending.push(g); thrown.push(g);
+    },
     onBotFire: () => {},
     spawnPlayer: at => { player.pos.copy(at); player.alive = true; player.hp = 100; },
     equipPlayer: () => {}, bombDetonated: () => {},
@@ -63,10 +68,22 @@ function makeMode(side, seed = 11) {
     }
     return n * dt;
   };
-  return { mode, player, feed, step };
+  return { mode, player, feed, thrown, step };
 }
 const aliveOn = (mode, side) => mode.players.filter(c => c.alive && mode.sideOf(c) === side);
 const killAll = (mode, side) => { for (const c of aliveOn(mode, side)) if (c.bot) { c.bot.takeDamage(999, false, 'player', false); mode.handleKill('player', c.bot, false, 'ak47'); } };
+
+/** Find a deterministic opening call without coupling a test to the PRNG's exact draw count. */
+function plannedMode(style) {
+  for (let seed = 1; seed < 300; seed++) {
+    const sim = makeMode('attack', seed);
+    if (sim.mode.debugAttackPlan().style === style) return sim;
+    sim.mode.dispose();
+  }
+  throw new Error(`No ${style} attack plan in deterministic seed range`);
+}
+
+const moved = (plans, start) => plans.reduce((sum, p) => sum + Math.hypot(p.position[0] - start.get(p.name)[0], p.position[1] - start.get(p.name)[1]), 0) / plans.length;
 
 test('a full bot round resolves inside the clock and pays CS2 money to both teams', () => {
   const { mode, step } = makeMode('attack');
@@ -125,6 +142,62 @@ test('with the bomb planted, killing every attacker does not end the round — d
   const took = t - started;
   assert.equal(defuser.inv.kit, false);
   assert.ok(Math.abs(took - TIMING.defuse) < 0.25, `kitless defuse took ${took.toFixed(2)}s, expected ${TIMING.defuse}s`);
+});
+
+test('attack styles drive distinct routes: rush commits one lane, split divides lanes, default holds map control', () => {
+  const rush = plannedMode('rush');
+  const split = plannedMode('split');
+  const def = plannedMode('default');
+  const rushPlan = rush.mode.debugPlans('attack');
+  const splitPlan = split.mode.debugPlans('attack');
+  const defaultPlan = def.mode.debugPlans('attack');
+  assert.ok(rushPlan.every(p => p.task === 'route' && p.lane === rushPlan[0].lane && p.stageLeft < 0), 'rush is a full-speed single-lane commitment');
+  assert.equal(new Set(splitPlan.map(p => p.lane)).size, 2, 'split sends attackers down two lanes');
+  assert.ok(defaultPlan.every(p => p.task === 'hold' && p.hold), 'default begins by taking map-control posts');
+
+  const starts = new Map(rushPlan.map(p => [p.name, p.position]));
+  rush.step(TIMING.freeze + 3.5);
+  const afterRush = rush.mode.debugPlans('attack');
+  assert.ok(moved(afterRush, starts) > 7, `rush bots actually travel their called lane (${moved(afterRush, starts).toFixed(1)} m average)`);
+
+  rush.mode.dispose(); split.mode.dispose(); def.mode.dispose();
+});
+
+test('plant converts attackers to post-plant holds and stages the whole retake before release', () => {
+  const { mode, step, thrown } = makeMode('attack', 47);
+  step(TIMING.freeze + 0.1);
+  const planter = aliveOn(mode, 'attack').find(c => c.bot);
+  const site = 'A';
+  const plant = SITES[site].plantSpots[0];
+  for (const c of aliveOn(mode, 'defend')) c.inv = { ...c.inv, smokes: 1 };
+  mode.giveBomb(planter);
+  planter.bot.pos.set(plant[0], 0, plant[1]);
+  mode.plantBomb(planter, new THREE.Vector3(plant[0], 0, plant[1]));
+
+  const posts = mode.debugPlans('attack');
+  const retake = mode.debugPlans('defend');
+  assert.ok(posts.every(p => p.task === 'hold' && p.anchor && p.hold), 'attackers stop re-peeking and occupy post-plant holds');
+  assert.ok(posts.every(p => SITES[site].postPlant.some(s => s.at[0] === p.hold.at[0] && s.at[1] === p.hold.at[1])), 'every post is authored for this site');
+  assert.ok(retake.every(p => p.task === 'retakeStage'), 'no defender is sent in alone before the regroup');
+
+  // Remove the attackers: the retake may safely release, and exactly one teammate
+  // spends an authored smoke before the group clears the site.
+  killAll(mode, 'attack');
+  step(8.2);
+  const smoke = thrown.find(g => g.kind === 'smoke' && g.at.distanceTo(new THREE.Vector3(SITES[site].retakeSmoke[0], 0, SITES[site].retakeSmoke[1])) < 0.1);
+  assert.ok(smoke, 'retake uses the authored entry smoke');
+});
+
+test('gunfire and footsteps turn nearby defenders using directional sound cues', () => {
+  const { mode } = makeMode('attack', 61);
+  const defender = mode.debugPlans('defend')[0];
+  const sound = new THREE.Vector3(defender.position[0] + 1, 0, defender.position[1] + 1);
+  mode.notifyFootstep(sound, true);
+  let heard = mode.debugPlans('defend').find(p => p.name === defender.name);
+  assert.deepEqual(heard.lookAt.map(n => Math.round(n)), [Math.round(sound.x), Math.round(sound.z)], 'a runner near an anchor is heard');
+  mode.notifyGunshot(sound, 30);
+  heard = mode.debugPlans('defend').find(p => p.name === defender.name);
+  assert.deepEqual(heard.lookAt.map(n => Math.round(n)), [Math.round(sound.x), Math.round(sound.z)], 'gunfire refreshes the same directional intel');
 });
 
 test('halftime: sides swap, everyone restarts on $800 with a 1911, and bots change colours', () => {

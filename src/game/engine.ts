@@ -514,6 +514,32 @@ export const VIEWMODEL_RIG = {
 } as const;
 
 /**
+ * Exact closed-form integration of a critically damped spring. It is stable for
+ * long frames and reaches the same state at 30 Hz and 144 Hz, unlike a fixed
+ * per-frame lerp. Kept exported so the spectator-camera contract is testable
+ * without a WebGL renderer.
+ */
+export function criticallyDampedSpring(position: THREE.Vector3, velocity: THREE.Vector3, target: THREE.Vector3, angularFrequency: number, dt: number) {
+  const t = Math.min(Math.max(dt, 0), 0.1);
+  const e = Math.exp(-angularFrequency * t);
+  const step = (p: number, v: number, goal: number) => {
+    const x = p - goal;
+    const a = (v + angularFrequency * x) * t;
+    return [goal + (x + a) * e, (v - angularFrequency * a) * e] as const;
+  };
+  const x = step(position.x, velocity.x, target.x);
+  const y = step(position.y, velocity.y, target.y);
+  const z = step(position.z, velocity.z, target.z);
+  position.set(x[0], y[0], z[0]);
+  velocity.set(x[1], y[1], z[1]);
+}
+
+const easeInOut = (t: number) => {
+  const x = THREE.MathUtils.clamp(t, 0, 1);
+  return x * x * (3 - 2 * x);
+};
+
+/**
  * Kill hitstop: freeze the sim for one-to-three frames on a direct gun kill.
  * 45 ms reads as punch, not a hitch (all shooters do 30–80 ms); explosions and
  * streak kills already shake the camera, so they skip it.
@@ -549,16 +575,31 @@ export class Engine {
   private isDefusal = false;
   private defusal: DefusalMode | null = null;
   private dfBuilds: Partial<Record<WeaponId, WeaponBuild>> = {};
-  private dfWeaponCache = new Map<WeaponId, WeaponDef>();
+  /** Cache by complete field build: round attachments may differ from Armory builds. */
+  private dfWeaponCache = new Map<string, WeaponDef>();
   private dfMagMemory = new Map<WeaponDef, number>();
   private dfLoadoutKey = '';
   private dfRosterVersion = -1;
   private dfSpectate = 0;
+  /** Stable bot identity keeps a death elsewhere from changing the viewed player. */
+  private dfSpectateId: number | null = null;
   private dfDeathCamT = 0;
   private dfDeathAt = new THREE.Vector3();
   private dfKiller: TDMBot | null = null;
   private dfCamPos = new THREE.Vector3();
+  private dfCamVel = new THREE.Vector3();
   private dfCamLook = new THREE.Vector3();
+  private dfCamLookFrom = new THREE.Vector3();
+  private dfCamPosFrom = new THREE.Vector3();
+  private dfCamWantPos = new THREE.Vector3();
+  private dfCamWantLook = new THREE.Vector3();
+  private dfCamRayDir = new THREE.Vector3();
+  private dfCamRot = new THREE.Quaternion();
+  private dfCamGoalRot = new THREE.Quaternion();
+  private dfCamAim = new THREE.Object3D();
+  private dfCamSubject: TDMBot | null = null;
+  private dfCamBlend = 1;
+  private dfCamClip = 2.5;
   private dfCamInit = false;
   private buyMenuOpen = false;
   // ---- momentum "ON FIRE" ----
@@ -3086,7 +3127,9 @@ export class Engine {
       this.dfDeathAt.copy(this.eyePos());
       this.dfKiller = killer;
       this.dfCamInit = false;
+      this.dfCamSubject = null;
       this.dfSpectate = 0;
+      this.dfSpectateId = null;
       this.defusal.playerKilled(killer, !!hit?.head, hit?.weapon ?? 'RIFLE');
     }
   }
@@ -3102,6 +3145,7 @@ export class Engine {
     this.lean = 0; this.leanTarget = 0; this.ads = 0; this.rmb = false; this.triggerHeld = false;
     this.lastDamageT = 99; this.shake = 0;
     this.dfDeathCamT = 0; this.dfKiller = null; this.dfCamInit = false;
+    this.dfCamSubject = null; this.dfSpectateId = null; this.dfCamVel.set(0, 0, 0);
     for (const g of this.grenades) { this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
     this.grenades = [];
     this.dfMagMemory.clear();
@@ -3113,10 +3157,11 @@ export class Engine {
   /** Field whatever the inventory holds; guns you keep hold their magazine count. */
   private dfEquip(inv: Inventory, focus?: 'primary' | 'secondary') {
     this.frags = inv.frags; this.flashes = inv.flashes;
-    const key = `${inv.primary ?? '-'}|${inv.secondary}`;
+    const fieldKey = Object.entries(inv.primaryAttachments).sort(([a], [b]) => a.localeCompare(b)).map(([slot, id]) => `${slot}:${id}`).join(',');
+    const key = `${inv.primary ?? '-'}@${fieldKey}|${inv.secondary}`;
     if (key !== this.dfLoadoutKey) {
       this.weapons.forEach((w, i) => this.dfMagMemory.set(w, this.mags[i]));
-      const prim = inv.primary ? this.dfWeapon(inv.primary) : null;
+      const prim = inv.primary ? this.dfWeapon(inv.primary, inv.primaryAttachments) : null;
       const sec = this.dfWeapon(inv.secondary);
       for (const w of this.weapons) w.model.group.visible = false;
       this.weapons = prim ? [prim, sec] : [sec];
@@ -3136,14 +3181,25 @@ export class Engine {
     this.weapons.forEach((w, i) => { w.model.group.visible = i === this.cur; });
   }
 
-  /** One cached viewmodel per gun — your armory build when you own it, factory otherwise. */
-  private dfWeapon(id: WeaponId): WeaponDef {
-    const cached = this.dfWeaponCache.get(id);
+  /**
+   * One cached viewmodel per complete field build. An Armory build supplies the
+   * finish and baseline hardware; purchases made during buy time override only
+   * their chosen slot and disappear when the round inventory is reset.
+   */
+  private dfWeapon(id: WeaponId, fieldAttachments: WeaponBuild['attachments'] = {}): WeaponDef {
+    const armory = this.dfBuilds[id] ?? { weapon: id, attachments: {}, skin: 'factory' };
+    const build: WeaponBuild = {
+      weapon: id,
+      attachments: { ...armory.attachments, ...fieldAttachments },
+      skin: armory.skin ?? 'factory',
+    };
+    const key = `${id}|${build.skin ?? 'factory'}|${Object.entries(build.attachments).sort(([a], [b]) => a.localeCompare(b)).map(([slot, attachment]) => `${slot}:${attachment}`).join(',')}`;
+    const cached = this.dfWeaponCache.get(key);
     if (cached) return cached;
-    const def = this.buildLoadoutWeapon(this.dfBuilds[id] ?? { weapon: id, attachments: {}, skin: 'factory' });
+    const def = this.buildLoadoutWeapon(build);
     def.model.group.visible = false;
     this.vmScene.add(def.model.group);
-    this.dfWeaponCache.set(id, def);
+    this.dfWeaponCache.set(key, def);
     return def;
   }
 
@@ -3169,48 +3225,92 @@ export class Engine {
     const list = this.defusal?.spectateList() ?? [];
     if (!list.length) return;
     this.dfDeathCamT = 0;
-    this.dfSpectate = (this.dfSpectate + dir + list.length * 4) % list.length;
-    this.dfCamInit = false;
+    const current = this.dfSpectateId === null ? -1 : list.findIndex(bot => bot.id === this.dfSpectateId);
+    const base = current >= 0 ? current : this.dfSpectate % list.length;
+    this.dfSpectate = (base + dir + list.length * 4) % list.length;
+    this.dfSpectateId = list[this.dfSpectate].id;
+    // Keep the camera live; composeSpectatorCamera eases from the old subject.
+    this.dfCamBlend = 0;
   }
 
   private dfSpectateTarget(): TDMBot | null {
     if (!this.isDefusal || !this.dead || this.dfDeathCamT > 0) return null;
     const list = this.defusal?.spectateList() ?? [];
-    return list.length ? list[this.dfSpectate % list.length] : null;
+    if (!list.length) return null;
+    const remembered = this.dfSpectateId === null ? -1 : list.findIndex(bot => bot.id === this.dfSpectateId);
+    this.dfSpectate = remembered >= 0 ? remembered : this.dfSpectate % list.length;
+    const target = list[this.dfSpectate];
+    this.dfSpectateId = target.id;
+    return target;
   }
 
-  /** Dead in a round: a short death cam on your killer, then an over-the-shoulder chase cam. */
+  /**
+   * Dead in a round: a short death cam on the killer, then a smooth
+   * over-the-shoulder chase cam. Position is a critically damped spring;
+   * orientation uses quaternion slerp so crossing ±π never snaps the view.
+   */
   private composeSpectatorCamera(dt: number) {
     const target = this.dfSpectateTarget();
-    let wantPos: THREE.Vector3, wantLook: THREE.Vector3;
+    const wantPos = this.dfCamWantPos;
+    const wantLook = this.dfCamWantLook;
     if (!target) {
       const rise = Math.min(1, 1 - Math.max(0, this.dfDeathCamT) / 2.2);
-      wantPos = this.dfDeathAt.clone().add(new THREE.Vector3(0, 0.3 + rise * 1.8, 0));
-      wantLook = this.dfKiller && !this.dfKiller.dead
-        ? this.dfKiller.eyePos()
-        : this.dfDeathAt.clone().add(new THREE.Vector3(-Math.sin(this.yaw) * 4, -1.2, -Math.cos(this.yaw) * 4));
+      wantPos.copy(this.dfDeathAt).add(new THREE.Vector3(0, 0.3 + rise * 1.8, 0));
+      if (this.dfKiller && !this.dfKiller.dead) wantLook.copy(this.dfKiller.eyePos());
+      else wantLook.copy(this.dfDeathAt).add(new THREE.Vector3(-Math.sin(this.yaw) * 4, -1.2, -Math.cos(this.yaw) * 4));
     } else {
       const eye = target.eyePos();
       const yaw = target.model.group.rotation.y;
       const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-      const back = new THREE.Vector3(eye.x - fx * 2.5 - fz * 0.55, eye.y + 0.42, eye.z - fz * 2.5 + fx * 0.55);
-      const dir = back.clone().sub(eye);
-      const len = dir.length();
-      dir.normalize();
-      this.raycaster.set(eye, dir);
-      this.raycaster.far = len;
+      // The collision distance has its own response, so brushing a wall does
+      // not hard-pop the chase camera between its full and shortened offsets.
+      this.dfCamRayDir.set(-fx * 2.5 - fz * 0.55, 0.42, -fz * 2.5 + fx * 0.55);
+      const idealDist = this.dfCamRayDir.length();
+      this.dfCamRayDir.multiplyScalar(1 / idealDist);
+      this.raycaster.set(eye, this.dfCamRayDir);
+      this.raycaster.far = idealDist;
       const hit = this.raycaster.intersectObjects(this.world.occluders, false)[0];
       this.raycaster.far = 300;
-      wantPos = hit ? eye.clone().addScaledVector(dir, Math.max(0.25, hit.distance - 0.25)) : back;
-      wantLook = eye.clone().add(new THREE.Vector3(fx * 7, -0.25, fz * 7));
+      const clippedDist = hit ? Math.max(0.25, hit.distance - 0.25) : idealDist;
+      if (!this.dfCamInit) this.dfCamClip = clippedDist;
+      else this.dfCamClip += (clippedDist - this.dfCamClip) * (1 - Math.exp(-dt * 15));
+      wantPos.copy(eye).addScaledVector(this.dfCamRayDir, Math.max(0.25, this.dfCamClip));
+      wantLook.set(eye.x + fx * 7, eye.y - 0.25, eye.z + fz * 7);
     }
-    if (!this.dfCamInit) { this.dfCamPos.copy(wantPos); this.dfCamLook.copy(wantLook); this.dfCamInit = true; }
-    const k = 1 - Math.exp(-dt * 8);
-    this.dfCamPos.lerp(wantPos, k);
-    this.dfCamLook.lerp(wantLook, k);
+
+    if (target !== this.dfCamSubject) {
+      if (this.dfCamInit) {
+        this.dfCamPosFrom.copy(this.dfCamPos);
+        this.dfCamLookFrom.copy(this.dfCamLook);
+      }
+      this.dfCamSubject = target;
+      this.dfCamBlend = 0;
+    }
+
+    if (!this.dfCamInit) {
+      this.dfCamPos.copy(wantPos); this.dfCamLook.copy(wantLook); this.dfCamVel.set(0, 0, 0);
+      this.dfCamAim.position.copy(this.dfCamPos); this.dfCamAim.lookAt(this.dfCamLook);
+      this.dfCamRot.copy(this.dfCamAim.quaternion);
+      this.dfCamInit = true; this.dfCamBlend = 1;
+    } else {
+      this.dfCamBlend = Math.min(1, this.dfCamBlend + dt / 0.34);
+      const handoff = easeInOut(this.dfCamBlend);
+      if (handoff < 1) {
+        wantPos.lerpVectors(this.dfCamPosFrom, wantPos, handoff);
+        wantLook.lerpVectors(this.dfCamLookFrom, wantLook, handoff);
+      }
+      criticallyDampedSpring(this.dfCamPos, this.dfCamVel, wantPos, 10, dt);
+      this.dfCamLook.lerp(wantLook, 1 - Math.exp(-dt * 12));
+      this.dfCamAim.position.copy(this.dfCamPos);
+      this.dfCamAim.lookAt(this.dfCamLook);
+      this.dfCamGoalRot.copy(this.dfCamAim.quaternion);
+      this.dfCamRot.slerp(this.dfCamGoalRot, 1 - Math.exp(-dt * 14));
+    }
+
     this.camera.position.copy(this.dfCamPos);
-    this.camera.lookAt(this.dfCamLook);
-    this.camera.fov += (this.fovSetting - this.camera.fov) * k;
+    this.camera.quaternion.copy(this.dfCamRot);
+    // Keep FOV comfort independent from follow/orientation responsiveness.
+    this.camera.fov += (this.fovSetting - this.camera.fov) * (1 - Math.exp(-dt * 5));
     this.camera.updateProjectionMatrix();
   }
 
@@ -3479,7 +3579,7 @@ export class Engine {
         if (!this.crouched) {
           this.ai.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
           this.tdm?.notifyGunshot(this.pos, this.sprinting ? 14 : 8);
-          if (this.sprinting) this.defusal?.notifyGunshot(this.pos, 12);
+          this.defusal?.notifyFootstep(this.pos, this.sprinting);
         }
       }
     }

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 const S = await import('../src/game/defusal/shop.ts');
 const { WEAPON_CATALOG } = await import('../src/game/economy/catalog.ts');
 const B = await import('../src/game/defusal/botplan.ts');
-const { SHOP, GRENADE_LIMITS, freshInventory, canBuy, buy, afterDeath, grantMoney, itemPrice, shopItem, killRewardFor, inventoryValue, hitDamage, modScaleFor, BALLISTICS } = S;
+const { SHOP, GRENADE_LIMITS, attachmentOffers, buyAttachment, freshInventory, canBuy, canBuyAttachment, buy, afterDeath, grantMoney, itemPrice, shopItem, killRewardFor, inventoryValue, hitDamage, modScaleFor, BALLISTICS } = S;
 
 test('the shop sells every armory gun at CS2 price bands, with class kill rewards', () => {
   const guns = SHOP.filter(i => i.weapon).map(i => i.weapon).sort();
@@ -52,6 +52,27 @@ test('buy rules: money, side locks, duplicates, helmet upgrade and grenade limit
   const again = buy(bought.inv, 'scar_h', 'defend');
   assert.equal(again.replaced, 'm4a1', 'replacing reports the gun that hits the floor');
   assert.equal(inv.primary, null, 'purchases are immutable');
+});
+
+test('field upgrades are compatible, round-scoped and priced into equipment value', () => {
+  let inv = freshInventory(12000);
+  assert.equal(canBuyAttachment(inv, 'opt_reddot').ok, false, 'a primary is required before buying hardware');
+  inv = buy(inv, 'ak47', 'attack').inv;
+  const offers = attachmentOffers(inv);
+  assert.ok(offers.length >= 3 && offers.length <= 4, 'the field counter stays readable');
+  assert.deepEqual([...new Set(offers.map(o => o.attachment.slot))], offers.map(o => o.attachment.slot), 'one compatible choice per slot');
+  const optic = offers.find(o => o.attachment.slot === 'optic');
+  assert.ok(optic, 'AK field counter offers a compatible optic');
+  const before = inventoryValue(inv);
+  const upgraded = buyAttachment(inv, optic.id);
+  assert.ok(upgraded.ok);
+  inv = upgraded.inv;
+  assert.equal(inv.primaryAttachments.optic, optic.id);
+  assert.equal(inventoryValue(inv), before + optic.price, 'in-round hardware counts toward the scoreboard equipment value');
+  assert.deepEqual(canBuyAttachment(inv, optic.id), { ok: false, reason: 'Equipped' });
+  inv = buy(inv, 'scar_h', 'attack').inv;
+  assert.deepEqual(inv.primaryAttachments, {}, 'replacing a weapon does not carry incompatible hardware over');
+  assert.deepEqual(afterDeath({ ...inv, primaryAttachments: { optic: optic.id } }).primaryAttachments, {}, 'field hardware is lost with the round inventory');
 });
 
 test('death strips the kit but keeps the bank; money is capped at $16,000', () => {

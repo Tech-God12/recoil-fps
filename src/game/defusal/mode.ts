@@ -730,7 +730,7 @@ export class DefusalMode implements BotSquad {
     this.player.inv = r.inv;
     // A replaced gun drops at your feet, exactly like CS.
     if (r.replaced && r.replaced !== 'm1911' && (item.kind === 'primary' || item.kind === 'secondary')) this.spawnDrop(r.replaced, this.ctx.playerFeet());
-    this.ctx.equipPlayer(this.player.inv, item.kind === 'secondary' ? 'secondary' : item.kind === 'primary' ? 'primary' : undefined);
+    this.ctx.equipPlayer(this.player.inv, item.kind === 'secondary' ? 'secondary' : item.kind === 'primary' || item.kind === 'attachment' ? 'primary' : undefined);
     return { ok: true };
   }
   /** Player utility spent (engine throws the grenade). */
@@ -794,10 +794,11 @@ export class DefusalMode implements BotSquad {
   }
   private teamBots(team: TeamId): TDMBot[] { return this.players.filter(c => c.team === team && c.bot && c.alive).map(c => c.bot!); }
 
-  /** Spectator candidates: living teammates first, then anyone alive. */
+  /** Spectator candidates: living teammates first, then anyone alive, in roster-stable order. */
   spectateList(): TDMBot[] {
-    const allies = this.teamBots('alpha');
-    return allies.length ? allies : this.teamBots('bravo');
+    const byRoster = (a: TDMBot, b: TDMBot) => this.players.findIndex(c => c.bot === a) - this.players.findIndex(c => c.bot === b);
+    const allies = this.teamBots('alpha').sort(byRoster);
+    return allies.length ? allies : this.teamBots('bravo').sort(byRoster);
   }
   combatantOf(bot: TDMBot): Combatant { return this.byBot(bot); }
 
@@ -1354,7 +1355,10 @@ export class DefusalMode implements BotSquad {
       const s = SITES[this.bomb.site!];
       const defs = this.botsOn('defend');
       const staged = defs.filter(b => this.plans.get(b)?.task === 'retakeStage' && d2(b.pos, this.plans.get(b)!.hold!.at[0], this.plans.get(b)!.hold!.at[1]) < 2.5).length;
-      const need = Math.min(2, defs.length);
+      // Retakes look stupid when the first body through the smoke is alone. Wait
+      // for most living defenders, but still go before the bomb timer makes a
+      // defuse mathematically impossible.
+      const need = Math.min(defs.length, Math.max(2, Math.ceil(defs.length * 0.75)));
       const timeLeft = m.clock;
       if (this.retakeGoT > 0 && (staged >= need || this.roundTime > this.retakeGoT || timeLeft < 22)) {
         this.retakeGoT = -1;

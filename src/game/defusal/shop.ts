@@ -1,27 +1,30 @@
 // Recoil FPS — Bomb Defusal buy menu, inventory and ballistics (PURE DATA + logic).
-// Prices follow the CS2 price bands mapped onto RECOIL's ten armory guns. A gun the
-// player owns in the Armory is fielded with their own build (attachments + finish);
-// everything here is build-agnostic.
-import { weaponById, type WeaponId } from '../economy/catalog';
+// Prices follow the CS2 price bands mapped onto RECOIL's armory guns. Owned guns
+// still field the Armory finish/build, and in-round attachment buys layer on top
+// so a newly purchased rifle can be upgraded before the freeze time ends.
+import { attachmentById, attachmentsFor, weaponById, type AttachSlot, type AttachmentId, type WeaponId } from '../economy/catalog';
 import { ECONOMY, KILL_REWARD, clampMoney, type KillClass, type Side } from './rules';
 
-export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'gear' | 'grenades';
+export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'attachments' | 'gear' | 'grenades';
 export type GrenadeKind = 'frag' | 'flash' | 'smoke';
 /** 0 = none, 1 = kevlar vest, 2 = kevlar + helmet. */
 export type ArmorTier = 0 | 1 | 2;
 export type ShopItemId =
   | WeaponId
   | 'kevlar' | 'helmet' | 'kit'
-  | 'frag' | 'flash' | 'smoke';
+  | 'frag' | 'flash' | 'smoke'
+  | AttachmentId;
 
 export interface ShopItem {
   id: ShopItemId;
   name: string;
   category: ShopCategory;
   price: number;
-  kind: 'primary' | 'secondary' | 'armor' | 'helmet' | 'kit' | 'grenade';
+  kind: 'primary' | 'secondary' | 'armor' | 'helmet' | 'kit' | 'grenade' | 'attachment';
   weapon?: WeaponId;
   grenade?: GrenadeKind;
+  attachment?: AttachmentId;
+  slot?: AttachSlot;
   /** Purchase restriction. */
   side?: Side;
   killClass?: KillClass;
@@ -33,6 +36,7 @@ export const SHOP_CATEGORIES: { id: ShopCategory; label: string }[] = [
   { id: 'smgs', label: 'SMGs' },
   { id: 'rifles', label: 'Rifles' },
   { id: 'heavy', label: 'Heavy' },
+  { id: 'attachments', label: 'Attachments' },
   { id: 'gear', label: 'Gear' },
   { id: 'grenades', label: 'Grenades' },
 ];
@@ -61,7 +65,39 @@ export const GRENADE_LIMITS: Record<GrenadeKind, number> & { total: number } = {
 /** Upgrading an existing vest to vest + helmet. */
 export const HELMET_UPGRADE_PRICE = 350;
 
-export function shopItem(id: string): ShopItem | undefined { return SHOP.find(i => i.id === id); }
+const ATTACHMENT_SLOT_LABEL: Record<AttachSlot, string> = {
+  muzzle: 'Muzzle', optic: 'Optic', magazine: 'Magazine', underbarrel: 'Grip', stock: 'Stock', rail: 'Rail', barrel: 'Barrel',
+};
+export const FIELD_ATTACHMENT_SLOTS: AttachSlot[] = ['optic', 'muzzle', 'magazine', 'underbarrel'];
+
+function attachmentShopItem(id: string): ShopItem | undefined {
+  const a = attachmentById(id);
+  if (!a) return undefined;
+  const label = ATTACHMENT_SLOT_LABEL[a.slot] ?? 'Attachment';
+  return {
+    id: a.id, name: a.name, category: 'attachments', price: a.price, kind: 'attachment',
+    attachment: a.id, slot: a.slot, tag: `${label} · ${a.desc}`,
+  };
+}
+
+export function shopItem(id: string): ShopItem | undefined { return SHOP.find(i => i.id === id) ?? attachmentShopItem(id); }
+
+/** Four readable in-round upgrades for the bought primary: optic, muzzle, mag, grip. */
+export function fieldAttachmentOffers(inv: Inventory): ShopItem[] {
+  const weapon = inv.primary;
+  if (!weapon) return [];
+  return FIELD_ATTACHMENT_SLOTS.flatMap(slot => {
+    if (!weaponById(weapon)?.slots.includes(slot)) return [];
+    const picked = attachmentsFor(weapon, slot)[0];
+    const item = picked ? attachmentShopItem(picked.id) : undefined;
+    return item ? [item] : [];
+  });
+}
+
+export function fieldBuildFor(inv: Inventory, weapon: WeaponId): Partial<Record<AttachSlot, AttachmentId>> {
+  return { ...(inv.builds?.[weapon] ?? {}) };
+}
+
 
 export interface Inventory {
   money: number;
@@ -72,10 +108,12 @@ export interface Inventory {
   frags: number;
   flashes: number;
   smokes: number;
+  /** Attachments bought during the current life, keyed by the weapon they modify. */
+  builds: Partial<Record<WeaponId, Partial<Record<AttachSlot, AttachmentId>>>>;
 }
 
 export function freshInventory(money: number = ECONOMY.start): Inventory {
-  return { money: clampMoney(money), primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0 };
+  return { money: clampMoney(money), primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0, builds: {} };
 }
 
 /** Dead players lose their kit; money carries over. */
@@ -110,6 +148,13 @@ export function canBuy(inv: Inventory, id: string, side: Side): BuyCheck {
     if (inv[grenadeKey(item.grenade)] >= GRENADE_LIMITS[item.grenade]) return { ok: false, reason: 'Carrying max' };
     if (grenadeCount(inv) >= GRENADE_LIMITS.total) return { ok: false, reason: 'Grenade slots full' };
   }
+  if (item.kind === 'attachment') {
+    const weapon = inv.primary;
+    const entry = item.attachment ? attachmentById(item.attachment) : undefined;
+    if (!weapon) return { ok: false, reason: 'Buy a primary first' };
+    if (!entry || !attachmentsFor(weapon, entry.slot).some(a => a.id === entry.id)) return { ok: false, reason: 'Not compatible' };
+    if (inv.builds?.[weapon]?.[entry.slot] === entry.id) return { ok: false, reason: 'Equipped' };
+  }
   const price = itemPrice(item, inv);
   if (inv.money < price) return { ok: false, reason: `Need $${price.toLocaleString('en-US')}` };
   return { ok: true, price };
@@ -129,6 +174,14 @@ export function buy(inv: Inventory, id: string, side: Side): { ok: boolean; inv:
     case 'helmet': next.armor = 2; break;
     case 'kit': next.kit = true; break;
     case 'grenade': { const k = grenadeKey(item.grenade!); next[k] = inv[k] + 1; break; }
+    case 'attachment': {
+      const weapon = inv.primary!;
+      const entry = attachmentById(item.attachment!)!;
+      const builds = { ...(inv.builds ?? {}) };
+      builds[weapon] = { ...(builds[weapon] ?? {}), [entry.slot]: entry.id };
+      next.builds = builds;
+      break;
+    }
   }
   return { ok: true, inv: next, replaced };
 }
@@ -141,6 +194,11 @@ export function inventoryValue(inv: Inventory): number {
   v += inv.armor === 2 ? 1000 : inv.armor === 1 ? 650 : 0;
   if (inv.kit) v += 400;
   v += inv.frags * 300 + inv.flashes * 200 + inv.smokes * 300;
+  const countBuild = (weapon: WeaponId | null | undefined) => {
+    if (!weapon) return;
+    for (const id of Object.values(inv.builds?.[weapon] ?? {})) v += attachmentById(id)?.price ?? 0;
+  };
+  countBuild(inv.primary); countBuild(inv.secondary);
   return v;
 }
 

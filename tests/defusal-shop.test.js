@@ -115,3 +115,19 @@ test('attack plans lean away from the site hit last round', () => {
   }
   assert.ok(a / 2000 < 0.48 && a / 2000 > 0.36, `A picked ${(a / 20).toFixed(1)}% after hitting A`);
 });
+
+test('in-round attachment buys use compatibility data and persist in inventory builds', () => {
+  let inv = freshInventory(6000);
+  assert.equal(canBuy(inv, 'opt_reddot', 'defend').ok, false, 'attachments need a primary first');
+  let r = buy(inv, 'm4a1', 'defend');
+  assert.equal(r.ok, true);
+  inv = r.inv;
+  r = buy(inv, 'opt_reddot', 'defend');
+  assert.equal(r.ok, true);
+  inv = r.inv;
+  assert.equal(inv.builds.m4a1.optic, 'opt_reddot');
+  assert.equal(canBuy(inv, 'opt_reddot', 'defend').ok, false, 'same attachment is equipped');
+  assert.equal(canBuy(inv, 'opt_ak_dot', 'defend').ok, false, 'AK side rail optic is not compatible with the M416');
+  assert.ok(S.fieldAttachmentOffers(inv).some(item => item.kind === 'attachment' && item.id === 'mag_extended'), 'the field upgrade shelf is generated from attachmentsFor(primary, slot)');
+  assert.ok(inventoryValue(inv) >= shopItem('m4a1').price + shopItem('opt_reddot').price);
+});

@@ -2,8 +2,7 @@
 // prompt, ticker and screen-space kit effects, the "equipped kit" button on the deploy
 // screens and the read-only pause-menu reference. The full shop/equip screen lives in
 // KitsMenu.tsx. Print-room palette (brass / bone / signal on ink); each kit carries one
-// accent: radar cyan, barricade signal orange, decoy holo teal, mine warning red,
-// medkit medical green.
+// accent: barricade signal orange, decoy holo teal, mine warning red, medkit medical green.
 import type { CSSProperties } from 'react';
 import { KIT_DEFS, KIT_KEY, KIT_TUNING, type KitFxKind, type KitHud, type KitId } from '../game/kits';
 
@@ -12,17 +11,6 @@ import { KIT_DEFS, KIT_KEY, KIT_TUNING, type KitFxKind, type KitHud, type KitId 
 /* ------------------------------------------------------------------ */
 export function KitIcon({ id, size = 22 }: { id: KitId; size?: number }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
-  if (id === 'recon') {
-    return (
-      <svg {...common}>
-        <path d="M5 7.5a8 8 0 0 0 11.5 11.5z" />
-        <path d="M10.8 13.2 15 9" />
-        <circle cx="15.6" cy="8.4" r="1.2" fill="currentColor" />
-        <path d="M17.8 3.6a5 5 0 0 1 2.6 2.6" />
-        <path d="M9 21h8" />
-      </svg>
-    );
-  }
   if (id === 'bulwark') {
     return (
       <svg {...common}>
@@ -189,18 +177,78 @@ export function KitFx({ kind }: { kind: KitFxKind }) {
 /* ------------------------------------------------------------------ */
 /* Deploy screens: the equipped kit, as a button into the ABILITIES menu    */
 /* ------------------------------------------------------------------ */
-export function KitEquipButton({ kit, onOpen, compact }: { kit: KitId | null; onOpen?: () => void; compact?: boolean }) {
+/* ------------------------------------------------------------------ */
+/* Ability cards                                                        */
+/*                                                                      */
+/* Every ability control answers three questions BEFORE it is clicked:  */
+/*   what do I have  ·  how do I use it  ·  what does this button do.   */
+/* The old text button answered none of them. The ability's own accent  */
+/* runs through the icon, the rule and the action verb so they visibly  */
+/* belong together.                                                     */
+/* ------------------------------------------------------------------ */
+
+/** One short sentence per ability: the promise, not the mechanics. */
+const ABILITY_LINE: Record<KitId, string> = {
+  mine: 'Guards a lane for you — pops up and detonates when someone walks in.',
+  phantom: 'Sends out a fake soldier. They shoot at it instead of you.',
+  medic: 'Drops a healing field. Stand in it and keep fighting.',
+  bulwark: 'Plants a steel shield. Stops bullets and blocks the way.',
+};
+
+/** A3a — wide card for a full-width slot (Arena Mode, step 03). */
+export function AbilityCardWide({ kit, onOpen }: { kit: KitId | null; onOpen?: () => void }) {
+  if (!kit) {
+    return (
+      <button type="button" className="abil-wide none" onClick={onOpen} disabled={!onOpen}
+        aria-label="No ability equipped. Open the Abilities menu">
+        <span className="abil-wide-icon"><LockIcon size={20} /></span>
+        <span className="abil-wide-body">
+          <b>NO ABILITY YET</b>
+          <em>An ability is a free extra play every cooldown. Pick one up in the Abilities menu.</em>
+        </span>
+        <span className="abil-wide-go mono">CHOOSE ONE →</span>
+      </button>
+    );
+  }
+  const d = KIT_DEFS[kit];
+  return (
+    <button type="button" className={`abil-wide kit-${kit}`} onClick={onOpen} disabled={!onOpen}
+      aria-label={`${d.name} equipped. Open the Abilities menu`}>
+      <span className="abil-wide-icon"><KitIcon id={kit} size={22} /></span>
+      <span className="abil-wide-body">
+        <b>{d.name}</b>
+        <em>{ABILITY_LINE[kit]}</em>
+        <span className="abil-wide-meta mono">
+          PRESS {KIT_KEY} IN GAME · {d.cooldown}S COOLDOWN · {d.role.toUpperCase()}
+        </span>
+      </span>
+      <span className="abil-wide-go mono">CHANGE →</span>
+    </button>
+  );
+}
+
+/** A3b — tall card for a narrow column (TDM loadout). */
+export function AbilityCardTall({ kit, onOpen }: { kit: KitId | null; onOpen?: () => void }) {
   const d = kit ? KIT_DEFS[kit] : null;
   return (
-    <button type="button" className={`kit-equip ${kit ? `kit-${kit}` : 'none'} ${compact ? 'compact' : ''}`} onClick={onOpen} disabled={!onOpen}
-      aria-label={d ? `${d.name} equipped. Open the Abilities menu` : 'No ability equipped. Open the Abilities menu'}>
-      <span className="kit-equip-icon">{kit ? <KitIcon id={kit} size={compact ? 18 : 22} /> : <LockIcon size={compact ? 16 : 18} />}</span>
-      <span className="kit-equip-body">
-        <em>ABILITY <span className="keycap">{KIT_KEY}</span></em>
-        <b>{d ? d.name : 'NONE EQUIPPED'}</b>
-      </span>
-      <span className="kit-equip-go mono">{d ? 'CHANGE' : 'GET AN ABILITY'} ›</span>
-    </button>
+    <div className={`abil-tall ${d && kit ? `kit-${kit}` : 'none'}`}>
+      <div className="abil-tall-head">
+        <span className="abil-tall-icon">{kit ? <KitIcon id={kit} size={24} /> : <LockIcon size={20} />}</span>
+        <div className="abil-tall-id">
+          <b>{d ? d.name : 'None equipped'}</b>
+          <span className="abil-tall-role mono">{d ? `${d.role.toUpperCase()} · ${d.cooldown}S COOLDOWN` : 'NOTHING SELECTED'}</span>
+        </div>
+      </div>
+      <p className="abil-tall-line">
+        {kit ? ABILITY_LINE[kit] : 'An ability is a free extra play every cooldown — a mine, a decoy, a medkit or a barricade.'}
+      </p>
+      {kit && (
+        <p className="abil-tall-key mono">PRESS <span className="keycap">{KIT_KEY}</span> IN GAME</p>
+      )}
+      <button type="button" className="abil-tall-act" onClick={onOpen} disabled={!onOpen}>
+        {kit ? 'Change ability' : 'Choose an ability'} ›
+      </button>
+    </div>
   );
 }
 

@@ -45,6 +45,7 @@ export const SHOP: ShopItem[] = [
   { id: 'ak47', name: 'AK-47', category: 'rifles', price: 2700, kind: 'primary', weapon: 'ak47', side: 'attack', killClass: 'rifle', tag: 'Attackers · one-tap headshots' },
   { id: 'm4a1', name: 'M416', category: 'rifles', price: 3100, kind: 'primary', weapon: 'm4a1', side: 'defend', killClass: 'rifle', tag: 'Defenders · accurate, controllable' },
   { id: 'scar_h', name: 'SCAR', category: 'rifles', price: 3300, kind: 'primary', weapon: 'scar_h', killClass: 'rifle', tag: 'Hard-hitting battle rifle' },
+  { id: 'aug_a3', name: 'AUG', category: 'rifles', price: 3300, kind: 'primary', weapon: 'aug_a3', side: 'defend', killClass: 'rifle', tag: 'Defenders · bullpup, fast to swing' },
   { id: 'awm', name: 'AWM', category: 'rifles', price: 4750, kind: 'primary', weapon: 'awm', killClass: 'sniper', tag: 'One shot, one kill' },
   { id: 'spas12', name: 'SPAS', category: 'heavy', price: 1050, kind: 'primary', weapon: 'spas12', killClass: 'shotgun', tag: 'Close quarters · $900 kills' },
   { id: 'm249', name: 'M249', category: 'heavy', price: 5200, kind: 'primary', weapon: 'm249', killClass: 'lmg', tag: '100-round suppression' },
@@ -169,6 +170,7 @@ export const BALLISTICS: Record<WeaponId, Ballistics> = {
   m249: { damage: 32, armorRatio: 0.80 },
   m1911: { damage: 35, armorRatio: 0.505 },
   deagle: { damage: 53, armorRatio: 0.93 },
+  aug_a3: { damage: 31, armorRatio: 0.69 },
 };
 
 export type HitPart = 'head' | 'torso' | 'limb';

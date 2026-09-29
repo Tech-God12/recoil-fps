@@ -15,7 +15,8 @@ function animationContext(model, audioTag) {
     ads: 0, adsFovEff: () => 60, crouched: false, grounded: true, walkBlend: 0, footPhase: 0,
     sprinting: false, sprintPose: 0, vmKick: 0, vmKickRot: 0, boltCycle: 0,
     reloadT: -1, reloadDur: 2, switchT: -1, cooking: false, pumpT: 0, slideKick: 0,
-    bipodDeployed: () => false, poseLArm() {}, updateTactical() {},
+    bipodDeployed: () => false, poseLArm() {}, restArm() {}, updateTactical() {},
+    _armTarget: new THREE.Vector3(),
     muzzleFlash: new THREE.Object3D(), vmLight: new THREE.Object3D(),
   };
 }

@@ -42,7 +42,7 @@ test('contact audit detects a genuinely displaced stock, not just scene-graph pa
   disposeWeapon(model);
 });
 
-test('all 119 supported attachment/weapon pairings have a continuous contact path', () => {
+test('all 138 supported attachment/weapon pairings have a continuous contact path', () => {
   let checked = 0;
   for (const entry of ATTACHMENT_CATALOG) for (const id of entry.compat) {
     if (!weaponById(id).slots.includes(entry.slot)) continue;
@@ -54,7 +54,9 @@ test('all 119 supported attachment/weapon pairings have a continuous contact pat
       checked++;
     } finally { disposeWeapon(model); }
   }
-  assert.equal(checked, 119);
+  // 119 before the AUG A3 joined the roster; the bullpup adds 19 supported pairings
+  // (17 shared parts plus its own 42-round magazine and the coupled-mag system).
+  assert.equal(checked, 138);
 });
 
 test('fully equipped builds remain connected when replacement slots overlap', () => {
@@ -98,7 +100,10 @@ test('clearance audit detects the Vector drum displaced forward through its fore
   const model = WEAPON_BUILDERS.vector();
   attach(model, attachmentById('mag_drum'), 'vector');
   attach(model, attachmentById('ub_vert_grip'), 'vector');
-  model.mag.position.z -= 0.065;
+  // Seated correctly the grip-fed drum sits back at the pistol grip, well clear of the foregrip.
+  assert.equal(assembliesInterfere(model.mag, model.attached.underbarrel), false);
+  // Drive it forward far enough to reach the foregrip and the audit must catch it.
+  model.mag.position.z -= 0.26;
   assert.equal(assembliesInterfere(model.mag, model.attached.underbarrel), true);
   disposeWeapon(model);
 });

@@ -6,8 +6,9 @@
 // ability until one is bought in the KITS menu. Ownership is permanent; the
 // equipped kit is locked for the whole deployment (no mid-match swapping).
 
-export type KitId = 'recon' | 'bulwark' | 'phantom' | 'mine' | 'medic';
-export const KIT_IDS: readonly KitId[] = ['recon', 'bulwark', 'phantom', 'mine', 'medic'];
+export type KitId = 'bulwark' | 'phantom' | 'mine' | 'medic';
+/** Menu order: cheapest first, which is also weakest first — a new operator reads down it. */
+export const KIT_IDS: readonly KitId[] = ['medic', 'mine', 'phantom', 'bulwark'];
 
 export function isKitId(v: unknown): v is KitId {
   return typeof v === 'string' && (KIT_IDS as readonly string[]).includes(v);
@@ -17,16 +18,14 @@ export function isKitId(v: unknown): v is KitId {
  * One-time unlock price per kit. The economy reference point is the tested
  * "competent run" of ≈ $3,350 (CHANGELOG, economy rebalance) and a mid-tier rifle
  * at $4,000–6,000, so:
- *   RECON   $4,500 — intel only, cheapest: ~1.3 runs.
  *   PHANTOM $6,000 — wins one fight outright when used well: ~1.8 runs.
  *   BULWARK $7,500 — permanent-feeling cover that also blocks AI pathing and can
  *                    be recalled: the strongest, ~2.2 runs.
  *   MEDKIT  $5,000 — sustain, not a fight-winner: it refills you between fights.
  *   MINE    $5,500 — a lane you no longer have to watch, and a likely kill.
- * All five together ($28,500) still cost less than half of the weapon catalog.
+ * All four together ($24,000) still cost less than half of the weapon catalog.
  */
 export const KIT_PRICES: Record<KitId, number> = {
-  recon: 4500,
   medic: 5000,
   mine: 5500,
   phantom: 6000,

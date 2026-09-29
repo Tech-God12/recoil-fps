@@ -6,7 +6,7 @@ import { installCanvasStub } from './helpers/geometry.js';
 installCanvasStub();
 const { LightBudget, LIGHT_POOL_SIZE, FADE_SECONDS } = await import('../src/game/light-budget.ts');
 const { snapToShadowTexels, fitSunShadow, SHADOW_SPAN, SHADOW_LOOK_BIAS } = await import('../src/game/shadow-fit.ts');
-const { usesPostChain, vignetteOverlay, DEFAULT_SETTINGS } = await import('../src/game/engine.ts');
+const { usesPostChain, vignetteOverlay, DEFAULT_SETTINGS, GRAPHICS_PRESETS } = await import('../src/game/engine.ts');
 const { buildSoldier, buildArmoredSoldier, HIT_PROXY_MAT, updateWeaponLod, WEAPON_LOD_DISTANCE } = await import('../src/game/models.ts');
 const { buildWorld } = await import('../src/game/world.ts');
 
@@ -85,11 +85,30 @@ test('Warehouse: shader point-light count drops from 12 to 4 once the pool adopt
 });
 
 test('post chain: default settings render straight to the canvas; vignette is a CSS overlay', () => {
+  // The off-screen composer is opt-in. Rendering straight into the multisampled
+  // canvas is both faster and already antialiased, and it sidesteps the
+  // half-float render target that black-screens GPUs without EXT_color_buffer_float.
   assert.equal(usesPostChain(DEFAULT_SETTINGS), false, 'defaults must not pay for the off-screen chain');
+  assert.equal(DEFAULT_SETTINGS.bloom, false, 'bloom must never be on by default');
+  for (const [name, preset] of Object.entries(GRAPHICS_PRESETS)) {
+    assert.equal(preset.bloom, false, `${name} preset must not enable bloom`);
+  }
+  for (const name of ['performance', 'balanced', 'high']) {
+    assert.equal(
+      usesPostChain({ ...DEFAULT_SETTINGS, ...GRAPHICS_PRESETS[name], filmGrain: 0 }),
+      false,
+      `${name} preset must not pay for the off-screen chain`,
+    );
+  }
   assert.equal(usesPostChain({ bloom: true, filmGrain: 0 }), true);
   assert.equal(usesPostChain({ bloom: false, filmGrain: 10 }), true);
+  // Every individual contributor must be able to engage the chain on its own.
+  for (const on of [{ postProcess: true }, { sunShafts: true }, { sharpness: 1 }, { aberration: 1 }]) {
+    assert.equal(usesPostChain(on), true, `${Object.keys(on)[0]} must engage the chain`);
+  }
+  assert.equal(usesPostChain({ postProcess: false, sunShafts: false, sharpness: 0, aberration: 0, bloom: false, filmGrain: 0 }), false);
   assert.equal(vignetteOverlay(0), null);
-  assert.match(vignetteOverlay(DEFAULT_SETTINGS.vignette), /radial-gradient\(.*rgba\(0,0,0,0\.120\) 100%\)/);
+  assert.match(vignetteOverlay(DEFAULT_SETTINGS.vignette), /radial-gradient\(.*rgba\(0,0,0,0\.100\) 100%\)/);
   assert.match(vignetteOverlay(999), /0\.700/, 'clamped to the slider max');
 });
 

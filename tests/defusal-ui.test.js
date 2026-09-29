@@ -83,14 +83,45 @@ test('buy menu lists prices, locks the enemy rifle, and auto-buy picks a sane pa
   assert.deepEqual(autoBuyPlan(freshInventory(800), 'attack'), ['kevlar'], 'pistol round: armor only');
 });
 
-test('Arena Mode offers Sirocco Bomb Defusal next to Warehouse TDM', () => {
+test('the Arena screen is minimal: two cards, two choices, one Play', () => {
   const html = renderToStaticMarkup(React.createElement(MainMenu, {
     s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {}, initialView: 'arena',
     defusal: { side: 'defend', format: 'long' }, onDefusal() {},
   }));
-  for (const text of ['SIROCCO', 'BOMB DEFUSAL', 'WAREHOUSE', 'TEAM DEATHMATCH', 'NEW MODE', 'ATTACK', 'DEFEND', 'FIRST TO 13', 'Play']) {
+  for (const text of ['Sirocco', 'Bomb defusal', 'Warehouse', 'Team deathmatch', 'Attack', 'Defend', 'First to 13', 'Play']) {
     assert.ok(html.includes(text), `arena screen shows ${text}`);
   }
+  // Each card still says in one plain sentence what the mode actually is.
+  assert.ok(html.includes('Plant the bomb — or stop it.'), 'sirocco says what it is');
+  assert.ok(html.includes('Most eliminations when the clock runs out wins it.'), 'warehouse says what it is');
+
+  // The numbered-step scaffolding and the badge/kicker soup are gone for good.
+  for (const gone of [
+    'PICK A GAME', 'MATCH SETUP', 'YOUR ABILITY', 'SELECTED', 'NEW MODE',
+    'HOVER FOR A LIVE FLYOVER', 'How a round works', 'YOUR SQUAD', 'FIELD BUILD',
+    'step-num', 'q-row', 'ARENA MODE',
+  ]) assert.ok(!html.includes(gone), `${gone} is gone from the arena screen`);
+
+  // Choices are still real radiogroups, just labelled like words instead of shouting.
+  assert.ok(html.includes('role="radiogroup" aria-label="Side"'), 'Side is a radiogroup');
+  assert.ok(html.includes('role="radiogroup" aria-label="Match length"'), 'Match length is a radiogroup');
+  assert.equal((html.match(/role="radio"/g) ?? []).length, 5, 'three sides + two lengths');
+  assert.equal((html.match(/deploy-btn/g) ?? []).length, 1, 'exactly one Play button');
+});
+
+test('the main menu no longer carries a Current Loadout panel', () => {
+  const html = renderToStaticMarkup(React.createElement(MainMenu, {
+    s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {},
+  }));
+  for (const gone of ['CURRENT LOADOUT', 'rm-loadout', 'EDIT IN ARMORY', 'rm-lo-tag', 'FRAG ×2']) {
+    assert.ok(!html.includes(gone), `${gone} is gone from the main menu`);
+  }
+  // The menu rows read as words, not as a telegram.
+  for (const word of ['Missions', 'Arena', 'Loadout', 'Settings']) {
+    assert.ok(html.includes(word), `menu still offers ${word}`);
+  }
+  assert.ok(!html.includes('DEPLOYMENT TERMINAL'), 'the kicker is gone');
+  assert.ok(!html.includes('CHOOSE A BATTLEFIELD AND DEPLOY'), 'shouted subtitles are gone');
 });
 
 test('the debrief tells the defusal story: score, round strip and standings', () => {

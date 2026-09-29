@@ -123,7 +123,92 @@ function gloveBox(parent: THREE.Object3D, w: number, h: number, d: number, x: nu
   m.position.set(x, y, z); m.rotation.set(rx, ry, rz); parent.add(m); return m;
 }
 
-export interface ArmAnchors { fore: [number, number, number]; mag: [number, number, number]; fa: [number, number, number]; grip?: [number, number, number] }
+/**
+ * How this weapon is actually fed. Drives the support-hand path during a reload.
+ *
+ * One universal magwell-exchange animation used to play for every gun, which meant a
+ * belt-fed SAW, a tube-fed pump and a bolt rifle all "reloaded" by miming a magazine
+ * change that none of them has. These are the real mechanisms:
+ *
+ *  ar      box magazine, drops free straight down, bolt release on the way back
+ *  ak      box magazine, rocks forward off a front catch, raked out by the fresh one
+ *  smg     box magazine in a short receiver; charging handle, no bolt release
+ *  pistol  box magazine, palm-seated, slide release
+ *  gripfed magazine enters through the pistol grip (Vector), not a separate well
+ *  tube    shells loaded one at a time into an underside tube (SPAS)
+ *  belt    feed cover lifts, belt is laid in, cover closes (M249). No magazine at all.
+ *  bolt    the support hand NEVER leaves the forend; the firing hand runs the bolt
+ */
+export type ReloadStyle = 'ar' | 'ak' | 'smg' | 'pistol' | 'gripfed' | 'tube' | 'belt' | 'bolt';
+
+export interface ArmAnchors {
+  fore: [number, number, number];
+  mag: [number, number, number];
+  fa: [number, number, number];
+  grip?: [number, number, number];
+  /** Feed mechanism. Defaults to 'ar'. */
+  style?: ReloadStyle;
+}
+
+/** Two-bone chain state hung off the animated arm group. */
+export interface ArmRig {
+  upper: THREE.Object3D; lower: THREE.Object3D; hand: THREE.Object3D;
+  L1: number; L2: number;
+  shoulder: THREE.Vector3; rest: THREE.Vector3; pole: THREE.Vector3;
+}
+
+const ZERO = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
+const _toTarget = new THREE.Vector3(), _poleDir = new THREE.Vector3(), _axis = new THREE.Vector3();
+const _upperDir = new THREE.Vector3(), _elbow = new THREE.Vector3(), _foreDir = new THREE.Vector3();
+const _q = new THREE.Quaternion(), _qInv = new THREE.Quaternion();
+const _bx = new THREE.Vector3(), _bz = new THREE.Vector3(), _basis = new THREE.Matrix4();
+/** Gun-forward hint; keeps the bone twist deterministic so the glove never barrel-rolls. */
+const TWIST_HINT = new THREE.Vector3(0, 0, -1);
+
+/**
+ * Orient `node` so its local +Y follows `dir`, choosing the remaining twist from a
+ * fixed hint instead of three.js' minimal-arc rotation (which spins unpredictably
+ * as the target sweeps past the pole and makes the hand flip mid-animation).
+ */
+function aimBone(node: THREE.Object3D, dir: THREE.Vector3, parentInv: THREE.Quaternion | null) {
+  _bx.crossVectors(TWIST_HINT, dir);
+  if (_bx.lengthSq() < 1e-8) _bx.set(1, 0, 0); else _bx.normalize();
+  _bz.crossVectors(_bx, dir).normalize();
+  _basis.makeBasis(_bx, dir, _bz);
+  node.quaternion.setFromRotationMatrix(_basis);
+  if (parentInv) node.quaternion.premultiply(parentInv);
+}
+
+/**
+ * Analytic two-bone IK. Places the elbow on the circle of valid solutions nearest
+ * the pole hint, so the arm bends the way a human arm bends instead of snapping
+ * through the weapon. `roll` twists the wrist about the forearm.
+ *
+ * Target is in the same space as the arm group's parent (gun-local).
+ */
+export function solveArm(arm: THREE.Object3D, target: THREE.Vector3, roll = 0) {
+  const rig = arm.userData.rig as ArmRig | undefined;
+  if (!rig) return;
+  const { L1, L2 } = rig;
+  _toTarget.copy(target).sub(rig.shoulder);
+  // Clamp reach: never fully lock out (looks broken) and never fold past the elbow.
+  const reach = Math.min(Math.max(_toTarget.length(), Math.abs(L1 - L2) + 0.012), L1 + L2 - 0.006);
+  if (reach < 1e-5) return;
+  _toTarget.normalize();
+  _poleDir.copy(rig.pole).sub(rig.shoulder).normalize();
+  _axis.crossVectors(_toTarget, _poleDir);
+  if (_axis.lengthSq() < 1e-9) _axis.set(1, 0, 0); else _axis.normalize();
+  const cosShoulder = (L1 * L1 + reach * reach - L2 * L2) / (2 * L1 * reach);
+  const shoulderAngle = Math.acos(Math.min(1, Math.max(-1, cosShoulder)));
+  _upperDir.copy(_toTarget).applyQuaternion(_q.setFromAxisAngle(_axis, -shoulderAngle));
+  _elbow.copy(rig.shoulder).addScaledVector(_upperDir, L1);
+  aimBone(rig.upper, _upperDir, null);
+  _foreDir.copy(target).sub(_elbow).normalize();
+  _qInv.copy(rig.upper.quaternion).invert();
+  aimBone(rig.lower, _foreDir, _qInv);
+  if (roll) rig.lower.quaternion.multiply(_q.setFromAxisAngle(UP, roll));
+}
 /**
  * Procedural first-person arms, built in gun-local space.
  * Right arm is static (gripping). Left arm lives in its own group so the
@@ -149,35 +234,199 @@ export function attachArms(gun: THREE.Group, a: ArmAnchors): { lArm: THREE.Group
   for (let i = 0; i < 3; i++) gloveBox(fingers, 0.036, 0.013, 0.014, 0.0, -0.062 - i * 0.016, -0.068, -0.32);
   gloveBox(fingers, 0.02, 0.05, 0.02, 0.028, -0.075, -0.03, -0.3, 0, -0.4); // thumb
 
-  // ---- left arm (animated) ----
+  // ---- left arm: a real two-bone IK chain -------------------------------
+  // The old arm was ONE rigid batch that got translated bodily toward the magazine,
+  // which dragged the shoulder through the receiver — that is the clipping the
+  // reload complaint was about. Now the shoulder is pinned, the hand is driven to a
+  // world target, and the elbow is solved between them, so the arm can reach the
+  // mag well, the pouch and the charging handle without ever passing through the gun.
   const lArm = new THREE.Group(); lArm.userData.arm = true; gun.add(lArm);
-  const lS = new THREE.Vector3(-0.23, -0.40, 0.16), lE = new THREE.Vector3(-0.175, -0.29, -0.15);
+  const lS = new THREE.Vector3(-0.235, -0.405, 0.170);
+  const lE = new THREE.Vector3(-0.180, -0.290, -0.140);
   const fw = new THREE.Vector3(...a.fore);
-  limb(lArm, lS, lE, 0.052, 0.046, WM.sleeve);
-  const cuff2 = cuff.clone(); cuff2.position.copy(lE).lerp(fw, 0.55);
-  cuff2.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3().subVectors(fw, lE).normalize());
-  lArm.add(cuff2);
-  limb(lArm, lE, fw, 0.044, 0.037, WM.sleeveDark);
-  // glove around foregrip/handguard
-  gloveBox(lArm, 0.04, 0.062, 0.05, fw.x, fw.y, fw.z);
-  for (let i = 0; i < 3; i++) gloveBox(lArm, 0.042, 0.012, 0.016, fw.x, fw.y - 0.012 - i * 0.015, fw.z - 0.028);
-  gloveBox(lArm, 0.02, 0.05, 0.02, fw.x - 0.026, fw.y - 0.005, fw.z + 0.005, 0, 0, 0.4);
+  const L1 = lS.distanceTo(lE), L2 = lE.distanceTo(fw);
+  lArm.position.copy(lS);
 
-  // reload keyframes: hand travels foregrip → mag → magwell → forward-assist → foregrip
+  // Build each bone DETACHED and batch it in isolation. batchRigidGroup() bakes a
+  // group's entire subtree into itself, so parenting first would duplicate the
+  // forearm and hand geometry into the upper arm and wreck the chain.
+  const upper = new THREE.Group(); upper.name = 'left upper arm';
+  limb(upper, ZERO, new THREE.Vector3(0, L1, 0), 0.052, 0.046, WM.sleeve);
+  batchRigidGroup(upper);
+
+  const lower = new THREE.Group(); lower.name = 'left forearm';
+  limb(lower, ZERO, new THREE.Vector3(0, L2, 0), 0.044, 0.037, WM.sleeveDark);
+  const cuff2 = new THREE.Mesh(new THREE.CylinderGeometry(0.047, 0.047, 0.03, 10), WM.sleeveDark);
+  cuff2.position.set(0, L2 * 0.40, 0);
+  lower.add(cuff2);
+  batchRigidGroup(lower);
+
+  // Hand frame: +Y continues out past the wrist, +Z is the gun's forward axis.
+  const lHand = new THREE.Group(); lHand.name = 'left hand';
+  gloveBox(lHand, 0.040, 0.050, 0.062, 0, 0.020, -0.004);
+  for (let i = 0; i < 3; i++) gloveBox(lHand, 0.042, 0.016, 0.012, 0, 0.012, -0.036 - i * 0.015);
+  gloveBox(lHand, 0.020, 0.020, 0.050, -0.026, 0.014, 0.004, 0.4);
+  batchRigidGroup(lHand);
+
+  lower.add(lHand); lHand.position.set(0, L2, 0);
+  upper.add(lower); lower.position.set(0, L1, 0);
+  lArm.add(upper);
+
+  const rig: ArmRig = {
+    upper, lower, hand: lHand, L1, L2,
+    shoulder: lS.clone(),
+    rest: fw.clone(),
+    // Elbow hint: down, outboard and slightly back — where a shooter's support
+    // elbow actually lives. Keeps the bend out of the magwell and off the screen edge.
+    pole: new THREE.Vector3(-0.44, -0.70, 0.12),
+  };
+  lArm.userData.rig = rig;
+  solveArm(lArm, fw, 0);
+
+  // Reload hand targets, in GUN SPACE (absolute), not deltas from the foregrip.
   const mg = new THREE.Vector3(...a.mag), fa = new THREE.Vector3(...a.fa);
-  const toMag: [number, number, number] = [mg.x - fw.x, mg.y - fw.y + 0.02, mg.z - fw.z];
-  const keys: LArmKey[] = [
-    { t: 0.0, p: [0, 0, 0], r: [0, 0, 0] },
-    { t: 0.13, p: [0, 0, 0], r: [0, 0, 0] },
-    { t: 0.30, p: toMag, r: [0.5, 0, 0.12] },
-    { t: 0.50, p: [toMag[0], toMag[1] - 0.075, toMag[2]], r: [0.62, 0, 0.12] },
-    { t: 0.62, p: [toMag[0] * 0.4, toMag[1] * 0.35, toMag[2] * 0.4], r: [0.3, 0, 0.05] },
-    { t: 0.74, p: [fa.x - fw.x, fa.y - fw.y, fa.z - fw.z], r: [-0.35, 0, -0.15] },
-    { t: 0.86, p: [0, 0, 0], r: [0, 0, 0] },
-    { t: 1.0, p: [0, 0, 0], r: [0, 0, 0] },
+  // How far the charging handle sits above the support hand tells us how much
+  // receiver/optic bulk the forearm has to swing around. Tall guns (AWM with its
+  // scope, the SAW with its feed cover) need a wider arc than a flat-top carbine.
+  const bulk = Math.max(0, fa.y - fw.y);
+  // Clamped: too little and the forearm shaves the receiver, too much and the hand
+  // swings so far outboard it comes back through the gun from the far side.
+  const standoff = Math.min(0.085, 0.052 + bulk * 0.95);
+  // The pouch is off the gun entirely: down, inboard and behind, where a chest rig is.
+  const pouch: [number, number, number] = [fw.x - 0.055, mg.y - 0.115, mg.z + 0.155];
+  // Waypoint clear of the underside of the gun, halfway between grip and magwell.
+  const under: [number, number, number] = [
+    (fw.x + mg.x) * 0.5 - 0.022,
+    Math.min(fw.y, mg.y + 0.03) - 0.052,
+    (fw.z + mg.z) * 0.5,
   ];
+  const wellLip: [number, number, number] = [mg.x, mg.y + 0.055, mg.z];
+  const style: ReloadStyle = a.style ?? 'ar';
+  // Shared opening: the hand is still driving the foregrip as the gun rolls up into
+  // the workspace, then drops BELOW the bore line before travelling aft. A straight
+  // foregrip-to-magwell line cuts the corner and buries the wrist in the handguard.
+  const lead: LArmKey[] = [
+    { t: 0.00, p: [fw.x, fw.y, fw.z], r: [0, 0, 0] },
+    { t: 0.10, p: [fw.x, fw.y - 0.004, fw.z + 0.010], r: [0.05, 0, 0] },
+    { t: 0.17, p: [under[0], under[1], under[2]], r: [0.22, 0.06, 0.10] },
+  ];
+  // Shared close: back under the receiver and onto the foregrip.
+  const tail: LArmKey[] = [
+    { t: 0.97, p: [under[0] - 0.010, under[1] + 0.020, under[2] - 0.030], r: [-0.10, -0.04, 0] },
+    { t: 0.99, p: [fw.x - 0.004, fw.y + 0.006, fw.z - 0.004], r: [-0.03, 0, 0] },
+    { t: 1.00, p: [fw.x, fw.y, fw.z], r: [0, 0, 0] },
+  ];
+  // The charging-handle approach: OUTBOARD of the receiver and down onto the handle
+  // from the side, never across the top — a straight reach drags the forearm through
+  // the upper receiver, which was the last clipping case left.
+  const runCharging = (t0: number): LArmKey[] => [
+    { t: t0, p: [fa.x - standoff, fa.y + 0.030, fa.z + 0.030], r: [-0.18, -0.16, -0.10] },
+    { t: t0 + 0.05, p: [fa.x - standoff * 0.55, fa.y + 0.014, fa.z], r: [-0.30, -0.12, -0.16] },
+    { t: t0 + 0.09, p: [fa.x - standoff * 0.66, fa.y + 0.010, fa.z + 0.042], r: [-0.26, -0.12, -0.14] },
+  ];
+
+  let keys: LArmKey[];
+  if (style === 'bolt') {
+    // The support hand stays on the forend for the whole cycle — this is how a bolt
+    // gun is actually run, and it is the only way the scope stays on target between
+    // shots. The firing hand works the bolt (driven separately in animateViewmodel).
+    // Everything here is a small settle under recoil and the shooter's grip shifting.
+    keys = [
+      { t: 0.00, p: [fw.x, fw.y, fw.z], r: [0, 0, 0] },
+      { t: 0.18, p: [fw.x + 0.004, fw.y - 0.006, fw.z + 0.012], r: [0.06, 0.02, 0.03] },
+      { t: 0.42, p: [fw.x + 0.006, fw.y - 0.009, fw.z + 0.018], r: [0.09, 0.03, 0.05] },
+      { t: 0.62, p: [fw.x + 0.003, fw.y - 0.007, fw.z + 0.014], r: [0.07, 0.02, 0.04] },
+      { t: 0.84, p: [fw.x, fw.y - 0.003, fw.z + 0.006], r: [0.03, 0.01, 0.02] },
+      { t: 1.00, p: [fw.x, fw.y, fw.z], r: [0, 0, 0] },
+    ];
+  } else if (style === 'belt') {
+    // No magazine exists. The hand lifts the feed cover, lays the belt into the tray,
+    // presses it down and closes the cover. All of that happens ON TOP of the
+    // receiver, so the hand must arc outboard and come down from the side.
+    const tray: [number, number, number] = [fa.x - standoff * 0.5, fa.y + 0.020, fa.z - 0.030];
+    keys = [
+      ...lead,
+      { t: 0.24, p: [fa.x - standoff, fa.y + 0.055, fa.z + 0.050], r: [-0.10, -0.18, -0.06] },
+      { t: 0.32, p: [fa.x - standoff * 0.6, fa.y + 0.046, fa.z + 0.010], r: [-0.22, -0.14, -0.12] },
+      { t: 0.46, p: [pouch[0], pouch[1] + 0.020, pouch[2]], r: [0.62, 0.20, 0.26] },
+      { t: 0.60, p: [tray[0], tray[1] + 0.045, tray[2] + 0.040], r: [-0.12, -0.16, -0.08] },
+      { t: 0.70, p: [tray[0], tray[1], tray[2]], r: [-0.26, -0.12, -0.14] },
+      { t: 0.80, p: [tray[0], tray[1] + 0.008, tray[2] - 0.020], r: [-0.24, -0.10, -0.12] },
+      { t: 0.90, p: [fa.x - standoff * 0.7, fa.y + 0.034, fa.z + 0.026], r: [-0.18, -0.14, -0.10] },
+      ...tail,
+    ];
+  } else if (style === 'tube') {
+    // Four shells, one at a time, into the loading gate under the receiver. The hand
+    // shuttles pouch -> gate four times; the rhythm is the whole character of it.
+    const gate: [number, number, number] = [mg.x - 0.010, mg.y + 0.040, mg.z + 0.020];
+    keys = [...lead];
+    for (let i = 0; i < 4; i++) {
+      const t0 = 0.20 + i * 0.175;
+      keys.push(
+        { t: t0, p: [pouch[0], pouch[1], pouch[2]], r: [0.70, 0.22, 0.30] },
+        { t: t0 + 0.070, p: [gate[0] - 0.016, gate[1] - 0.026, gate[2] + 0.030], r: [0.42, 0.14, 0.22] },
+        { t: t0 + 0.115, p: [gate[0], gate[1], gate[2]], r: [0.30, 0.08, 0.16] },
+      );
+    }
+    keys.push(...tail);
+  } else if (style === 'gripfed') {
+    // The magazine goes up through the pistol grip, so the hand approaches from below
+    // and behind the grip rather than from in front of a separate well.
+    keys = [
+      ...lead,
+      { t: 0.26, p: [mg.x - 0.014, mg.y - 0.010, mg.z + 0.026], r: [0.40, 0.12, 0.20] },
+      { t: 0.38, p: [mg.x - 0.030, mg.y - 0.070, mg.z + 0.070], r: [0.58, 0.18, 0.28] },
+      { t: 0.50, p: pouch, r: [0.72, 0.22, 0.30] },
+      { t: 0.66, p: [mg.x - 0.012, mg.y - 0.050, mg.z + 0.040], r: [0.52, 0.14, 0.24] },
+      { t: 0.76, p: [mg.x, mg.y + 0.012, mg.z + 0.004], r: [0.32, 0.06, 0.15] },
+      { t: 0.82, p: [mg.x, mg.y + 0.034, mg.z], r: [0.24, 0.03, 0.11] },
+      ...runCharging(0.86),
+      ...tail,
+    ];
+  } else if (style === 'ak') {
+    // Rock-and-lock. The empty pivots FORWARD off the front catch (so the hand sweeps
+    // toward the muzzle as it strips, not straight down), and the fresh magazine is
+    // hooked in front-first and raked back until the rear catch bites.
+    keys = [
+      ...lead,
+      { t: 0.25, p: [mg.x - 0.012, mg.y + 0.030, mg.z + 0.006], r: [0.35, 0.10, 0.18] },
+      // forward-and-down: the empty rotating out around its front lug
+      { t: 0.34, p: [mg.x - 0.024, mg.y - 0.014, mg.z - 0.052], r: [0.50, 0.16, 0.26] },
+      { t: 0.42, p: [mg.x - 0.034, mg.y - 0.080, mg.z + 0.010], r: [0.62, 0.18, 0.28] },
+      { t: 0.52, p: pouch, r: [0.72, 0.22, 0.30] },
+      // fresh mag indexes its FRONT lug first, ahead of the well
+      { t: 0.66, p: [mg.x - 0.012, mg.y - 0.026, mg.z - 0.048], r: [0.48, 0.12, 0.22] },
+      { t: 0.76, p: [mg.x, mg.y + 0.006, mg.z - 0.020], r: [0.34, 0.07, 0.16] },
+      // then rocks BACK to lock
+      { t: 0.82, p: [mg.x, mg.y + 0.034, mg.z + 0.014], r: [0.22, 0.02, 0.10] },
+      ...runCharging(0.86),
+      ...tail,
+    ];
+  } else {
+    // ar / smg / pistol — a straight drop-free exchange. The differences between these
+    // three are in the body motion and the timings, not the hand path.
+    const boltRelease: [number, number, number] = [mg.x - 0.040, mg.y + 0.086, mg.z - 0.010];
+    keys = [
+      ...lead,
+      { t: 0.25, p: [mg.x - 0.012, mg.y + 0.030, mg.z + 0.008], r: [0.35, 0.10, 0.18] },
+      { t: 0.38, p: [mg.x - 0.030, mg.y - 0.060, mg.z + 0.060], r: [0.55, 0.16, 0.26] },
+      { t: 0.50, p: pouch, r: [0.72, 0.22, 0.30] },
+      { t: 0.64, p: [wellLip[0] - 0.010, wellLip[1] - 0.030, wellLip[2] + 0.030], r: [0.50, 0.12, 0.22] },
+      { t: 0.74, p: [mg.x, mg.y + 0.018, mg.z], r: [0.30, 0.05, 0.14] },
+      { t: 0.80, p: [mg.x, mg.y + 0.040, mg.z], r: [0.22, 0.02, 0.10] },
+      // The thumb comes off the magazine straight onto the bolt release, which sits
+      // above and inboard of the well. Only 'ar' and 'pistol' actually have one.
+      ...(style === 'ar' || style === 'pistol'
+        ? [{ t: 0.845, p: boltRelease, r: [0.10, -0.02, 0.06] } as LArmKey]
+        : []),
+      ...runCharging(style === 'ar' || style === 'pistol' ? 0.875 : 0.85),
+      ...tail,
+    ];
+  }
+  keys.sort((x, y) => x.t - y.t);
   batchRigidGroup(r);
-  batchRigidGroup(lArm);
+  // NOTE: do NOT batch lArm — its three bones must stay separate transforms for
+  // the IK solver. Each bone is already batched individually above (3 draws).
   return { lArm, keys };
 }
 

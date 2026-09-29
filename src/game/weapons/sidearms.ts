@@ -79,7 +79,7 @@ export function buildM1911(): WeaponModel {
   mag.group.position.set(0, -0.017, 0.007);
   return a.finish({ mag: mag.group, handle: slide.group, sightY: 0.051, pistol: true,
     sockets: { muzzle: [0, 0.026, -0.157], barrel: [0, 0.026, -0.128], optic: [0, 0.042, 0.018], magazine: [0, -0.017, 0.007], rail: [0, -0.012, -0.107] },
-    muzzleTip: [0, 0.026, -0.161], arms: { fore: [-0.004, -0.055, 0.025], grip: [0.004, -0.054, 0.028], mag: [0, -0.098, 0.031], fa: [0, 0.026, 0.020] },
+    muzzleTip: [0, 0.026, -0.161], arms: { fore: [-0.004, -0.055, 0.025], grip: [0.004, -0.054, 0.028], mag: [0, -0.098, 0.031], fa: [0, 0.026, 0.020], style: 'pistol' },
   });
 }
 
@@ -129,6 +129,6 @@ export function buildDeagle(): WeaponModel {
   mag.group.position.set(0, -0.017, 0.010);
   return a.finish({ mag: mag.group, handle: slide.group, sightY: 0.064, pistol: true,
     sockets: { muzzle: [0, 0.031, -0.212], barrel: [0, 0.031, -0.078], optic: [0, 0.053, 0.011], magazine: [0, -0.017, 0.010], rail: [0, -0.018, -0.142] },
-    muzzleTip: [0, 0.031, -0.217], arms: { fore: [-0.004, -0.059, 0.029], grip: [0.004, -0.060, 0.034], mag: [0, -0.108, 0.037], fa: [0, 0.031, 0.030] },
+    muzzleTip: [0, 0.031, -0.217], arms: { fore: [-0.004, -0.059, 0.029], grip: [0.004, -0.060, 0.034], mag: [0, -0.108, 0.037], fa: [0, 0.031, 0.030], style: 'pistol' },
   });
 }

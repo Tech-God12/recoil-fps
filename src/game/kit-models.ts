@@ -1,4 +1,4 @@
-// Recoil FPS — procedural field-kit hardware: the Radar unit, the Barricade and the
+// Recoil FPS — procedural field-kit hardware: the Mine, the Barricade, the Medkit and the
 // Decoy hologram. Everything is built from primitives at runtime (no model files),
 // but detail parts are MERGED per material so a deployed kit costs a handful of draw
 // calls no matter how many rivets, pouches and struts it carries.
@@ -150,160 +150,7 @@ class Parts {
   }
 }
 
-let arrayMatShared: THREE.MeshStandardMaterial | null = null;
-/** Radar emitter face: dark tile grid with cyan-lit seams (shared, never disposed). */
-function arrayMat(): THREE.MeshStandardMaterial {
-  if (arrayMatShared) return arrayMatShared;
-  const cg = canvas(256, 160);
-  let map: THREE.CanvasTexture | null = null;
-  let emi: THREE.CanvasTexture | null = null;
-  if (cg) {
-    const [c, g] = cg;
-    g.fillStyle = '#10161a'; g.fillRect(0, 0, 256, 160);
-    for (let y = 0; y < 8; y++) for (let x = 0; x < 14; x++) {
-      g.fillStyle = (x + y) % 2 ? '#1b252b' : '#162026';
-      g.fillRect(4 + x * 17.8, 4 + y * 19, 15, 16);
-    }
-    map = new THREE.CanvasTexture(c); map.colorSpace = THREE.SRGBColorSpace;
-    const ce = canvas(256, 160)!;
-    const ge = ce[1];
-    ge.fillStyle = '#000'; ge.fillRect(0, 0, 256, 160);
-    ge.fillStyle = '#5fe3ff';
-    for (let y = 0; y < 8; y++) for (let x = 0; x < 14; x++) ge.fillRect(9 + x * 17.8, 10 + y * 19, 5, 3);
-    ge.fillRect(0, 0, 256, 2); ge.fillRect(0, 158, 256, 2);
-    emi = new THREE.CanvasTexture(ce[0]); emi.colorSpace = THREE.SRGBColorSpace;
-  }
-  return (arrayMatShared = new THREE.MeshStandardMaterial({
-    color: 0xffffff, map, emissive: emi ? 0xffffff : 0x113844, emissiveMap: emi, emissiveIntensity: 1.6, roughness: 0.35, metalness: 0.5,
-  }));
-}
-
-// ---------------------------------------------------------------------------------
-// Radar: throwable ground radar — rugged case, fold-out legs, mast, spinning array panel
-// ---------------------------------------------------------------------------------
-export interface DartModel {
-  group: THREE.Group;
-  /** Status light (own material — the director pulses it). */
-  led: THREE.Mesh;
-  /** Radar head: spins while deployed. */
-  dish: THREE.Group;
-  /** 0 = folded for the throw, 1 = legs out, mast up. */
-  setDeploy(k: number): void;
-  /** Flat expanding ground ring for each pulse (world space, scaled by the director). */
-  ring: THREE.Mesh;
-  /** Trailing echo ring. */
-  echo: THREE.Mesh;
-  /** Expanding translucent dome — the pulse's 3-D reach. */
-  dome: THREE.Mesh;
-  /** Vertical beacon beam marking the unit. */
-  beam: THREE.Mesh;
-}
-
-export function buildDart(): DartModel {
-  const m = M();
-  const group = new THREE.Group();
-  // Base: a rugged rounded case (olive, worn) on a rubber skirt, with a carry handle,
-  // a dark top deck, vents, bolts and a small status panel. ~26 × 20 cm footprint.
-  const body = new Parts()
-    .rbox(0.26, 0.085, 0.2, 0.025, m.olive, 0, 0.06, 0)
-    .rbox(0.275, 0.03, 0.215, 0.012, m.rubber, 0, 0.022, 0)
-    .rbox(0.2, 0.02, 0.15, 0.008, m.gunmetal, 0, 0.108, 0)
-    .cyl(0.05, 0.056, 0.03, m.dark, 0, 0.128, 0, 0, 0, 0, 16)
-    .rbox(0.07, 0.03, 0.004, 0.003, m.glass, -0.06, 0.07, 0.101)
-    // carry handle across the back edge
-    .cyl(0.008, 0.008, 0.16, m.steel, 0, 0.13, -0.085, 0, 0, Math.PI / 2, 8)
-    .box(0.012, 0.035, 0.012, m.steel, -0.08, 0.112, -0.085)
-    .box(0.012, 0.035, 0.012, m.steel, 0.08, 0.112, -0.085);
-  for (let i = 0; i < 4; i++) body.box(0.012, 0.03, 0.004, m.dark, 0.03 + i * 0.022, 0.065, 0.101); // vents
-  for (const [x, z] of [[-0.09, -0.065], [0.09, -0.065], [-0.09, 0.065], [0.09, 0.065]]) body.cyl(0.007, 0.007, 0.006, m.steel, x, 0.12, z, 0, 0, 0, 8);
-  body.build(group);
-  // status LED strip on the front (own material — the director pulses it)
-  const ledMat = m.cyan.clone();
-  const led = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.01, 0.004), ledMat);
-  led.position.set(-0.06, 0.07, 0.104);
-  group.add(led);
-  // three fold-out legs with rubber feet
-  const legs: THREE.Group[] = [];
-  for (const a of [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.5]) {
-    const hinge = new THREE.Group();
-    hinge.position.set(Math.sin(a) * 0.12, 0.05, Math.cos(a) * 0.1);
-    hinge.rotation.y = a;
-    new Parts()
-      .rbox(0.028, 0.018, 0.17, 0.006, m.gunmetal, 0, 0, 0.085)
-      .cyl(0.012, 0.012, 0.036, m.steel, 0, 0, 0, 0, 0, Math.PI / 2, 8)
-      .cyl(0.024, 0.028, 0.016, m.rubber, 0, -0.012, 0.17, 0, 0, 0, 10)
-      .build(hinge);
-    group.add(hinge);
-    legs.push(hinge);
-  }
-  // telescopic mast: two steel stages with collars
-  const mast = new THREE.Group();
-  mast.position.y = 0.14;
-  new Parts()
-    .cyl(0.02, 0.024, 0.16, m.gunmetal, 0, 0.08, 0, 0, 0, 0, 12)
-    .cyl(0.028, 0.028, 0.018, m.dark, 0, 0.16, 0, 0, 0, 0, 12)
-    .cyl(0.014, 0.014, 0.12, m.steel, 0, 0.23, 0, 0, 0, 0, 10)
-    .build(mast);
-  group.add(mast);
-  // Head: a flat phased-array panel (glowing emitter grid) on a turntable yoke,
-  // tilted back 15°, with a sensor pod and whip antenna. Reads as "radar" at a glance.
-  const dish = new THREE.Group();
-  dish.position.y = 0.29;
-  mast.add(dish);
-  const tilt = -0.26;
-  const head = new Parts()
-    .cyl(0.04, 0.045, 0.025, m.gunmetal, 0, 0.012, 0, 0, 0, 0, 16)     // turntable
-    .rbox(0.2, 0.018, 0.04, 0.006, m.gunmetal, 0, 0.032, 0)          // yoke bar
-    .rbox(0.016, 0.1, 0.03, 0.005, m.gunmetal, -0.1, 0.08, 0)        // yoke arms
-    .rbox(0.016, 0.1, 0.03, 0.005, m.gunmetal, 0.1, 0.08, 0)
-    .rbox(0.32, 0.2, 0.04, 0.012, m.olive, 0, 0.14, 0, tilt, 0, 0)    // panel housing
-    .rbox(0.18, 0.1, 0.035, 0.01, m.dark, 0, 0.13, 0.04, tilt, 0, 0) // rear electronics box
-    .cyl(0.004, 0.004, 0.2, m.dark, 0.12, 0.3, 0.02, 0, 0, 0, 5)     // antenna
-    .sphere(0.008, m.amber, 0.12, 0.4, 0.02, 1, 1, 1, 8);
-  for (const s of [-1, 1]) head.cyl(0.012, 0.012, 0.03, m.steel, s * 0.1, 0.12, 0, 0, 0, Math.PI / 2, 10); // pivots
-  head.build(dish);
-  // emitter face (own mesh so its emissive grid can glow)
-  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.29, 0.17), arrayMat());
-  face.position.set(0, 0.14 - Math.sin(tilt) * 0.021, -0.021 * Math.cos(tilt));
-  face.rotation.set(tilt, Math.PI, 0);
-  dish.add(face);
-
-  const setDeploy = (k: number) => {
-    const e = Math.max(0, Math.min(1, k));
-    // legs tucked flat under the case, then swing down/out
-    for (const l of legs) l.rotation.x = THREE.MathUtils.lerp(-0.2, 0.42, e);
-    const up = Math.max(0, Math.min(1, (e - 0.35) / 0.65));
-    mast.scale.set(1, Math.max(0.04, up), 1);
-    dish.scale.setScalar(Math.max(0.04, up));
-  };
-  setDeploy(0);
-
-  // pulse FX (world space, additive)
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 64),
-    new THREE.MeshBasicMaterial({ color: 0x5fe3ff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
-  ring.rotation.x = -Math.PI / 2; ring.visible = false;
-  const echo = new THREE.Mesh(new THREE.RingGeometry(0.97, 1, 64),
-    new THREE.MeshBasicMaterial({ color: 0xbff6ff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
-  echo.rotation.x = -Math.PI / 2; echo.visible = false;
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), fresnelShell(0x5fe3ff));
-  dome.visible = false;
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.09, 3, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0x5fe3ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
-  beam.visible = false;
-  return { group, led, dish, setDeploy, ring, echo, dome, beam };
-}
-
-/** Disposes the radar's own materials and its world-space pulse meshes. */
-export function disposeDartFx(m: DartModel) {
-  (m.led.material as THREE.Material).dispose();
-  for (const o of [m.ring, m.echo, m.dome, m.beam]) {
-    o.removeFromParent();
-    o.geometry.dispose();
-    (o.material as THREE.Material).dispose();
-  }
-}
-
-/** Soft rim-lit shell (bright at grazing angles, clear face-on): the radar dome. */
+/** Soft rim-lit shell (bright at grazing angles, clear face-on): the medkit dome. */
 function fresnelShell(color: number): THREE.ShaderMaterial {
   const mat = new THREE.ShaderMaterial({
     uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: 0 } },
@@ -463,7 +310,7 @@ function addDepthPrepass(root: THREE.Object3D) {
 }
 
 // ---------------------------------------------------------------------------------
-// Radar tag: through-wall body silhouette
+// Marked contact: through-wall body silhouette
 // ---------------------------------------------------------------------------------
 export interface TagGhost {
   group: THREE.Group;

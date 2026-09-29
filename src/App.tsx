@@ -12,6 +12,13 @@ import { settleResult } from './game/economy/settlement';
 import { MAPS } from './game/world';
 import type { TDMArmor } from './game/tdm';
 
+/**
+ * Every combatant fields the same standard plating. The armor MECHANIC is still live —
+ * the bots carry varied tiers and it drives their body models — but the player no longer
+ * chooses, so the TDM loadout screen is about one thing: the loadout.
+ */
+const PLAYER_TDM_ARMOR: TDMArmor = 1;
+
 type Phase = 'menu' | 'playing' | 'paused' | 'results' | 'armory' | 'tdm-setup' | 'kits';
 const SETTINGS_KEY = 'recoilfps.settings.v1';
 const LEGACY_WALLET_NOTICE_THRESHOLD = 9_000_000;
@@ -70,7 +77,7 @@ export default function App() {
   const [showLegacyWalletNotice, setShowLegacyWalletNotice] = useState(false);
   const legacyWalletNoticeDismissed = useRef(false);
   const [armoryFrom, setArmoryFrom] = useState<'menu' | 'results'>('menu');
-  const [tdmArmor, setTdmArmor] = useState<TDMArmor>(1);
+
   // Which MainMenu screen to show when phase returns to 'menu' (so leaving the
   // TDM loadout screen lands back on Arena Mode, not the home screen).
   const [menuView, setMenuView] = useState<'home' | 'arena'>('home');
@@ -124,6 +131,13 @@ export default function App() {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* Storage is optional. */ }
     engineRef.current?.applySettings(settings);
   }, [settings]);
+  // Colour vision lives on <html>, not the HUD: the menus, the buy screen and the
+  // scoreboards all carry combat colour too, and they must move with it.
+  useEffect(() => {
+    const el = document.documentElement;
+    if (settings.colorBlindMode && settings.colorBlindMode !== 'off') el.dataset.cb = settings.colorBlindMode;
+    else delete el.dataset.cb;
+  }, [settings.colorBlindMode]);
   const set = useCallback((patch: Partial<GameSettings>) => setSettings(previous => sanitizeSettings({ ...previous, ...patch })), []);
   useEffect(() => {
     try { localStorage.setItem(DEFUSAL_KEY, JSON.stringify(defusalOpts)); } catch { /* Storage is optional. */ }
@@ -343,7 +357,13 @@ export default function App() {
         ? { mode: 'defusal' as const, side: defusalOpts.side, format: defusalOpts.format, builds: Object.fromEntries(prof.ownedWeapons.map(id => [id, buildForWeapon(prof, id)])) }
         : mode === 'tdm' ? { mode: 'tdm' as const, kit: prof.equippedKit } : { mode: 'mission' as const };
       buyOpenRef.current = false; setBuyOpen(false);
-      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, tdmArmor, launchOptions);
+      // Texture resolution has to be set BEFORE the world is built: materials bake
+      // their canvases once at construction, so changing it later would only affect
+      // whatever happens to be created after the fact.
+      Engine.applyTextureQuality(settings.textureQuality);
+      Engine.applyTimeOfDay(settings.timeOfDay);
+      Engine.applyWorldDetail(settings.worldDetail);
+      const engine = await Engine.create(canvasRef.current, settings.difficulty, e => { if (session.current === epoch) onEvent(e); }, map, prof.loadout, PLAYER_TDM_ARMOR, launchOptions);
       engineRef.current = engine;
       engine.applySettings(settings);
       changePhase('paused');
@@ -461,9 +481,6 @@ export default function App() {
         <TdmSetup
           profile={profile}
           onProfile={updateProfile}
-          armor={tdmArmor}
-          onArmor={setTdmArmor}
-          onDeploy={() => { void launch('arena', 'tdm'); }}
           onBack={() => { setMenuView('arena'); changePhase('menu'); }}
           kit={profile.equippedKit}
           onKits={() => openKits('tdm-setup')}

@@ -236,7 +236,8 @@ function magDimensions(weapon: WeaponId, extended = true) {
     case 'm1911': return { width: 0.019, depth: 0.026, length: extended ? 0.104 : 0.086, rake: extended ? 0.030 : 0.024, ribs: 0 };
     case 'deagle': return { width: 0.025, depth: 0.030, length: extended ? 0.112 : 0.094, rake: extended ? 0.032 : 0.027, ribs: 0 };
     case 'mp7': return { width: 0.023, depth: 0.029, length: extended ? 0.171 : 0.152, rake: extended ? 0.038 : 0.034, ribs: 2 };
-    case 'vector': return { width: 0.026, depth: 0.037, length: extended ? 0.165 : 0.146, bend: 0.010, ribs: 2 };
+    // Grip-fed (Glock-pattern): straight body sized to the grip well, not a raked magwell stick.
+    case 'vector': return { width: 0.026, depth: 0.036, length: extended ? 0.148 : 0.112, bend: 0.003, ribs: 2 };
     case 'ak47': return { width: 0.029, depth: 0.054, length: extended ? 0.198 : 0.171, bend: extended ? 0.080 : 0.067, ribs: 3 };
     case 'scar_h': return { width: 0.031, depth: 0.066, length: extended ? 0.139 : 0.113, bend: 0.001, ribs: 2 };
     default: return { width: 0.027, depth: 0.054, length: extended ? 0.161 : 0.140, bend: 0.023, ribs: 3 };

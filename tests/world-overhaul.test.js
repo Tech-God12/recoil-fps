@@ -2,6 +2,8 @@ import './helpers/register-json.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
+import { installCanvasStub } from './helpers/geometry.js';
+installCanvasStub();
 const { buildWorld } = await import('../src/game/world.ts');
 const { Engine } = await import('../src/game/engine.ts');
 const { NavGrid } = await import('../src/game/ai.ts');
@@ -62,8 +64,15 @@ for (const id of ['alrasul', 'kasbah']) {
       if (changed) world.detonate();
       const b = budget(world.group);
       assert.ok(b.draws <= 20, `${b.draws} world draws`);
-      // Outward expansion and architectural families have a fixed 112k/65k ceiling; world draws stay <=20.
-      assert.ok(b.triangles < (id === 'alrasul' ? 112000 : 65000), `${b.triangles} world triangles`);
+      // DRAW CALLS are the budget that matters and they are still hard-capped at 20:
+      // the whole world merges down to one mesh per material, so architectural detail
+      // is free at the API level. The triangle ceiling was raised from 112k/65k to
+      // 210k/140k in the architecture overhaul — recessed window reveals, stepped
+      // parapets, mashrabiya bays, plinths and roof programs cost vertices, not
+      // submissions, and a GPU that can run this game at all eats 200k triangles in
+      // well under a millisecond. Keep the draw assertion above sacred; this one is a
+      // regression tripwire against accidental geometry explosions, not a perf limit.
+      assert.ok(b.triangles < (id === 'alrasul' ? 210000 : 140000), `${b.triangles} world triangles`);
       t.diagnostic(`${changed ? 'destroyed' : 'intact'}: ${b.draws} world draws, ${b.triangles} triangles (not an FPS measurement)`);
     }
     assert.ok(world.coverNodes.length >= 25 && world.coverNodes.length <= 40);
@@ -110,4 +119,44 @@ test('fallen hoist blocks a real lane and defender relay stays inside five-draw 
   markers.setContested(true); markers.destroyCache(w);
   assert.equal(markers.cache.visible, false);
   markers.dispose(); dispose(w);
+});
+
+// Footstep audio has had a `metal` profile since the audio rewrite, but nothing ever
+// returned that surface, so the warehouse's steel decks sounded like the concrete slab
+// underneath them. These assert the decks line up with geometry you can actually stand on
+// — a deck that drifts off its container is worse than no deck at all, because the player
+// hears steel while walking on air.
+test('arena: every steel deck sits on geometry the player can actually stand on', () => {
+  const world = fixture('arena');
+  const context = { world, solidGrid: new Map(), scratch: [], GRID_CELL: 8, nearSolids: Engine.prototype.nearSolids };
+  Engine.prototype.buildSolidGrid.call(context);
+  assert.ok(world.metalDecks.length >= 6, `expected the container yards and both catwalks to be decked, got ${world.metalDecks.length}`);
+  for (const deck of world.metalDecks) {
+    const x = (deck.minX + deck.maxX) / 2, z = (deck.minZ + deck.maxZ) / 2;
+    const p = new THREE.Vector3(x, deck.maxY, z);
+    p.y = Engine.prototype.supportHeight.call(context, p, 0.4);
+    // surfaceAt() probes half a metre above the feet.
+    assert.ok(p.y + 0.5 >= deck.minY && p.y + 0.5 <= deck.maxY,
+      `deck at (${x.toFixed(1)}, ${z.toFixed(1)}) spans y ${deck.minY}–${deck.maxY} but the floor there is ${p.y.toFixed(2)} — footsteps would not read as metal`);
+    assert.ok(p.y > 2.2, `deck at (${x.toFixed(1)}, ${z.toFixed(1)}) resolves to ground level (${p.y.toFixed(2)})`);
+  }
+  dispose(world);
+});
+
+test('arena: ground level is not steel', () => {
+  const world = fixture('arena');
+  const inside = (x, y, z, b) => x >= b.minX && x <= b.maxX && y >= b.minY && y <= b.maxY && z >= b.minZ && z <= b.maxZ;
+  for (const [x, z] of [[0, 0], [-30, 0], [30, 0], [-38, 20], [38, -20], [0, 30], [0, -30]]) {
+    assert.ok(!world.metalDecks.some(d => inside(x, 0.5, z, d)),
+      `(${x}, ${z}) at ground level is being reported as a steel deck`);
+  }
+  dispose(world);
+});
+
+test('the other maps carry no steel decks', () => {
+  for (const id of ['alrasul', 'kasbah', 'sirocco']) {
+    const world = fixture(id);
+    assert.equal(world.metalDecks.length, 0, `${id} should have no steel decks`);
+    dispose(world);
+  }
 });

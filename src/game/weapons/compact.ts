@@ -56,7 +56,7 @@ export function buildMP7(): WeaponModel {
   mag.group.position.set(0, -0.032, -0.051);
   return a.finish({ mag: mag.group, handle: charging.group, sightY: 0.072,
     sockets: { muzzle: [0, 0.008, -0.299], optic: [0, 0.047, -0.120], magazine: [0, -0.032, -0.051], underbarrel: [0, -0.025, -0.222], stock: [0, 0.011, 0.010], rail: [-0.0275, -0.005, -0.176] },
-    muzzleTip: [0, 0.008, -0.332], arms: { fore: [0, -0.060, -0.222], grip: [0.004, -0.072, -0.037], mag: [0, -0.160, -0.019], fa: [0, 0.030, 0.025] },
+    muzzleTip: [0, 0.008, -0.332], arms: { fore: [0, -0.060, -0.222], grip: [0.004, -0.072, -0.037], mag: [0, -0.160, -0.019], fa: [0, 0.030, 0.025], style: 'smg' },
   });
 }
 
@@ -111,10 +111,15 @@ export function buildVector(): WeaponModel {
   barrel.b.name('threaded barrel').tube(0.009, 0.0045, 0.069, WM.darkSteel, 0, -0.014, -0.303);
   flashHider(a, -0.335, -0.014, 0.018, 0.0105);
   ironSights(a, -0.007, -0.257, 0.057, 0.057, 0.082);
-  magazine(mag.b, { width: 0.026, depth: 0.037, length: 0.146, bend: 0.008, material: WM.darkSteel, ribs: 2 });
-  mag.group.position.set(0, -0.053, -0.200);
+  // The Vector feeds through the PISTOL GRIP (it takes Glock magazines) — that is the
+  // defining feature of the layout. It was previously modelled with an MP5-style
+  // magwell 20 cm forward of the grip, hanging off the underside of the receiver.
+  // Grip core spans z 0.007..0.040 and y -0.018..-0.119, so the magazine lives inside
+  // that volume and the baseplate protrudes a little below the heel.
+  magazine(mag.b, { width: 0.026, depth: 0.036, length: 0.112, bend: 0.003, material: WM.darkSteel, ribs: 2 });
+  mag.group.position.set(0, -0.024, 0.016);
   return a.finish({ mag: mag.group, handle: charging.group, sightY: 0.082,
-    sockets: { muzzle: [0, -0.014, -0.335], barrel: [0, -0.014, -0.278], optic: [0, 0.057, -0.120], magazine: [0, -0.053, -0.200], underbarrel: [0, -0.054, -0.265], stock: [0, 0.013, 0.025], rail: [-0.027, 0.016, -0.241] },
-    muzzleTip: [0, -0.014, -0.357], arms: { fore: [0, -0.086, -0.265], grip: [0.004, -0.080, 0.020], mag: [0, -0.173, -0.205], fa: [-0.034, 0.024, -0.072] },
+    sockets: { muzzle: [0, -0.014, -0.335], barrel: [0, -0.014, -0.278], optic: [0, 0.057, -0.120], magazine: [0, -0.024, 0.016], underbarrel: [0, -0.054, -0.265], stock: [0, 0.013, 0.025], rail: [-0.027, 0.016, -0.241] },
+    muzzleTip: [0, -0.014, -0.357], arms: { fore: [0, -0.086, -0.265], grip: [0.004, -0.080, 0.020], mag: [0, -0.150, 0.020], fa: [-0.034, 0.024, -0.072], style: 'gripfed' },
   });
 }

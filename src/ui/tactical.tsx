@@ -105,6 +105,7 @@ export const CALIBER: Record<WeaponId, { round: string; note: string }> = {
   scar_h: { round: '7.62×51MM', note: 'Full-power battle rifle round. Two taps solve most problems.' },
   deagle: { round: '.50 AE', note: 'Hand-cannon magnum. Loud, proud, and wrist-breaking.' },
   m249: { round: '5.56×45 BELT', note: 'Linked suppression. One hundred rounds before the long reload.' },
+  aug_a3: { round: '5.56×45 NATO', note: 'Bullpup layout puts a full 16-inch barrel in a carbine footprint. Flat, fast, and short enough to turn corners with.' },
 };
 
 const clampN = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));

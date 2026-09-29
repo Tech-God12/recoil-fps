@@ -61,10 +61,11 @@ export const BOT_WEAPONS: Record<WeaponId, BotWeapon> = {
   awm: { id: 'awm', name: 'AWM', kind: 'sniper', damage: 115, armorRatio: 0.975, interval: 1.45, burst: [1, 1], pause: [0.9, 1.6], accNear: 0.72, accFar: 0.8, range: 80, headChance: 0.18 },
   spas12: { id: 'spas12', name: 'SPAS', kind: 'shotgun', damage: 26, armorRatio: 0.5, interval: 0.85, burst: [1, 2], pause: [0.5, 0.9], accNear: 0.85, accFar: 0.1, range: 16, headChance: 0.06, pellets: 8, falloffStart: 8 },
   m249: { id: 'm249', name: 'M249', kind: 'lmg', damage: 32, armorRatio: 0.8, interval: 0.08, burst: [6, 12], pause: [0.3, 0.6], accNear: 0.72, accFar: 0.35, range: 55, headChance: 0.07 },
+  aug_a3: { id: 'aug_a3', name: 'AUG', kind: 'rifle', damage: 31, armorRatio: 0.69, interval: 0.088, burst: [3, 7], pause: [0.28, 0.55], accNear: 0.83, accFar: 0.47, range: 62, headChance: 0.1 },
 };
 const WORLD_KIND: Record<WeaponId, WorldWeaponKind> = {
   m1911: 'pistol', deagle: 'pistol', mp7: 'smg', vector: 'smg', ak47: 'rifle', m4a1: 'rifle',
-  scar_h: 'rifle', awm: 'sniper', spas12: 'shotgun', m249: 'lmg',
+  scar_h: 'rifle', awm: 'sniper', spas12: 'shotgun', m249: 'lmg', aug_a3: 'rifle',
 };
 
 export interface Combatant {

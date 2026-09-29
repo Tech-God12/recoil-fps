@@ -7,8 +7,8 @@ import type { DefusalHud, DefusalResult } from '../game/defusal/mode';
 import { WEAPON_CATALOG } from '../game/economy/catalog';
 import { getMission, type MissionReport } from '../game/systems/mission';
 import type { MissionHud } from '../game/systems/mission-runtime';
-import type { KitHud } from '../game/kits';
-import { KitPauseCard } from './Kits';
+import type { KitHud, KitId } from '../game/kits';
+import { AbilityCardWide, KitPauseCard } from './Kits';
 import type { PressureStats } from '../game/systems/reinforcements';
 import { missionClock, objectiveReadout } from './MissionObjective';
 import { CountUp } from './components';
@@ -65,20 +65,6 @@ const CrossIcon = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.1" aria-hidden="true"><circle cx="12" cy="12" r="6.5" /><path d="M12 2v5M12 17v5M2 12h5M17 12h5" /></svg>
 );
 
-const PistolIcon = () => (
-  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
-    <path d="M2 8.5h13.5v3.6H11l-.8 5.4H7.4l.8-5.4H4.5v2.4H2z" />
-    <path d="M15.5 8.5V12 M18.5 8.5h2.8v2.6h-2.8" />
-  </svg>
-);
-const FragIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-    <rect x="9" y="2.5" width="6" height="3.4" rx="1" />
-    <circle cx="16.6" cy="4.4" r="1.7" />
-    <path d="M7 9.5h10V15a5 5 0 0 1-10 0z" />
-    <path d="M7 12.5h10" />
-  </svg>
-);
 
 
 const INTEL_TABS = [
@@ -102,18 +88,15 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
   const [intel, setIntel] = useState(2);
   const [profileOpen, setProfileOpen] = useState(false);
   const [cashShown, setCashShown] = useState(0);
-  const [thumbs, setThumbs] = useState<{ primary: string; secondary: string }>({ primary: '', secondary: '' });
-  const primaryId = prof.loadout.primary.weapon;
-  const secondaryId = prof.loadout.secondary.weapon;
   const rootRef = useRef<HTMLElement | null>(null);
   const cashTarget = prof.cash;
   const level = 13 + prof.missions;
   const phaseCount = getMission('kasbah').phases.length + getMission('alrasul').phases.length;
   const intelReadouts = [
-    '1 OPERATOR · RECOIL_01',
-    'DESERT VALLEY · GRID 39S',
-    `2 ARENAS · ${phaseCount} PHASES`,
-    prof.missions > 0 || prof.kills > 0 ? `${prof.missions} OPS · ${prof.kills} KILLS` : 'AWAITING DEPLOYMENT',
+    'Recoil_01',
+    'Desert valley · grid 39S',
+    `2 arenas · ${phaseCount} phases`,
+    prof.missions > 0 || prof.kills > 0 ? `${prof.missions} ops · ${prof.kills} kills` : 'Awaiting deployment',
   ];
 
   // Wallet ticker — rolls up fast on mount.
@@ -131,22 +114,11 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
     return () => cancelAnimationFrame(raf);
   }, [cashTarget]);
 
-  // Whole-weapon renders for the loadout card — real 3D thumbnails, one per slot.
-  useEffect(() => {
-    let active = true;
-    void weaponTexturesReady.then(async () => {
-      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-      if (!active) return;
-      setThumbs({ primary: gunThumbnail(primaryId), secondary: gunThumbnail(secondaryId) });
-    });
-    return () => { active = false; };
-  }, [primaryId, secondaryId]);
-
   const items = [
-    { id: 'missions', idx: '01', title: 'MISSIONS', sub: 'CHOOSE A BATTLEFIELD AND DEPLOY', action: () => onSelect('maps') },
-    { id: 'arena', idx: '02', title: 'ARENA MODE', sub: '5V5 · BOMB DEFUSAL · TEAM DEATHMATCH', action: () => onSelect('arena') },
-    { id: 'loadout', idx: '04', title: 'LOADOUT', sub: 'WEAPONS, ARMOR AND CUSTOMIZATION', action: onArmory },
-    { id: 'settings', idx: '05', title: 'SETTINGS', sub: 'VIDEO, AUDIO AND CONTROLS', action: onSettings },
+    { id: 'missions', idx: '01', title: 'Missions', sub: 'Pick a battlefield and deploy', action: () => onSelect('maps') },
+    { id: 'arena', idx: '02', title: 'Arena', sub: 'Bomb defusal and team deathmatch', action: () => onSelect('arena') },
+    { id: 'loadout', idx: '03', title: 'Loadout', sub: 'Weapons, attachments and skins', action: onArmory },
+    { id: 'settings', idx: '04', title: 'Settings', sub: 'Video, audio and controls', action: onSettings },
   ];
   const activate = useCallback((i: number) => { items[i]?.action(); }, [items]);
 
@@ -195,9 +167,8 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
       <div className="rm-layout">
         <div className="rm-left">
           <div className="rm-titleblock seq" style={{ animationDelay: '.02s' }}>
-            <span className="rm-kicker">DEPLOYMENT TERMINAL<br />V1.1.0</span>
             <h1 className="rm-title">RECOIL<sup>®</sup></h1>
-            <span className="rm-subtitle">DESERT OPERATIONS&nbsp;&nbsp;•&nbsp;&nbsp;SINGLE OPERATOR</span>
+            <span className="rm-subtitle">Desert operations</span>
             <i className="rm-goldrule" aria-hidden="true" />
           </div>
 
@@ -230,7 +201,7 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
             </span>
             <button type="button" className="rm-op" onClick={() => setProfileOpen(true)} title="Open player profile (Tab)">
               <RankIcon />
-              <span className="rm-op-body"><em>OPERATOR</em><b>RECOIL_01</b><i>LVL {level}</i></span>
+              <span className="rm-op-body"><b>Recoil_01</b><i>Level {level}</i></span>
             </button>
           </div>
 
@@ -253,32 +224,6 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
             <i className="rm-goldrule sm right" aria-hidden="true" />
           </div>
 
-          <button type="button" className="rm-loadout seq" style={{ animationDelay: '.2s' }} onClick={onArmory} title="Open loadout">
-            <span className="rm-lo-kicker">CURRENT LOADOUT</span>
-            <span className="rm-lo-main">
-              <span className="rm-lo-tag mono">PRIMARY</span>
-              <b className="rm-lo-name">{primaryName}</b>
-              {thumbs.primary
-                ? <img src={thumbs.primary} alt="" draggable={false} className="rm-lo-gun" />
-                : <span className="rm-lo-gun rm-lo-gun-loading" aria-hidden="true" />}
-            </span>
-            <span className="rm-lo-div" aria-hidden="true" />
-            <span className="rm-lo-slots">
-              <span className="rm-lo-slot">
-                <span className="rm-lo-tag mono">SIDEARM</span>
-                {thumbs.secondary
-                  ? <img src={thumbs.secondary} alt="" draggable={false} className="rm-lo-gun sm" />
-                  : <PistolIcon />}
-                <em>{secondaryName}</em>
-              </span>
-              <span className="rm-lo-slot">
-                <span className="rm-lo-tag mono">TACTICAL</span>
-                <FragIcon />
-                <em>FRAG ×2</em>
-              </span>
-            </span>
-            <span className="rm-lo-foot"><em>EDIT IN ARMORY</em><Arrow /></span>
-          </button>
         </div>
       </div>
 
@@ -290,26 +235,26 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
         <span className="rm-keys"><span className="rm-key wide">ENTER</span></span>
         <span className="rm-sep" aria-hidden="true" />
         <span className="rm-keys"><span className="rm-key wide">TAB</span></span>
-        <span className="rm-foot-right">V1.1.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
+        <span className="rm-foot-right">v1.1.0</span>
       </footer>
 
       {profileOpen && (
         <div className="rm-profile-scrim" onClick={() => setProfileOpen(false)}>
           <aside className="rm-profile" role="dialog" aria-label="Player profile" onClick={e => e.stopPropagation()}>
             <div className="rm-profile-head">
-              <span>OPERATOR FILE</span>
+              <span>Profile</span>
               <button type="button" onClick={() => setProfileOpen(false)} aria-label="Close profile">✕</button>
             </div>
             <div className="rm-profile-callsign">RECOIL_01</div>
-            <div className="rm-profile-lvl">LVL {level} · DESERT OPERATIONS</div>
+            <div className="rm-profile-lvl">Level {level}</div>
             <div className="rm-profile-rows">
-              <div><span>MISSIONS</span><b className="tabular">{prof.missions}</b></div>
-              <div><span>ELIMINATIONS</span><b className="tabular">{prof.kills}</b></div>
-              <div><span>WALLET</span><b className="tabular">${prof.cash.toLocaleString('en-US')}</b></div>
-              <div><span>PRIMARY</span><b>{primaryName}</b></div>
-              <div><span>SECONDARY</span><b>{secondaryName}</b></div>
+              <div><span>Missions</span><b className="tabular">{prof.missions}</b></div>
+              <div><span>Eliminations</span><b className="tabular">{prof.kills}</b></div>
+              <div><span>Wallet</span><b className="tabular">${prof.cash.toLocaleString('en-US')}</b></div>
+              <div><span>Primary</span><b>{primaryName}</b></div>
+              <div><span>Secondary</span><b>{secondaryName}</b></div>
             </div>
-            <div className="rm-profile-foot">TAB / ESC — CLOSE</div>
+            <div className="rm-profile-foot">Tab or Esc to close</div>
           </aside>
         </div>
       )}
@@ -323,23 +268,33 @@ function TacticalHome({ prof, primaryName, secondaryName, onSelect, onArmory, on
      01 WAREHOUSE · Team Deathmatch (respawns, 2:30)
      02 SIROCCO   · Bomb Defusal (CS2-style rounds, economy, plant/defuse)
    ================================================================ */
-const SEG = <T extends string,>({ value, options, onChange, label }: { value: T; options: { id: T; label: string; sub?: string }[]; onChange: (v: T) => void; label: string }) => (
-  <div className="df-opt" role="radiogroup" aria-label={label}>
-    <span className="df-opt-k mono">{label}</span>
-    <div className="df-seg">
-      {options.map(o => (
-        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} className={value === o.id ? 'on' : ''} onClick={() => onChange(o.id)}>
-          <b>{o.label}</b>{o.sub && <em>{o.sub}</em>}
-        </button>
-      ))}
-    </div>
+/** A labelled row. One word on the left, the control on the right. */
+const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div className="ar-row">
+    <span className="ar-row-label">{label}</span>
+    <div className="ar-row-body">{children}</div>
   </div>
 );
 
-function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup, onAbilities, defusal, onDefusal }: {
+/** A segmented control. Flat, one line, no badges — pick one and move on. */
+const Seg = <T extends string,>({ name, value, options, onChange }: {
+  name: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void;
+}) => (
+  <div className="ar-seg" role="radiogroup" aria-label={name}>
+    {options.map(o => (
+      <button key={o.id} type="button" role="radio" aria-checked={value === o.id}
+        className={`ar-seg-btn${value === o.id ? ' on' : ''}`} onClick={() => onChange(o.id)}>
+        {o.label}
+      </button>
+    ))}
+  </div>
+);
+
+function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onArenaSetup, onAbilities, equippedKit, defusal, onDefusal }: {
   primaryName: string; secondaryName: string;
   onBack: () => void; onMap: (map: GameSettings['map']) => void;
   onDeploy: (map?: GameSettings['map']) => void; onArenaSetup?: () => void; onAbilities: () => void;
+  equippedKit: KitId | null;
   defusal: DefusalMenuOptions; onDefusal: (o: DefusalMenuOptions) => void;
 }) {
   const [mode, setMode] = useState<'defusal' | 'tdm'>('defusal');
@@ -361,11 +316,17 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
   }, [isDf]);
   const play = () => { const m: MapId = isDf ? 'sirocco' : 'arena'; onMap(m); onDeploy(m); };
   const cards = [
-    { id: 'sirocco' as MapId, mode: 'defusal' as const, num: '01', name: 'SIROCCO', kind: 'BOMB DEFUSAL', meta: `5V5 · FIRST TO ${defusal.format === 'long' ? 13 : 7} · NO RESPAWNS`, fresh: true },
-    { id: 'arena' as MapId, mode: 'tdm' as const, num: '02', name: 'WAREHOUSE', kind: 'TEAM DEATHMATCH', meta: '5V5 · 2:30 MATCH · 5S RESPAWN', fresh: false },
+    {
+      id: 'sirocco' as MapId, mode: 'defusal' as const, name: 'Sirocco', kind: 'Bomb defusal',
+      line: 'Rounds, no respawns, buy your gun each round. Plant the bomb — or stop it.',
+    },
+    {
+      id: 'arena' as MapId, mode: 'tdm' as const, name: 'Warehouse', kind: 'Team deathmatch',
+      line: 'One long fight with respawns. Most eliminations when the clock runs out wins it.',
+    },
   ];
   return (
-    <main className="tx-root arena2-root">
+    <main className="tx-root ar-root">
       <div className="map2-base" aria-hidden="true" />
       <div className={`map2-flyover ${live ? 'live' : ''}`} aria-hidden="true">
         {cards.map(c => (
@@ -376,101 +337,73 @@ function ArenaView({ primaryName, secondaryName, onBack, onMap, onDeploy, onAren
       </div>
       <div className="tx-grain" aria-hidden="true" />
 
-      <header className="map2-head seq" style={{ animationDelay: '.02s' }}>
+      <header className="ar-head seq" style={{ animationDelay: '.02s' }}>
         <TxBack onClick={onBack} />
-        <div className="map2-titleblock">
-          <span className="map2-kicker">ARENA MODE<br />{isDf ? 'BOMB DEFUSAL' : 'TEAM DEATHMATCH'}</span>
-          <h1 className="map2-title">{isDf ? 'SIROCCO' : 'WAREHOUSE'}</h1>
-          <span className="map2-sub">{isDf ? `5V5 · ${defusal.format === 'long' ? 'FIRST TO 13 · 24 ROUNDS' : 'FIRST TO 7 · 12 ROUNDS'} · HALFTIME SWAP` : '5V5 · 2:30 MATCH · 5S RESPAWN'}</span>
-          <i className="tx-rule" aria-hidden="true" />
-        </div>
-        <TxCoords lat="33.7731° N" lon="44.4208° E" />
-        <div className="map2-brand">
-          <b>RECOIL</b>
-          <em>{isDf ? 'BUY EACH ROUND · YOUR ARMORY BUILDS' : `${primaryName}  //  ${secondaryName}`}</em>
-        </div>
+        <h1 className="ar-title">Arena</h1>
       </header>
 
-      <div className="arena2-cards arena2-cards--two" role="listbox" aria-label="Choose a mode">
-        {cards.map((c, i) => (
+      <div className="ar-cards seq" style={{ animationDelay: '.08s' }} role="listbox" aria-label="Choose a mode">
+        {cards.map(c => (
           <button
             key={c.id}
             type="button"
             role="option"
             aria-selected={mode === c.mode}
-            className={`map2-card seq ${mode === c.mode ? 'sel picked' : ''}`}
-            style={{ animationDelay: `${0.08 + i * 0.06}s` }}
+            className={`ar-card${mode === c.mode ? ' on' : ''}`}
             onMouseEnter={() => setHovered(c.id)}
             onMouseLeave={() => setHovered(cur => (cur === c.id ? null : cur))}
             onFocus={() => setHovered(c.id)}
             onBlur={() => setHovered(cur => (cur === c.id ? null : cur))}
             onClick={() => setMode(c.mode)}
-            onDoubleClick={() => { setMode(c.mode); const m = c.id; onMap(m); onDeploy(m); }}
-            aria-label={`${c.name} — ${c.kind}`}
+            onDoubleClick={() => { setMode(c.mode); onMap(c.id); onDeploy(c.id); }}
           >
-            <img src={MAP_ART[c.id]} alt="" draggable={false} className="map2-art" />
-            <span className="map2-shade" aria-hidden="true" />
-            <span className="map2-num mono">{c.num}</span>
-            {c.fresh && <span className="map2-new mono">NEW MODE</span>}
-            <span className="map2-info">
+            <img src={MAP_ART[c.id]} alt="" draggable={false} className="ar-card-art" />
+            <span className="ar-card-veil" aria-hidden="true" />
+            <span className="ar-card-text">
               <b>{c.name}</b>
               <em>{c.kind}</em>
-              <span className="map2-obj mono">{c.meta}</span>
+              <span className="ar-card-line">{c.line}</span>
             </span>
-            <span className="map2-go"><Arrow /></span>
           </button>
         ))}
       </div>
-      <p className="map2-hint mono" role="status">
-        HOVER A CARD FOR A LIVE FLYOVER · CLICK TO SELECT · DOUBLE-CLICK TO PLAY
-      </p>
 
-      <div className="arena2-cta seq" style={{ animationDelay: '.2s' }}>
+      <div className="ar-setup seq" style={{ animationDelay: '.14s' }}>
         {isDf ? (
           <>
-            <div className="df-options">
-              <SEG label="SIDE" value={defusal.side} onChange={side => onDefusal({ ...defusal, side })}
-                options={[{ id: 'attack', label: 'ATTACK', sub: 'plant the bomb' }, { id: 'defend', label: 'DEFEND', sub: 'hold the sites' }, { id: 'random', label: 'RANDOM', sub: 'coin flip' }]} />
-              <SEG label="MATCH" value={defusal.format} onChange={format => onDefusal({ ...defusal, format })}
-                options={[{ id: 'short', label: 'SHORT', sub: 'first to 7' }, { id: 'long', label: 'FULL', sub: 'first to 13' }]} />
-            </div>
-            <button className="deploy-btn" onClick={play}>
-              <span>Play</span>
-              <span className="hint">Sirocco · Bomb Defusal</span>
-              <Arrow />
-            </button>
-            <button className="menu-secondary-btn" onClick={onAbilities}>Abilities <span>choose your arena ability</span></button>
+            <Row label="Side">
+              <Seg name="Side" value={defusal.side} onChange={side => onDefusal({ ...defusal, side })}
+                options={[
+                  { id: 'attack', label: 'Attack' },
+                  { id: 'defend', label: 'Defend' },
+                  { id: 'random', label: 'Random' },
+                ]} />
+            </Row>
+            <Row label="Match">
+              <Seg name="Match length" value={defusal.format} onChange={format => onDefusal({ ...defusal, format })}
+                options={[
+                  { id: 'short', label: 'First to 7' },
+                  { id: 'long', label: 'First to 13' },
+                ]} />
+            </Row>
           </>
         ) : (
-          <>
-            <button className="deploy-btn" onClick={play}>
-              <span>Play</span>
-              <span className="hint">Warehouse · 5v5 TDM</span>
-              <Arrow />
-            </button>
-            <button className="menu-secondary-btn" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>
-              Set up loadout <span>armor + weapon</span>
-            </button>
-            <button className="menu-secondary-btn" onClick={onAbilities}>
-              Abilities <span>choose your arena ability</span>
-            </button>
-          </>
+          <Row label="Loadout">
+            <span className="ar-loadline">{primaryName} <i>·</i> {secondaryName}</span>
+            <button type="button" className="ar-link" onClick={() => { onMap('arena'); onArenaSetup?.(); }}>Change</button>
+          </Row>
         )}
+        <Row label="Ability">
+          <AbilityCardWide kit={equippedKit} onOpen={onAbilities} />
+        </Row>
       </div>
-      {isDf && (
-        <ul className="df-rules seq" style={{ animationDelay: '.26s' }} aria-label="Bomb defusal rules">
-          <li><b>BUY</b><span>$800 start · CS2 economy · win, loss &amp; kill bonuses</span></li>
-          <li><b>PLANT</b><span>Attackers carry the bomb to A or B · hold X for 3.2s</span></li>
-          <li><b>DEFUSE</b><span>40s fuse · 10s defuse · 5s with an ability</span></li>
-          <li><b>SURVIVE</b><span>No respawns · keep your gun if you live</span></li>
-          <li><b>COMMAND</b><span>6 / 7 call A / B · 8 follow me · 5 drop bomb</span></li>
-        </ul>
-      )}
 
-      <footer className="map2-foot mono">
-        <span>YOUR SQUAD 5&nbsp;&nbsp;//&nbsp;&nbsp;HOSTILES 5</span>
-        <span className="map2-foot-right">V1.2.0&nbsp;&nbsp;//&nbsp;&nbsp;FIELD BUILD</span>
-      </footer>
+      <div className="ar-go seq" style={{ animationDelay: '.2s' }}>
+        <button className="deploy-btn" onClick={play}>
+          <span>Play</span>
+          <Arrow />
+        </button>
+      </div>
     </main>
   );
 }
@@ -651,6 +584,7 @@ export function MainMenu({ s, onDeploy, onSettings, onMap, onArmory, onArenaSetu
         onDeploy={onDeploy}
         onArenaSetup={onArenaSetup}
         onAbilities={() => onAbilities?.()}
+        equippedKit={prof.equippedKit}
         defusal={defusal ?? { side: 'random', format: 'short' }}
         onDefusal={o => onDefusal?.(o)}
       />
@@ -724,7 +658,7 @@ const BOOT_TIPS = [
   'Lean with Q and E, then return to cover before firing.',
   'Reload before crossing an exposed lane.',
   'Manage the magazine; reserve ammunition is not consumed.',
-  'Buy an ability in ABILITIES, then press Z in game: Radar, Barricade or Decoy.',
+  'Buy an ability in ABILITIES, then press Z in game: Mine, Decoy, Medkit or Barricade.',
 ];
 
 export function BootScreen({ map }: { map?: MapId }) {

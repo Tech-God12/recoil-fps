@@ -1,14 +1,14 @@
 // Recoil FPS — Bomb Defusal buy menu (B during the buy window, inside your buy zone).
-// CS-style number flow (1–6 picks a category, 1–9 buys inside it), real 3D gun
-// thumbnails, kill-reward chips, and your armory build fielded when you own the gun.
+// CS-style number flow (1–7 picks a category, 1–9 buys inside it), real 3D gun
+// thumbnails, attachment upgrades, kill-reward chips, and your armory build fielded when you own the gun.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DefusalHud } from '../game/defusal/mode';
 import {
-  SHOP, SHOP_CATEGORIES, buy as simulateBuy, canBuy, fieldAttachmentOffers, inventoryValue, itemPrice, shopItem,
+  SHOP, SHOP_CATEGORIES, buy as simulateBuy, canBuy, inventoryValue, itemPrice, shopItem,
   type Inventory, type ShopCategory, type ShopItem,
 } from '../game/defusal/shop';
 import { KILL_REWARD, type Side } from '../game/defusal/rules';
-import type { WeaponId } from '../game/economy/catalog';
+import { attachmentById, attachmentsFor, type AttachmentId, type AttachSlot, type WeaponId } from '../game/economy/catalog';
 import { gunThumbnail } from './armory/GunViewer';
 import { weaponTexturesReady } from '../game/weapons/finish';
 
@@ -19,10 +19,12 @@ const GEAR_ICON: Record<string, string> = {
   frag: 'M9 2.5h6v3.4H9zM7 9.5h10V15a5 5 0 0 1-10 0z',
   flash: 'M8 3h8v4H8zM7 8h10v12H7zM10 11h4',
   smoke: 'M8 3h8v3H8zM7 7h10v13H7zM4 12c-2 0-2 3 0 3M20 12c2 0 2 3 0 3',
-  optic: 'M4 12h5M15 12h5M12 4v5M12 15v5M8 8h8v8H8z',
-  muzzle: 'M4 9h9v6H4zM13 7h5v10h-5',
-  magazine: 'M8 4h7l1 14H7zM10 7h4M9 11h6',
-  underbarrel: 'M6 7h12M8 10h8l-1 8H9z',
+  optic: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z',
+  muzzle: 'M4 8h16v8H4zM2 10h2v4H2zM20 10h2v4h-2zM8 8v8M12 8v8M16 8v8',
+  underbarrel: 'M6 4h12v4H6zM9 8h6v10c0 1.1-.9 2-2 2h-2c-1.1 0-2-.9-2-2V8z',
+  magazine: 'M7 3h10v14l-3 4H7V3zm3 4h4M10 11h4M10 15h4',
+  barrel: 'M2 10h20v4H2zM5 8v8M19 8v8',
+  laser: 'M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5-6.5 4.5 2-7.5L2 9h7z',
 };
 
 /** Best package for the bank: rifle, armor, kit, utility — the CS "rebuy" in one key. */
@@ -52,7 +54,7 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
 }) {
   const side = df.side;
   const inv = df.inv;
-  const [cat, setCat] = useState<ShopCategory>(() => (inv.primary ? 'attachments' : inv.money >= 3350 ? 'rifles' : inv.money >= 1250 ? 'smgs' : 'pistols'));
+  const [cat, setCat] = useState<ShopCategory>(() => (inv.primary ? 'grenades' : inv.money >= 3350 ? 'rifles' : inv.money >= 1250 ? 'smgs' : 'pistols'));
   const [step, setStep] = useState<'cat' | 'item'>('cat');
   const [toast, setToast] = useState<{ text: string; bad: boolean; key: number } | null>(null);
   const [thumbs, setThumbs] = useState<Partial<Record<WeaponId, string>>>({});
@@ -78,10 +80,36 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const items = useMemo(() => (cat === 'attachments' ? fieldAttachmentOffers(inv) : SHOP.filter(i => i.category === cat)), [cat, inv]);
+  const targetWeapon = inv.primary ?? inv.secondary;
+  const upgradeItems = useMemo((): ShopItem[] => {
+    if (!targetWeapon) return [];
+    const slots: AttachSlot[] = ['optic', 'muzzle', 'underbarrel', 'magazine', 'barrel', 'stock', 'rail'];
+    const list: ShopItem[] = [];
+    for (const s of slots) {
+      const atts = attachmentsFor(targetWeapon, s);
+      for (const a of atts) {
+        list.push({
+          id: a.id,
+          name: a.name,
+          category: 'upgrades',
+          price: a.price,
+          kind: 'attachment',
+          weapon: targetWeapon,
+          slot: a.slot,
+          tag: `${a.slot} · ${a.family}`,
+        });
+      }
+    }
+    return list;
+  }, [targetWeapon]);
+
+  const items = useMemo(() => {
+    if (cat === 'upgrades') return upgradeItems;
+    return SHOP.filter(i => i.category === cat);
+  }, [cat, upgradeItems]);
+
   const doBuy = useCallback((item: ShopItem) => {
     const r = onBuy(item.id);
-    if (r.ok && item.kind === 'primary') setCat('attachments');
     setToast({ text: r.ok ? `${item.name} purchased` : r.reason ?? 'Cannot buy', bad: !r.ok, key: Date.now() + Math.random() });
   }, [onBuy]);
   const autoBuy = useCallback(() => {
@@ -115,13 +143,21 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
     return () => window.removeEventListener('keydown', onKey);
   }, [df.buyOpen, step, items, doBuy, autoBuy, onClose]);
 
+  const formatAtts = (w: WeaponId | null | undefined) => {
+    if (!w || !inv.attachments?.[w]) return '';
+    const atts = Object.values(inv.attachments[w]!).filter(Boolean);
+    if (!atts.length) return '';
+    const names = atts.map(id => attachmentById(id as AttachmentId)?.name ?? id).join(', ');
+    return names ? ` [${names}]` : '';
+  };
+
   const nades = [inv.frags && `Frag ×${inv.frags}`, inv.flashes && `Flash ×${inv.flashes}`, inv.smokes && `Smoke ×${inv.smokes}`].filter(Boolean).join(' · ') || '—';
   return (
     <div className="buy-root" role="dialog" aria-modal="true" aria-label="Buy menu" onContextMenu={e => e.preventDefault()}>
       <div className="buy-panel anim-rise">
         <header className="buy-head">
-          <span className="buy-title">Buy menu</span>
-          <span className={`buy-side ${side}`}>{side === 'attack' ? 'Attack' : 'Defend'} · Round {df.round}</span>
+          <span className="buy-title">BUY MENU</span>
+          <span className={`buy-side ${side}`}>{side === 'attack' ? 'ATTACK' : 'DEFEND'} · ROUND {df.round}</span>
           <span className="buy-money mono tabular">${df.money.toLocaleString('en-US')}</span>
           <span className="buy-time mono tabular" title="Buy time left">◷ {Math.ceil(df.buyTimeLeft)}s</span>
           <button type="button" className="buy-close" onClick={() => onClose(true)} aria-label="Close buy menu">✕</button>
@@ -138,9 +174,10 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
             {items.map((item, i) => {
               const check = canBuy(inv, item.id, side);
               const equipped = !check.ok && check.reason === 'Equipped';
-              const price = itemPrice(item, inv);
+              const price = item.kind === 'attachment' ? item.price : itemPrice(item, inv);
               const reward = item.killClass ? KILL_REWARD[item.killClass] : 0;
-              const yours = !!item.weapon && owned.includes(item.weapon);
+              const yours = !!item.weapon && item.kind !== 'attachment' && owned.includes(item.weapon);
+              const iconKey = item.slot ?? item.id;
               return (
                 <button
                   key={item.id}
@@ -152,15 +189,15 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
                 >
                   <span className="buy-key mono">{step === 'item' ? i + 1 : ''}</span>
                   <span className="buy-art">
-                    {item.weapon
+                    {item.weapon && item.kind !== 'attachment'
                       ? (thumbs[item.weapon] ? <img src={thumbs[item.weapon]} alt="" draggable={false} /> : <i className="buy-art-wait" />)
-                      : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={GEAR_ICON[item.id] ?? (item.slot ? GEAR_ICON[item.slot] : undefined) ?? GEAR_ICON.kevlar} /></svg>}
+                      : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={GEAR_ICON[iconKey] ?? GEAR_ICON.kevlar} /></svg>}
                   </span>
-                  <span className="buy-name">{item.name}{yours && <em className="buy-yours">Your build</em>}</span>
+                  <span className="buy-name">{item.name}{yours && <em className="buy-yours">YOUR BUILD</em>}</span>
                   <span className="buy-tag">{item.tag}</span>
                   <span className="buy-foot">
                     <b className="mono tabular">${price.toLocaleString('en-US')}</b>
-                    {reward > 0 && <i className="mono">${reward} / kill</i>}
+                    {reward > 0 && <i className="mono">${reward} / KILL</i>}
                     {!check.ok && <u>{check.reason}</u>}
                   </span>
                 </button>
@@ -168,24 +205,24 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
             })}
           </div>
           <aside className="buy-loadout">
-            <span className="buy-k">Your round loadout</span>
-            <div><span>Primary</span><b>{inv.primary ? shopItem(inv.primary)?.name : '—'}</b></div>
-            <div><span>Sidearm</span><b>{shopItem(inv.secondary)?.name ?? inv.secondary}</b></div>
-            <div><span>Armor</span><b>{inv.armor === 2 ? 'Kevlar + helmet' : inv.armor ? 'Kevlar' : 'None'}</b></div>
-            {side === 'defend' && <div><span>Defuse kit</span><b>{inv.kit ? 'Yes · 5s defuse' : 'No · 10s defuse'}</b></div>}
-            <div><span>Utility</span><b>{nades}</b></div>
-            <div className="buy-value"><span>Equipment value</span><b className="mono tabular">${inventoryValue(inv).toLocaleString('en-US')}</b></div>
-            <button type="button" className="buy-auto" onClick={autoBuy} disabled={!df.buyOpen}><b className="mono">A</b> Auto-buy <em>rifle · armor · {side === 'defend' ? 'kit · ' : ''}utility</em></button>
+            <span className="buy-k">YOUR ROUND LOADOUT</span>
+            <div><span>PRIMARY</span><b>{inv.primary ? `${shopItem(inv.primary)?.name ?? inv.primary}${formatAtts(inv.primary)}` : '—'}</b></div>
+            <div><span>SIDEARM</span><b>{`${shopItem(inv.secondary)?.name ?? inv.secondary}${formatAtts(inv.secondary)}`}</b></div>
+            <div><span>ARMOR</span><b>{inv.armor === 2 ? 'Kevlar + helmet' : inv.armor ? 'Kevlar' : 'None'}</b></div>
+            {side === 'defend' && <div><span>DEFUSE KIT</span><b>{inv.kit ? 'Yes · 5s defuse' : 'No · 10s defuse'}</b></div>}
+            <div><span>UTILITY</span><b>{nades}</b></div>
+            <div className="buy-value"><span>EQUIPMENT VALUE</span><b className="mono tabular">${inventoryValue(inv).toLocaleString('en-US')}</b></div>
+            <button type="button" className="buy-auto" onClick={autoBuy} disabled={!df.buyOpen}><b className="mono">A</b> AUTO-BUY <em>rifle · armor · {side === 'defend' ? 'kit · ' : ''}utility</em></button>
             <p className="buy-note">Survive the round and you keep everything. Die and you respawn with a 1911.</p>
           </aside>
         </div>
         <footer className="buy-foot-keys mono">
-          <span><b className="keycap">B</b> Close</span>
-          <span><b className="keycap">1-7</b> Category</span>
-          <span><b className="keycap">1-9</b> Buy</span>
-          <span><b className="keycap">⌫</b> Back</span>
-          <span><b className="keycap">A</b> Auto-buy</span>
-          <span><b className="keycap">Esc</b> Pause</span>
+          <span><b className="keycap">B</b> CLOSE</span>
+          <span><b className="keycap">1-7</b> CATEGORY</span>
+          <span><b className="keycap">1-9</b> BUY</span>
+          <span><b className="keycap">⌫</b> BACK</span>
+          <span><b className="keycap">A</b> AUTO-BUY</span>
+          <span><b className="keycap">ESC</b> PAUSE</span>
         </footer>
         {toast && <div key={toast.key} className={`buy-toast ${toast.bad ? 'bad' : ''}`}>{toast.text}</div>}
         {!df.buyOpen && (

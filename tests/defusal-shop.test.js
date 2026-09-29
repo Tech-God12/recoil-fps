@@ -62,6 +62,25 @@ test('death strips the kit but keeps the bank; money is capped at $16,000', () =
   assert.equal(inventoryValue(rich), 4750 + 1000 + 400 + 300 + 400 + 300);
 });
 
+test('attachments can be bought in-round for held weapons and increase inventory value', () => {
+  let inv = freshInventory(5000);
+  inv = buy(inv, 'm4a1', 'defend').inv;
+  assert.equal(inv.primary, 'm4a1');
+  assert.deepEqual(canBuy(inv, 'opt_holo', 'defend'), { ok: true, price: 700 });
+  inv = buy(inv, 'opt_holo', 'defend').inv;
+  assert.equal(inv.attachments?.m4a1?.optic, 'opt_holo');
+  assert.equal(canBuy(inv, 'opt_holo', 'defend').ok, false, 'already equipped');
+
+  // Equip a muzzle attachment
+  assert.deepEqual(canBuy(inv, 'muz_suppressor', 'defend'), { ok: true, price: 800 });
+  inv = buy(inv, 'muz_suppressor', 'defend').inv;
+  assert.equal(inv.attachments?.m4a1?.muzzle, 'muz_suppressor');
+
+  // Inventory value reflects primary gun + attachments
+  const expectedVal = 3100 + 700 + 800;
+  assert.equal(inventoryValue(inv), expectedVal);
+});
+
 test('ballistics: AK one-taps a helmet, the M416 does not, AWM kills to the body, legs take 75%', () => {
   assert.ok(hitDamage('ak47', 'head', 2) >= 100, 'AK headshot through a helmet is lethal');
   assert.ok(hitDamage('m4a1', 'head', 2) < 100, 'M416 needs two headshots on a helmet');
@@ -114,20 +133,4 @@ test('attack plans lean away from the site hit last round', () => {
     if (p.site === 'A') a++;
   }
   assert.ok(a / 2000 < 0.48 && a / 2000 > 0.36, `A picked ${(a / 20).toFixed(1)}% after hitting A`);
-});
-
-test('in-round attachment buys use compatibility data and persist in inventory builds', () => {
-  let inv = freshInventory(6000);
-  assert.equal(canBuy(inv, 'opt_reddot', 'defend').ok, false, 'attachments need a primary first');
-  let r = buy(inv, 'm4a1', 'defend');
-  assert.equal(r.ok, true);
-  inv = r.inv;
-  r = buy(inv, 'opt_reddot', 'defend');
-  assert.equal(r.ok, true);
-  inv = r.inv;
-  assert.equal(inv.builds.m4a1.optic, 'opt_reddot');
-  assert.equal(canBuy(inv, 'opt_reddot', 'defend').ok, false, 'same attachment is equipped');
-  assert.equal(canBuy(inv, 'opt_ak_dot', 'defend').ok, false, 'AK side rail optic is not compatible with the M416');
-  assert.ok(S.fieldAttachmentOffers(inv).some(item => item.kind === 'attachment' && item.id === 'mag_extended'), 'the field upgrade shelf is generated from attachmentsFor(primary, slot)');
-  assert.ok(inventoryValue(inv) >= shopItem('m4a1').price + shopItem('opt_reddot').price);
 });

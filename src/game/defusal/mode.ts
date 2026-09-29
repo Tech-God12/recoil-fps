@@ -730,7 +730,7 @@ export class DefusalMode implements BotSquad {
     this.player.inv = r.inv;
     // A replaced gun drops at your feet, exactly like CS.
     if (r.replaced && r.replaced !== 'm1911' && (item.kind === 'primary' || item.kind === 'secondary')) this.spawnDrop(r.replaced, this.ctx.playerFeet());
-    this.ctx.equipPlayer(this.player.inv, item.kind === 'secondary' ? 'secondary' : item.kind === 'primary' || item.kind === 'attachment' ? 'primary' : undefined);
+    this.ctx.equipPlayer(this.player.inv, item.kind === 'secondary' ? 'secondary' : item.kind === 'primary' ? 'primary' : undefined);
     return { ok: true };
   }
   /** Player utility spent (engine throws the grenade). */
@@ -794,11 +794,10 @@ export class DefusalMode implements BotSquad {
   }
   private teamBots(team: TeamId): TDMBot[] { return this.players.filter(c => c.team === team && c.bot && c.alive).map(c => c.bot!); }
 
-  /** Spectator candidates: living teammates first, then anyone alive, in roster-stable order. */
+  /** Spectator candidates: living teammates first, then anyone alive. */
   spectateList(): TDMBot[] {
-    const byRoster = (a: TDMBot, b: TDMBot) => this.players.findIndex(c => c.bot === a) - this.players.findIndex(c => c.bot === b);
-    const allies = this.teamBots('alpha').sort(byRoster);
-    return allies.length ? allies : this.teamBots('bravo').sort(byRoster);
+    const allies = this.teamBots('alpha');
+    return allies.length ? allies : this.teamBots('bravo');
   }
   combatantOf(bot: TDMBot): Combatant { return this.byBot(bot); }
 
@@ -820,13 +819,14 @@ export class DefusalMode implements BotSquad {
 
   /** Player gunfire is heard by the hostile team. */
   notifyGunshot(pos: THREE.Vector3, radius: number) {
+    const enemyTeam = this.match.teamOf(this.playerSide === 'attack' ? 'defend' : 'attack');
     for (const c of this.players) {
-      if (!c.bot || !c.alive || c.team !== 'bravo') continue;
+      if (!c.bot || !c.alive || c.team !== enemyTeam) continue;
       if (c.bot.pos.distanceTo(pos) <= radius) c.bot.hearShot(pos);
     }
     if (this.playerSide === 'attack') { const s = this.siteNear(pos, true); if (s) this.threat[s] += 0.35; }
     for (const c of this.players) {
-      if (!c.bot || !c.alive || c.team !== 'bravo' || c.bot.seesEnemy() || c.bot.pos.distanceTo(pos) > Math.min(radius, 30)) continue;
+      if (!c.bot || !c.alive || c.team !== enemyTeam || c.bot.seesEnemy() || c.bot.pos.distanceTo(pos) > Math.min(radius, 30)) continue;
       const plan = this.plans.get(c.bot);
       if (plan && (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'retakeStage')) { plan.lookAt = pos.clone(); plan.lookT = this.roundTime + 1.6; }
     }
@@ -1355,12 +1355,9 @@ export class DefusalMode implements BotSquad {
       const s = SITES[this.bomb.site!];
       const defs = this.botsOn('defend');
       const staged = defs.filter(b => this.plans.get(b)?.task === 'retakeStage' && d2(b.pos, this.plans.get(b)!.hold!.at[0], this.plans.get(b)!.hold!.at[1]) < 2.5).length;
-      // Retakes look stupid when the first body through the smoke is alone. Wait
-      // for most living defenders, but still go before the bomb timer makes a
-      // defuse mathematically impossible.
-      const need = Math.min(defs.length, Math.max(2, Math.ceil(defs.length * 0.75)));
+      const need = Math.max(1, defs.length <= 2 ? defs.length : defs.length - 1);
       const timeLeft = m.clock;
-      if (this.retakeGoT > 0 && (staged >= need || this.roundTime > this.retakeGoT || timeLeft < 22)) {
+      if (this.retakeGoT > 0 && (staged >= need || this.roundTime > this.retakeGoT || timeLeft < 20)) {
         this.retakeGoT = -1;
         let smoked = false;
         for (const b of defs) {
@@ -1371,6 +1368,10 @@ export class DefusalMode implements BotSquad {
             smoked = true;
             this.ctx.throwGrenade(b.eyePos(), V(s.retakeSmoke[0], s.retakeSmoke[1]), b, 'smoke');
             c.inv = { ...c.inv, smokes: c.inv.smokes - 1 };
+          } else if (c.inv.flashes > 0 && b.flashes > 0 && d2(b.pos, s.center[0], s.center[1]) < 36) {
+            b.flashes--;
+            c.inv = { ...c.inv, flashes: Math.max(0, c.inv.flashes - 1) };
+            this.ctx.throwGrenade(b.eyePos(), V(s.center[0], s.center[1]), b, 'flash');
           }
         }
         if (this.playerSide === 'defend') this.ctx.onRadio('Retaking — go in together!');

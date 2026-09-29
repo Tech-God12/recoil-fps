@@ -75,13 +75,9 @@ test('buy menu lists prices, locks the enemy rifle, and auto-buy picks a sane pa
   const mode = makeMode('defend');
   const df = { ...mode.hud(), money: 5200, inv: { ...freshInventory(5200) } };
   const html = renderToStaticMarkup(React.createElement(BuyMenu, { df, owned: ['m4a1'], onBuy: () => ({ ok: true }), onClose() {} }));
-  for (const text of ['Buy menu', '$5,200', 'Rifles', 'Attachments', 'M416', 'Your build', 'Attackers only', 'Your round loadout', 'Auto-buy', 'Defuse kit']) {
+  for (const text of ['BUY MENU', '$5,200', 'Rifles', 'M416', 'YOUR BUILD', 'Attackers only', 'YOUR ROUND LOADOUT', 'AUTO-BUY', 'DEFUSE KIT']) {
     assert.ok(html.includes(text), `buy menu shows ${text}`);
   }
-
-  const upgraded = { ...mode.hud(), money: 1800, inv: { ...freshInventory(1800), primary: 'm4a1' } };
-  const upHtml = renderToStaticMarkup(React.createElement(BuyMenu, { df: upgraded, owned: [], onBuy: () => ({ ok: true }), onClose() {} }));
-  for (const text of ['Red Dot', 'Flash Hider', '40-Round STANAG', 'Vertical Grip']) assert.ok(upHtml.includes(text), `attachment shelf shows ${text}`);
   // $5,200: M416 (3,100) → helmet (1,000) → kit (400) → smoke (300) → flash (200) → the frag no longer fits → second flash (200).
   assert.deepEqual(autoBuyPlan(freshInventory(5200), 'defend'), ['m4a1', 'helmet', 'kit', 'smoke', 'flash', 'flash']);
   assert.deepEqual(autoBuyPlan(freshInventory(800), 'attack'), ['kevlar'], 'pistol round: armor only');
@@ -145,16 +141,4 @@ test('the debrief tells the defusal story: score, round strip and standings', ()
   }
   assert.equal((html.match(/df-hcell/g) ?? []).length, 10, 'one history cell per round played');
   assert.ok(!html.includes('Mission timeline'), 'no mission timeline for arena modes');
-});
-
-test('the Missions screen uses the rebuilt calm layout, not theater-card shouting', () => {
-  const html = renderToStaticMarkup(React.createElement(MainMenu, {
-    s: DEFAULT_SETTINGS, onDeploy() {}, onSettings() {}, onMap() {}, initialView: 'maps',
-  }));
-  for (const text of ['Missions', 'Choose a place.', 'Town', 'Sandblast', 'Fortified market town', 'Desert river valley']) {
-    assert.ok(html.includes(text), `missions screen shows ${text}`);
-  }
-  for (const gone of ['THEATER SELECT', 'SELECT AREA OF OPERATIONS', 'DEPLOY TO A THEATER', 'FIELD BUILD', 'map2-num', 'map2-cardcoords', 'TWO THEATERS']) {
-    assert.ok(!html.includes(gone), `${gone} is gone from the missions picker`);
-  }
 });

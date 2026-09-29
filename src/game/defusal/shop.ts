@@ -1,19 +1,17 @@
 // Recoil FPS — Bomb Defusal buy menu, inventory and ballistics (PURE DATA + logic).
-// Prices follow the CS2 price bands mapped onto RECOIL's armory guns. Owned guns
-// still field the Armory finish/build, and in-round attachment buys layer on top
-// so a newly purchased rifle can be upgraded before the freeze time ends.
-import { attachmentById, attachmentsFor, weaponById, type AttachSlot, type AttachmentId, type WeaponId } from '../economy/catalog';
+// Prices follow the CS2 price bands mapped onto RECOIL's eleven armory guns.
+import { attachmentById, type AttachmentId, type AttachSlot, isCompatible, type WeaponId, weaponById } from '../economy/catalog';
 import { ECONOMY, KILL_REWARD, clampMoney, type KillClass, type Side } from './rules';
 
-export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'attachments' | 'gear' | 'grenades';
+export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'gear' | 'grenades' | 'upgrades';
 export type GrenadeKind = 'frag' | 'flash' | 'smoke';
 /** 0 = none, 1 = kevlar vest, 2 = kevlar + helmet. */
 export type ArmorTier = 0 | 1 | 2;
 export type ShopItemId =
   | WeaponId
+  | AttachmentId
   | 'kevlar' | 'helmet' | 'kit'
-  | 'frag' | 'flash' | 'smoke'
-  | AttachmentId;
+  | 'frag' | 'flash' | 'smoke';
 
 export interface ShopItem {
   id: ShopItemId;
@@ -23,7 +21,6 @@ export interface ShopItem {
   kind: 'primary' | 'secondary' | 'armor' | 'helmet' | 'kit' | 'grenade' | 'attachment';
   weapon?: WeaponId;
   grenade?: GrenadeKind;
-  attachment?: AttachmentId;
   slot?: AttachSlot;
   /** Purchase restriction. */
   side?: Side;
@@ -36,9 +33,9 @@ export const SHOP_CATEGORIES: { id: ShopCategory; label: string }[] = [
   { id: 'smgs', label: 'SMGs' },
   { id: 'rifles', label: 'Rifles' },
   { id: 'heavy', label: 'Heavy' },
-  { id: 'attachments', label: 'Attachments' },
   { id: 'gear', label: 'Gear' },
   { id: 'grenades', label: 'Grenades' },
+  { id: 'upgrades', label: 'Upgrades' },
 ];
 
 export const SHOP: ShopItem[] = [
@@ -65,39 +62,7 @@ export const GRENADE_LIMITS: Record<GrenadeKind, number> & { total: number } = {
 /** Upgrading an existing vest to vest + helmet. */
 export const HELMET_UPGRADE_PRICE = 350;
 
-const ATTACHMENT_SLOT_LABEL: Record<AttachSlot, string> = {
-  muzzle: 'Muzzle', optic: 'Optic', magazine: 'Magazine', underbarrel: 'Grip', stock: 'Stock', rail: 'Rail', barrel: 'Barrel',
-};
-export const FIELD_ATTACHMENT_SLOTS: AttachSlot[] = ['optic', 'muzzle', 'magazine', 'underbarrel'];
-
-function attachmentShopItem(id: string): ShopItem | undefined {
-  const a = attachmentById(id);
-  if (!a) return undefined;
-  const label = ATTACHMENT_SLOT_LABEL[a.slot] ?? 'Attachment';
-  return {
-    id: a.id, name: a.name, category: 'attachments', price: a.price, kind: 'attachment',
-    attachment: a.id, slot: a.slot, tag: `${label} · ${a.desc}`,
-  };
-}
-
-export function shopItem(id: string): ShopItem | undefined { return SHOP.find(i => i.id === id) ?? attachmentShopItem(id); }
-
-/** Four readable in-round upgrades for the bought primary: optic, muzzle, mag, grip. */
-export function fieldAttachmentOffers(inv: Inventory): ShopItem[] {
-  const weapon = inv.primary;
-  if (!weapon) return [];
-  return FIELD_ATTACHMENT_SLOTS.flatMap(slot => {
-    if (!weaponById(weapon)?.slots.includes(slot)) return [];
-    const picked = attachmentsFor(weapon, slot)[0];
-    const item = picked ? attachmentShopItem(picked.id) : undefined;
-    return item ? [item] : [];
-  });
-}
-
-export function fieldBuildFor(inv: Inventory, weapon: WeaponId): Partial<Record<AttachSlot, AttachmentId>> {
-  return { ...(inv.builds?.[weapon] ?? {}) };
-}
-
+export function shopItem(id: string): ShopItem | undefined { return SHOP.find(i => i.id === id); }
 
 export interface Inventory {
   money: number;
@@ -108,17 +73,16 @@ export interface Inventory {
   frags: number;
   flashes: number;
   smokes: number;
-  /** Attachments bought during the current life, keyed by the weapon they modify. */
-  builds: Partial<Record<WeaponId, Partial<Record<AttachSlot, AttachmentId>>>>;
+  attachments?: Partial<Record<WeaponId, Partial<Record<AttachSlot, AttachmentId>>>>;
 }
 
 export function freshInventory(money: number = ECONOMY.start): Inventory {
-  return { money: clampMoney(money), primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0, builds: {} };
+  return { money: clampMoney(money), primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0, attachments: {} };
 }
 
 /** Dead players lose their kit; money carries over. */
 export function afterDeath(inv: Inventory): Inventory {
-  return { ...freshInventory(inv.money), money: inv.money };
+  return { ...freshInventory(inv.money), money: inv.money, attachments: {} };
 }
 
 export function grantMoney(inv: Inventory, amount: number): Inventory {
@@ -137,7 +101,19 @@ export type BuyCheck = { ok: true; price: number } | { ok: false; reason: string
 
 export function canBuy(inv: Inventory, id: string, side: Side): BuyCheck {
   const item = shopItem(id);
-  if (!item) return { ok: false, reason: 'Unknown item' };
+  if (!item) {
+    const att = attachmentById(id as AttachmentId);
+    if (att) {
+      const targetWeapon = inv.primary ?? inv.secondary;
+      if (!isCompatible(att, targetWeapon)) return { ok: false, reason: 'Incompatible' };
+      const curAtt = inv.attachments?.[targetWeapon]?.[att.slot];
+      if (curAtt === att.id) return { ok: false, reason: 'Equipped' };
+      const price = att.price;
+      if (inv.money < price) return { ok: false, reason: `Need $${price.toLocaleString('en-US')}` };
+      return { ok: true, price };
+    }
+    return { ok: false, reason: 'Unknown item' };
+  }
   if (item.side && item.side !== side) return { ok: false, reason: item.side === 'defend' ? 'Defenders only' : 'Attackers only' };
   if (item.kind === 'primary' && inv.primary === item.weapon) return { ok: false, reason: 'Equipped' };
   if (item.kind === 'secondary' && inv.secondary === item.weapon) return { ok: false, reason: 'Equipped' };
@@ -148,13 +124,6 @@ export function canBuy(inv: Inventory, id: string, side: Side): BuyCheck {
     if (inv[grenadeKey(item.grenade)] >= GRENADE_LIMITS[item.grenade]) return { ok: false, reason: 'Carrying max' };
     if (grenadeCount(inv) >= GRENADE_LIMITS.total) return { ok: false, reason: 'Grenade slots full' };
   }
-  if (item.kind === 'attachment') {
-    const weapon = inv.primary;
-    const entry = item.attachment ? attachmentById(item.attachment) : undefined;
-    if (!weapon) return { ok: false, reason: 'Buy a primary first' };
-    if (!entry || !attachmentsFor(weapon, entry.slot).some(a => a.id === entry.id)) return { ok: false, reason: 'Not compatible' };
-    if (inv.builds?.[weapon]?.[entry.slot] === entry.id) return { ok: false, reason: 'Equipped' };
-  }
   const price = itemPrice(item, inv);
   if (inv.money < price) return { ok: false, reason: `Need $${price.toLocaleString('en-US')}` };
   return { ok: true, price };
@@ -164,24 +133,37 @@ export function canBuy(inv: Inventory, id: string, side: Side): BuyCheck {
 export function buy(inv: Inventory, id: string, side: Side): { ok: boolean; inv: Inventory; reason?: string; replaced?: WeaponId | null } {
   const check = canBuy(inv, id, side);
   if (!check.ok) return { ok: false, inv, reason: check.reason };
+  const att = attachmentById(id as AttachmentId);
+  if (att) {
+    const targetWeapon = inv.primary ?? inv.secondary;
+    const prevAtts = inv.attachments?.[targetWeapon] ?? {};
+    const nextAtts = { ...prevAtts, [att.slot]: att.id };
+    const next: Inventory = {
+      ...inv,
+      money: inv.money - check.price,
+      attachments: { ...inv.attachments, [targetWeapon]: nextAtts },
+    };
+    return { ok: true, inv: next };
+  }
   const item = shopItem(id)!;
   const next: Inventory = { ...inv, money: inv.money - check.price };
   let replaced: WeaponId | null | undefined;
   switch (item.kind) {
-    case 'primary': replaced = inv.primary; next.primary = item.weapon!; break;
+    case 'primary': {
+      replaced = inv.primary;
+      next.primary = item.weapon!;
+      if (replaced && next.attachments?.[replaced]) {
+        const remaining = { ...next.attachments };
+        delete remaining[replaced];
+        next.attachments = remaining;
+      }
+      break;
+    }
     case 'secondary': replaced = inv.secondary; next.secondary = item.weapon!; break;
     case 'armor': next.armor = 1; break;
     case 'helmet': next.armor = 2; break;
     case 'kit': next.kit = true; break;
     case 'grenade': { const k = grenadeKey(item.grenade!); next[k] = inv[k] + 1; break; }
-    case 'attachment': {
-      const weapon = inv.primary!;
-      const entry = attachmentById(item.attachment!)!;
-      const builds = { ...(inv.builds ?? {}) };
-      builds[weapon] = { ...(builds[weapon] ?? {}), [entry.slot]: entry.id };
-      next.builds = builds;
-      break;
-    }
   }
   return { ok: true, inv: next, replaced };
 }
@@ -194,11 +176,17 @@ export function inventoryValue(inv: Inventory): number {
   v += inv.armor === 2 ? 1000 : inv.armor === 1 ? 650 : 0;
   if (inv.kit) v += 400;
   v += inv.frags * 300 + inv.flashes * 200 + inv.smokes * 300;
-  const countBuild = (weapon: WeaponId | null | undefined) => {
-    if (!weapon) return;
-    for (const id of Object.values(inv.builds?.[weapon] ?? {})) v += attachmentById(id)?.price ?? 0;
-  };
-  countBuild(inv.primary); countBuild(inv.secondary);
+  if (inv.attachments) {
+    for (const w in inv.attachments) {
+      const atts = inv.attachments[w as WeaponId];
+      if (atts) {
+        for (const s in atts) {
+          const aId = atts[s as AttachSlot];
+          if (aId) v += attachmentById(aId)?.price ?? 0;
+        }
+      }
+    }
+  }
   return v;
 }
 

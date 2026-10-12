@@ -43,7 +43,8 @@ export const SIDE_LABEL: Record<Side, string> = { attack: 'ATTACKERS', defend: '
 export const SIDE_TINT: Record<Side, number> = { attack: 0xC7792E, defend: 0x2F6FB0 };
 const ALPHA_NAMES = ['Dagger', 'Havoc', 'Bricks', 'Tundra'];
 const BRAVO_NAMES = ['Viper', 'Reaper', 'Ghost', 'Specter', 'Wraith'];
-const SKILLS: Record<string, BotSkill> = {
+/** Difficulty → bot handling. `reaction` multiplies the acquisition delay. */
+export const DIFFICULTY_SKILLS: Record<string, BotSkill> = {
   Easy: { acc: 0.62, head: 0.5, reaction: 1.6 },
   Normal: { acc: 0.8, head: 0.8, reaction: 1.15 },
   Hard: { acc: 0.92, head: 1.0, reaction: 0.9 },
@@ -120,12 +121,16 @@ export interface DefusalCtx {
 type BombStateId = 'none' | 'carried' | 'dropped' | 'planted' | 'defused' | 'exploded';
 type Task =
   | 'route' | 'stage' | 'hold' | 'plant' | 'getbomb' | 'loot'
-  | 'rotate' | 'retakeStage' | 'retake' | 'defuse' | 'flee' | 'follow' | 'hunt';
+  | 'rotate' | 'retakeStage' | 'retake' | 'defuse' | 'flee' | 'follow' | 'hunt'
+  /** Attackers: somebody is on the bomb — break the hold and go kill them. */
+  | 'savebomb';
 interface BotPlan {
   task: Task;
   route: Vec2[];
   /** Waypoints remaining until the staging point (≤0 = past it). */
   stageLeft: number;
+  /** Out-of-sight spot this bot waits on until the execute is called. */
+  stageAt: Vec2 | null;
   lane: Lane | null;
   hold: { at: Vec2; face: Vec2; crouch?: boolean } | null;
   anchor: boolean;
@@ -139,6 +144,11 @@ interface BotPlan {
   /** Heard a fight: look that way until `lookT`. */
   lookAt: THREE.Vector3 | null;
   lookT: number;
+  /** Trade discipline: stand still and hold this angle until `waitT`. */
+  waitT: number;
+  /** Cached spot to step to when the post itself is inside a smoke, and its expiry. */
+  smokeDodge: Vec2 | null;
+  smokeDodgeT: number;
 }
 
 interface Smoke { pos: THREE.Vector3; age: number; group: THREE.Group; mat: THREE.SpriteMaterial; puffs: { s: THREE.Sprite; off: THREE.Vector3; size: number }[] }
@@ -278,6 +288,10 @@ export class DefusalMode implements BotSquad {
   private buyCalls: Record<TeamId, BuyCall> = { alpha: 'pistol', bravo: 'pistol' };
   private followPlayer = false;
   private reportCooldown = new Map<string, number>();
+  private hearT = 0;
+  private lastHeardPos = new Map<string, THREE.Vector3>();
+  /** Diagnostics: how much utility the director has actually thrown this match. */
+  readonly utility = { execSmoke: 0, delaySmoke: 0, retakeSmoke: 0, execFlash: 0 };
   private announcedTen = false;
   // ---- hud ----
   private banner: DefusalBanner | null = null;
@@ -288,7 +302,7 @@ export class DefusalMode implements BotSquad {
     this.rng = rng;
     this.startSide = opts.side === 'random' ? (rng() < 0.5 ? 'attack' : 'defend') : opts.side;
     this.match = new MatchState(opts.format, this.startSide);
-    this.skill = SKILLS[opts.difficulty] ?? SKILLS.Normal;
+    this.skill = DIFFICULTY_SKILLS[opts.difficulty] ?? DIFFICULTY_SKILLS.Normal;
     this.nav = new NavGrid(ctx.solids, ctx.half, ctx.groundHeight);
     this.tctx = {
       scene: ctx.scene, occluders: ctx.occluders, coverNodes: ctx.coverNodes, solids: ctx.solids, half: ctx.half,
@@ -309,6 +323,7 @@ export class DefusalMode implements BotSquad {
       idleGoal: bot => this.idleGoal(bot),
       mayChase: bot => this.mayChase(bot),
       busy: bot => this.isBusy(bot),
+      leash: bot => this.leash(bot),
     };
 
     const mk = (id: string, name: string, team: TeamId, isPlayer: boolean, role: BotRole): Combatant => ({
@@ -671,6 +686,7 @@ export class DefusalMode implements BotSquad {
     const zone = siroccoZoneAt(pos.x, pos.z);
     this.ctx.onFeed(k ? (k.isPlayer ? 'YOU' : k.name) : '', label, v.isPlayer ? 'YOU' : v.name, headshot, k?.team ?? other(v.team), zone);
     if (v.team === 'alpha' && !v.isPlayer) this.report(`dead-${v.id}`, `${v.name} is down — ${zone}.`, 0);
+    if (v.bot) this.tradeDiscipline(v.bot);
     this.rosterVersion++;
     this.checkElimination();
   }
@@ -807,6 +823,51 @@ export class DefusalMode implements BotSquad {
     return out;
   }
 
+  /**
+   * Footstep hearing. Every quarter second, work out who moved how far and let
+   * the other side hear it. Sound never pulls a bot off its post — it turns his
+   * head and briefly widens his awareness, which is what makes a flank feel
+   * risky instead of free.
+   */
+  private updateHearing(dt: number) {
+    type Mover = { pos: THREE.Vector3; team: TeamId; loud: number };
+    const movers: Mover[] = [];
+    for (const c of this.players) {
+      const p = this.posOf(c);
+      const prev = this.lastHeardPos.get(c.id);
+      this.lastHeardPos.set(c.id, p.clone());
+      if (!c.alive || !prev) continue;
+      const speed = prev.distanceTo(p) / dt;
+      // Walking is quiet; a sprint at ~5 m/s is audible a long way off.
+      if (speed < 2.3) continue;
+      movers.push({ pos: p, team: c.team, loud: THREE.MathUtils.clamp((speed - 2.3) / 3.2, 0.15, 1) });
+    }
+    if (!movers.length) return;
+    for (const c of this.players) {
+      if (!c.bot || !c.alive) continue;
+      let best: Mover | null = null, bestScore = 0;
+      for (const mv of movers) {
+        if (mv.team === c.team) continue;
+        const range = 11 + mv.loud * 17;
+        const d = c.bot.pos.distanceTo(mv.pos);
+        if (d > range) continue;
+        const score = (1 - d / range) * mv.loud;
+        if (score > bestScore) { bestScore = score; best = mv; }
+      }
+      if (!best) continue;
+      c.bot.hearSteps(best.pos, bestScore);
+      const plan = this.plans.get(c.bot);
+      if (plan && (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'retakeStage') && this.roundTime > plan.lookT) {
+        plan.lookAt = best.pos.clone(); plan.lookT = this.roundTime + 1.2;
+      }
+      // Defenders reading a site by sound alone, at a fraction of a sighting.
+      if (this.sideOf(c) === 'defend') {
+        const site = this.siteNear(best.pos, true);
+        if (site) this.threat[site] += 0.10 * bestScore;
+      }
+    }
+  }
+
   /** Bot gunfire: enemies holding an angle within earshot turn to face the fight. */
   private hearGunfire(p: THREE.Vector3, team: TDMTeam) {
     for (const c of this.players) {
@@ -924,6 +985,10 @@ export class DefusalMode implements BotSquad {
     this.updateSmokes(dt);
     this.spotT -= dt;
     if (this.spotT <= 0) { this.spotT = 0.2; this.updateSpotting(); }
+    if (!frozen) {
+      this.hearT -= dt;
+      if (this.hearT <= 0) { this.hearT = 0.25; this.updateHearing(0.25); }
+    }
     if (m.phase === 'live' && m.clock < 10.5 && !this.announcedTen && this.bomb.state !== 'planted') {
       this.announcedTen = true;
       this.ctx.onCallout('Ten seconds left in the round!');
@@ -1049,7 +1114,7 @@ export class DefusalMode implements BotSquad {
   // DIRECTOR — plans, goals and team logic
   // =====================================================================
   private newPlan(task: Task, extra: Partial<BotPlan> = {}): BotPlan {
-    return { task, route: [], stageLeft: 0, lane: null, hold: null, anchor: false, post: null, smokeAt: null, speed: 4.4, t: 0, resume: null, lootAt: null, lookAt: null, lookT: 0, ...extra };
+    return { task, route: [], stageLeft: 0, stageAt: null, lane: null, hold: null, anchor: false, post: null, smokeAt: null, speed: 4.4, t: 0, resume: null, lootAt: null, lookAt: null, lookT: 0, waitT: 0, smokeDodge: null, smokeDodgeT: 0, ...extra };
   }
 
   private planRound(keepAttack = false) {
@@ -1075,10 +1140,10 @@ export class DefusalMode implements BotSquad {
     }
   }
 
-  private routeFor(site: SiteId, lane: Lane): { points: Vec2[]; stage: number; lane: Lane } {
+  private routeFor(site: SiteId, lane: Lane): { points: Vec2[]; stage: number; stageAt: Vec2; lane: Lane } {
     const r = ATTACK_ROUTES.find(x => x.site === site && x.lane === lane)
       ?? ATTACK_ROUTES.find(x => x.site === site)!;
-    return { points: r.points.map(p => [p[0], p[1]] as Vec2), stage: r.stage, lane: r.lane };
+    return { points: r.points.map(p => [p[0], p[1]] as Vec2), stage: r.stage, stageAt: [r.stageAt[0], r.stageAt[1]] as Vec2, lane: r.lane };
   }
 
   /** (Re)assign every attacking bot. `fromHere` trims routes to the bot's position. */
@@ -1106,15 +1171,19 @@ export class DefusalMode implements BotSquad {
       const site = isFake ? fakeSite : this.attack.site;
       const r = this.routeFor(site, lane);
       let pts = r.points, stage = r.stage;
+      let stageAt: Vec2 | null = r.stageAt;
       if (fromHere) {
         // Start from the waypoint nearest the bot, never walking back toward spawn.
         let bi = 0, bd = Infinity;
         pts.forEach((p, k) => { const dd = d2(bot.pos, p[0], p[1]); if (dd < bd) { bd = dd; bi = k; } });
         pts = pts.slice(bi); stage -= bi;
+        // Already past the staging spot: do not walk backwards to reach it.
+        if (stage <= 0) stageAt = null;
       }
       const smoke = c.inv.smokes > 0 && smokeTargets.length && !isFake ? smokeTargets.shift()! : null;
       this.plans.set(bot, this.newPlan('route', {
         route: pts, stageLeft: this.attack.style === 'rush' ? -1 : stage, lane: r.lane,
+        stageAt: this.attack.style === 'rush' ? null : stageAt,
         speed: this.attack.style === 'rush' ? 5.2 : 4.5, smokeAt: smoke, anchor: false,
       }));
     });
@@ -1156,10 +1225,12 @@ export class DefusalMode implements BotSquad {
         this.ctx.throwGrenade(bot.eyePos(), V(plan.smokeAt[0], plan.smokeAt[1]), bot, 'smoke');
         c.inv = { ...c.inv, smokes: c.inv.smokes - 1 };
         plan.smokeAt = null;
+        this.utility.execSmoke++;
       } else if (c.inv.flashes > 0 && bot.flashes > 0 && this.rng() < 0.45 && d2(bot.pos, SITES[site].center[0], SITES[site].center[1]) < 32) {
         bot.flashes--;
         c.inv = { ...c.inv, flashes: Math.max(0, c.inv.flashes - 1) };
         this.ctx.throwGrenade(bot.eyePos(), V(SITES[site].center[0], SITES[site].center[1]), bot, 'flash');
+        this.utility.execFlash++;
       }
     }
     if (this.playerSide === 'attack') this.ctx.onRadio(`Executing ${site} — go, go, go!`);
@@ -1178,8 +1249,9 @@ export class DefusalMode implements BotSquad {
       plan.task = 'hold'; plan.hold = { at: sp.at, face: sp.face, crouch: this.rng() < 0.5 }; plan.anchor = true; plan.speed = 4.8;
       this.plans.set(bot, plan);
     }
-    // Defenders: every living bot converges on the retake stage.
-    this.retakeGoT = this.roundTime + 7;
+    // Defenders: every living bot converges on the retake stage. The window is
+    // the hard backstop — normally the go call comes from `staged >= need`.
+    this.retakeGoT = this.roundTime + 11;
     for (const bot of this.botsOn('defend')) {
       const plan = this.plans.get(bot) ?? this.newPlan('hold');
       if (this.followPlayer && bot.team === 'alpha') continue;
@@ -1229,6 +1301,7 @@ export class DefusalMode implements BotSquad {
       if (c.inv.smokes <= 0 || d2(bot.pos, SITES[site].center[0], SITES[site].center[1]) > 16) continue;
       this.ctx.throwGrenade(bot.eyePos(), V(choke[0], choke[1]), bot, 'smoke');
       c.inv = { ...c.inv, smokes: c.inv.smokes - 1 };
+      this.utility.delaySmoke++;
       return;
     }
   }
@@ -1353,8 +1426,14 @@ export class DefusalMode implements BotSquad {
     if (planted) {
       const s = SITES[this.bomb.site!];
       const defs = this.botsOn('defend');
-      const staged = defs.filter(b => this.plans.get(b)?.task === 'retakeStage' && d2(b.pos, this.plans.get(b)!.hold!.at[0], this.plans.get(b)!.hold!.at[1]) < 2.5).length;
-      const need = Math.min(2, defs.length);
+      // Staged = actually stood on the regroup spot. A retake goes in when MOST
+      // of the survivors are there, not when the first two arrive — trickling in
+      // one at a time is the single most stupid-looking thing bots can do.
+      const staged = defs.filter(b => {
+        const p = this.plans.get(b);
+        return p?.task === 'retakeStage' && !!p.hold && d2(b.pos, p.hold.at[0], p.hold.at[1]) < 3.5;
+      }).length;
+      const need = Math.max(1, Math.ceil(defs.length * 0.6));
       const timeLeft = m.clock;
       if (this.retakeGoT > 0 && (staged >= need || this.roundTime > this.retakeGoT || timeLeft < 22)) {
         this.retakeGoT = -1;
@@ -1367,9 +1446,28 @@ export class DefusalMode implements BotSquad {
             smoked = true;
             this.ctx.throwGrenade(b.eyePos(), V(s.retakeSmoke[0], s.retakeSmoke[1]), b, 'smoke');
             c.inv = { ...c.inv, smokes: c.inv.smokes - 1 };
+            this.utility.retakeSmoke++;
           }
         }
         if (this.playerSide === 'defend') this.ctx.onRadio('Retaking — go in together!');
+      }
+      // Somebody is kneeling on the bomb. Every attacker who is not already in a
+      // gunfight breaks his post-plant angle and converges — holding a doorway
+      // while the C4 is defused behind you is the definition of a stupid bot.
+      const beingDefused = !!this.bomb.defuser && this.bomb.defuseT > 0;
+      for (const b of this.botsOn('attack')) {
+        const plan = this.plans.get(b);
+        if (!plan) continue;
+        if (beingDefused) {
+          if (plan.task === 'hold' || plan.task === 'stage' || plan.task === 'route') {
+            plan.task = 'savebomb'; plan.anchor = false; plan.waitT = 0; plan.speed = 5.4;
+          }
+        } else if (plan.task === 'savebomb') {
+          // Defuse stopped: back to the nearest post-plant angle.
+          const spots = SITES[this.bomb.site!].postPlant;
+          const sp = spots.reduce((a, c) => (d2(b.pos, a.at[0], a.at[1]) < d2(b.pos, c.at[0], c.at[1]) ? a : c));
+          plan.task = 'hold'; plan.hold = { at: sp.at, face: sp.face }; plan.anchor = true; plan.speed = 4.8;
+        }
       }
       // Pick a defuser: closest bot that can still make it, once the site is quiet or time is short.
       if (!this.bomb.defuser) {
@@ -1417,9 +1515,18 @@ export class DefusalMode implements BotSquad {
         }
         if (!this.executing && plan.stageLeft <= 0 && plan.stageLeft > -1 && this.attack.style !== 'rush' && m.clock > 42) {
           const next = r[1] ?? SITES[this.attack.site].center;
+          // Wait on the authored out-of-sight spot, not on the lane waypoint —
+          // a lane waypoint is by definition somewhere a defender is watching.
+          const at = plan.stageAt ?? r[0];
           plan.task = 'stage';
-          plan.hold = { at: r[0], face: next };
-          return { at: V(r[0][0], r[0][1]), hold: true, face: V(next[0], next[1]) };
+          plan.hold = { at, face: next };
+          return { at: V(at[0], at[1]), hold: true, face: V(next[0], next[1]) };
+        }
+        // Trade discipline: a lane-mate just died within earshot. Stop, hold the
+        // angle he died on for a beat instead of feeding into the same crosshair.
+        if (plan.waitT > this.roundTime) {
+          const face = plan.lookAt ?? V(r[0][0], r[0][1]);
+          return { at: bot.pos.clone(), hold: true, face };
         }
         if (r.length === 1 && d2(bot.pos, r[0][0], r[0][1]) < 2.2) {
           // Arrived on site: take a clearing spot inside it.
@@ -1427,7 +1534,12 @@ export class DefusalMode implements BotSquad {
           const spots = SITES[site].postPlant;
           const sp = spots[(this.bots.indexOf(bot) + this.match.round) % spots.length];
           plan.task = 'hold'; plan.hold = { at: sp.at, face: sp.face }; plan.anchor = false;
+          return { at: V(sp.at[0], sp.at[1]), speed: plan.speed, settle: true };
         }
+        // Execute cohesion: never out-run the rest of your lane group. Only
+        // while there is lane left to walk — throttling a bot that has already
+        // arrived just leaves him jittering on the last waypoint.
+        if (this.executing && r.length > 1 && this.laneMateBehind(bot, plan)) return { at: V(r[0][0], r[0][1]), speed: 1.7 };
         return { at: V(r[0][0], r[0][1]), speed: plan.speed };
       }
       case 'stage':
@@ -1437,23 +1549,33 @@ export class DefusalMode implements BotSquad {
         const h = plan.hold!;
         if (plan.task === 'rotate' && d2(bot.pos, h.at[0], h.at[1]) < 1.2) { plan.task = 'hold'; plan.anchor = true; }
         let at = V(h.at[0], h.at[1]);
-        // Never hold an angle from inside a smoke: back off toward the face-away side.
-        if (this.smokes.length && this.smokeDensityAt(new THREE.Vector3(at.x, 1.6, at.z)) > 0.2) {
+        // Never hold an angle from inside a smoke: back off toward the face-away
+        // side. Cached for 3 s — recomputing every tick made bots walk in and
+        // out of the cloud as the density at their feet crossed the threshold.
+        if (plan.smokeDodge && this.roundTime < plan.smokeDodgeT) {
+          at = V(plan.smokeDodge[0], plan.smokeDodge[1]);
+        } else if (this.smokes.length && this.smokeDensityAt(new THREE.Vector3(at.x, 1.6, at.z)) > 0.2) {
           const away = new THREE.Vector3(at.x - h.face[0], 0, at.z - h.face[1]).normalize();
           at = at.addScaledVector(away, 5.5);
           const [cx, cz] = this.nav.nearestFree(this.nav.toCell(at.x), this.nav.toCell(at.z));
           at.set(this.nav.toWorld(cx), 0, this.nav.toWorld(cz));
-        }
+          plan.smokeDodge = [at.x, at.z]; plan.smokeDodgeT = this.roundTime + 3;
+        } else plan.smokeDodge = null;
         const face = plan.lookAt && this.roundTime < plan.lookT ? plan.lookAt.clone() : V(h.face[0], h.face[1]);
-        return { at, hold: true, face, crouch: h.crouch, speed: plan.speed };
+        // Getting to your position is an objective move and outranks a distant
+        // duel: until a bot is actually on its angle, a sighting across the map
+        // must not be allowed to freeze it in the open. Once it is in position,
+        // holding and trading is exactly right.
+        const urgent = d2(bot.pos, at.x, at.z) > 5;
+        return { at, hold: true, face, crouch: h.crouch, speed: plan.speed, settle: true, urgent };
       }
       case 'plant': {
         const h = plan.hold!;
-        return { at: V(h.at[0], h.at[1]), hold: true, face: V(h.face[0], h.face[1]), crouch: true, speed: plan.speed };
+        return { at: V(h.at[0], h.at[1]), hold: true, face: V(h.face[0], h.face[1]), crouch: true, speed: plan.speed, urgent: true };
       }
       case 'getbomb': {
         if (this.bomb.state !== 'dropped') { plan.task = plan.resume ?? 'route'; plan.resume = null; if (plan.task === 'route' && !plan.route.length) plan.task = 'hold'; return null; }
-        return { at: this.bomb.pos.clone(), speed: 5.3 };
+        return { at: this.bomb.pos.clone(), speed: 5.3, urgent: true };
       }
       case 'loot': {
         if (!plan.lootAt) { plan.task = plan.resume ?? 'hold'; return null; }
@@ -1463,18 +1585,42 @@ export class DefusalMode implements BotSquad {
         const r = plan.route;
         while (r.length > 1 && d2(bot.pos, r[0][0], r[0][1]) < 2) r.shift();
         const tgt = r[0] ?? SITES[this.bomb.site ?? 'A'].center;
-        return { at: V(tgt[0], tgt[1]), speed: 4.6, hold: r.length <= 1 && d2(bot.pos, tgt[0], tgt[1]) < 1.5, face: this.bomb.pos.clone() };
+        // Urgent only while still travelling: once a retaker is on the site, a
+        // gunfight IS the objective and he should fight it properly.
+        const far = d2(bot.pos, this.bomb.pos.x, this.bomb.pos.z) > 10;
+        return { at: V(tgt[0], tgt[1]), speed: 4.6, hold: r.length <= 1 && d2(bot.pos, tgt[0], tgt[1]) < 1.5, face: this.bomb.pos.clone(), urgent: far };
+      }
+      case 'savebomb': {
+        const d = d2(bot.pos, this.bomb.pos.x, this.bomb.pos.z);
+        return { at: this.bomb.pos.clone(), speed: 5.4, hold: d < 2.2, face: this.bomb.pos.clone(), urgent: true };
       }
       case 'defuse':
-        return { at: this.bomb.pos.clone(), speed: 5.2, hold: d2(bot.pos, this.bomb.pos.x, this.bomb.pos.z) < 0.9, crouch: true, face: this.bomb.pos.clone() };
+        return { at: this.bomb.pos.clone(), speed: 5.2, hold: d2(bot.pos, this.bomb.pos.x, this.bomb.pos.z) < 0.9, crouch: true, face: this.bomb.pos.clone(), urgent: true };
       case 'flee': {
         const home = SPAWNS[this.sideOf(c)][this.bots.indexOf(bot) % 5];
-        return { at: V(home[0], home[1]), speed: 5.6, hold: d2(bot.pos, home[0], home[1]) < 1.5, face: this.bomb.pos.clone() };
+        return { at: V(home[0], home[1]), speed: 5.6, hold: d2(bot.pos, home[0], home[1]) < 1.5, face: this.bomb.pos.clone(), urgent: true };
       }
       case 'hunt':
         return { at: bot.lastKnownEnemy?.clone() ?? V(0, 0), speed: 4.6 };
     }
     return null;
+  }
+
+  /**
+   * Diagnostics/tests: force a specific team plan and re-issue orders. Lets the
+   * test suite prove that `style` actually changes movement instead of being a
+   * label on a plan nobody follows.
+   */
+  forceAttackPlan(plan: AttackPlan) {
+    this.attack = plan;
+    this.executing = false;
+    this.stagedSince = -1;
+    this.assignAttack(false);
+  }
+  /** Diagnostics/tests: the lane a bot was assigned, and its current task. */
+  planOf(bot: TDMBot): { task: Task; lane: Lane | null; anchor: boolean } | null {
+    const p = this.plans.get(bot);
+    return p ? { task: p.task, lane: p.lane, anchor: p.anchor } : null;
   }
 
   /** Debug: the director's current task for a bot (sim/diagnostics). */
@@ -1487,7 +1633,72 @@ export class DefusalMode implements BotSquad {
     const plan = this.plans.get(bot);
     if (!plan) return true;
     if (plan.anchor) return false;
-    return plan.task === 'route' || plan.task === 'rotate' || plan.task === 'retake' || plan.task === 'follow' || plan.task === 'hunt';
+    if (plan.waitT > this.roundTime) return false;
+    return plan.task === 'route' || plan.task === 'rotate' || plan.task === 'retake'
+      || plan.task === 'savebomb' || plan.task === 'follow' || plan.task === 'hunt';
+  }
+
+  /**
+   * Lane leash. A bot that may chase still has to fight from inside its lane:
+   * without this, one attacker who clips a defender in his peripheral vision
+   * peels off the execute, sprints across the map and dies alone. That single
+   * behaviour is what made the squad look like five strangers.
+   */
+  private leash(bot: TDMBot): { at: THREE.Vector3; radius: number } | null {
+    const plan = this.plans.get(bot);
+    if (!plan || plan.task === 'follow' || plan.task === 'hunt' || plan.task === 'getbomb' || plan.task === 'loot') return null;
+    switch (plan.task) {
+      case 'route': {
+        const wp = plan.route[0];
+        if (!wp) return null;
+        // Wider once the execute is called: the site itself has to be clearable.
+        return { at: V(wp[0], wp[1]), radius: this.executing ? 13 : 9 };
+      }
+      case 'stage': case 'hold': case 'rotate': case 'retakeStage': {
+        const h = plan.hold;
+        return h ? { at: V(h.at[0], h.at[1]), radius: plan.anchor ? 7 : 10 } : null;
+      }
+      case 'retake': case 'savebomb': {
+        const site = this.bomb.site ? SITES[this.bomb.site].center : [0, 0] as Vec2;
+        return { at: V(site[0], site[1]), radius: 18 };
+      }
+      default: return null;
+    }
+  }
+
+  /**
+   * True when a live lane-mate is meaningfully further from the objective than
+   * this bot. Used to throttle the leader so an execute arrives as a group.
+   */
+  private laneMateBehind(bot: TDMBot, plan: BotPlan): boolean {
+    if (!plan.lane) return false;
+    const goal = SITES[this.attack.site].center;
+    const mine = d2(bot.pos, goal[0], goal[1]);
+    for (const other of this.botsOn('attack')) {
+      if (other === bot) continue;
+      const p = this.plans.get(other);
+      if (!p || p.lane !== plan.lane || p.task !== 'route') continue;
+      if (d2(other.pos, goal[0], goal[1]) - mine > 13) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A body just hit the floor. Nearby friends on the same push stop and hold the
+   * angle that killed him for a beat — a trade attempt instead of a queue.
+   */
+  private tradeDiscipline(victim: TDMBot) {
+    const team = victim.team;
+    for (const c of this.players) {
+      if (!c.bot || !c.alive || c.team !== team || c.bot === victim) continue;
+      if (c.bot.seesEnemy()) continue;
+      if (c.bot.pos.distanceTo(victim.pos) > 20) continue;
+      const plan = this.plans.get(c.bot);
+      if (!plan || plan.task === 'plant' || plan.task === 'defuse' || plan.task === 'follow') continue;
+      plan.lookAt = victim.pos.clone();
+      plan.lookT = this.roundTime + 3;
+      if (plan.task === 'route' || plan.task === 'retake') plan.waitT = this.roundTime + 1.5 + this.rng() * 1.1;
+    }
   }
 
   private isBusy(bot: TDMBot): boolean {

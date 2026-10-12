@@ -65,7 +65,10 @@ test('every authored AI point is physically clear and sits on reachable nav', ()
     s.retakeClear.forEach((p, i) => pts.push([`retake clear ${id}${i}`, p]));
     s.execSmokes.forEach((p, i) => assert.ok(L.isOpen(p[0], p[1]), `exec smoke ${id}${i} lands in open ground`));
   }
-  L.ATTACK_ROUTES.forEach(r => r.points.forEach((p, i) => pts.push([`route ${r.lane}${i}`, p])));
+  L.ATTACK_ROUTES.forEach(r => {
+    r.points.forEach((p, i) => pts.push([`route ${r.lane}${i}`, p]));
+    pts.push([`stage ${r.lane}`, r.stageAt]);
+  });
   L.CONTROL_SPOTS.forEach(c => pts.push([`control ${c.lane}`, c.at]));
   Object.values(L.DEFENSE_POSTS).forEach(p => pts.push([`post ${p.id}`, p.at]));
   for (const [label, [x, z]] of pts) {
@@ -102,5 +105,24 @@ test('no spawn-to-spawn sightline down mid', () => {
     ray.set(a, dir.normalize());
     ray.far = dist;
     assert.ok(ray.intersectObjects(world.occluders, false).length > 0, `T pad ${ax},${az} can see CT pad ${dx},${dz}`);
+  }
+});
+
+test('every lane has a staging point that is out of the defenders\u2019 opening sightlines', () => {
+  const eye = 1.62;
+  // Where a defender can actually be looking from on the opening of a round.
+  const holds = Object.values(L.DEFENSE_POSTS).map(p => p.at);
+  for (const r of L.ATTACK_ROUTES) {
+    const [sx, sz] = r.stageAt;
+    assert.ok(r.stage >= 0 && r.stage < r.points.length, `${r.lane} stage index is inside the route`);
+    for (const [hx, hz] of holds) {
+      const n = Math.ceil(Math.hypot(sx - hx, sz - hz) / 0.35);
+      let blocked = false;
+      for (let i = 1; i < n && !blocked; i++) {
+        const t = i / n;
+        if (!L.isOpen(hx + (sx - hx) * t, hz + (sz - hz) * t, eye)) blocked = true;
+      }
+      assert.ok(blocked, `${r.lane} stages at (${sx},${sz}) in plain view of a defender post at (${hx},${hz})`);
+    }
   }
 });

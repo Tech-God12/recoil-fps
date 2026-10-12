@@ -363,69 +363,9 @@ img { display: block; max-width: 100%; }
   letter-spacing: 0.06em; text-transform: uppercase;
 }
 .home-item-body em { display: block; margin-top: 2px; font-style: normal; font-family: var(--body); font-size: 12px; color: var(--bone-mute); }
-
-/* ============================================================
-   PICK MAP — two tiles; hover = full-screen live 3D overview
-   ============================================================ */
-.pick-root { }
-.pick-flyover { position: absolute; inset: 0; z-index: 0; }
-.pick-flyover-slot { position: absolute; inset: 0; transition: opacity 500ms ease; }
-.pick-flyover .flyover-root { position: absolute; inset: 0; }
-/* Dark down the full-screen flyover slightly so the tiles stay readable */
-.pick-flyover::after {
-  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 500ms;
-  background: linear-gradient(180deg, rgba(18,16,12,0.72) 0%, rgba(18,16,12,0.18) 40%, rgba(18,16,12,0.78) 100%);
-}
-.pick-flyover.live::after { opacity: 1; }
-.pick-heading { display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; }
-.pick-heading b { font-family: var(--display); font-weight: 800; font-size: clamp(15px, 2.4vh, 20px); letter-spacing: 0.08em; text-transform: uppercase; color: var(--bone); }
-.pick-tiles {
-  position: relative; z-index: 2; flex: 1; min-height: 0;
-  display: grid; grid-template-columns: repeat(2, minmax(0, 420px)); justify-content: center; align-content: center;
-  gap: clamp(16px, 3vw, 36px); width: 100%; max-width: 1240px; margin: 0 auto; padding: clamp(10px, 3vh, 28px) 20px;
-  transition: opacity 300ms;
-}
-.pick-tiles .map-tile { aspect-ratio: 16 / 10; min-height: 180px; max-height: 46vh; }
 /* When the full-screen overview is live: the hovered tile turns into a glass
    frame (its art fades so the live 3D world shows THROUGH it) and the other
    tile recedes — the whole screen belongs to the spinning map. */
-.pick-tiles.dimmed .map-tile:not(.selected) { opacity: 0.30; filter: saturate(0.6); }
-.pick-tiles.dimmed .map-tile.selected { background: transparent; box-shadow: 0 0 0 1px rgba(200,155,90,0.55), 0 26px 60px rgba(0,0,0,0.45); }
-.pick-tiles.dimmed .map-tile.selected .map-tile-art { opacity: 0; }
-.pick-hint { position: relative; z-index: 2; text-align: center; padding: 0 20px 18px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bone-mute); }
-
-/* ============================================================
-   MISSIONS — the selected map's operation card list
-   ============================================================ */
-.msn-art { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0.35; filter: saturate(0.85); }
-.msn-art-fade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(18,16,12,0.96) 0%, rgba(18,16,12,0.82) 46%, rgba(18,16,12,0.55) 100%); }
-.msn-wrap {
-  position: relative; z-index: 2; flex: 1; min-height: 0; overflow-y: auto;
-  display: flex; flex-direction: column; justify-content: safe center; gap: clamp(10px, 2vh, 18px);
-  width: 100%; max-width: 760px; margin: 0 auto; padding: clamp(10px, 2.5vh, 24px) 20px;
-}
-.msn-brief p { margin: 0; font-family: var(--body); font-size: clamp(12px, 1.7vh, 14px); line-height: 1.55; color: var(--bone-dim); max-width: 64ch; }
-.msn-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.msn-card {
-  display: grid; grid-template-columns: 34px 76px 1fr auto; align-items: center; gap: 14px;
-  padding: 12px 16px; background: rgba(24,22,17,0.88); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 3px;
-  transition: border-color 160ms, background 160ms;
-}
-.msn-card:first-of-type { border-left-color: var(--signal); background: rgba(30,27,20,0.92); }
-.msn-card:hover { border-color: var(--line-strong); }
-.msn-idx { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--brass); }
-.msn-verb {
-  font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--bone-mute); border: 1px solid var(--line); padding: 4px 0; border-radius: 20px; text-align: center;
-}
-.msn-card:first-of-type .msn-verb { color: #1A0A00; background: var(--brass); border-color: var(--brass); }
-.msn-body b { display: block; font-family: var(--display); font-weight: 700; font-size: clamp(13px, 1.9vh, 16px); letter-spacing: 0.03em; color: var(--bone); }
-.msn-body em { display: block; margin-top: 1px; font-style: normal; font-family: var(--body); font-size: 11px; color: var(--bone-mute); }
-.msn-status { font-size: 9px; letter-spacing: 0.14em; color: var(--bone-mute); }
-.msn-card:first-of-type .msn-status { color: var(--signal); }
-.msn-cta { display: flex; align-items: stretch; gap: 12px; }
-.msn-cta .deploy-btn { margin-top: 0; flex: 1.3; max-width: none; }
-.msn-cta .menu-secondary-btn { margin-top: 0; flex: 1; max-width: none; }
 .menu-header .cmd-back { justify-self: start; }
 
 /* ============================================================
@@ -1316,7 +1256,6 @@ html[data-cb='tritanopia'] {
   .armory-stage .gv-root { min-height: 320px; }
 }
 
-
 /* stage viewport */
 .stage-viewport {
   position: relative; flex: 1; min-height: 0; overflow: hidden;
@@ -1336,7 +1275,6 @@ html[data-cb='tritanopia'] {
 
 /* ensure armory stage head is above watermark */
 .armory-stage-head { position: relative; z-index: 3; }
-
 
 /* Optics are identified by their hardware, not inferred from the current FOV. */
 .optic-overlay { position:absolute; inset:0; pointer-events:none; --optic-size:min(78vmin,640px); }
@@ -1674,8 +1612,6 @@ html[data-cb='tritanopia'] {
 .rm-arrow { color: var(--rm-dim); display: grid; place-items: center; transition: color 0.16s, transform 0.2s; }
 .rm-item:hover .rm-arrow, .rm-item.sel .rm-arrow { color: #EDE6D6; transform: translateX(3px); }
 
-
-
 .rm-right { width: 292px; display: flex; flex-direction: column; align-items: flex-end; }
 .rm-topbar { display: flex; gap: 10px; align-items: stretch; }
 .rm-cash {
@@ -1819,7 +1755,7 @@ html[data-cb='tritanopia'] {
 .tx-back {
   display: inline-flex; align-items: center; gap: 7px; padding: 9px 16px;
   background: rgba(237,228,211,0.05); border: 1px solid var(--line); border-radius: 2px;
-  font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: 0.1em;
+  font-family: var(--display); font-weight: 700; font-size: 12.5px; letter-spacing: 0.01em;
   color: var(--bone-dim); cursor: pointer; transition: color 0.14s, border-color 0.14s;
 }
 .tx-back span { font-size: 15px; line-height: 1; }
@@ -2088,7 +2024,6 @@ span.arm2-thumb { display: inline-block; }
 .arm2-owned { color: var(--bone-mute); font-weight: 500; }
 .arm2-price { color: var(--brass); font-weight: 700; }
 
-
 .arm2-stage { display: flex; flex-direction: column; gap: 12px; }
 .arm2-hero { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; flex: none; }
 .arm2-hero h2 { margin: 0; font-family: var(--display); font-size: clamp(24px, 2.4vw, 34px); font-weight: 800; letter-spacing: 0.03em; line-height: 1; }
@@ -2126,102 +2061,27 @@ span.arm2-thumb { display: inline-block; }
 .arm2-panel { display: flex; flex-direction: column; }
 .arm2-cta { margin-top: auto; padding-top: 16px; display: flex; flex-direction: column; gap: 8px; }
 
-
 /* ============================================================
    THEATER SELECT
    ============================================================ */
-.map2-base {
+.ar-base {
   position: absolute; inset: 0;
   background:
     radial-gradient(1000px 500px at 50% 0%, rgba(200,155,90,0.05), transparent 60%),
     linear-gradient(180deg, #0c0c10 0%, #0a0a0d 100%);
 }
-.map2-flyover { position: absolute; inset: 0; z-index: 0; }
-.map2-flyover-slot { position: absolute; inset: 0; transition: opacity 0.5s ease; }
-.map2-flyover .flyover-root { position: absolute; inset: 0; }
-.map2-flyover::after {
+.ar-flyover { position: absolute; inset: 0; z-index: 0; }
+.ar-flyover-slot { position: absolute; inset: 0; transition: opacity 0.5s ease; }
+.ar-flyover .flyover-root { position: absolute; inset: 0; }
+.ar-flyover::after {
   content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.5s;
   background: linear-gradient(180deg, rgba(10,10,13,0.78) 0%, rgba(10,10,13,0.25) 40%, rgba(10,10,13,0.82) 100%);
 }
-.map2-flyover.live::after { opacity: 1; }
-.map2-head {
-  position: relative; z-index: 3; display: flex; align-items: flex-start; gap: 22px;
-  padding: 20px 30px 12px; flex: none;
-}
-.map2-head .tx-back { margin-top: 6px; flex: none; }
-.map2-titleblock { display: flex; flex-direction: column; }
-.map2-kicker { font-family: var(--mono); font-size: 9px; letter-spacing: 0.22em; line-height: 1.9; color: var(--bone-mute); }
-.map2-title {
-  margin: 8px 0 0; font-family: "Anton", var(--display); font-weight: 400;
-  font-size: clamp(34px, 4.6vw, 58px); letter-spacing: 0.01em; line-height: 1;
-  color: #EFE8D8; text-shadow: 0 3px 0 rgba(0,0,0,0.5);
-}
-.map2-sub { margin-top: 8px; font-size: 10px; letter-spacing: 0.26em; color: #a09a8c; }
-.map2-titleblock .tx-rule { margin-top: 10px; width: 30px; height: 3px; }
-.map2-head > .tx-coords { margin: 10px auto 0; flex: none; }
-.map2-brand { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }
-.map2-brand > b { font-family: "Anton", var(--display); font-weight: 400; font-size: 34px; letter-spacing: 0.02em; line-height: 1; }
-.map2-brand > em { font-style: normal; font-size: 8.5px; letter-spacing: 0.2em; color: var(--bone-mute); }
-.map2-intel { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; margin-top: 10px; }
-.map2-intel span { font-size: 9px; letter-spacing: 0.24em; color: #5d5a53; }
-
-.map2-cards {
-  position: relative; z-index: 2; flex: 1; min-height: 0; align-content: center;
-  display: grid; grid-template-columns: repeat(2, minmax(0, 480px)); justify-content: center;
-  gap: 18px; padding: 14px 30px 6px;
-}
-.map2-card {
-  position: relative; overflow: hidden; text-align: left; cursor: pointer;
-  border: 1px solid var(--line); border-radius: 3px; background: #141210;
-  min-height: 280px; aspect-ratio: 16 / 10; max-height: 46vh; padding: 0;
-  color: var(--bone); font: inherit;
-  transition: border-color 0.18s, transform 0.22s cubic-bezier(.22,1,.36,1), box-shadow 0.22s;
-}
-.map2-card:hover, .map2-card.sel {
-  border-color: rgba(200,155,90,0.7);
-  box-shadow: 0 0 0 1px rgba(200,155,90,0.35), 0 18px 50px rgba(0,0,0,0.5);
-  transform: translateY(-3px);
-}
-.map2-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s cubic-bezier(.22,1,.36,1); }
-.map2-card:hover .map2-art { transform: scale(1.05); }
-.map2-shade {
-  position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(8,8,10,0.42) 0%, transparent 35%, rgba(8,8,10,0.88) 100%);
-}
-.map2-num { position: absolute; top: 12px; left: 14px; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--brass); }
-.map2-cardcoords { position: absolute; top: 12px; right: 14px; text-align: right; font-size: 9px; line-height: 1.6; letter-spacing: 0.1em; color: rgba(237,228,211,0.75); }
-.map2-info { position: absolute; left: 16px; right: 52px; bottom: 14px; display: flex; flex-direction: column; gap: 2px; }
-.map2-info b { font-family: var(--display); font-weight: 800; font-size: 30px; letter-spacing: 0.05em; line-height: 1; }
-.map2-info em { font-style: normal; font-size: 10px; letter-spacing: 0.2em; color: var(--bone-dim); }
-.map2-line { margin-top: 5px; font-size: 11.5px; line-height: 1.4; color: rgba(237,228,211,0.66); max-width: 44ch; }
-.map2-obj { margin-top: 6px; font-size: 9px; letter-spacing: 0.14em; color: var(--bone-mute); }
-.map2-go { position: absolute; right: 16px; bottom: 16px; color: var(--brass); transition: transform 0.2s; }
-.map2-card:hover .map2-go { transform: translateX(4px); }
-.map2-card:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
-.map2-hint { position: relative; z-index: 2; text-align: center; margin: 10px 0 0; font-size: 10px; letter-spacing: 0.14em; color: var(--bone-mute); min-height: 16px; flex: none; }
-
-.map2-features {
-  position: relative; z-index: 2; display: flex; align-items: center; justify-content: center;
-  gap: 44px; padding: 14px 30px; border-top: 1px solid var(--line);
-  background: rgba(8,8,10,0.5); flex: none;
-}
-.map2-creed { display: flex; flex-direction: column; gap: 2px; }
-.map2-creed span { font-size: 8.5px; letter-spacing: 0.3em; color: var(--bone-mute); }
-.map2-creed .tx-rule { margin-top: 8px; width: 18px; }
-.map2-feat { display: flex; align-items: center; gap: 12px; color: var(--brass); }
-.map2-feat svg { width: 30px; height: 30px; flex: none; }
-.map2-feat span { display: flex; flex-direction: column; gap: 3px; }
-.map2-feat b { font-family: var(--display); font-size: 13px; font-weight: 800; letter-spacing: 0.1em; color: var(--bone); }
-.map2-feat em { font-style: normal; font-size: 8.5px; letter-spacing: 0.18em; color: var(--bone-mute); }
-.map2-foot {
-  position: relative; z-index: 2; display: flex; justify-content: space-between; gap: 16px;
-  padding: 9px 30px; border-top: 1px solid rgba(237,228,211,0.06);
-  font-size: 8px; letter-spacing: 0.18em; color: #55524b; flex: none;
-}
+.ar-flyover.live::after { opacity: 1; }
 
 /* ============================================================
    ARENA MODE — one centered Warehouse card + CTA.
-   The card reuses .map2-card; the flyover layer is shared with theaters.
+   The flyover layer is shared with the Arena mode cards.
    ============================================================ */
 .arena2-cards {
   position: relative; z-index: 2; flex: 1; min-height: 0; align-content: center;
@@ -2321,7 +2181,6 @@ span.arm2-thumb { display: inline-block; }
   .tdm2-main { grid-template-columns: 260px minmax(0,1fr) 280px; }
   .arm2-main { grid-template-columns: 264px minmax(0,1fr) 288px; }
   .tdm2-stage { grid-template-columns: 170px minmax(0,1fr); }
-  .map2-cards { grid-template-columns: repeat(2, minmax(0,1fr)); }
 }
 @media (max-width: 1120px) {
   /* Compact three-column: everything stays side-by-side, columns scroll inside. */
@@ -2335,12 +2194,8 @@ span.arm2-thumb { display: inline-block; }
 @media (max-width: 920px) {
   .tdm2-main, .arm2-main { grid-template-columns: 204px minmax(0,1fr) 224px; }
   .tx-head { gap: 12px; padding: 10px 14px; }
-  .map2-root, .arena2-root { overflow-y: auto; }
-  .map2-cards { grid-template-columns: minmax(0,560px); flex: none; }
+  .arena2-root { overflow-y: auto; }
   .arena2-cards { grid-template-columns: minmax(0,560px); flex: none; }
-  .map2-features { flex-wrap: wrap; gap: 20px; }
-  .map2-head { flex-wrap: wrap; }
-  .map2-head > .tx-coords { display: none; }
 }
 @media (max-width: 700px) {
   /* Phones only: single column, the page scrolls as a last resort. */
@@ -2351,8 +2206,6 @@ span.arm2-thumb { display: inline-block; }
   .tdm2-stage .tx-bars { order: 2; }
   .tdm2-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .tdm2-sum { display: none; }
-  .map2-brand { display: none; }
-  .map2-title { font-size: 32px; }
   .arena2-cta { flex-wrap: wrap; }
   /* Phones only: results stack vertically. */
   .results-root { overflow-y: auto; }
@@ -2376,17 +2229,11 @@ span.arm2-thumb { display: inline-block; }
   .arm2-stats { gap: 10px; }
   .tdm2-foot { padding: 8px 16px; }
   .tdm2-brand b { font-size: 24px; }
-  .msn-card { padding: 9px 14px; }
-  .map2-head { padding: 14px 30px 8px; }
-  .map2-kicker { line-height: 1.7; }
-  .map2-title { font-size: clamp(28px, 3.6vw, 44px); }
   .rm-layout { padding-top: 22px; }
   .rm-loadout { margin-top: 12px; }
   .settings-panel { max-height: 96vh; }
 }
 @media (max-height: 680px) {
-  .map2-features { display: none; }
-  .map2-card { min-height: 200px; }
   .tx-hint { display: none; }
   .tdm2-cell img, .tdm2-cell-ph { height: 34px; }
   .rm-intel-readout { display: none; }
@@ -2646,6 +2493,11 @@ span.arm2-thumb { display: inline-block; }
 .buy-k { font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; color: var(--bone-mute); }
 .buy-loadout > div { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; padding-bottom: 6px; border-bottom: 1px solid rgba(237,228,211,0.06); }
 .buy-loadout > div span { color: var(--bone-mute); font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.12em; }
+/* Parts fitted to the primary this round, nested under it. */
+.buy-fitted { list-style: none; margin: -2px 0 2px; padding: 0 0 0 10px; display: flex; flex-direction: column; gap: 3px; border-left: 1px solid rgba(237,228,211,0.10); }
+.buy-fitted li { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
+.buy-fitted li span { color: var(--bone-mute); font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; }
+.buy-fitted li b { font-weight: 500; opacity: 0.85; }
 .buy-loadout > div b { text-align: right; font-weight: 700; }
 .buy-value b { color: #9BD68A; }
 .buy-auto {
@@ -2671,12 +2523,6 @@ span.arm2-thumb { display: inline-block; }
 
 /* ---- arena mode: two cards + defusal options ---- */
 .arena2-cards--two { grid-template-columns: repeat(2, minmax(0, 440px)); }
-.map2-card.picked { border-color: rgba(255,106,42,0.85); box-shadow: 0 0 0 1px rgba(255,106,42,0.45), 0 18px 50px rgba(0,0,0,0.5); }
-.map2-new {
-  position: absolute; top: 11px; right: 12px; padding: 3px 7px; font-size: 9px; font-weight: 700; letter-spacing: 0.18em;
-  color: #1A0A00; background: var(--signal); border-radius: 2px;
-}
-.map2-new.sel { background: var(--brass); }
 /* ---- debrief ---- */
 .df-debrief {
   grid-area: side; align-self: start; min-width: 0; display: flex; flex-direction: column; gap: 0;
@@ -3075,7 +2921,6 @@ span.arm2-thumb { display: inline-block; }
   .kits-bottom { grid-template-columns: 1fr; }
 }
 
-
 /* ============================================================================
    PAUSE — in-game menu
    ============================================================================ */
@@ -3352,4 +3197,85 @@ span.arm2-thumb { display: inline-block; }
 @media (max-width: 900px) {
   .ar-cards { grid-template-columns: 1fr; }
   .ar-card { height: 180px; }
+}
+
+/* ================================================================
+   OPERATIONS — missions screen
+   A list on the left drives a live overview behind the whole screen and
+   the full brief on the right. One screen instead of two, no hover
+   required to see anything, and no coordinate readouts.
+   ================================================================ */
+.ops-root { display: flex; flex-direction: column; align-items: center; }
+.ops-stage { position: absolute; inset: 0; z-index: 0; }
+.ops-stage-slot { position: absolute; inset: 0; transition: opacity 620ms cubic-bezier(.22,1,.36,1); }
+.ops-stage .flyover-root { position: absolute; inset: 0; }
+.ops-veil {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(10,10,13,0.94) 0%, rgba(10,10,13,0.86) 46%, rgba(10,10,13,0.42) 100%),
+    linear-gradient(180deg, rgba(10,10,13,0.70) 0%, rgba(10,10,13,0.10) 34%, rgba(10,10,13,0.80) 100%);
+}
+.ops-head {
+  position: relative; z-index: 5; width: 100%; max-width: 1180px;
+  display: flex; align-items: center; gap: 20px; padding: 26px 24px 0;
+}
+.ops-title {
+  font-family: var(--display); font-weight: 700; font-size: 26px;
+  letter-spacing: 0.01em; color: var(--bone); margin: 0;
+}
+.ops-body {
+  position: relative; z-index: 5; width: 100%; max-width: 1180px; flex: 1; min-height: 0;
+  display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 34px;
+  padding: 24px 24px 30px; align-content: start;
+}
+
+/* --- the list --- */
+.ops-list { display: flex; flex-direction: column; gap: 10px; }
+.ops-item {
+  position: relative; display: grid; grid-template-columns: 74px 1fr auto; align-items: center; gap: 14px;
+  padding: 12px 14px 12px 12px; text-align: left; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 6px; background: rgba(16,16,20,0.72);
+  color: var(--bone); backdrop-filter: blur(6px);
+  transition: border-color 200ms, background 200ms, transform 240ms cubic-bezier(.22,1,.36,1);
+}
+.ops-item:hover { border-color: var(--line-strong); transform: translateX(2px); }
+.ops-item.on { border-color: var(--signal); background: rgba(22,22,27,0.88); }
+.ops-item.on::before {
+  content: ''; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 2px;
+  border-radius: 2px; background: var(--signal);
+}
+.ops-item img { width: 74px; height: 52px; object-fit: cover; border-radius: 4px; opacity: 0.72; transition: opacity 200ms; }
+.ops-item.on img, .ops-item:hover img { opacity: 1; }
+.ops-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ops-item-text b { font-size: 15px; font-weight: 600; }
+.ops-item-text em { font-style: normal; font-size: 11.5px; color: var(--signal); opacity: 0.85; }
+.ops-item-text > span {
+  font-size: 11.5px; line-height: 1.45; color: var(--bone-mute);
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.ops-item-count {
+  font-family: var(--mono); font-size: 15px; color: var(--bone-mute);
+  min-width: 22px; text-align: right; opacity: 0.6;
+}
+.ops-item.on .ops-item-count { color: var(--signal); opacity: 1; }
+
+/* --- the brief --- */
+.ops-detail { display: flex; flex-direction: column; gap: 20px; min-width: 0; padding-top: 2px; }
+.ops-brief { margin: 0; max-width: 62ch; font-size: 14px; line-height: 1.7; color: var(--bone); opacity: 0.92; }
+.ops-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ops-steps li {
+  display: grid; grid-template-columns: 26px 1fr; align-items: baseline; gap: 12px;
+  padding: 11px 0; border-top: 1px solid rgba(237,228,211,0.08);
+}
+.ops-steps li:last-child { border-bottom: 1px solid rgba(237,228,211,0.08); }
+.ops-steps i { font-family: var(--mono); font-style: normal; font-size: 12px; color: var(--bone-mute); opacity: 0.55; }
+.ops-steps span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ops-steps b { font-size: 13.5px; font-weight: 600; }
+.ops-steps em { font-style: normal; font-size: 11.5px; color: var(--bone-mute); }
+.ops-go { display: flex; align-items: center; gap: 22px; margin-top: 4px; }
+.ops-go .deploy-btn { max-width: 220px; margin-top: 0; justify-content: center; gap: 12px; }
+
+@media (max-width: 960px) {
+  .ops-body { grid-template-columns: 1fr; gap: 22px; }
+  .ops-veil { background: linear-gradient(180deg, rgba(10,10,13,0.86) 0%, rgba(10,10,13,0.40) 30%, rgba(10,10,13,0.92) 100%); }
 }

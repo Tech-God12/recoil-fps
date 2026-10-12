@@ -112,13 +112,32 @@ export interface BotWeapon {
 export interface BotSkill { acc: number; head: number; reaction: number }
 
 /** Objective layer for a squad: where idle bots go, and whether they may chase. */
-export interface BotGoal { at: THREE.Vector3; speed?: number; hold?: boolean; face?: THREE.Vector3 | null; crouch?: boolean }
+export interface BotGoal {
+  at: THREE.Vector3; speed?: number; hold?: boolean; face?: THREE.Vector3 | null; crouch?: boolean;
+  /** "Near enough is fine": if the last metre is walled off, hold where you stand
+   *  instead of grinding into the wall. Never set for plant/defuse goals. */
+  settle?: boolean;
+  /**
+   * The objective needs this bot HERE, now. An urgent goal outranks a distant
+   * gunfight: the bot keeps shooting but keeps walking. Without it a defender
+   * with a 70 m sightline down mid will stand and trade for the whole round
+   * while his team retakes the site without him.
+   */
+  urgent?: boolean;
+}
 export interface BotDirector {
   idleGoal(bot: TDMBot): BotGoal | null;
   /** May this bot leave its post to push/flank/hunt a lost contact? */
   mayChase(bot: TDMBot): boolean;
   /** Bot is planting/defusing: it keeps its eyes open but does not move or shoot. */
   busy(bot: TDMBot): boolean;
+  /**
+   * Optional lane leash. A bot that is allowed to chase still may not wander
+   * outside this sphere — without it, one attacker who spots a defender peels
+   * off the execute and feeds himself into the site alone. Returning null means
+   * "no restriction".
+   */
+  leash?(bot: TDMBot): { at: THREE.Vector3; radius: number } | null;
 }
 /** What a bot needs from whoever owns the roster (TDMManager, DefusalMode). */
 export interface BotSquad {
@@ -285,6 +304,9 @@ export class TDMBot {
   /** Human-like acquisition delay: counts down after a target first becomes
    * visible; the bot may not fire until it reaches zero AND is facing them. */
   private reactionT = 0;
+  /** Sights are still settling: the first rounds after an acquisition are loose
+   * and can never be headshots. Stops flick-to-headshot behaviour. */
+  private settleT = 0;
   private hadLOS = false;
   /** Teal chevron floating above alpha teammates (null for bravo). */
   private allyMarker: THREE.Sprite | null = null;
@@ -296,6 +318,11 @@ export class TDMBot {
   private escapeDir = 0;
   private escapeT = 0;
   private blockedT = 0;
+  /** Seconds spent failing to make progress toward a director hold goal. */
+  private goalStuckT = 0;
+  private goalBestD = Infinity;
+  /** Latched: pursuing an urgent objective goal while shooting on the move. */
+  private urgentMove = false;
   // visuals
   private walkPhase = 0;
   private locomotion = 0;
@@ -319,6 +346,10 @@ export class TDMBot {
   get dead() { return this.state === 'DEAD'; }
   /** Live sight picture (read by objective directors). */
   get sinceSeen() { return this.lastSeenT; }
+  /** Awareness raised by sound in the last moment (diagnostics/tests). */
+  get heardRecently() { return this.alertT > 0; }
+  /** Sights still settling after an acquisition (diagnostics/tests). */
+  get settling() { return this.settleT > 0; }
   get lastKnownEnemy(): THREE.Vector3 | null { return this.lastKnown; }
   get targetFeet(): THREE.Vector3 | null { return this.target?.feet ?? null; }
   get targetBot(): TDMBot | null { return this.target?.bot ?? null; }
@@ -468,6 +499,27 @@ export class TDMBot {
       this.lastKnown = pos.clone();
       this.lastSeenT = Math.min(this.lastSeenT, 4);
       this.patrolTarget = pos.clone();
+    }
+    // Sound widens awareness even for a bot glued to an angle: for a moment the
+    // sight cone stops mattering, which is what lets a holder catch a flanker.
+    this.alertT = Math.max(this.alertT, 1.1);
+  }
+
+  /**
+   * Heard footsteps. Much softer than gunfire: it never pulls a bot off its post
+   * and never pinpoints the source, but it does turn the head and briefly open
+   * the sight cone. `strength` 0..1 scales with how close and how loud.
+   */
+  hearSteps(pos: THREE.Vector3, strength = 1) {
+    if (this.dead || this.hasLOS) return;
+    this.alertT = Math.max(this.alertT, 0.35 + strength * 0.75);
+    if (this.lastSeenT > 3) {
+      // A rough bearing, not a position: footsteps tell you "that way", not "there".
+      const jitter = (1 - strength) * 6;
+      this.lastKnown = new THREE.Vector3(
+        pos.x + (Math.random() - 0.5) * jitter, pos.y, pos.z + (Math.random() - 0.5) * jitter,
+      );
+      this.lastSeenT = Math.min(this.lastSeenT, 5.5);
     }
   }
 
@@ -744,18 +796,31 @@ export class TDMBot {
   /** True only when the RENDERED body actually faces the target (±40°).
    * The logic yaw snaps instantly but the model turns at a finite speed —
    * without this gate bots could shoot targets behind their back. */
-  private renderedFacingWithin(t: THREE.Vector3, rad: number): boolean {
-    const want = Math.atan2(-(t.x - this.pos.x), -(t.z - this.pos.z));
-    let d = want - this.model.group.rotation.y;
-    while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
-    return Math.abs(d) < rad;
-  }
-
   private renderedFacing(t: THREE.Vector3): boolean {
     const want = Math.atan2(-(t.x - this.pos.x), -(t.z - this.pos.z));
     let d = want - this.model.group.rotation.y;
     while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
     return Math.abs(d) < 0.7;
+  }
+
+  /** Absolute angle (radians, 0..π) between the rendered facing and a point. */
+  private angleToRendered(t: THREE.Vector3): number {
+    const want = Math.atan2(-(t.x - this.pos.x), -(t.z - this.pos.z));
+    let d = want - this.model.group.rotation.y;
+    while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d);
+  }
+
+  /** Pull a movement destination back inside the director's lane leash. */
+  private clampToLeash(p: THREE.Vector3): THREE.Vector3 {
+    const l = this.mgr.director?.leash?.(this);
+    if (!l) return p;
+    const dx = p.x - l.at.x, dz = p.z - l.at.z;
+    const d = Math.hypot(dx, dz);
+    if (d <= l.radius || d < 1e-4) return p;
+    p.x = l.at.x + (dx / d) * l.radius;
+    p.z = l.at.z + (dz / d) * l.radius;
+    return p;
   }
 
   private fireShot(target: TargetRef) {
@@ -770,6 +835,7 @@ export class TDMBot {
     // accuracy 0.82 close → 0.43 at 65 m; first bullet of a burst +0.12
     let acc = THREE.MathUtils.lerp(0.82, 0.43, THREE.MathUtils.clamp((dist - 4) / 61, 0, 1));
     if (this.burstIdx === 0) acc = Math.min(0.94, acc + 0.12);
+    if (this.settleT > 0) acc *= 0.72;
     this.burstIdx++;
     // never shoot through a wall
     ray.set(muzzle, tmpA.copy(aimAt).sub(muzzle).normalize()); ray.far = Math.max(0, dist - 0.25);
@@ -784,7 +850,7 @@ export class TDMBot {
     }
     if (Math.random() < acc) {
       this.ctx.effects.tracer(muzzle, aimAt, hostile);
-      const headshot = Math.random() < 0.10;
+      const headshot = this.settleT <= 0 && Math.random() < 0.10;
       // 44 head / 18-24 body — tuned against the lighter TDM armor curve so a
       // full-HP player survives roughly 7-9 hits (plus regen between fights)
       const dmg = (headshot ? 44 : 18 + Math.random() * 6) * (this.onFire ? TDM_FIRE_DMG_MUL : 1);
@@ -815,6 +881,10 @@ export class TDMBot {
     if (this.state === 'PUSH') acc *= 0.8;
     else if (this.anchoredFire) acc *= 1.12;   // set feet, pre-aimed angle
     else acc *= 0.92;                          // shooting on the move
+    // Sights still settling from the acquisition — the opening rounds of a duel
+    // are loose, and they are never headshots.
+    const settling = this.settleT > 0;
+    if (settling) acc *= 0.72;
     acc = Math.min(0.96, acc * this.skill.acc);
     this.burstIdx++;
     ray.set(muzzle, tmpA.copy(aimAt).sub(muzzle).normalize()); ray.far = Math.max(0, dist - 0.25);
@@ -828,7 +898,7 @@ export class TDMBot {
       // pellets spread wider with range
       const pAcc = pellets > 1 ? acc * THREE.MathUtils.clamp(1.25 - dist / 16, 0.1, 1) : acc;
       if (Math.random() >= pAcc) continue;
-      const isHead = Math.random() < w.headChance * this.skill.head * (pellets > 1 ? 0.5 : 1);
+      const isHead = !settling && Math.random() < w.headChance * this.skill.head * (pellets > 1 ? 0.5 : 1);
       const isLimb = !isHead && Math.random() < 0.18;
       let dmg = w.damage * falloff;
       if (isHead) { dmg *= 4; head = true; }
@@ -919,9 +989,15 @@ export class TDMBot {
       if (this.hasLOS && this.target) {
         // fresh acquisition → human reaction delay before the first round
         if (!this.hadLOS) {
-          this.reactionT = (0.28 + Math.random() * 0.22) * this.skill.reaction;
-          // Holding an angle with the crosshair already there: the peeker walks into it.
-          if (this.holding && this.renderedFacingWithin(this.target.feet, 0.5)) this.reactionT *= 0.55;
+          // Base recognition, then an off-axis penalty: a contact behind you costs
+          // the time it takes to get your head and your gun round to it. Pre-aimed
+          // angles are the exception and that is exactly why holding wins duels.
+          const off = this.angleToRendered(this.target.feet);
+          let r = (0.22 + Math.random() * 0.22 + Math.min(0.40, off * 0.20)) * this.skill.reaction;
+          if (this.holding && off < 0.5) r *= 0.55;
+          this.reactionT = r;
+          // Sights settle after the trigger is legal — first rounds are loose.
+          this.settleT = r + 0.22 * this.skill.reaction;
         }
         this.lastKnown = this.target.feet.clone();
         this.lastSeenT = 0;
@@ -931,6 +1007,7 @@ export class TDMBot {
       this.hadLOS = this.hasLOS;
     }
     this.reactionT = Math.max(0, this.reactionT - dt);
+    this.settleT = Math.max(0, this.settleT - dt);
     /** May this bot legally pull the trigger right now? Needs sight, an elapsed
      * reaction window, and a rendered body that is actually pointing that way. */
     const canFire = (t: TargetRef) => this.hasLOS && this.reactionT <= 0 && this.renderedFacing(t.feet);
@@ -950,10 +1027,24 @@ export class TDMBot {
         const goal = director?.idleGoal(this) ?? null;
         if (goal) {
           const gd = Math.hypot(goal.at.x - this.pos.x, goal.at.z - this.pos.z);
-          if (gd > 0.7 || !goal.hold) {
+          // A post whose last metre is walled off used to leave a bot grinding
+          // into the wall for the rest of the round, which is the single most
+          // broken-looking thing a bot can do. Track progress TOWARD the goal —
+          // raw movement is useless because a stuck bot still slides along the
+          // wall — and once it stalls, stand and hold where we are.
+          if (goal.hold && goal.settle && gd < 3.2) {
+            if (Math.abs(gd - this.goalBestD) > 3.2) this.goalBestD = gd;
+            if (gd < this.goalBestD - 0.1) { this.goalBestD = gd; this.goalStuckT = 0; }
+            else this.goalStuckT += dt;
+          } else { this.goalStuckT = 0; this.goalBestD = Infinity; }
+          const settled = this.goalStuckT > 1.8;
+          if ((gd > 0.7 && !settled) || !goal.hold) {
             this.holding = false;
-            this.goTo(goal.at, goal.speed ?? 4.2, dt);
+            // goTo reports true when it is wedged as well as when it arrives;
+            // for a hold goal both answers mean "stop here".
+            if (this.goTo(goal.at, goal.speed ?? 4.2, dt) && goal.hold && goal.settle) this.goalStuckT = 99;
           } else {
+            this.path = null;
             this.holding = true;
             this.crouched = !!goal.crouch;
             if (goal.face) this.faceTarget(goal.face);
@@ -1014,6 +1105,20 @@ export class TDMBot {
               this.burstIdx = 0;
             }
           }
+          // An urgent objective outranks a long-range duel: shoot on the move
+          // rather than standing in the open trading while the round is decided
+          // somewhere else.
+          // Hysteresis on the range gate: without it the bot chatters between
+          // "walk the objective" and "hold and trade" right on the boundary and
+          // ends up doing neither.
+          if (dist > 11) this.urgentMove = true;
+          else if (dist < 8) this.urgentMove = false;
+          const urgent = this.urgentMove ? director?.idleGoal(this) ?? null : null;
+          if (urgent?.urgent) {
+            this.anchoredFire = false;
+            this.goTo(urgent.at, urgent.speed ?? 4.6, dt);
+            break;
+          }
           // strafe perpendicular to the target while shooting (snipers plant their feet)
           this.strafeT -= dt;
           if (this.strafeT <= 0) { this.strafeDir = -this.strafeDir; this.strafeT = 0.7 + Math.random() * 1.1; }
@@ -1040,7 +1145,7 @@ export class TDMBot {
           if (this.flanker && Math.random() < 0.5 && this.lastSeenT < 6) this.startFlank(target);
           else if (this.pusher || this.isFireTarget(target)) this.startPush(target, this.isFireTarget(target));
           else if (this.lastKnown) {
-            if (this.goTo(this.lastKnown, 3.8, dt) || this.lastSeenT > 8) {
+            if (this.goTo(this.clampToLeash(this.lastKnown.clone()), 3.8, dt) || this.lastSeenT > 8) {
               // checked the spot — forget it so we don't camp a corpse
               this.lastKnown = null; this.lastSeenT = 999;
               this.setState('PATROL');
@@ -1114,7 +1219,7 @@ export class TDMBot {
     at.x += (Math.random() - 0.5) * 10; at.z += (Math.random() - 0.5) * 10;
     const h = this.ctx.half - 4;
     at.x = THREE.MathUtils.clamp(at.x, -h, h); at.z = THREE.MathUtils.clamp(at.z, -h, h);
-    this.pushTarget = at;
+    this.pushTarget = this.clampToLeash(at);
     this.setState('PUSH');
     this.ctx.onCallout(hunt ? 'pushfire' : 'push', this.pos, this.team);
   }
@@ -1130,7 +1235,7 @@ export class TDMBot {
     const p = new THREE.Vector3(at.x + dir.x * r, 0, at.z + dir.z * r);
     const h = this.ctx.half - 4;
     p.x = THREE.MathUtils.clamp(p.x, -h, h); p.z = THREE.MathUtils.clamp(p.z, -h, h);
-    this.flankTarget = p;
+    this.flankTarget = this.clampToLeash(p);
     this.setState('FLANK');
     this.ctx.onCallout('flank', this.pos, this.team);
   }

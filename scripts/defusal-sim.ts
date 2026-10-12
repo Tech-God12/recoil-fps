@@ -122,7 +122,7 @@ async function main() {
 
     const dt = 1 / 30;
     let t = 0, lastRound = 0;
-    const still = new Map<any, { x: number; z: number; t: number; worst: number }>();
+    const still = new Map<any, { x: number; z: number; t: number; worst: number; where: string }>();
     let roundStart = 0;
     const t0 = Date.now();
     while (!ended && t < 60 * 60) {
@@ -154,10 +154,16 @@ async function main() {
       if (m.phase === 'live' || m.phase === 'planted') {
         for (const b of mode.bots) {
           if (b.dead) continue;
-          const s = still.get(b) ?? { x: b.pos.x, z: b.pos.z, t: 0, worst: 0 };
+          const s = still.get(b) ?? { x: b.pos.x, z: b.pos.z, t: 0, worst: 0, where: '' };
           const busy = mode.bomb.defuser?.bot === b || mode.bomb.planter?.bot === b;
-          if (Math.hypot(b.pos.x - s.x, b.pos.z - s.z) < 0.05 && !b.holding && !busy && b.state === 'PATROL') { s.t += dt; s.worst = Math.max(s.worst, s.t); }
-          else s.t = 0;
+          if (Math.hypot(b.pos.x - s.x, b.pos.z - s.z) < 0.05 && !b.holding && !busy && b.state === 'PATROL') {
+            s.t += dt;
+            if (s.t > s.worst) { s.worst = s.t; s.where = `${mode.debugTask(b)}@${b.pos.x.toFixed(0)},${b.pos.z.toFixed(0)}`; }
+            if (process.env.WHY && s.t > 8 && s.t < 8 + dt * 1.5) {
+              const g = (mode as any).idleGoal(b);
+              console.log(`    WHY ${b.name} ${mode.debugTask(b)} pos=${b.pos.x.toFixed(1)},${b.pos.z.toFixed(1)} goal=${g ? `${g.at.x.toFixed(1)},${g.at.z.toFixed(1)} hold=${g.hold} settle=${g.settle} speed=${g.speed}` : 'null'} busy=${(mode as any).isBusy(b)} stun=${b.stunTimer.toFixed(2)} state=${b.state} hold=${b.holding}`);
+            }
+          } else s.t = 0;
           s.x = b.pos.x; s.z = b.pos.z;
           still.set(b, s);
         }
@@ -165,7 +171,7 @@ async function main() {
       if (m.phase === 'over' && m.clock > 4.95) {
         const r = m.lastRound;
         const alive = (team: string) => mode.players.filter((c: any) => c.team === team && c.alive).length;
-        const stuck = [...still.entries()].filter(([, s]) => s.worst > 6).map(([b, s]) => `${b.name}@${b.pos.x.toFixed(0)},${b.pos.z.toFixed(0)}(${s.worst.toFixed(0)}s ${mode.debugTask(b)} ${b.state})`);
+        const stuck = [...still.entries()].filter(([, s]) => s.worst > 6).map(([b, s]) => `${b.name}(${s.worst.toFixed(0)}s ${s.where})`);
         const money = (team: string) => Math.round(mode.players.filter((c: any) => c.team === team).reduce((a: number, c: any) => a + c.inv.money, 0) / 5);
         console.log(`R${String(r.round).padStart(2)} ${r.winnerSide.padEnd(6)} ${r.reason.padEnd(11)} ${String(r.alphaScore).padStart(2)}-${String(r.bravoScore).padEnd(2)} planted=${r.planted ? 'Y' : 'n'} dur=${(t - roundStart - 10).toFixed(0)}s alive a${alive('alpha')} b${alive('bravo')} plan=${(mode as any).attack.style}${(mode as any).attack.site} buy a:${(mode as any).buyCalls.alpha} b:${(mode as any).buyCalls.bravo} $a${money('alpha')} $b${money('bravo')}${stuck.length ? ' STUCK ' + stuck.join(' ') : ''}`);
         if (process.env.FEED) for (const l of log) console.log(l);

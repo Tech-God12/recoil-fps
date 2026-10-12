@@ -128,9 +128,10 @@ test('stat bar normalisation is pinned', () => {
 
 test('buyWeapon rejects unknown, duplicate and unaffordable guns', () => {
   const rich = { ...profile.DEFAULT_PROFILE, cash: 99999 };
+  const broke = { ...profile.DEFAULT_PROFILE, cash: 0 };
   assert.equal(profile.buyWeapon(rich, 'nope').ok, false);
   assert.equal(profile.buyWeapon(rich, 'm4a1').error, 'ALREADY_OWNED');
-  assert.equal(profile.buyWeapon(profile.DEFAULT_PROFILE, 'awm').error, 'INSUFFICIENT_FUNDS');
+  assert.equal(profile.buyWeapon(broke, 'awm').error, 'INSUFFICIENT_FUNDS');
   const bought = profile.buyWeapon(rich, 'awm');
   assert.equal(bought.ok, true);
   assert.equal(bought.value.cash, 99999 - weaponById('awm').price);
@@ -146,7 +147,7 @@ test('attachment ownership is per weapon and buying auto-equips', () => {
   assert.ok(!(next.ownedAttachments.ak47 ?? []).includes('mag_extended'));
   assert.equal(next.builds.m4a1.attachments.magazine, 'mag_extended');
   assert.equal(profile.buyAttachment(next, 'm4a1', 'mag_extended').error, 'ALREADY_OWNED');
-  assert.equal(profile.buyAttachment(profile.DEFAULT_PROFILE, 'm4a1', 'mag_extended').error, 'INSUFFICIENT_FUNDS');
+  assert.equal(profile.buyAttachment({ ...profile.DEFAULT_PROFILE, cash: 0 }, 'm4a1', 'mag_extended').error, 'INSUFFICIENT_FUNDS');
 });
 
 test('equipAttachment enforces ownership and compatibility', () => {

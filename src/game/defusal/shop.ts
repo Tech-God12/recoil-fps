@@ -2,26 +2,48 @@
 // Prices follow the CS2 price bands mapped onto RECOIL's ten armory guns. A gun the
 // player owns in the Armory is fielded with their own build (attachments + finish);
 // everything here is build-agnostic.
-import { weaponById, type WeaponId } from '../economy/catalog';
+import { attachmentById, attachmentsFor, isCompatible, weaponById, type AttachSlot, type AttachmentCatalogEntry, type AttachmentId, type WeaponId } from '../economy/catalog';
 import { ECONOMY, KILL_REWARD, clampMoney, type KillClass, type Side } from './rules';
 
-export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'gear' | 'grenades';
+export type ShopCategory = 'pistols' | 'smgs' | 'rifles' | 'heavy' | 'attachments' | 'gear' | 'grenades';
 export type GrenadeKind = 'frag' | 'flash' | 'smoke';
 /** 0 = none, 1 = kevlar vest, 2 = kevlar + helmet. */
 export type ArmorTier = 0 | 1 | 2;
 export type ShopItemId =
   | WeaponId
   | 'kevlar' | 'helmet' | 'kit'
-  | 'frag' | 'flash' | 'smoke';
+  | 'frag' | 'flash' | 'smoke'
+  /** Attachment for the primary you are holding, e.g. `att:holo_r1`. */
+  | `att:${string}`;
+
+/**
+ * Attachments you can bolt on mid-round. Deliberately not the full armory set:
+ * a buy menu is a ten-second decision, so it offers the four slots that change
+ * how the gun plays and leaves stock/rail/barrel cosmetics to the armory.
+ */
+export const BUYABLE_SLOTS: AttachSlot[] = ['optic', 'muzzle', 'magazine', 'underbarrel'];
+export const SLOT_LABEL: Record<AttachSlot, string> = {
+  optic: 'Optic', muzzle: 'Muzzle', magazine: 'Magazine', underbarrel: 'Grip',
+  stock: 'Stock', rail: 'Rail', barrel: 'Barrel',
+};
+/** Round prices onto the same bands as the rest of the menu. */
+export const ATTACH_PRICE: Record<1 | 2 | 3, number> = { 1: 200, 2: 350, 3: 500 };
+export const attachShopId = (id: AttachmentId): `att:${string}` => `att:${id}`;
+export const isAttachmentId = (id: string): boolean => id.startsWith('att:');
+export const attachmentOfShopId = (id: string): AttachmentCatalogEntry | undefined =>
+  (id.startsWith('att:') ? attachmentById(id.slice(4)) : undefined);
+export const attachPrice = (a: AttachmentCatalogEntry): number => ATTACH_PRICE[a.tier];
 
 export interface ShopItem {
   id: ShopItemId;
   name: string;
   category: ShopCategory;
   price: number;
-  kind: 'primary' | 'secondary' | 'armor' | 'helmet' | 'kit' | 'grenade';
+  kind: 'primary' | 'secondary' | 'armor' | 'helmet' | 'kit' | 'grenade' | 'attachment';
   weapon?: WeaponId;
   grenade?: GrenadeKind;
+  attachment?: AttachmentId;
+  slot?: AttachSlot;
   /** Purchase restriction. */
   side?: Side;
   killClass?: KillClass;
@@ -33,6 +55,7 @@ export const SHOP_CATEGORIES: { id: ShopCategory; label: string }[] = [
   { id: 'smgs', label: 'SMGs' },
   { id: 'rifles', label: 'Rifles' },
   { id: 'heavy', label: 'Heavy' },
+  { id: 'attachments', label: 'Attachments' },
   { id: 'gear', label: 'Gear' },
   { id: 'grenades', label: 'Grenades' },
 ];
@@ -61,11 +84,36 @@ export const GRENADE_LIMITS: Record<GrenadeKind, number> & { total: number } = {
 /** Upgrading an existing vest to vest + helmet. */
 export const HELMET_UPGRADE_PRICE = 350;
 
-export function shopItem(id: string): ShopItem | undefined { return SHOP.find(i => i.id === id); }
+/** Shop entry for one catalog attachment. Generated, never hand-authored: the
+ *  compatibility table is the single source of truth for what fits what. */
+export function attachmentShopItem(a: AttachmentCatalogEntry): ShopItem {
+  return {
+    id: attachShopId(a.id), name: a.name, category: 'attachments', price: attachPrice(a),
+    kind: 'attachment', attachment: a.id, slot: a.slot,
+    tag: `${SLOT_LABEL[a.slot]} · ${a.pros[0] ?? a.desc}`,
+  };
+}
+
+/** Everything that fits the primary in hand, grouped in slot order. */
+export function attachmentsForSale(primary: WeaponId | null): ShopItem[] {
+  if (!primary) return [];
+  const out: ShopItem[] = [];
+  for (const slot of BUYABLE_SLOTS) for (const a of attachmentsFor(primary, slot)) out.push(attachmentShopItem(a));
+  return out;
+}
+
+export function shopItem(id: string): ShopItem | undefined {
+  const a = attachmentOfShopId(id);
+  if (a) return attachmentShopItem(a);
+  return SHOP.find(i => i.id === id);
+}
 
 export interface Inventory {
   money: number;
   primary: WeaponId | null;
+  /** Attachments bought this round, scoped to `primary`. Cleared when the
+   *  primary changes - you do not get to keep a scope for a gun you sold. */
+  mods: Partial<Record<AttachSlot, AttachmentId>>;
   secondary: WeaponId;
   armor: ArmorTier;
   kit: boolean;
@@ -75,7 +123,22 @@ export interface Inventory {
 }
 
 export function freshInventory(money: number = ECONOMY.start): Inventory {
-  return { money: clampMoney(money), primary: null, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0 };
+  return { money: clampMoney(money), primary: null, mods: {}, secondary: 'm1911', armor: 0, kit: false, frags: 0, flashes: 0, smokes: 0 };
+}
+
+/** The build the player actually fields this round: primary plus whatever was
+ *  bolted on in the buy menu, filtered through the same compatibility gate the
+ *  armory uses so an inventory can never field a part that does not fit. */
+export function roundBuild(inv: Inventory): { weapon: WeaponId; attachments: Partial<Record<AttachSlot, AttachmentId>> } | null {
+  if (!inv.primary) return null;
+  const attachments: Partial<Record<AttachSlot, AttachmentId>> = {};
+  const slots = weaponById(inv.primary)?.slots ?? [];
+  for (const slot of slots) {
+    const id = inv.mods?.[slot];
+    const a = id ? attachmentById(id) : undefined;
+    if (a && a.slot === slot && isCompatible(a, inv.primary)) attachments[slot] = a.id;
+  }
+  return { weapon: inv.primary, attachments };
 }
 
 /** Dead players lose their kit; money carries over. */
@@ -102,6 +165,14 @@ export function canBuy(inv: Inventory, id: string, side: Side): BuyCheck {
   if (!item) return { ok: false, reason: 'Unknown item' };
   if (item.side && item.side !== side) return { ok: false, reason: item.side === 'defend' ? 'Defenders only' : 'Attackers only' };
   if (item.kind === 'primary' && inv.primary === item.weapon) return { ok: false, reason: 'Equipped' };
+  if (item.kind === 'attachment') {
+    const a = attachmentById(item.attachment!);
+    if (!a) return { ok: false, reason: 'Unknown attachment' };
+    if (!inv.primary) return { ok: false, reason: 'Buy a primary first' };
+    if (!isCompatible(a, inv.primary)) return { ok: false, reason: 'Does not fit' };
+    if (!(weaponById(inv.primary)?.slots ?? []).includes(a.slot)) return { ok: false, reason: 'No mount' };
+    if (inv.mods[a.slot] === a.id) return { ok: false, reason: 'Fitted' };
+  }
   if (item.kind === 'secondary' && inv.secondary === item.weapon) return { ok: false, reason: 'Equipped' };
   if (item.kind === 'armor' && inv.armor >= 1) return { ok: false, reason: 'Equipped' };
   if (item.kind === 'helmet' && inv.armor >= 2) return { ok: false, reason: 'Equipped' };
@@ -123,12 +194,14 @@ export function buy(inv: Inventory, id: string, side: Side): { ok: boolean; inv:
   const next: Inventory = { ...inv, money: inv.money - check.price };
   let replaced: WeaponId | null | undefined;
   switch (item.kind) {
-    case 'primary': replaced = inv.primary; next.primary = item.weapon!; break;
+    // A new primary arrives bare: the old gun's glass went with the old gun.
+    case 'primary': replaced = inv.primary; next.primary = item.weapon!; next.mods = {}; break;
     case 'secondary': replaced = inv.secondary; next.secondary = item.weapon!; break;
     case 'armor': next.armor = 1; break;
     case 'helmet': next.armor = 2; break;
     case 'kit': next.kit = true; break;
     case 'grenade': { const k = grenadeKey(item.grenade!); next[k] = inv[k] + 1; break; }
+    case 'attachment': next.mods = { ...inv.mods, [item.slot!]: item.attachment! }; break;
   }
   return { ok: true, inv: next, replaced };
 }
@@ -140,6 +213,10 @@ export function inventoryValue(inv: Inventory): number {
   if (inv.secondary !== 'm1911') v += shopItem(inv.secondary)?.price ?? 0;
   v += inv.armor === 2 ? 1000 : inv.armor === 1 ? 650 : 0;
   if (inv.kit) v += 400;
+  for (const id of Object.values(inv.mods ?? {})) {
+    const a = id ? attachmentById(id) : undefined;
+    if (a) v += attachPrice(a);
+  }
   v += inv.frags * 300 + inv.flashes * 200 + inv.smokes * 300;
   return v;
 }

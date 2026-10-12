@@ -9,6 +9,7 @@ const { WEAPON_BUILDERS, buildSoldier, WM } = await import('../src/game/models.t
 const { weaponBounds } = await import('../src/game/weapons/geometry.ts');
 const { attach, detach, applyBuild, ATTACHMENT_BUILDERS, ATTACH_ORDER } = await import('../src/game/attachments.ts');
 const { WEAPON_CATALOG, ATTACHMENT_CATALOG, attachmentsFor, attachmentById, weaponById } = await import('../src/game/economy/catalog.ts');
+const await_shop = await import('../src/game/defusal/shop.ts');
 
 function approx(a, b, message) { assert.ok(Math.abs(a - b) < 1e-6, `${message}: ${a} vs ${b}`); }
 function connected(model, label) {
@@ -276,4 +277,45 @@ test('showcase bounds ignore hidden arms and furniture but include fitted access
   attach(model, attachmentById('muz_suppressor'), 'm4a1');
   assert.ok(weaponBounds(model.group).min.z < before.min.z - 0.05, 'long fitted muzzle must be included');
   disposeWeapon(model);
+});
+
+test('every build the buy menu can produce is gapless, with all four slots fitted at once', () => {
+  // The buy menu lets you bolt on an optic, a muzzle device, a magazine and a
+  // grip in the same round. Each part is checked alone above; this checks the
+  // combinations, which is what actually reaches the viewmodel.
+  const { BUYABLE_SLOTS, attachmentsForSale } = await_shop;
+  let builds = 0;
+  for (const entry of WEAPON_CATALOG) {
+    const bySlot = BUYABLE_SLOTS
+      .map(slot => attachmentsFor(entry.id, slot))
+      .filter(list => list.length);
+    if (!bySlot.length) continue;
+    // Deepest build: the last (highest tier) option in every slot at once,
+    // plus the first option in every slot, which exercises different geometry.
+    for (const pick of [list => list[list.length - 1], list => list[0]]) {
+      const attachments = {};
+      for (const list of bySlot) { const a = pick(list); attachments[a.slot] = a.id; }
+      const model = WEAPON_BUILDERS[entry.id]();
+      try {
+        applyBuild(model, { weapon: entry.id, attachments });
+        connected(model, `${entry.id} + ${Object.values(attachments).join(' + ')}`);
+        // A magazine and a foregrip are the pair that can physically collide.
+        // The SPAS is the documented exception: its shell tube runs under the
+        // barrel and the pump handstop is meant to slide over it.
+        if (model.attached?.underbarrel && entry.id !== 'spas12') {
+          assert.equal(assembliesInterfere(model.mag, model.attached.underbarrel), false,
+            `${entry.id}: magazine clips the ${attachments.underbarrel}`);
+        }
+        builds++;
+      } finally { disposeWeapon(model); }
+    }
+    // And everything the shop actually offers must be one of the pairings the
+    // gap audit above already walked - nothing may bypass it.
+    for (const item of attachmentsForSale(entry.id)) {
+      const a = attachmentById(item.attachment);
+      assert.ok(a.compat.includes(entry.id), `${item.attachment} is on sale for ${entry.id} but not compatible with it`);
+      assert.ok(weaponById(entry.id).slots.includes(a.slot), `${entry.id} has no ${a.slot} mount`);
+    }
+  }
+  assert.ok(builds >= 20, `only checked ${builds} full builds`);
 });

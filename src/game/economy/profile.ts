@@ -30,12 +30,16 @@ export interface PlayerProfile {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
+/** What a brand-new operator is staked. */
+export const STARTING_CASH = 10000;
+
 export const PROFILE_KEY = 'recoilfps.profile.v2';
 const LEGACY_PROFILE_KEY = 'recoilfps.profile.v1';
 
 export const DEFAULT_PROFILE: PlayerProfile = {
   v: 1,
-  cash: 0,
+  // Everyone starts with a working budget rather than an empty wallet.
+  cash: STARTING_CASH,
   lifetimeCash: 0,
   missions: 0,
   kills: 0,

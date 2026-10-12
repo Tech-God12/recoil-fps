@@ -5,6 +5,7 @@
 import type { DefusalHud, DefusalRosterEntry } from '../game/defusal/mode';
 import type { HudState } from '../game/engine';
 import { missionClock } from './MissionObjective';
+import { formatCash } from '../game/economy/money';
 
 const SIDE_NAME = { attack: 'ATTACK', defend: 'DEFEND' } as const;
 const REASON_ICON: Record<string, string> = { elimination: '☠', bomb: '✹', defuse: '✂', time: '◷' };
@@ -72,7 +73,7 @@ export function DefusalBoard({ df }: { df: DefusalHud }) {
         {r.weapon && <i className="df-row-gun mono">{r.weapon}</i>}
         {r.kit && <i className="df-row-kit" title="Defuse kit"><KitGlyph /></i>}
       </span>
-      <span className="mono tabular money">{r.money !== null ? `$${r.money.toLocaleString('en-US')}` : ''}</span>
+      <span className="mono tabular money">{r.money !== null ? formatCash(r.money) : ''}</span>
       <span className="tabular">{r.kills}</span>
       <span className="tabular dim">{r.assists}</span>
       <span className="tabular dim">{r.deaths}</span>
@@ -190,7 +191,7 @@ export default function DefusalHudLayer({ hud, showBoard }: { hud: HudState; sho
       {/* ============ MONEY + KIT (left, above vitals) ============ */}
       {!df.playerDead && (
         <div className="df-wallet">
-          <span className="df-money mono tabular">${df.money.toLocaleString('en-US')}</span>
+          <span className="df-money mono tabular">{formatCash(df.money)}</span>
           {df.buyOpen && df.inBuyZone && <span className="df-buyhint mono"><b className="keycap">B</b> BUY · {Math.ceil(df.buyTimeLeft)}s</span>}
           <span className="df-kit">
             <span className={df.armor ? 'on' : ''} title={df.armor === 2 ? 'Kevlar + helmet' : df.armor ? 'Kevlar' : 'No armor'}><ArmorGlyph tier={df.armor} /></span>

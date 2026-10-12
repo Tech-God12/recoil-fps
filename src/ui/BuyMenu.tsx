@@ -4,13 +4,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DefusalHud } from '../game/defusal/mode';
 import {
-  SHOP, SHOP_CATEGORIES, buy as simulateBuy, canBuy, inventoryValue, itemPrice, shopItem,
-  type Inventory, type ShopCategory, type ShopItem,
+  SHOP, SHOP_CATEGORIES, SLOT_LABEL, attachmentsForSale, buy as simulateBuy, canBuy, inventoryValue,
+  itemPrice, shopItem, type Inventory, type ShopCategory, type ShopItem,
 } from '../game/defusal/shop';
 import { KILL_REWARD, type Side } from '../game/defusal/rules';
 import type { WeaponId } from '../game/economy/catalog';
 import { gunThumbnail } from './armory/GunViewer';
 import { weaponTexturesReady } from '../game/weapons/finish';
+import { formatCash } from '../game/economy/money';
+
+/** Slot glyphs for attachment cards — they have no gun thumbnail of their own. */
+const SLOT_ICON: Record<string, string> = {
+  optic: 'M4 9.5h13l3-2v9l-3-2H4zM7 7.5v-2M7 18.5v-2M12 12h.01',
+  muzzle: 'M3 10h11v4H3zM14 9.5h7v5h-7zM16 9.5v5M18 9.5v5',
+  magazine: 'M8 4h8v4H8zM9 8h6l-1 12H10zM10.5 11h3M10.5 14h3',
+  underbarrel: 'M4 6h16v3H4zM10 9v5a2 2 0 0 0 4 0V9M11 14v5h2v-5',
+};
 
 const GEAR_ICON: Record<string, string> = {
   kevlar: 'M12 2.5l8 3v6c0 5-3.5 8.6-8 10-4.5-1.4-8-5-8-10v-6z',
@@ -74,7 +83,13 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const items = useMemo(() => SHOP.filter(i => i.category === cat), [cat]);
+  // Attachments are generated from the compatibility table for the gun in hand,
+  // so the list changes the moment you buy a different primary.
+  const attachItems = useMemo(() => attachmentsForSale(inv.primary), [inv.primary]);
+  const items = useMemo(
+    () => (cat === 'attachments' ? attachItems : SHOP.filter(i => i.category === cat)),
+    [cat, attachItems],
+  );
   const doBuy = useCallback((item: ShopItem) => {
     const r = onBuy(item.id);
     setToast({ text: r.ok ? `${item.name} purchased` : r.reason ?? 'Cannot buy', bad: !r.ok, key: Date.now() + Math.random() });
@@ -110,14 +125,18 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
     return () => window.removeEventListener('keydown', onKey);
   }, [df.buyOpen, step, items, doBuy, autoBuy, onClose]);
 
-  const nades = [inv.frags && `FRAG ×${inv.frags}`, inv.flashes && `FLASH ×${inv.flashes}`, inv.smokes && `SMOKE ×${inv.smokes}`].filter(Boolean).join(' · ') || '—';
+  const nades = [inv.frags && `Frag ×${inv.frags}`, inv.flashes && `Flash ×${inv.flashes}`, inv.smokes && `Smoke ×${inv.smokes}`].filter(Boolean).join(' · ') || '—';
+  const fitted = useMemo(
+    () => attachItems.filter(a => inv.mods?.[a.slot!] === a.attachment).map(a => ({ slot: a.slot!, name: a.name })),
+    [attachItems, inv.mods],
+  );
   return (
     <div className="buy-root" role="dialog" aria-modal="true" aria-label="Buy menu" onContextMenu={e => e.preventDefault()}>
       <div className="buy-panel anim-rise">
         <header className="buy-head">
-          <span className="buy-title">BUY MENU</span>
-          <span className={`buy-side ${side}`}>{side === 'attack' ? 'ATTACK' : 'DEFEND'} · ROUND {df.round}</span>
-          <span className="buy-money mono tabular">${df.money.toLocaleString('en-US')}</span>
+          <span className="buy-title">Buy menu</span>
+          <span className={`buy-side ${side}`}>{side === 'attack' ? 'Attack' : 'Defend'} · round {df.round}</span>
+          <span className="buy-money mono tabular">{formatCash(df.money)}</span>
           <span className="buy-time mono tabular" title="Buy time left">◷ {Math.ceil(df.buyTimeLeft)}s</span>
           <button type="button" className="buy-close" onClick={() => onClose(true)} aria-label="Close buy menu">✕</button>
         </header>
@@ -149,13 +168,15 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
                   <span className="buy-art">
                     {item.weapon
                       ? (thumbs[item.weapon] ? <img src={thumbs[item.weapon]} alt="" draggable={false} /> : <i className="buy-art-wait" />)
-                      : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={GEAR_ICON[item.id] ?? GEAR_ICON.kevlar} /></svg>}
+                      : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                          <path d={item.slot ? SLOT_ICON[item.slot] ?? GEAR_ICON.kevlar : GEAR_ICON[item.id] ?? GEAR_ICON.kevlar} />
+                        </svg>}
                   </span>
-                  <span className="buy-name">{item.name}{yours && <em className="buy-yours">YOUR BUILD</em>}</span>
+                  <span className="buy-name">{item.name}{yours && <em className="buy-yours">Your build</em>}</span>
                   <span className="buy-tag">{item.tag}</span>
                   <span className="buy-foot">
                     <b className="mono tabular">${price.toLocaleString('en-US')}</b>
-                    {reward > 0 && <i className="mono">${reward} / KILL</i>}
+                    {reward > 0 && <i className="mono">${reward} a kill</i>}
                     {!check.ok && <u>{check.reason}</u>}
                   </span>
                 </button>
@@ -163,29 +184,34 @@ export default function BuyMenu({ df, owned, onBuy, onClose }: {
             })}
           </div>
           <aside className="buy-loadout">
-            <span className="buy-k">YOUR ROUND LOADOUT</span>
-            <div><span>PRIMARY</span><b>{inv.primary ? shopItem(inv.primary)?.name : '—'}</b></div>
-            <div><span>SIDEARM</span><b>{shopItem(inv.secondary)?.name ?? inv.secondary}</b></div>
-            <div><span>ARMOR</span><b>{inv.armor === 2 ? 'Kevlar + helmet' : inv.armor ? 'Kevlar' : 'None'}</b></div>
-            {side === 'defend' && <div><span>DEFUSE KIT</span><b>{inv.kit ? 'Yes · 5s defuse' : 'No · 10s defuse'}</b></div>}
-            <div><span>UTILITY</span><b>{nades}</b></div>
-            <div className="buy-value"><span>EQUIPMENT VALUE</span><b className="mono tabular">${inventoryValue(inv).toLocaleString('en-US')}</b></div>
-            <button type="button" className="buy-auto" onClick={autoBuy} disabled={!df.buyOpen}><b className="mono">A</b> AUTO-BUY <em>rifle · armor · {side === 'defend' ? 'kit · ' : ''}utility</em></button>
+            <span className="buy-k">Your round loadout</span>
+            <div><span>Primary</span><b>{inv.primary ? shopItem(inv.primary)?.name : '—'}</b></div>
+            {fitted.length > 0 && (
+              <ul className="buy-fitted">
+                {fitted.map(f => <li key={f.slot}><span>{SLOT_LABEL[f.slot]}</span><b>{f.name}</b></li>)}
+              </ul>
+            )}
+            <div><span>Sidearm</span><b>{shopItem(inv.secondary)?.name ?? inv.secondary}</b></div>
+            <div><span>Armor</span><b>{inv.armor === 2 ? 'Kevlar + helmet' : inv.armor ? 'Kevlar' : 'None'}</b></div>
+            {side === 'defend' && <div><span>Defuse kit</span><b>{inv.kit ? 'Yes · 5s defuse' : 'No · 10s defuse'}</b></div>}
+            <div><span>Utility</span><b>{nades}</b></div>
+            <div className="buy-value"><span>Equipment value</span><b className="mono tabular">${inventoryValue(inv).toLocaleString('en-US')}</b></div>
+            <button type="button" className="buy-auto" onClick={autoBuy} disabled={!df.buyOpen}><b className="mono">A</b> Auto-buy <em>rifle · armor · {side === 'defend' ? 'kit · ' : ''}utility</em></button>
             <p className="buy-note">Survive the round and you keep everything. Die and you respawn with a 1911.</p>
           </aside>
         </div>
         <footer className="buy-foot-keys mono">
-          <span><b className="keycap">B</b> CLOSE</span>
-          <span><b className="keycap">1-6</b> CATEGORY</span>
-          <span><b className="keycap">1-9</b> BUY</span>
-          <span><b className="keycap">⌫</b> BACK</span>
-          <span><b className="keycap">A</b> AUTO-BUY</span>
-          <span><b className="keycap">ESC</b> PAUSE</span>
+          <span><b className="keycap">B</b> close</span>
+          <span><b className="keycap">1-7</b> category</span>
+          <span><b className="keycap">1-9</b> buy</span>
+          <span><b className="keycap">⌫</b> back</span>
+          <span><b className="keycap">A</b> auto-buy</span>
+          <span><b className="keycap">Esc</b> pause</span>
         </footer>
         {toast && <div key={toast.key} className={`buy-toast ${toast.bad ? 'bad' : ''}`}>{toast.text}</div>}
         {!df.buyOpen && (
           <div className="buy-over">
-            <b>BUY TIME IS OVER</b>
+            <b>Buy time is over</b>
             <button type="button" className="deploy-btn" onClick={() => onClose(true)}><span>Back to the fight</span></button>
           </div>
         )}

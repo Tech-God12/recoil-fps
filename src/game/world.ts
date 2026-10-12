@@ -295,9 +295,57 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
 
   /** Weathered base course. A wall that meets the ground with no plinth reads as a
    *  floating texture sample; 0.55 m of darker, slightly proud stone fixes that. */
-  function plinth(cx: number, cz: number, w: number, d: number, m: THREE.Material, h = 0.55) {
-    box(cx, h / 2, cz, w + 0.14, h, d + 0.14, m, false);
-    box(cx, h + 0.05, cz, w + 0.2, 0.1, d + 0.2, M.concrete, false);
+  /**
+   * Base moulding around a building - a SKIRT, not a slab.
+   *
+   * This used to be two solid boxes spanning the whole footprint from y=0 to
+   * y=0.65. Because they are non-colliding the player walks at terrain level,
+   * which meant standing buried two feet inside the visible floor: every wall
+   * base, window sill and doorway read a foot and a half too high from
+   * inside, and the doorway's bottom half was simply filled in.
+   *
+   * Now it is four bands that sit within the wall thickness, so they never
+   * intrude into the room, and they are cut around every doorway so you walk
+   * through an opening instead of over a sill.
+   */
+  function plinth(
+    cx: number, cz: number, w: number, d: number, m: THREE.Material,
+    doors: { x: number; z: number; w: number; alongX: boolean }[] = [], h = 0.42,
+  ) {
+    const t = 0.44;                      // band depth: inside the 0.5 m wall
+    const ox = w / 2 + 0.07, oz = d / 2 + 0.07;  // 7 cm overhang, as before
+    /** Emit [from,to] minus the gaps, as boxes along one side. */
+    const run = (alongX: boolean, fixed: number, from: number, to: number, gaps: [number, number][]) => {
+      let at = from;
+      for (const [a, b] of [...gaps].sort((p, q) => p[0] - q[0])) {
+        if (b <= at || a >= to) continue;
+        if (a > at) piece(alongX, fixed, at, Math.min(a, to));
+        at = Math.max(at, b);
+      }
+      if (at < to) piece(alongX, fixed, at, to);
+    };
+    const piece = (alongX: boolean, fixed: number, a: number, b: number) => {
+      const len = b - a, mid = (a + b) / 2;
+      if (len <= 0.05) return;
+      if (alongX) {
+        box(mid, h / 2, fixed, len, h, t, m, false);
+        box(mid, h + 0.05, fixed, len, 0.1, t + 0.1, M.concrete, false);
+      } else {
+        box(fixed, h / 2, mid, t, h, len, m, false);
+        box(fixed, h + 0.05, mid, t + 0.1, 0.1, len, M.concrete, false);
+      }
+    };
+    // A doorway needs its reveal clear too, so widen the gap either side.
+    const gapsOn = (alongX: boolean, side: number): [number, number][] => doors
+      .filter(dr => dr.alongX === alongX && Math.sign((alongX ? dr.z - cz : dr.x - cx)) === side)
+      .map(dr => {
+        const c = alongX ? dr.x : dr.z;
+        return [c - dr.w / 2 - 0.3, c + dr.w / 2 + 0.3] as [number, number];
+      });
+    run(true, cz - oz + t / 2, cx - ox, cx + ox, gapsOn(true, -1));
+    run(true, cz + oz - t / 2, cx - ox, cx + ox, gapsOn(true, 1));
+    run(false, cx - ox + t / 2, cz - oz, cz + oz, gapsOn(false, -1));
+    run(false, cx + ox - t / 2, cz - oz, cz + oz, gapsOn(false, 1));
   }
 
   /** Alternating corner stones. Cheap, and it turns a flat box into masonry. */
@@ -506,7 +554,12 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
     // hundred triangles of window surround.
     const frameMat = style === 1 ? stone : style === 3 ? M.adobeBrick : M.concrete;
     const trimMat = style === 0 ? ACC_TURQ : style === 2 ? ACC_TERRA : timber;
-    plinth(cx, cz, w, d, style === 3 ? M.adobeBrick : stone);
+    const doorHoles = holeLog.slice(holeStart).filter(hl => hl.door)
+      .map(hl => ({ x: hl.x, z: hl.z, w: hl.w, alongX: hl.alongX }));
+    plinth(cx, cz, w, d, style === 3 ? M.adobeBrick : stone, doorHoles);
+    // A floor you actually stand on, flush with the ground you walk at, so the
+    // room reads as a room instead of a patch of the desert with walls round it.
+    ground(cx, cz, w - 0.9, d - 0.9, M.tileFloor ?? M.concrete, 0.03);
     if (style === 1 || style === 3) quoins(x0, z0, w, d, H, stone);
     let bayUsed = false;
     for (let i = holeStart; i < holeLog.length; i++) {
@@ -517,22 +570,33 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
       const g = { x: h.x, y: h.y, z: h.z, w: h.w, height: h.h, alongX: h.alongX, sill: h.sill };
       reveal(g, frameMat, trimMat);
       if (h.door) {
-        // Deep shaded doorway: a recessed reveal plus a solid timber leaf and a step.
-        const dw = h.w * 0.78;
-        if (h.alongX) {
-          box(h.x, h.sill + h.h / 2, h.z + nz * 0.22, dw, h.h - 0.12, 0.09, timber, false);
-          box(h.x, 0.06, h.z + nz * 0.62, h.w + 0.9, 0.14, 1.1, stone, false);
-        } else {
-          box(h.x + nx * 0.22, h.sill + h.h / 2, h.z, 0.09, h.h - 0.12, dw, timber, false);
-          box(h.x + nx * 0.62, 0.06, h.z, 1.1, 0.14, h.w + 0.9, stone, false);
+        // The leaf used to be hung shut across the opening. It does not
+        // collide, so you walked straight through a closed door - which is
+        // exactly what it looked like you were doing. Hang it OPEN instead,
+        // swung back against the inside wall on its hinge, so the opening
+        // reads as something you can walk through, because you can.
+        const dw = h.w * 0.78, lh = h.h - 0.14, swing = 1.36; // ~78 degrees ajar
+        const leafY = h.sill + lh / 2;
+        const leaf = new THREE.BoxGeometry(h.alongX ? dw : 0.075, lh, h.alongX ? 0.075 : dw);
+        // Pivot the geometry onto its hinge edge so it swings rather than spins.
+        leaf.translate(h.alongX ? dw / 2 : 0, 0, h.alongX ? 0 : dw / 2);
+        const hingeX = h.alongX ? h.x - h.w / 2 + 0.16 : h.x + nx * 0.2;
+        const hingeZ = h.alongX ? h.z + nz * 0.2 : h.z - h.w / 2 + 0.16;
+        // Swing inwards: +x must end up pointing along -nz (or +z along -nx).
+        shape(leaf, timber, hingeX, leafY, hingeZ, 0, h.alongX ? nz * swing : -nx * swing, 0);
+        // Flat threshold, not a step up - the skirt is already cut back here.
+        if (h.alongX) box(h.x, 0.04, h.z + nz * 0.55, h.w + 0.7, 0.08, 1.0, stone, false);
+        else box(h.x + nx * 0.55, 0.04, h.z, 1.0, 0.08, h.w + 0.7, stone, false);
+        // Hinge straps on the jamb the leaf actually hangs from, and a ring
+        // pull on the swung leaf's free edge.
+        for (const sgn of [-0.32, 0.32]) {
+          if (h.alongX) box(hingeX, leafY + sgn * lh, hingeZ, 0.12, 0.07, 0.14, METAL, false);
+          else box(hingeX, leafY + sgn * lh, hingeZ, 0.14, 0.07, 0.12, METAL, false);
         }
-        // Studded door furniture: two hinge straps and a ring pull.
-        for (const s of [-1, 1]) {
-          if (h.alongX) box(h.x + s * dw * 0.34, h.sill + h.h * 0.5, h.z + nz * 0.28, dw * 0.26, 0.07, 0.03, METAL, false);
-          else box(h.x + nx * 0.28, h.sill + h.h * 0.5, h.z + s * dw * 0.34, 0.03, 0.07, dw * 0.26, METAL, false);
-        }
-        shape(new THREE.TorusGeometry(0.09, 0.022, 5, 10), METAL,
-          h.x + nx * 0.3, h.sill + 1.05, h.z + nz * 0.3, 0, h.alongX ? 0 : Math.PI / 2, 0);
+        const freeX = hingeX + (h.alongX ? Math.cos(nz * swing) * dw * 0.9 : -nx * Math.sin(nx * swing) * dw * -0.9);
+        const freeZ = hingeZ + (h.alongX ? -Math.sin(nz * swing) * dw * 0.9 : Math.cos(nx * swing) * dw * 0.9);
+        shape(new THREE.TorusGeometry(0.085, 0.02, 5, 10), METAL,
+          freeX, h.sill + 1.05, freeZ, 0, h.alongX ? Math.PI / 2 : 0, 0);
         continue;
       }
       if (i % 2 === 0) shutters(g, nx + nz, trimMat);
@@ -699,17 +763,50 @@ export function buildWorld(scene: THREE.Scene, mapId: MapId = 'alrasul', materia
   // ---- streets ----
   function street(alongX: boolean, pos: number, from: number, to: number, w = 12) {
     const len = to - from, mid = (from + to) / 2;
+    const half = w / 2;
+    // A road was a single flat asphalt quad: no kerb, no verge, no markings,
+    // so at eye level it read as bare ground with lampposts standing in it.
+    // Everything added below reuses materials the map already batches, so it
+    // costs geometry but not draw calls.
     if (alongX) {
       ground(mid, pos, w, len, M.asphalt, 0.02, Math.PI / 2);
-      concrete.push({ minX: from, minY: -1, minZ: pos - w / 2, maxX: to, maxY: 3, maxZ: pos + w / 2 });
+      concrete.push({ minX: from, minY: -1, minZ: pos - half, maxX: to, maxY: 3, maxZ: pos + half });
     } else {
       ground(pos, mid, w, len, M.asphalt, 0.02);
-      concrete.push({ minX: pos - w / 2, minY: -1, minZ: from, maxX: pos + w / 2, maxY: 3, maxZ: to });
+      concrete.push({ minX: pos - half, minY: -1, minZ: from, maxX: pos + half, maxY: 3, maxZ: to });
+    }
+    const at = (s: number, off: number): [number, number] => (alongX ? [s, pos + off] : [pos + off, s]);
+    // Graded verge either side of the carriageway, so the road sits in
+    // something instead of floating on sand.
+    for (const sgn of [-1, 1]) {
+      const [vx, vz] = at(mid, sgn * (half + 1.5));
+      ground(vx, vz, alongX ? len : 3, alongX ? 3 : len, M.dirtPath ?? M.packedEarth ?? M.sand, 0.012);
+    }
+    // Kerbs: low enough to walk over, high enough to catch the light and give
+    // the carriageway an edge. Non-colliding on purpose - a 14 cm lip that
+    // stops you dead at the roadside is worse than no kerb at all.
+    for (const sgn of [-1, 1]) {
+      const [kx, kz] = at(mid, sgn * (half - 0.13));
+      box(kx, 0.07, kz, alongX ? len : 0.26, 0.14, alongX ? 0.26 : len, M.concrete, false);
+    }
+    // Worn centre line: broken dashes, laid as thin slabs rather than ground
+    // patches so they sit ON the asphalt instead of cutting holes in it.
+    for (let s = from + 3; s < to - 3; s += 7.5) {
+      const [dx, dz] = at(s + 1.2, 0);
+      box(dx, 0.035, dz, alongX ? 2.4 : 0.26, 0.03, alongX ? 0.26 : 2.4, M.signage ?? M.concrete, false);
+    }
+    // A few resurfacing patches and a pothole or two, placed deterministically
+    // from the road's own coordinates so the map is identical every load.
+    for (let i = 0; i < Math.max(1, Math.floor(len / 26)); i++) {
+      const s = from + 9 + i * 26 + ((i * 37) % 11);
+      const off = (((i * 53) % 9) / 9 - 0.5) * (w - 2.4);
+      const [px, pz] = at(s, off);
+      box(px, 0.028, pz, alongX ? 3.4 : 2.2, 0.02, alongX ? 2.2 : 3.4, M.packedEarth ?? M.concrete, false);
     }
     // lamps on the verge, every 32m — never on the carriageway
     for (let s = from + 16; s < to - 8; s += 32) {
-      if (alongX) { lamp(s, pos - w / 2 - 1.6); lamp(s + 16, pos + w / 2 + 1.6); }
-      else { lamp(pos - w / 2 - 1.6, s); lamp(pos + w / 2 + 1.6, s + 16); }
+      if (alongX) { lamp(s, pos - half - 1.6); lamp(s + 16, pos + half + 1.6); }
+      else { lamp(pos - half - 1.6, s); lamp(pos + half + 1.6, s + 16); }
     }
   }
   function terrain(size: number, inner: number) {

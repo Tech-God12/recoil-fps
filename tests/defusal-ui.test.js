@@ -28,7 +28,8 @@ const { DefusalMode } = await import('../src/game/defusal/mode.ts');
 const { default: DefusalHudLayer } = await import('../src/ui/DefusalHud.tsx');
 const { default: BuyMenu, autoBuyPlan } = await import('../src/ui/BuyMenu.tsx');
 const { MainMenu, ResultsScreen } = await import('../src/ui/Screens.tsx');
-const { freshInventory } = await import('../src/game/defusal/shop.ts');
+const SHOPMOD = await import('../src/game/defusal/shop.ts');
+const { freshInventory } = SHOPMOD;
 
 const keys = ['sand', 'plaza', 'adobeWall', 'adobeWall2', 'adobeBrick', 'concrete', 'asphalt', 'wood', 'rustedMetal', 'sandbag', 'tileFloor', 'plaster', 'whitewash', 'stoneBlock', 'firedBrick', 'packedEarth', 'corrugatedMetal', 'roughTimber', 'terracePavers', 'cobbleLane', 'wadiBed', 'signage'];
 const world = buildWorld(new THREE.Scene(), 'sirocco', Object.fromEntries(keys.map(k => [k, new THREE.MeshStandardMaterial()])));
@@ -75,8 +76,13 @@ test('buy menu lists prices, locks the enemy rifle, and auto-buy picks a sane pa
   const mode = makeMode('defend');
   const df = { ...mode.hud(), money: 5200, inv: { ...freshInventory(5200) } };
   const html = renderToStaticMarkup(React.createElement(BuyMenu, { df, owned: ['m4a1'], onBuy: () => ({ ok: true }), onClose() {} }));
-  for (const text of ['BUY MENU', '$5,200', 'Rifles', 'M416', 'YOUR BUILD', 'Attackers only', 'YOUR ROUND LOADOUT', 'AUTO-BUY', 'DEFUSE KIT']) {
+  // Your balance reads compact; prices stay exact so you can budget.
+  for (const text of ['Buy menu', '$5.2k', 'Rifles', 'Attachments', 'M416', 'Your build', 'Attackers only', 'Your round loadout', 'Auto-buy', 'Defuse kit']) {
     assert.ok(html.includes(text), `buy menu shows ${text}`);
+  }
+  // The buy menu stopped shouting; it must not start again.
+  for (const shout of ['BUY MENU', 'YOUR BUILD', 'YOUR ROUND LOADOUT', 'AUTO-BUY', 'DEFUSE KIT', 'EQUIPMENT VALUE', 'BUY TIME IS OVER', '/ KILL']) {
+    assert.ok(!html.includes(shout), `buy menu must not shout "${shout}"`);
   }
   // $5,200: M416 (3,100) → helmet (1,000) → kit (400) → smoke (300) → flash (200) → the frag no longer fits → second flash (200).
   assert.deepEqual(autoBuyPlan(freshInventory(5200), 'defend'), ['m4a1', 'helmet', 'kit', 'smoke', 'flash', 'flash']);
@@ -141,4 +147,56 @@ test('the debrief tells the defusal story: score, round strip and standings', ()
   }
   assert.equal((html.match(/df-hcell/g) ?? []).length, 10, 'one history cell per round played');
   assert.ok(!html.includes('Mission timeline'), 'no mission timeline for arena modes');
+});
+
+test('the buy menu offers attachments for the gun in hand, and nothing when you have none', () => {
+  const S = SHOPMOD;
+  const bare = { ...makeMode('attack').hud(), money: 5200, inv: { ...freshInventory(5200) } };
+  const noPrimary = renderToStaticMarkup(React.createElement(BuyMenu, { df: bare, owned: [], onBuy: () => ({ ok: true }), onClose() {} }));
+  assert.ok(noPrimary.includes('Attachments'), 'the category is always listed');
+
+  const armed = { ...bare, inv: { ...freshInventory(5200), primary: 'ak47' } };
+  const html = renderToStaticMarkup(React.createElement(BuyMenu, { df: armed, owned: [], onBuy: () => ({ ok: true }), onClose() {} }));
+  // The fitted-parts list only appears once something is actually bolted on.
+  assert.ok(!html.includes('buy-fitted'), 'a bare gun lists no fitted parts');
+
+  const fitted = S.buy({ ...freshInventory(16000), primary: 'ak47' }, S.attachmentsForSale('ak47').find(i => i.slot === 'optic').id, 'attack');
+  assert.ok(fitted.ok, fitted.reason);
+  const withGlass = renderToStaticMarkup(React.createElement(BuyMenu, {
+    df: { ...bare, inv: fitted.inv }, owned: [], onBuy: () => ({ ok: true }), onClose() {},
+  }));
+  assert.ok(withGlass.includes('buy-fitted'), 'a fitted optic shows under the primary');
+  assert.ok(withGlass.includes('Optic'), 'labelled by slot');
+});
+
+test('the missions screen is one screen: pick an operation on the left, read it on the right', () => {
+  const html = renderToStaticMarkup(React.createElement(MainMenu, {
+    s: { ...DEFAULT_SETTINGS, map: 'kasbah' }, onDeploy() {}, onSettings() {}, onMap() {}, initialView: 'maps',
+  }));
+  // Both operations are listed, and the selected one's brief and objectives
+  // are on the same screen - no click-through to a second page.
+  for (const text of ['Missions', 'Kasbah', 'Al Rasul', 'A fortified market town', 'A river valley under a desert sun', 'Play', 'Loadout']) {
+    assert.ok(html.includes(text), `missions screen shows ${text}`);
+  }
+  assert.ok(/class="ops-steps"/.test(html), 'the objective list is on the screen');
+  assert.ok((html.match(/<li>/g) ?? []).length >= 3, 'the selected operation lists its objectives');
+  assert.equal((html.match(/deploy-btn/g) ?? []).length, 1, 'exactly one Play button');
+
+  // Selecting drives the detail pane: the other map's brief must not be showing.
+  const alrasul = renderToStaticMarkup(React.createElement(MainMenu, {
+    s: { ...DEFAULT_SETTINGS, map: 'alrasul' }, onDeploy() {}, onSettings() {}, onMap() {}, initialView: 'maps',
+  }));
+  assert.notEqual(html.replace(/\s+/g, ''), alrasul.replace(/\s+/g, ''), 'the brief changes with the selection');
+
+  // The old theater-select chrome is gone and must stay gone.
+  for (const gone of [
+    'SELECT AREA OF OPERATIONS', 'OPERATIONS COMMAND', 'THEATER SELECT', 'DEPLOY TO A THEATER',
+    'TWO THEATERS', 'DIFFERENT THREATS', 'PROVE YOURSELF', 'FIELD BUILD', 'FIELD NOTES',
+    'SANDBLAST', 'TOWN', 'FORTIFIED MARKET TOWN', 'DESERT RIVER VALLEY',
+    'OBJECTIVES ·', 'HOVER A THEATER', 'map2-', 'msn-', '° N', '° E', 'V1.1.0',
+  ]) assert.ok(!html.includes(gone), `${gone} is gone from the missions screen`);
+
+  // Sentence case: no shouty words left in the visible copy.
+  const words = (html.replace(/<[^>]*>/g, ' ').match(/\b[A-Z]{3,}\b/g) ?? []).filter(w => w !== 'AND');
+  assert.deepEqual(words, [], `missions screen still shouts: ${words.join(', ')}`);
 });

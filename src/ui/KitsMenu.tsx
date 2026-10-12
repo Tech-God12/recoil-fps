@@ -9,6 +9,7 @@ import type { PlayerProfile } from '../game/economy/profile';
 import { audio } from '../game/audio';
 import { KitIcon, LockIcon } from './Kits';
 import { KitViewer } from './KitViewer';
+import { formatCash } from '../game/economy/money';
 
 const money = (n: number) => `$${n.toLocaleString('en-US')}`;
 
@@ -78,7 +79,7 @@ export default function KitsMenu({ profile, onProfile, onBack }: {
         <span className="kits-sub mono">One ability per game · use it with <span className="keycap">{KIT_KEY}</span></span>
         <div className="kits-wallet" title="Wallet balance">
           <span className="mono">Wallet</span>
-          <b className="tabular">{money(profile.cash)}</b>
+          <b className="tabular">{formatCash(profile.cash)}</b>
         </div>
       </header>
 

@@ -130,15 +130,27 @@ export type Lane = 'long' | 'short' | 'tunnels' | 'window' | 'mid';
 export interface AttackRoute {
   lane: Lane;
   site: SiteId;
-  /** Waypoints from T spawn; `stage` is where the squad waits for the execute call. */
+  /** Waypoints from T spawn; `stage` is the index the squad walks up to before
+   *  it waits for the execute call. */
   points: Vec2[];
   stage: number;
+  /**
+   * Where the squad actually waits. This is deliberately NOT just `points[stage]`:
+   * a staging spot has to be out of every defender's held sightline, or the squad
+   * gets picked apart one body at a time before the execute is ever called.
+   * Verified against the built geometry by tests/defusal-map.test.js.
+   */
+  stageAt: Vec2;
 }
 export const ATTACK_ROUTES: AttackRoute[] = [
-  { lane: 'long', site: 'A', points: [[-6, 34], [-20, 34], [-34, 32], [-34, 21], [-34, 9], [-34.5, -7], [-33.5, -19], [-30, -27]], stage: 4 },
-  { lane: 'short', site: 'A', points: [[-8.5, 31], [-2, 24.5], [0, 12], [0.5, -9], [-3, -20.5], [-11, -21], [-20.5, -22.5], [-27, -28]], stage: 5 },
-  { lane: 'tunnels', site: 'B', points: [[6, 34], [20, 34], [34.5, 32], [36.5, 22], [36.5, 6], [36.5, -8], [35.5, -19], [31, -28]], stage: 5 },
-  { lane: 'window', site: 'B', points: [[8.5, 31], [2, 24.5], [0, 12], [0.5, -6], [2.5, -11.5], [11, -11.5], [16, -11.5], [22, -15], [28, -26]], stage: 6 },
+  // Outside long, behind the long-doors wall: A LONG is a straight corridor, so
+  // anything inside it is already in the A_LONG anchor's scope.
+  { lane: 'long', site: 'A', points: [[-6, 34], [-20, 34], [-34, 32], [-34, 21], [-34, 9], [-34.5, -7], [-33.5, -19], [-30, -27]], stage: 3, stageAt: [-38, 30] },
+  // Mid is watched end to end from CT mid; the short group holds in T alley.
+  { lane: 'short', site: 'A', points: [[-8.5, 31], [-2, 24.5], [0, 12], [0.5, -9], [-3, -20.5], [-11, -21], [-20.5, -22.5], [-27, -28]], stage: 1, stageAt: [-9, 31] },
+  // Tunnel yard, around the corner from the B_TUNNEL sightline.
+  { lane: 'tunnels', site: 'B', points: [[6, 34], [20, 34], [34.5, 32], [36.5, 22], [36.5, 6], [36.5, -8], [35.5, -19], [31, -28]], stage: 2, stageAt: [30, 31] },
+  { lane: 'window', site: 'B', points: [[8.5, 31], [2, 24.5], [0, 12], [0.5, -6], [2.5, -11.5], [11, -11.5], [16, -11.5], [22, -15], [28, -26]], stage: 1, stageAt: [8.5, 31] },
 ];
 /** Map-control spots for 'default' rounds and lurkers: [position, face]. */
 export const CONTROL_SPOTS: { lane: Lane; at: Vec2; face: Vec2 }[] = [

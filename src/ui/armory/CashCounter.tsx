@@ -1,5 +1,6 @@
 // Recoil FPS — rolling-odometer cash display with +/- flashes.
 import { useEffect, useRef, useState } from 'react';
+import { formatCash } from '../../game/economy/money';
 
 export default function CashCounter({ value, className = '' }: { value: number; className?: string }) {
   const [display, setDisplay] = useState(value);
@@ -36,11 +37,11 @@ export default function CashCounter({ value, className = '' }: { value: number; 
     };
   }, [value]);
 
-  const chars = `$${display.toLocaleString('en-US')}`.split('');
+  const chars = formatCash(display).split('');
   return (
     <span
       className={`cash-counter mono ${flash === 1 ? 'cash-up' : flash === -1 ? 'cash-down' : ''} ${className}`}
-      aria-label={`$${display.toLocaleString('en-US')}`}
+      aria-label={formatCash(display)}
     >
       {chars.map((c, i) =>
         /[0-9]/.test(c) ? (

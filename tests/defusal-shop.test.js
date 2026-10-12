@@ -3,9 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const S = await import('../src/game/defusal/shop.ts');
-const { WEAPON_CATALOG } = await import('../src/game/economy/catalog.ts');
+const { WEAPON_CATALOG, ATTACHMENT_CATALOG, attachmentsFor, attachmentById, isCompatible, weaponById } = await import('../src/game/economy/catalog.ts');
 const B = await import('../src/game/defusal/botplan.ts');
-const { SHOP, GRENADE_LIMITS, freshInventory, canBuy, buy, afterDeath, grantMoney, itemPrice, shopItem, killRewardFor, inventoryValue, hitDamage, modScaleFor, BALLISTICS } = S;
+const { SHOP, GRENADE_LIMITS, freshInventory, canBuy, buy, afterDeath, grantMoney, itemPrice, shopItem, killRewardFor, inventoryValue, hitDamage, modScaleFor, BALLISTICS, attachmentsForSale, roundBuild, BUYABLE_SLOTS, ATTACH_PRICE } = S;
 
 test('the shop sells every armory gun at CS2 price bands, with class kill rewards', () => {
   const guns = SHOP.filter(i => i.weapon).map(i => i.weapon).sort();
@@ -114,4 +114,116 @@ test('attack plans lean away from the site hit last round', () => {
     if (p.site === 'A') a++;
   }
   assert.ok(a / 2000 < 0.48 && a / 2000 > 0.36, `A picked ${(a / 20).toFixed(1)}% after hitting A`);
+});
+
+// ---------------------------------------------------------------------------
+// Attachments bought in the buy menu
+// ---------------------------------------------------------------------------
+
+test('attachments on offer are exactly what the compatibility table allows', () => {
+  // Nothing may reach the buy menu that has not been through the same
+  // compatibility gate the armory and the gap tests use.
+  for (const weapon of ['ak47', 'm4a1', 'awm', 'spas12', 'vector', 'm249', 'aug_a3', 'scar_h']) {
+    const offered = attachmentsForSale(weapon);
+    assert.ok(offered.length > 0, `${weapon} must have something to bolt on`);
+    const expected = BUYABLE_SLOTS.flatMap(slot => attachmentsFor(weapon, slot).map(a => a.id));
+    assert.deepEqual(offered.map(i => i.attachment), expected, `${weapon} offer list drifted from attachmentsFor()`);
+    for (const item of offered) {
+      assert.equal(item.kind, 'attachment');
+      assert.ok(isCompatible(attachmentById(item.attachment), weapon), `${item.attachment} does not fit ${weapon}`);
+      assert.ok(weaponById(weapon).slots.includes(item.slot), `${weapon} has no ${item.slot} mount`);
+    }
+  }
+  assert.deepEqual(attachmentsForSale(null), [], 'no primary, nothing to bolt on');
+});
+
+test('attachment prices sit in the existing bands, by tier', () => {
+  for (const item of attachmentsForSale('m4a1')) {
+    const a = attachmentById(item.attachment);
+    assert.equal(item.price, ATTACH_PRICE[a.tier], `${a.id} is priced off-band`);
+    assert.ok(item.price >= 200 && item.price <= 500);
+  }
+});
+
+test('buying an attachment fits it, charges for it, and counts towards equipment value', () => {
+  let inv = { ...freshInventory(16000) };
+  // You cannot fit glass to a gun you do not have.
+  const optic = attachmentsForSale('ak47').find(i => i.slot === 'optic');
+  assert.ok(optic);
+  assert.equal(canBuy(inv, optic.id, 'attack').ok, false);
+  assert.equal(canBuy(inv, optic.id, 'attack').reason, 'Buy a primary first');
+
+  inv = buy(inv, 'ak47', 'attack').inv;
+  const valueBare = inventoryValue(inv);
+  const before = inv.money;
+  const res = buy(inv, optic.id, 'attack');
+  assert.ok(res.ok, res.reason);
+  inv = res.inv;
+  assert.equal(inv.money, before - optic.price);
+  assert.equal(inv.mods.optic, optic.attachment);
+  assert.equal(inventoryValue(inv), valueBare + optic.price);
+
+  // Same part twice is a no-op, not a second charge.
+  const again = buy(inv, optic.id, 'attack');
+  assert.equal(again.ok, false);
+  assert.equal(again.reason, 'Fitted');
+  assert.equal(again.inv.money, inv.money);
+
+  // A different optic replaces it in the same slot rather than stacking.
+  const other = attachmentsForSale('ak47').filter(i => i.slot === 'optic')[1];
+  if (other) {
+    inv = buy(inv, other.id, 'attack').inv;
+    assert.equal(inv.mods.optic, other.attachment);
+    assert.equal(Object.keys(inv.mods).length, 1);
+  }
+});
+
+test('a part that does not fit the gun in hand is refused', () => {
+  let inv = buy({ ...freshInventory(16000) }, 'ak47', 'attack').inv;
+  // Something that exists in the catalog but is not on the AK's list.
+  const alien = ATTACHMENT_CATALOG.find(a => BUYABLE_SLOTS.includes(a.slot) && !isCompatible(a, 'ak47'));
+  assert.ok(alien, 'the catalog should contain at least one part that does not fit an AK');
+  const check = canBuy(inv, `att:${alien.id}`, 'attack');
+  assert.equal(check.ok, false);
+  assert.ok(check.reason === 'Does not fit' || check.reason === 'No mount', check.reason);
+  assert.equal(buy(inv, `att:${alien.id}`, 'attack').inv.money, inv.money);
+});
+
+test('swapping primary drops the parts bolted to the old one', () => {
+  let inv = buy({ ...freshInventory(16000) }, 'ak47', 'attack').inv;
+  const optic = attachmentsForSale('ak47').find(i => i.slot === 'optic');
+  inv = buy(inv, optic.id, 'attack').inv;
+  assert.equal(inv.mods.optic, optic.attachment);
+  inv = buy(inv, 'scar_h', 'attack').inv;
+  assert.deepEqual(inv.mods, {}, 'a new primary arrives bare');
+  assert.equal(inventoryValue(inv), 3300, 'and you stop paying for glass you no longer own');
+});
+
+test('the round build carries the bought parts and never a part that does not fit', () => {
+  let inv = buy({ ...freshInventory(16000) }, 'ak47', 'attack').inv;
+  const optic = attachmentsForSale('ak47').find(i => i.slot === 'optic');
+  const mag = attachmentsForSale('ak47').find(i => i.slot === 'magazine');
+  inv = buy(inv, optic.id, 'attack').inv;
+  if (mag) inv = buy(inv, mag.id, 'attack').inv;
+  const build = roundBuild(inv);
+  assert.equal(build.weapon, 'ak47');
+  assert.equal(build.attachments.optic, optic.attachment);
+  if (mag) assert.equal(build.attachments.magazine, mag.attachment);
+
+  // Corrupt the inventory the way a stale save or a bad patch would, and the
+  // build must still be clean - the viewmodel never sees an impossible part.
+  const dirty = { ...inv, mods: { ...inv.mods, optic: 'not_a_real_part', muzzle: ATTACHMENT_CATALOG.find(a => !isCompatible(a, 'ak47')).id } };
+  const safe = roundBuild(dirty);
+  assert.equal(safe.attachments.optic, undefined);
+  assert.equal(safe.attachments.muzzle, undefined);
+  assert.equal(roundBuild(freshInventory(800)), null);
+});
+
+test('a dead player respawns with nothing bolted on', () => {
+  let inv = buy({ ...freshInventory(16000) }, 'ak47', 'attack').inv;
+  inv = buy(inv, attachmentsForSale('ak47').find(i => i.slot === 'optic').id, 'attack').inv;
+  const after = afterDeath(inv);
+  assert.deepEqual(after.mods, {});
+  assert.equal(after.primary, null);
+  assert.equal(after.money, inv.money);
 });

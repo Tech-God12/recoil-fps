@@ -297,7 +297,7 @@ export function OrangeDeploy({ title, hint, onClick, wide }: {
 export function TxBack({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" className="tx-back" onClick={onClick}>
-      <span aria-hidden="true">‹</span> BACK
+      <span aria-hidden="true">‹</span> Back
     </button>
   );
 }

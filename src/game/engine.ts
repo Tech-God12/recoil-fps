@@ -13,8 +13,8 @@ import { setTextureQuality } from './textures';
 import { buildWorld, pointInAABB, type World, type MapId, type AABB, type WorldDetail } from './world';
 import { applySkin, buildM4, buildAK47, buildM1911, buildAWM, buildMP7, WEAPON_BUILDERS, type WeaponModel } from './models';
 import { solveArm } from './weapons/core';
-import { applyBuild } from './attachments';
-import { WEAPON_CATALOG, attachmentById, weaponById, type WeaponId } from './economy/catalog';
+import { ATTACH_ORDER, applyBuild } from './attachments';
+import { WEAPON_CATALOG, attachmentById, weaponById, type WeaponId, type AttachSlot, type AttachmentId } from './economy/catalog';
 import { resolveWeaponStats, type ScopeReticle } from './economy/stats';
 import { REWARDS, difficultyMultiplier, streakAward } from './economy/rewards';
 import { skinById } from './economy/skins';
@@ -25,6 +25,7 @@ import { Effects } from './effects';
 import { audio } from './audio';
 import { voice } from './voice';
 import { KitDirector, type KitContext, type KitFxKind, type KitHostile, type KitHud, type KitId } from './kits';
+import { SpectatorRig } from './spectator';
 import { AIManager, NavGrid, DIFFICULTIES, type AIContext, type Enemy } from './ai';
 import { MissionRuntime, type MissionHud } from './systems/mission-runtime';
 import type { MissionReport, MissionPhase } from './systems/mission';
@@ -40,7 +41,7 @@ import { LightBudget } from './light-budget';
 import { hitZone } from './reactions';
 import { fitSunShadow } from './shadow-fit';
 import { DefusalMode, type DefusalHud, type DefusalResult } from './defusal/mode';
-import { armorCovers, hitDamage, modScaleFor, type HitPart, type Inventory } from './defusal/shop';
+import { armorCovers, hitDamage, modScaleFor, type HitPart, type Inventory, roundBuild } from './defusal/shop';
 import type { MatchFormatId, Side } from './defusal/rules';
 export interface EngineLaunchOptions {
   /** 'mission' | 'tdm' | 'defusal' — defaults keep every existing call site honest. */
@@ -549,7 +550,7 @@ export class Engine {
   private isDefusal = false;
   private defusal: DefusalMode | null = null;
   private dfBuilds: Partial<Record<WeaponId, WeaponBuild>> = {};
-  private dfWeaponCache = new Map<WeaponId, WeaponDef>();
+  private dfWeaponCache = new Map<string, WeaponDef>();
   private dfMagMemory = new Map<WeaponDef, number>();
   private dfLoadoutKey = '';
   private dfRosterVersion = -1;
@@ -560,6 +561,11 @@ export class Engine {
   private dfCamPos = new THREE.Vector3();
   private dfCamLook = new THREE.Vector3();
   private dfCamInit = false;
+  private dfRig = new SpectatorRig();
+  /** Spectated bot by identity, not index: the list shrinks as bots die. */
+  private dfSpectateBot: TDMBot | null = null;
+  /** Who the rig was following last frame, to detect a subject change. */
+  private dfCamSubject: TDMBot | null = null;
   private buyMenuOpen = false;
   // ---- momentum "ON FIRE" ----
   private killTimes: number[] = [];
@@ -3087,6 +3093,8 @@ export class Engine {
       this.dfKiller = killer;
       this.dfCamInit = false;
       this.dfSpectate = 0;
+      this.dfSpectateBot = null;
+      this.dfCamSubject = null;
       this.defusal.playerKilled(killer, !!hit?.head, hit?.weapon ?? 'RIFLE');
     }
   }
@@ -3102,6 +3110,7 @@ export class Engine {
     this.lean = 0; this.leanTarget = 0; this.ads = 0; this.rmb = false; this.triggerHeld = false;
     this.lastDamageT = 99; this.shake = 0;
     this.dfDeathCamT = 0; this.dfKiller = null; this.dfCamInit = false;
+    this.dfSpectateBot = null; this.dfCamSubject = null; this.dfRig.reset();
     for (const g of this.grenades) { this.scene.remove(g.mesh); g.mesh.geometry.dispose(); }
     this.grenades = [];
     this.dfMagMemory.clear();
@@ -3113,10 +3122,14 @@ export class Engine {
   /** Field whatever the inventory holds; guns you keep hold their magazine count. */
   private dfEquip(inv: Inventory, focus?: 'primary' | 'secondary') {
     this.frags = inv.frags; this.flashes = inv.flashes;
-    const key = `${inv.primary ?? '-'}|${inv.secondary}`;
+    // The key has to carry the fitted attachments too, or a scope bought
+    // mid-round never reaches the viewmodel.
+    const build = roundBuild(inv);
+    const modKey = build ? ATTACH_ORDER.map(sl => build.attachments[sl] ?? '').join(',') : '';
+    const key = `${inv.primary ?? '-'}[${modKey}]|${inv.secondary}`;
     if (key !== this.dfLoadoutKey) {
       this.weapons.forEach((w, i) => this.dfMagMemory.set(w, this.mags[i]));
-      const prim = inv.primary ? this.dfWeapon(inv.primary) : null;
+      const prim = build ? this.dfWeapon(build.weapon, build.attachments) : null;
       const sec = this.dfWeapon(inv.secondary);
       for (const w of this.weapons) w.model.group.visible = false;
       this.weapons = prim ? [prim, sec] : [sec];
@@ -3136,14 +3149,26 @@ export class Engine {
     this.weapons.forEach((w, i) => { w.model.group.visible = i === this.cur; });
   }
 
-  /** One cached viewmodel per gun — your armory build when you own it, factory otherwise. */
-  private dfWeapon(id: WeaponId): WeaponDef {
-    const cached = this.dfWeaponCache.get(id);
+  /**
+   * One cached viewmodel per *build* — your armory build when you own the gun,
+   * otherwise factory, with anything bought in the buy menu bolted on. Cached
+   * per build rather than per weapon so fitting a scope does not silently hand
+   * back the bare gun that was built first.
+   */
+  private dfWeapon(id: WeaponId, mods?: Partial<Record<AttachSlot, AttachmentId>>): WeaponDef {
+    const owned = this.dfBuilds[id];
+    const base: WeaponBuild = owned ?? { weapon: id, attachments: {}, skin: 'factory' };
+    // Bought parts win over the armory build for the slot they occupy.
+    const build: WeaponBuild = mods && Object.keys(mods).length
+      ? { ...base, attachments: { ...base.attachments, ...mods } }
+      : base;
+    const cacheKey = `${id}|${ATTACH_ORDER.map(sl => build.attachments[sl] ?? '').join(',')}|${build.skin ?? ''}`;
+    const cached = this.dfWeaponCache.get(cacheKey);
     if (cached) return cached;
-    const def = this.buildLoadoutWeapon(this.dfBuilds[id] ?? { weapon: id, attachments: {}, skin: 'factory' });
+    const def = this.buildLoadoutWeapon(build);
     def.model.group.visible = false;
     this.vmScene.add(def.model.group);
-    this.dfWeaponCache.set(id, def);
+    this.dfWeaponCache.set(cacheKey, def);
     return def;
   }
 
@@ -3169,14 +3194,27 @@ export class Engine {
     const list = this.defusal?.spectateList() ?? [];
     if (!list.length) return;
     this.dfDeathCamT = 0;
-    this.dfSpectate = (this.dfSpectate + dir + list.length * 4) % list.length;
-    this.dfCamInit = false;
+    // Step from where we actually are. Indexing a list that shrinks underneath
+    // you silently hands the camera to a different bot every time one dies.
+    const at = this.dfSpectateBot ? list.indexOf(this.dfSpectateBot) : -1;
+    const from = at >= 0 ? at : this.dfSpectate;
+    this.dfSpectate = (from + dir + list.length * 4) % list.length;
+    this.dfSpectateBot = list[this.dfSpectate];
   }
 
   private dfSpectateTarget(): TDMBot | null {
     if (!this.isDefusal || !this.dead || this.dfDeathCamT > 0) return null;
     const list = this.defusal?.spectateList() ?? [];
-    return list.length ? list[this.dfSpectate % list.length] : null;
+    if (!list.length) { this.dfSpectateBot = null; return null; }
+    // Whoever we were watching, if he is still up; otherwise the next body
+    // along, so a death hands the camera on rather than reshuffling it.
+    if (this.dfSpectateBot && list.includes(this.dfSpectateBot)) {
+      this.dfSpectate = list.indexOf(this.dfSpectateBot);
+    } else {
+      this.dfSpectate = this.dfSpectate % list.length;
+      this.dfSpectateBot = list[this.dfSpectate];
+    }
+    return this.dfSpectateBot;
   }
 
   /** Dead in a round: a short death cam on your killer, then an over-the-shoulder chase cam. */
@@ -3204,14 +3242,21 @@ export class Engine {
       wantPos = hit ? eye.clone().addScaledVector(dir, Math.max(0.25, hit.distance - 0.25)) : back;
       wantLook = eye.clone().add(new THREE.Vector3(fx * 7, -0.25, fz * 7));
     }
-    if (!this.dfCamInit) { this.dfCamPos.copy(wantPos); this.dfCamLook.copy(wantLook); this.dfCamInit = true; }
-    const k = 1 - Math.exp(-dt * 8);
-    this.dfCamPos.lerp(wantPos, k);
-    this.dfCamLook.lerp(wantLook, k);
-    this.camera.position.copy(this.dfCamPos);
-    this.camera.lookAt(this.dfCamLook);
-    this.camera.fov += (this.fovSetting - this.camera.fov) * k;
-    this.camera.updateProjectionMatrix();
+    // A touch wider on the death cam so the kill reads, tighter on the chase.
+    const want = { pos: wantPos, look: wantLook, fov: target ? this.fovSetting : this.fovSetting + 6 };
+    if (!this.dfCamInit) {
+      this.dfRig.reset();
+      this.dfRig.cut(want);
+      this.dfCamInit = true;
+    } else if (target !== this.dfCamSubject) {
+      this.dfRig.transition(want);
+    } else {
+      this.dfRig.update(dt, want);
+    }
+    this.dfCamSubject = target;
+    this.dfCamPos.copy(this.dfRig.outPos);
+    this.dfCamLook.copy(wantLook);
+    this.dfRig.applyTo(this.camera);
   }
 
   private endDefusalMatch() {

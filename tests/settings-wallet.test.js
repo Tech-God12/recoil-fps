@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const { DEFAULT_SETTINGS, sanitizeSettings } = await import('../src/game/engine.ts');
-const { DEFAULT_PROFILE, developmentCashGrant, migrateProfile, resetCurrentCash } = await import('../src/game/economy/profile.ts');
+const { DEFAULT_PROFILE, STARTING_CASH, developmentCashGrant, migrateProfile, resetCurrentCash } = await import('../src/game/economy/profile.ts');
 
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
@@ -67,7 +67,9 @@ test('settings sanitizer accepts a valid JSON save and safely handles malformed 
 });
 
 test('normal startup preserves saved wallets and the optional hash grant is development-only', () => {
-  assert.equal(DEFAULT_PROFILE.cash, 0);
+  // A new operator is staked rather than starting broke.
+  assert.equal(DEFAULT_PROFILE.cash, STARTING_CASH);
+  assert.equal(STARTING_CASH, 10000);
   assert.equal(developmentCashGrant('#cash=50000', false), 0);
   assert.equal(developmentCashGrant('#cash=50000', true), 50000);
   assert.equal(developmentCashGrant('#cash=999999999999999999', true), 999999);

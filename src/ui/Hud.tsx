@@ -8,6 +8,7 @@ import ScopeView, { type ScopeControls } from './ScopeView';
 import DefusalHudLayer, { C4Glyph } from './DefusalHud';
 import { KitFx, KitHint, KitLive, KitMessage, KitSlot } from './Kits';
 import type { KitFxKind } from '../game/kits';
+import { formatCash } from '../game/economy/money';
 
 export interface HudFx {
   hitmark: { id: number; kill: boolean; headshot?: boolean } | null;
@@ -325,7 +326,7 @@ function Hud({ hud, s, fx, active, ...scopeControls }: { hud: HudState; s: GameS
             {/* ============ CASH (mission wallet; the defusal layer shows round money) ============ */}
       {!df && (
         <div className="hud-cash mono" aria-label={`Cash ${hud.cash}`}>
-          <span>$</span>{hud.cash.toLocaleString('en-US')}
+          {formatCash(hud.cash)}
         </div>
       )}
 
